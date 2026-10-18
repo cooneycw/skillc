@@ -22,6 +22,13 @@ POLICY_KEYS = IDENTITY_KEYS | {"subject_locator", "project", "gate_entrypoint", 
 RECEIPT_KEYS = IDENTITY_KEYS | {"image_id", "descriptor_sha256", "recipe_sha256",
                               "base_recipe_sha256", "build_context_sha256", "source_commit", "target"}
 DESCRIPTOR_KEYS = IDENTITY_KEYS | {"uv_version", "python", "required_env"}
+#: The two named runtimes (#280). `profile-runtime` is the flow-check runtime
+#: the #360 builder produces; `cicd-runtime` is that exact image plus one curl
+#: layer (docker/cicd-trial/), with the base receipt embedded whole.
+PROFILE_RUNTIME = "profile-runtime"
+CICD_RUNTIME = "cicd-runtime"
+CICD_RECEIPT_KEYS = IDENTITY_KEYS | {"image_id", "descriptor_sha256", "recipe_sha256", "source_commit",
+                                    "target", "base_receipt", "base_image_id", "curl_version"}
 
 
 class Refused(ValueError):
@@ -106,7 +113,10 @@ def metadata(policy: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _receipt(raw: bytes) -> dict[str, Any]:
-    value = load_json(raw)
+    return _profile_receipt(load_json(raw))
+
+
+def _profile_receipt(value: dict[str, Any]) -> dict[str, Any]:
     _keys(value, RECEIPT_KEYS, "receipt")
     _identity(value, supported_policy())
     if value["target"] != "profile-runtime":
@@ -121,6 +131,43 @@ def _receipt(raw: bytes) -> dict[str, Any]:
     return value
 
 
+def _cicd_receipt(value: dict[str, Any]) -> dict[str, Any]:
+    """A curl layer on one validated flow-check receipt, embedded whole.
+
+    The embedded base passes the unchanged flow-check validator, so a cicd
+    receipt can never certify a base image that receipt could not. The
+    descriptor is inherited byte-for-byte; a layer that rewrote it is refused.
+    """
+    _keys(value, CICD_RECEIPT_KEYS, "cicd receipt")
+    _identity(value, supported_policy())
+    if value["target"] != CICD_RUNTIME:
+        raise Refused("cicd receipt target is not the cicd runtime")
+    base = value["base_receipt"]
+    if not isinstance(base, dict):
+        raise Refused("cicd receipt base is not a receipt object")
+    base = _profile_receipt(base)
+    if value["base_image_id"] != base["image_id"]:
+        raise Refused("cicd receipt base image differs from its embedded base receipt")
+    if not isinstance(value["image_id"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"]):
+        raise Refused("runtime receipt image must be immutable")
+    if value["image_id"] == base["image_id"]:
+        raise Refused("cicd receipt names its base image, not the layered one")
+    if value["descriptor_sha256"] != base["descriptor_sha256"]:
+        raise Refused("cicd receipt descriptor differs from its base runtime")
+    if not _hex(value["source_commit"], 40) or not _hex(value["recipe_sha256"], 64):
+        raise Refused("cicd receipt source commit or recipe is malformed")
+    if not isinstance(value["curl_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value["curl_version"]):
+        raise Refused("cicd receipt curl version is malformed")
+    return value
+
+
+def _any_receipt(raw: bytes) -> dict[str, Any]:
+    value = load_json(raw)
+    if value.get("target") == CICD_RUNTIME:
+        return _cicd_receipt(value)
+    return _profile_receipt(value)
+
+
 @dataclass(frozen=True)
 class RuntimeSupply:
     """Immutable validated receipt bytes supplied by the controller/operator."""
@@ -128,7 +175,7 @@ class RuntimeSupply:
     receipt_bytes: bytes = field(repr=False)
 
     def __post_init__(self) -> None:
-        _receipt(self.receipt_bytes)
+        _any_receipt(self.receipt_bytes)
 
     @classmethod
     def from_path(cls, path: Path) -> RuntimeSupply:
@@ -140,10 +187,15 @@ class RuntimeSupply:
 
     @property
     def image_id(self) -> str:
-        return str(_receipt(self.receipt_bytes)["image_id"])
+        return str(_any_receipt(self.receipt_bytes)["image_id"])
+
+    @property
+    def kind(self) -> str:
+        """`profile-runtime` or `cicd-runtime`: which named runtime this is."""
+        return str(_any_receipt(self.receipt_bytes)["target"])
 
     def descriptor(self, raw: bytes, *, actual_image: str) -> dict[str, Any]:
-        receipt = _receipt(self.receipt_bytes)
+        receipt = _any_receipt(self.receipt_bytes)
         if actual_image != self.image_id:
             raise Refused("runtime actual image differs from selected receipt")
         if hashlib.sha256(raw).hexdigest() != receipt["descriptor_sha256"]:
@@ -220,3 +272,44 @@ def requires_supply(*, locator: str, revision: str, gate_entrypoint: str | None,
     if selected and any(files.get(path) != digest for path, digest in metadata(policy).items()):
         raise Refused("supported profile runtime metadata changed or is missing")
     return selected
+
+
+def selected_runtime(*, locator: str, revision: str, gate_entrypoint: str | None,
+                     files: Mapping[str, str], tools: Sequence[Mapping[str, Any]]) -> str | None:
+    """Which named runtime a freshly validated closure selects, if any (#280).
+
+    `requires_supply` decides the flow-check runtime first and unchanged, with
+    every refusal it raises. Only a closure it does not select, that declares
+    NO gate, sits at the supported subject pin, and declares both the policy
+    project's import probe and a curl command probe selects the cicd runtime -
+    which shares that pin's dependency metadata, so the same metadata refusal
+    applies. Everything else selects nothing, as before.
+    """
+    if requires_supply(locator=locator, revision=revision, gate_entrypoint=gate_entrypoint,
+                       files=files, tools=tools):
+        return PROFILE_RUNTIME
+    if gate_entrypoint is not None:
+        return None
+    probes = [probe for tool in tools for probe in tool.get("probes", ())]
+    curl_probe = any(probe.get("kind") == "command" and probe.get("name") == "curl" for probe in probes)
+    # Like requires_supply, an unrelated closure is classified without the
+    # policy resource, so absent package data cannot refuse it.
+    if not curl_probe or not any(probe.get("kind") == "python-import" for probe in probes):
+        return None
+    policy = supported_policy()
+    if locator != policy["subject_locator"] or revision != policy["subject_revision"]:
+        return None
+    if not any(probe.get("kind") == "python-import" and probe.get("uv_project") == policy["project"]
+               for probe in probes):
+        return None
+    if any(files.get(path) != digest for path, digest in metadata(policy).items()):
+        raise Refused("supported cicd runtime metadata changed or is missing")
+    return CICD_RUNTIME
+
+
+def require_kind(supply: RuntimeSupply, selected: str | None) -> None:
+    """A receipt serves only the runtime its closure selected (#280)."""
+    if selected is None:
+        raise Refused("runtime receipt supplied for an unrelated or absent profile")
+    if supply.kind != selected:
+        raise Refused(f"runtime receipt is a {supply.kind} receipt, but the closure selects {selected}")

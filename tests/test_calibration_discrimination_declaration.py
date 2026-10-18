@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import stamp_approval
 
 from skillc import calibration, degrade, verify
 from skillc import materialize as m
@@ -49,7 +50,7 @@ OTHER_MUTATED_DIGEST = "sha256:" + "b" * 64
 def _declaration(*, attempts_per_arm: int = 10, seed: int = 20261006, approval: dict[str, object] | None = None,
                   mutated_digest: str = MUTATED_DIGEST) -> dict[str, Any]:
     sequence = calibration.derive_arm_order(seed, list(calibration.DISCRIMINATION_ARMS), attempts_per_arm)
-    return {
+    return stamp_approval({
         "kind": "discrimination-declaration",
         "arms": [
             {"name": "intact", "subject": dict(INTACT_SUBJECT)},
@@ -82,7 +83,7 @@ def _declaration(*, attempts_per_arm: int = 10, seed: int = 20261006, approval: 
         "retain_transcripts": True,
         "tolerance": {"non_evaluable_per_arm": 1},
         "approval": approval,
-    }
+    })
 
 
 def _approved(*, attempts_per_arm: int = 10, mutated_digest: str = MUTATED_DIGEST) -> dict[str, Any]:
@@ -307,4 +308,5 @@ def test_a_discrimination_approval_that_explicitly_names_the_matching_fixture_is
     data = _approved()
     data["task"]["fixture"] = "wrong/pipeline-red"
     data["approval"]["task_fixture"] = "wrong/pipeline-red"
+    stamp_approval(data)
     calibration.require_approved_discrimination(calibration.parse_discrimination_declaration(data), ROOT)

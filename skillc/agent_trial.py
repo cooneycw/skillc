@@ -102,6 +102,7 @@ from . import (
     verify,
     witness_capture,
 )
+from . import egress as eg
 from . import runtime_supply as rs
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
@@ -283,6 +284,78 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
         run_metadata=ta.codex_run_metadata,
     ),
 }
+
+
+class ServerSideChannelRefused(Exception):
+    """#442: a live codex attempt was about to run with a channel to the
+    outside that skillc does not control - a server-side tool left on (web
+    search, remote plugins/apps), or an open network with no provider-only
+    egress policy. Raised before any container exists, so nothing is spent."""
+
+
+#: #442: response-item and event types that are a SERVER-SIDE tool, which runs
+#: at the model provider and so never touches the container's network. Any of
+#: them in a live transcript means the attempt reached outside the controlled
+#: environment, and its result is not credited.
+_SERVER_SIDE_TYPE = re.compile(r"web_search|mcp_|image_generation|tool_search|remote_plugin|plugin|connector|app_call|"
+                               r"computer_call|browser")
+#: A tool CALL whose name points at a plugin, app or MCP server. A remote plugin
+#: can surface as an ordinary `function_call` with a namespaced name, which a
+#: count of line types cannot see.
+_SERVER_SIDE_NAME = re.compile(r"mcp__|@openai-curated|openai-curated-remote|^(apps?|plugins?|web|browser|image_gen)[._:]",
+                               re.IGNORECASE)
+_CALL_TYPES = frozenset({"function_call", "custom_tool_call", "local_shell_call", "mcp_tool_call"})
+#: A call's own `namespace` field naming a server-side tool family, matched
+#: EXACTLY (counter-model review: `namespace: "web"` with `name: "run"` has no
+#: punctuation for a name pattern to find).
+_SERVER_SIDE_NAMESPACES = frozenset({
+    "web", "web_search", "browser", "image_gen", "image_generation", "apps", "app", "plugins", "plugin",
+    "connector", "connectors", "mcp", "remote_plugin", "tool_search", "computer",
+})
+
+
+def server_side_tool_uses(
+    transcript: bytes | None, line_types: Mapping[str, object] | None,
+    local_mcp_servers: frozenset[str] = frozenset(),
+) -> list[str]:
+    """#442: each server-side tool use the attempt's transcript shows, as
+    `<type>` or `<type>:<name>` (sorted, deduplicated). With the transcript,
+    every item is read - types AND call names - and an MCP call to a server
+    skillc itself configured for the attempt (`local_mcp_servers`, run inside
+    the container) is local, not server-side. Without it, only the census line
+    types can be read, so any MCP-looking type counts. Empty means none was
+    seen in what was read; the caller must not pass "nothing read" as clean."""
+    found: set[str] = set()
+    if transcript is None:
+        for key in (line_types or {}):
+            if _SERVER_SIDE_TYPE.search(str(key).split("/", 1)[-1]):
+                found.add(str(key))
+        return sorted(found)
+    for line in transcript.decode("utf-8", "replace").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        kind, top = str(payload.get("type")), str(entry.get("type"))
+        server = payload.get("server")
+        names = [n for n in (payload.get(k) for k in ("name", "server", "namespace")) if isinstance(n, str)]
+        local = (isinstance(server, str) and server in local_mcp_servers) or any(
+            n.startswith(f"mcp__{s}__") for n in names for s in local_mcp_servers)
+        if local:
+            continue
+        if _SERVER_SIDE_TYPE.search(kind):
+            found.add(f"{top}/{kind}")
+        if kind in _CALL_TYPES:
+            for name in names:
+                if _SERVER_SIDE_NAME.search(name):
+                    found.add(f"{top}/{kind}:{name}")
+            namespace = payload.get("namespace")
+            if isinstance(namespace, str) and namespace.lower() in _SERVER_SIDE_NAMESPACES:
+                found.add(f"{top}/{kind}:{namespace}/{payload.get('name')}")
+    return sorted(found)
 
 
 class HomeFileVerificationRefused(Exception):
@@ -1127,6 +1200,7 @@ def _make_observe_before_teardown(
     delivered_credential_bytes: dict[str, bytes],
     retained_transcript: dict[str, object] | None = None,
     stored_transcript: dict[str, trial.TranscriptEvidence] | None = None,
+    local_mcp_servers: frozenset[str] = frozenset(),
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
     def hook(backend: ExecutionBackend, handle: object) -> dict[str, object]:
         assert isinstance(backend, DockerBackend)
@@ -1146,6 +1220,9 @@ def _make_observe_before_teardown(
             "transcript_client_version": None, "transcript_model": None,
             "transcript_response_items_inspected": None,
             "transcript_line_types": None, "transcript_unrecognized_types": None,
+            # #442: None until the RAW transcript is read - never [] standing
+            # in for "nothing was inspected".
+            "server_side_tool_uses": None,
         }
         observation = TranscriptObservation(
             files_found=len(matches), prompt_delivered=False, prompt_delivery_reason=None,
@@ -1182,6 +1259,10 @@ def _make_observe_before_teardown(
                 census = transcript_census(spec.name, text)
             except Exception as exc:  # noqa: BLE001 - the census is context; it must never erase the observation
                 census = {**census, "transcript_census_error": f"{type(exc).__name__}: {exc}"}
+            # #442: from the RAW bytes, before any retention decision - a
+            # transcript the leak check refuses to store is still inspected.
+            census["server_side_tool_uses"] = server_side_tool_uses(
+                raw, census.get("transcript_line_types"), local_mcp_servers)  # type: ignore[arg-type]
             events = spec.parse_transcript(text)
             if spec.run_metadata is not None:
                 run_metadata = spec.run_metadata(text)
@@ -1835,6 +1916,22 @@ def run_one_attempt(
 
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
+    if client == "codex" and isinstance(backend, DockerBackend):
+        # #442 preflight, before any container exists: a live codex attempt
+        # runs only with provider-only egress AND every server-side channel
+        # pinned off in its own argv. A scripted subject on network "none"
+        # (the Level-3 campaigns) reaches nothing and is not checked here.
+        if backend.egress:
+            missing = eg.missing_server_side_flags(base_argv)
+            if missing:
+                raise ServerSideChannelRefused(
+                    "refusing a live codex attempt with a server-side channel left open: " + "; ".join(missing)
+                )
+        elif backend.network != "none":
+            raise ServerSideChannelRefused(
+                f"refusing a live codex attempt on network {backend.network!r} with no provider-only egress "
+                "policy (#442): the container could reach the public repository that holds the graders"
+            )
     spec = CLIENT_SPECS[client]
     resolved_workdir = workdir if workdir is not None else PurePosixPath("/work")
     resolved_mcp_servers: Mapping[str, MCPServerSpec] = mcp_servers if mcp_servers is not None else {}
@@ -1896,6 +1993,7 @@ def run_one_attempt(
         spec=spec, expected_prompt=full_prompt, skill_name=skill_name,
         delivered_credential_bytes=delivered_credential_bytes,
         retained_transcript=retained_transcript, stored_transcript=stored_transcript,
+        local_mcp_servers=frozenset(resolved_mcp_servers),
     )
 
     if witness_session is not None:
@@ -1909,6 +2007,28 @@ def run_one_attempt(
                 witness_session.failure = witness_session.failure or "witness finalization failed"
             return observe_transcript(observed_backend, handle)
 
+    # #442: the attempt's egress proxy log, read while the proxy still runs
+    # (before teardown) and FIRST, so a failing transcript hook cannot lose it.
+    # It is captured as the `egress-proxy-log` stream of the attempt's manifest.
+    egress_imports: list[trial.Import] = []
+    if isinstance(backend, DockerBackend) and backend.egress:
+        observe_without_egress = observe_before_teardown
+
+        def observe_before_teardown(observed_backend: ExecutionBackend, handle: object) -> Mapping[str, object]:
+            summary: dict[str, object]
+            raw = observed_backend.egress_log(handle) if isinstance(observed_backend, DockerBackend) else None
+            if raw is None:
+                summary = {"status": "unread", "reason": "the egress proxy log could not be read before teardown"}
+            else:
+                log_path = base / f"{attempt_id}.{eg.PROXY_LOG_STREAM}.jsonl"
+                log_path.write_bytes(raw)
+                digest = trial.sha256_bytes(raw)
+                egress_imports.append(trial.Import(log_path, eg.PROXY_LOG_STREAM, "observed", digest))
+                summary = {"status": "read", "digest": digest, **eg.summarize_log(raw)}
+            observed = dict(observe_without_egress(observed_backend, handle))
+            observed["egress"] = summary
+            return observed
+
     def transcript_for_capture() -> trial.TranscriptEvidence:
         return stored_transcript.get("evidence") or trial.TranscriptEvidence(
             None, "the transcript observation hook did not complete; no transcript was read",
@@ -1918,6 +2038,7 @@ def run_one_attempt(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
         transcript_for_capture=transcript_for_capture,
+        imports_for_capture=lambda: egress_imports,
     )
 
     graded: dict[str, object] | None = None
@@ -1939,6 +2060,15 @@ def run_one_attempt(
                 f"canary_satisfied={observation.get('canary_satisfied')!r} - "
                 "never graded without both confirmed against the real transcript"
             )
+        elif not isinstance(observation.get("server_side_tool_uses"), list):
+            # #442: the census never inspected the raw transcript - unknown,
+            # never read as clean.
+            grading_blocked_reason = "not credited: server-side tool inspection unavailable"
+        elif server_side := observation["server_side_tool_uses"]:
+            # #442: a tool that ran at the provider reached outside the
+            # controlled environment; the attempt stays in every account, but
+            # is never credited.
+            grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
         else:
             try:
                 if grading_backend is None:

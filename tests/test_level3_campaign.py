@@ -304,7 +304,9 @@ def test_the_campaign_backends_give_the_agent_no_network(tmp_path: Path) -> None
     agent, grading = lc.campaign_backends(image="img", base=tmp_path, docker_bin=("docker",),
                                           daemon_timeout=30, runtime_supply=None)
     assert agent.network == "none" and grading.network == "none"
-    assert cc.AGENT_NETWORK != "none", "the production default this deliberately overrides"
+    assert not agent.egress, "a scripted campaign actor gets no network at all, not even the provider"
+    production, _ = cc.agent_backends(image="i", base=tmp_path, docker_bin=["docker"], daemon_timeout=1)
+    assert production.egress, "the production default (provider-only egress) this deliberately overrides"
     body = Path(cli.__file__).read_text(encoding="utf-8").split("def cmd_level3_campaign", 1)[1].split("\ndef ", 1)[0]
     assert "lc.campaign_backends(" in body and "TrackingDockerBackend(" not in body
 

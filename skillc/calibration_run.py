@@ -78,6 +78,7 @@ TRIAL_PREFIX = "calibration"
 OUTCOMES_FILENAME = mp.OUTCOMES_FILENAME
 REPORT_FILENAME = "calibration-report.json"
 REPORT_KIND = "calibration-run-report"
+DISCRIMINATION_REPORT_KIND = "discrimination-run-report"
 UNKNOWN = calibration.UNKNOWN
 
 #: Private by default: outside any work tree, never exported.
@@ -283,11 +284,25 @@ def build_treatment(
         gate_entrypoint = closure.gate_entrypoint
         # Two derivations of the same fact - the installed bytes and the
         # validated inventory - must agree, or the pins would describe skills
-        # this treatment does not install (#424).
-        if closure.skill_pins != skill_digests:
+        # this treatment does not install (#424). Per path, as a SUBSET (#432,
+        # orchestrator ruling): the inventory pins only the profile's selected
+        # skills, while the treatment installs - and pins, from its bytes -
+        # every skill of the subject's collection. Each inventory pin needs an
+        # installed pin at the same path with BOTH digests equal; installed
+        # skills the inventory does not name stay pinned from their bytes.
+        installed = {pin["path"]: pin for pin in skill_digests}
+        disagreements = []
+        for pin in closure.skill_pins:
+            have = installed.get(pin["path"])
+            if have is None:
+                disagreements.append(f"{pin['path']}: not installed by this treatment")
+                continue
+            disagreements.extend(f"{pin['path']}: {field} {pin[field]} (inventory) != {have[field]} (installed)"
+                                 for field in ("body_digest", "description_digest") if pin[field] != have[field])
+        if disagreements:
             raise CalibrationRefused(
-                f"profile {subject_profile!r}'s inventory pins {list(closure.skill_pins)} disagree with "
-                f"the installed skills' own digests {list(skill_digests)}"
+                f"profile {subject_profile!r}'s inventory pins disagree with the installed skills' own "
+                f"digests: {disagreements}"
             )
     return Treatment(
         home_files=home_files,
@@ -308,7 +323,11 @@ def build_treatment(
     )
 
 
-def _shared_str(declaration: calibration.CalibrationDeclaration, *path: str) -> str:
+#: Either declaration kind: the helpers below read only `.shared`/`.arm_order`.
+AnyDeclaration = calibration.CalibrationDeclaration | calibration.DiscriminationDeclaration
+
+
+def _shared_str(declaration: AnyDeclaration, *path: str) -> str:
     node: object = declaration.shared
     for key in path:
         node = node.get(key) if isinstance(node, dict) else None
@@ -317,11 +336,11 @@ def _shared_str(declaration: calibration.CalibrationDeclaration, *path: str) -> 
     return node
 
 
-def declared_model(declaration: calibration.CalibrationDeclaration) -> tuple[str, str]:
+def declared_model(declaration: AnyDeclaration) -> tuple[str, str]:
     return _shared_str(declaration, "model"), _shared_str(declaration, "reasoning_effort")
 
 
-def declared_client(declaration: calibration.CalibrationDeclaration) -> tuple[str, str]:
+def declared_client(declaration: AnyDeclaration) -> tuple[str, str]:
     return _shared_str(declaration, "client", "name"), _shared_str(declaration, "client", "version")
 
 
@@ -449,7 +468,7 @@ def reconcile(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome
 
 def write_outcomes(
     run_dir: Path, experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome],
-    declaration: calibration.CalibrationDeclaration,
+    declaration: AnyDeclaration,
 ) -> Path:
     """The private, resumable per-run record (`matched_pilot.read_outcomes`
     reads it back). Rewritten after every attempt, and before the first, so
@@ -481,6 +500,7 @@ def run_calibration(
     credential_explicit_path: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
     total_seconds: float | None = None,
+    rehearse: bool = False,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, plan and run the whole declared schedule. `backends()`
     returns a fresh `(agent backend, grading backend)` pair per attempt;
@@ -529,6 +549,8 @@ def run_calibration(
     write_outcomes(run_dir, experiment, outcomes, declaration)
 
     def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
+        if rehearse:  # #287 P2: only the attempt is swapped; everything around it is the real path
+            return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
         treated = scheduled.arm != calibration.BASELINE_ARM
         instruction = calibration.arm_spec(declaration, scheduled.arm).get("instruction")
         prompt = f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
@@ -569,6 +591,372 @@ def run_calibration(
         write_outcomes(run_dir, experiment, reconcile(experiment, outcomes), declaration)
         raise
     return experiment, outcomes
+
+
+# ------------------------------------------------- #287 P2: discrimination run
+
+
+#: The rehearsal's attempt disposition reason: a deterministic, in-process
+#: stand-in for an agent attempt. No container, no client, no model.
+REHEARSAL_REASON = "rehearsal: deterministic in-process attempt; no container, no client, no model"
+
+
+def degraded_treatment(intact: Treatment, declaration: calibration.DiscriminationDeclaration) -> Treatment:
+    """The degraded arm, DERIVED IN MEMORY from the intact treatment (#287 P2):
+    the same install with exactly the declared mutation applied. Every
+    delivered copy of `mutation.skill/mutation.path` (the skill surface AND the
+    profile closure place the same file at different destinations) gets the
+    SAME degraded bytes, and each copy's in-container re-check digest follows
+    it. The degraded bytes come from `calibration.require_degraded_mutation`, so
+    they hash to the approved `mutated_digest`, the digest P1's textual scan
+    was run at. Derived rather than re-acquired because both degrade-subject
+    paths lose the checkout a profile closure needs, and a snapshot-sourced
+    degrade can never carry the declared `git:` revision label."""
+    mutation = declaration.mutation
+    skill, path = str(mutation.get("skill")), str(mutation.get("path"))
+    if path == "SKILL.md":
+        raise CalibrationRefused("a SKILL.md mutation would change the skill's own pins; not supported here")
+    suffix = f"skills/{skill}/{path}"
+    keys = sorted(k for k in intact.home_files if k == suffix or k.endswith("/" + suffix))
+    if not keys:
+        raise CalibrationRefused(f"the intact treatment delivers no {suffix}; the declared mutation has no target")
+    originals = {intact.home_files[k] for k in keys}
+    if len(originals) != 1:
+        raise CalibrationRefused(f"the intact treatment delivers different bytes at {keys}; refusing to degrade")
+    try:
+        degraded = calibration.require_degraded_mutation(originals.pop(), mutation)
+    except calibration.DeclarationRefused as exc:
+        raise CalibrationRefused(str(exc)) from exc
+    revision = declaration.degraded_subject.get("revision")
+    if revision != calibration._expected_degraded_revision(declaration.intact_subject):
+        raise CalibrationRefused(f"degraded subject revision {revision!r} is not the derived git: label")
+    home_files = dict(intact.home_files)
+    verify_home_files = dict(intact.verify_home_files)
+    for key in keys:
+        home_files[key] = degraded
+        if key in verify_home_files:
+            verify_home_files[key] = m.sha256_bytes(degraded)
+    tree = trial.sha256_bytes(trial.canonical(sorted([k, trial.sha256_bytes(v)] for k, v in home_files.items())))
+    context = intact.receipt_context
+    if context is not None:
+        context = agent_trial.InstallationReceiptContext(
+            declared=context.declared, tree_digest=tree, listing_client_argv=context.listing_client_argv,
+            subject_locator=context.subject_locator, subject_revision=str(revision),
+            surface_name=context.surface_name, cache={},
+        )
+    return Treatment(home_files=home_files, digest=tree, receipt_context=context,
+                     verify_home_files=verify_home_files, preflight_tools=intact.preflight_tools,
+                     gate_entrypoint=intact.gate_entrypoint, skill_digests=intact.skill_digests)
+
+
+def require_textual_evidence(declaration: calibration.DiscriminationDeclaration, root: Path) -> dict[str, object]:
+    """Tie the run to P1's textual check (orchestrator ruling on #287 P2): the
+    evidence file `mutation.diagnose_evidence` names (its first word, a
+    repo-relative path) must exist, report NO_TEXTUAL_SURVIVOR with its own
+    digest check passed, and have been run at EXACTLY the declared
+    `mutated_digest`, so the bytes a live degraded attempt installs are the
+    bytes that scan examined. Returns the evidence; refuses otherwise. That
+    verdict is still only a necessary textual check (see the scan's own
+    `verdict_meaning`), never evidence the obligation is absent."""
+    named = str(declaration.mutation.get("diagnose_evidence") or "").split()
+    path = root / named[0] if named else None
+    if path is None or not path.is_file():
+        raise CalibrationRefused(f"mutation.diagnose_evidence names no evidence file under the checkout: {named[:1]}")
+    try:
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise CalibrationRefused(f"{named[0]} is not readable JSON: {exc}") from exc
+    scan = evidence.get("occurrence_scan") if isinstance(evidence, dict) else None
+    declared = declaration.mutation.get("mutated_digest")
+    if not isinstance(evidence, dict) or evidence.get("removed_text") != declaration.mutation.get("removed_text"):
+        raise CalibrationRefused(f"{named[0]} scanned for a different removed_text than the declaration removes; "
+                                 f"evidence about one sentence cannot vouch for another")
+    profile_dir = declaration.intact_subject.get("profile")
+    if not isinstance(profile_dir, str) or not profile_dir:
+        raise CalibrationRefused("the intact subject declares no profile, so the closure the textual check scanned "
+                                 "cannot be bound to the closure this run installs")
+    if evidence.get("closure_source") != f"{profile_dir}/evidence/inventory.json":
+        raise CalibrationRefused(f"{named[0]} scanned closure {evidence.get('closure_source')!r}, not this run's "
+                                 f"{profile_dir}/evidence/inventory.json")
+    if not isinstance(scan, dict) or scan.get("verdict") != "NO_TEXTUAL_SURVIVOR":
+        raise CalibrationRefused(f"{named[0]}: the textual check did not report NO_TEXTUAL_SURVIVOR")
+    if evidence.get("mutated_digest_matches") is not True \
+            or evidence.get("measured_degraded_reference_digest") != declared or evidence.get("mutated_digest") != declared:
+        raise CalibrationRefused(f"{named[0]} was not run at the declared mutated_digest {declared}; the runtime and "
+                                 f"the textual check would describe different degraded files")
+    return evidence
+
+
+def _norm_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def require_no_delivered_survivor(treatment: Treatment, removed_text: str) -> None:
+    """Scan EVERY file the degraded treatment actually delivers (counter-model
+    finding, pass 3: the subject selects all skills, while P1's textual scan
+    covered only the profile's closure). Refuses when any delivered file still
+    carries the full removed sentence or any 3+-word piece of it (a line that is
+    itself contained in it), on whitespace-normalized text. A necessary textual
+    check on the real delivered population, never proof the obligation is gone."""
+    removed = _norm_text(removed_text)
+    found: list[str] = []
+    for path, data in sorted(treatment.home_files.items()):
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue  # binary content cannot carry the sentence as text
+        if removed and removed in _norm_text(text):
+            found.append(f"{path} (whole sentence)")
+            continue
+        for line in text.splitlines():
+            piece = _norm_text(line)
+            if len(piece.split()) >= 3 and piece in removed:
+                found.append(f"{path}: {piece!r}")
+                break
+    if found:
+        raise CalibrationRefused(f"the degraded install still delivers the removed sentence or a piece of it: {found}")
+
+
+def plan_discrimination(
+    declaration: calibration.DiscriminationDeclaration, store: Path, *, root: Path,
+    treatments: Mapping[str, Treatment], image_digest: str | None,
+) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
+    """One trial per attempt, in `arm_order.sequence`, each arm installing its
+    OWN treatment: its own `subject.digest` and its own `skill_digests` pins.
+    The exact approved declaration rides in every trial's config."""
+    if set(treatments) != set(calibration.DISCRIMINATION_ARMS):
+        raise CalibrationRefused(f"need a treatment for each of {calibration.DISCRIMINATION_ARMS}")
+    if any(not t.skill_digests for t in treatments.values()):
+        raise CalibrationRefused("a discrimination arm has no skill_digests to pin; refusing to plan it unpinned")
+    client_name, client_version = declared_client(declaration)
+    grader_identity = verify.GraderDef.load(root / declaration.task_path).identity()
+    snapshot = json.loads(trial.canonical(declaration.data))
+    trials: list[dict[str, object]] = []
+    counts: dict[str, int] = {}
+    for position, arm in enumerate(declaration.arm_order, start=1):
+        counts[arm] = counts.get(arm, 0) + 1
+        trials.append({
+            "label": f"{TRIAL_PREFIX}_{arm}_{counts[arm]}",
+            "case": {"id": declaration.grader_id, "revision": declaration.grader_revision},
+            "grader": grader_identity,
+            "subject": {"digest": treatments[arm].digest},
+            "client": {"name": client_name, "version": client_version},
+            "image": {"digest": image_digest or UNKNOWN},
+            "config": {"arm": arm, "repeat": counts[arm], "position": position,
+                       "discrimination_declaration": snapshot},
+            "attempts": 1,
+            "skill_digests": [dict(pin) for pin in treatments[arm].skill_digests],
+        })
+    try:
+        experiment = trial.plan({"experiment": EXPERIMENT_LABEL, "trials": trials}, store)
+    except trial.Refused as exc:
+        raise CalibrationRefused(f"the controller refused the schedule: {exc}") from exc
+    pairs = list(experiment.attempts())
+    if len(pairs) != len(trials):
+        raise CalibrationRefused(f"planned {len(pairs)} attempts for {len(trials)} trials")
+    schedule = [mp.ScheduledAttempt(attempt_id=str(attempt["attempt_id"]), trial_id=str(planned["trial_id"]),
+                                    arm=str(spec["config"]["arm"]), repeat=int(spec["config"]["repeat"]))  # type: ignore[index]
+                for (planned, attempt), spec in zip(pairs, trials, strict=True)]
+    return experiment, schedule
+
+
+def run_discrimination(
+    declaration: calibration.DiscriminationDeclaration,
+    *,
+    run_dir: Path,
+    intact: Treatment,
+    image_digest: str | None,
+    backends: Callable[[], tuple[object, object]],
+    argv_for: Callable[[mp.ScheduledAttempt], Sequence[str]],
+    root: Path = ROOT,
+    credential_explicit_path: Path | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    total_seconds: float | None = None,
+    rehearse: bool = False,
+) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
+    """Authorize, derive the degraded arm, plan and run a discrimination
+    declaration (#287 P2). Nothing - no store, no plan - before the approval
+    and the run-time mutation check pass. `rehearse=True` swaps ONLY the
+    attempt function for a deterministic in-process one (`REHEARSAL_REASON`):
+    approval, derivation, planning, the store, the cap-enforcing schedule and
+    reconciliation are the real ones, so a rehearsal accounts for every slot a
+    live run would. `total_seconds` overrides the declared cap (tests only)."""
+    calibration.require_approved_discrimination(declaration, root)
+    if image_digest != _shared_str(declaration, "image", "digest"):
+        raise CalibrationRefused("the run's image digest differs from the approved declaration's")
+    require_textual_evidence(declaration, root)
+    degraded = degraded_treatment(intact, declaration)
+    require_no_delivered_survivor(degraded, str(declaration.mutation.get("removed_text")))
+    treatments = {"intact": intact, "degraded": degraded}
+    model, effort = declared_model(declaration)
+    client_name, client_version = declared_client(declaration)
+    mp.pin_model_argv(model, effort, [])
+    task_root = root / declaration.task_path
+    try:
+        surface = cc.surface_mapping(cc.task_surface(task_root / declaration.task_fixture))
+        goal = (task_root / "goal.md").read_text(encoding="utf-8")
+    except demo.SubjectRefused as exc:
+        raise CalibrationRefused(str(exc)) from exc
+    per_attempt = float(str(declaration.shared["per_attempt_seconds"]))
+    total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
+
+    store = trial.open_store(run_dir / "store", forbidden=[])
+    experiment, schedule = plan_discrimination(declaration, store, root=root, treatments=treatments,
+                                               image_digest=image_digest)
+    outcomes: list[mp.AttemptOutcome] = []
+    write_outcomes(run_dir, experiment, outcomes, declaration)
+
+    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
+        if rehearse:
+            return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
+        chosen = treatments[scheduled.arm]
+        agent_backend, grading_backend = backends()
+        return cc.run_level1_agent_attempt(
+            experiment=experiment, attempt_id=scheduled.attempt_id,
+            backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
+            base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
+            extra_home_files=chosen.home_files, client=client_name, cli_version=client_version,
+            task_root=task_root, surface=surface, prompt=goal, timeout=budget,
+            credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
+            verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
+            gate_entrypoint=chosen.gate_entrypoint,
+        )
+
+    def on_outcome(outcome: mp.AttemptOutcome) -> None:
+        outcomes.append(outcome)
+        write_outcomes(run_dir, experiment, outcomes, declaration)
+
+    try:
+        mp.run_schedule(experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
+                        clock=clock, on_outcome=on_outcome)
+    except KeyboardInterrupt:
+        write_outcomes(run_dir, experiment, reconcile(experiment, outcomes), declaration)
+        raise
+    return experiment, outcomes
+
+
+#: An attempt counts as EVALUABLE only when its primary endpoint is PASS or
+#: FAIL; anything else (NOT_GRADED, INCONCLUSIVE, a not-run or unavailable
+#: attempt) is non-evaluable for the per-arm tolerance.
+EVALUABLE_STATUSES = frozenset({"PASS", "FAIL"})
+
+
+def apply_tolerance(report: Mapping[str, object], tolerance: int) -> dict[str, dict[str, object]]:
+    """Per-arm evaluability under the declared `tolerance.non_evaluable_per_arm`
+    (#287 P5 rule, enforced here per D-P2b): an arm with MORE non-evaluable
+    attempts than the tolerance has verdict UNKNOWN, naming the count; at or
+    under it, the arm is evaluable over its evaluable attempts."""
+    attempts = report.get("attempts")
+    per_arm: dict[str, dict[str, int]] = {}
+    for entry in attempts if isinstance(attempts, list) else []:
+        arm = str(entry.get("arm"))
+        endpoint = entry.get("primary_endpoint")
+        status = str(endpoint.get("status")) if isinstance(endpoint, dict) else calibration.NOT_GRADED
+        counts = per_arm.setdefault(arm, {"evaluable": 0, "non_evaluable": 0})
+        counts["evaluable" if status in EVALUABLE_STATUSES else "non_evaluable"] += 1
+    out: dict[str, dict[str, object]] = {}
+    for arm, counts in per_arm.items():
+        over = counts["non_evaluable"] > tolerance
+        empty = counts["evaluable"] == 0  # an empty evaluable population is never a clean verdict
+        reason = (f"{counts['non_evaluable']} non-evaluable attempt(s) exceed the declared tolerance of {tolerance}"
+                  if over else "no evaluable attempt: nothing to compare" if empty else None)
+        out[arm] = {**counts, "tolerance_non_evaluable": tolerance,
+                    "verdict_status": "UNKNOWN" if over or empty else "EVALUABLE", "reason": reason}
+    return out
+
+
+def stored_discrimination_declaration(experiment: trial.Experiment) -> calibration.DiscriminationDeclaration:
+    """The discrimination declaration the run LAUNCHED with, read from the
+    verified ledger: the same snapshot in every trial, whose arm order is the
+    ledger's schedule and whose approval still binds it. A report takes its
+    settings from here, never from its caller."""
+    snapshots = []
+    for planned, _attempt in experiment.attempts():
+        binding = planned["config"]
+        assert isinstance(binding, dict)
+        config = json.loads(trial._read_object(experiment.root, str(binding["digest"])))
+        snapshots.append(config.get("discrimination_declaration") if isinstance(config, dict) else None)
+    if not snapshots or not isinstance(snapshots[0], dict) \
+            or any(trial.canonical(s) != trial.canonical(snapshots[0]) for s in snapshots):
+        raise CalibrationRefused("missing, partial or mixed discrimination declaration snapshots in the ledger")
+    try:
+        declaration = calibration.parse_discrimination_declaration(snapshots[0])
+        # The stored launch snapshot must itself be approved (pure check: the
+        # current checkout's files cannot change a historical report's answer).
+        calibration.require_discrimination_approval_record(declaration)
+    except calibration.DeclarationRefused as exc:
+        raise CalibrationRefused(f"stored discrimination declaration is not an approved one: {exc}") from exc
+    schedule = schedule_from_ledger(experiment)
+    if tuple(s.arm for s in schedule) != declaration.arm_order:
+        raise CalibrationRefused("stored discrimination declaration and ledger schedule disagree")
+    # Every trial's runtime identities and configuration must be the stored
+    # declaration's (counter-model finding, pass 3), as the outcome report checks.
+    counts: dict[str, int] = {}
+    for position, ((planned, _attempt), scheduled) in enumerate(zip(experiment.attempts(), schedule, strict=True), 1):
+        counts[scheduled.arm] = counts.get(scheduled.arm, 0) + 1
+        binding = planned["config"]
+        assert isinstance(binding, dict)
+        config = json.loads(trial._read_object(experiment.root, str(binding["digest"])))
+        expected = {"arm": scheduled.arm, "repeat": counts[scheduled.arm], "position": position}
+        if any(config.get(k) != v or type(config.get(k)) is not type(v) for k, v in expected.items()) \
+                or scheduled.repeat != counts[scheduled.arm]:
+            raise CalibrationRefused("stored declaration and trial configuration schedule disagree")
+        grader = planned.get("grader")
+        if planned.get("case") != {"id": declaration.grader_id, "revision": declaration.grader_revision} \
+                or not isinstance(grader, dict) or grader.get("id") != declaration.grader_id \
+                or grader.get("revision") != declaration.grader_revision:
+            raise CalibrationRefused("stored declaration and ledger grader identity disagree")
+        if planned.get("client") != declaration.shared["client"] \
+                or planned.get("image") != {"digest": _shared_str(declaration, "image", "digest")}:
+            raise CalibrationRefused("stored declaration and ledger runtime identity disagree")
+    return declaration
+
+
+def build_discrimination_report(
+    experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome],
+    declaration: calibration.DiscriminationDeclaration, *, rehearsal: bool = False,
+) -> dict[str, object]:
+    """The calibration report body (endpoint, readiness, model check per
+    attempt) plus, per arm, `flow-check-honest` beside the endpoint and the
+    tolerance verdict. Descriptive only: no Fisher test is run here (the pilot
+    exists to size the main study)."""
+    experiment = trial.Experiment.open(experiment.root)
+    stored = stored_discrimination_declaration(experiment)
+    if calibration.declaration_digest(stored.data) != calibration.declaration_digest(declaration.data):
+        raise CalibrationRefused("the supplied declaration differs from the one this run launched with; a report "
+                                 "is scored only against the launch-bound declaration")
+    declaration = stored
+    model, effort = declared_model(declaration)
+    report = build_report(experiment, outcomes, declared_model=model, declared_effort=effort)
+    for entry, outcome in zip(report["attempts"], reconcile(experiment, outcomes), strict=True):  # type: ignore[call-overload]
+        entry["process_honesty_beside"] = _honesty_beside(outcome.record)
+    report["kind"] = DISCRIMINATION_REPORT_KIND
+    report["declaration_digest"] = calibration.declaration_digest(declaration.data)
+    report["mutated_digest"] = declaration.mutation.get("mutated_digest")
+    report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
+    report["rehearsal"] = rehearsal
+    return report
+
+
+def rehearsal_accounting(declaration: AnyDeclaration, outcomes: Sequence[mp.AttemptOutcome]) -> dict[str, object]:
+    """The rehearsal's slot accounting: every declared slot, by arm, against
+    the declared caps. Worst-case seconds is every slot at its per-attempt cap
+    (the total cap still bounds a live run). No tokens or price: P1's
+    measured-mean table multiplies these slot counts (no invented price)."""
+    per_attempt = float(str(declaration.shared["per_attempt_seconds"]))
+    by_arm: dict[str, int] = {}
+    for arm in declaration.arm_order:
+        by_arm[arm] = by_arm.get(arm, 0) + 1
+    accounted: dict[str, int] = {}
+    for outcome in outcomes:
+        accounted[outcome.scheduled.arm] = accounted.get(outcome.scheduled.arm, 0) + 1
+    return {
+        "slots_declared": len(declaration.arm_order), "slots_by_arm": by_arm,
+        "slots_accounted": sum(accounted.values()), "accounted_by_arm": accounted,
+        "every_slot_accounted": accounted == by_arm,
+        "per_attempt_seconds": per_attempt, "total_seconds": float(str(declaration.shared["total_seconds"])),
+        "worst_case_seconds": per_attempt * len(declaration.arm_order),
+    }
 
 
 def verified_result(experiment: trial.Experiment, record: Mapping[str, object]) -> dict[str, object] | None:

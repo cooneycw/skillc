@@ -119,6 +119,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
@@ -135,6 +136,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO
 
+from . import egress as eg
 from . import runtime_supply as rs
 from .backend import CANDIDATE_GID as _CANDIDATE_GID
 from .backend import CANDIDATE_UID as _CANDIDATE_UID
@@ -467,6 +469,7 @@ def compose_run_argv(
     container_user: str,
     disk_limit: str | None,
     trigger_socket_host_path: Path | None = None,
+    dns: str | None = None,
 ) -> list[str]:
     """The full `docker run` argv. Pure - makes no call, mutates nothing. A
     FIXED, closed set of flags: there is no passthrough for arbitrary extra
@@ -532,6 +535,7 @@ def compose_run_argv(
         "--label", f"{OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}",
         "--label", f"{ATTEMPT_LABEL_KEY}={attempt_id}",
         "--network", network,
+        *(("--dns", dns) if dns is not None else ()),
         "--user", container_user,
         "--hostname", CONTAINER_HOSTNAME,
         "--init",
@@ -861,6 +865,10 @@ class _Handle:
     name: str
     env: Mapping[str, str] = field(repr=False)
     trigger_channel: DecideReplyChannel | None = field(default=None, repr=False)
+    #: #442: this attempt's own internal network and egress proxy container,
+    #: when the backend runs with `egress`; `None` otherwise.
+    egress_network: str | None = None
+    egress_proxy: str | None = None
 
 
 @dataclass(frozen=True)
@@ -898,6 +906,16 @@ class DockerBackend:
     #: observations/PID bookkeeping. Default probe write-back stays unchanged.
     witness_io: bool = False
     runtime_supply: rs.RuntimeSupply | None = field(default=None, repr=False)
+    #: #442: provider-only egress for a LIVE agent container. When set, the
+    #: attempt's container joins only its own `--internal` network, with no DNS
+    #: and the per-attempt allowlisting proxy's address in its proxy env;
+    #: `network` is then not used for it (`egress.py`). Grading and scripted
+    #: containers leave this False and keep `network` (default "none").
+    egress: bool = False
+    #: The hosts the egress proxy forwards to. Production never sets this:
+    #: the default IS the measured allowlist. Only the real-Docker control's
+    #: `allow-all` break widens it, to prove the denial check can fail.
+    egress_hosts: tuple[str, ...] = eg.ALLOWED_HOSTS
     #: Host-side directory for #183's socket files - see
     #: `DEFAULT_TRIGGER_SOCKET_DIR`'s own comment for why this is NOT
     #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
@@ -911,8 +929,12 @@ class DockerBackend:
             version=version or "unreachable",
             isolation=(
                 "container (pid/mount/network namespaces)",
-                (f"network={self.network} by default" if self.network == "none"
-                 else f"network={self.network}: egress OPEN (owner ruling on issue #11; agent containers only)"),
+                ("network: a per-attempt --internal network, no DNS; egress only through the "
+                 f"per-attempt proxy to {', '.join(self.egress_hosts)}:443 (#442; client-side fetches only - "
+                 "server-side tools are closed by the client's declared flags and the transcript census)"
+                 if self.egress else
+                 f"network={self.network} by default" if self.network == "none"
+                 else f"network={self.network}: egress OPEN (no egress policy set)"),
                 f"fixed non-root user {_container_user()} ({CANDIDATE_USER_NAME}), independent of the host caller",
                 "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
                 (f"disk: --storage-opt size={self.disk_limit}" if self.disk_limit is not None
@@ -926,7 +948,10 @@ class DockerBackend:
             ),
             unobserved=(
                 *(("network egress actually blocked - not verified from inside the container",)
-                  if self.network == "none" else ()),
+                  if self.network == "none" and not self.egress else ()),
+                *((("egress restriction verified only by the real-Docker live controls (#442), not on "
+                    "every attempt; the proxy log of each attempt is captured as evidence"),)
+                  if self.egress else ()),
                 "file reads by candidate code",
                 ("credential confidentiality against an ancestor's /proc/<pid>/environ - "
                  "the verifier's own boundary (verify.py's probe through this same seam)"),
@@ -965,6 +990,7 @@ class DockerBackend:
 
     def _keepalive_run_argv(
         self, name: str, attempt_id: str, trigger_socket_host_path: Path | None = None,
+        *, network: str | None = None, extra_env: Mapping[str, str] | None = None, dns: str | None = None,
     ) -> list[str]:
         """`prepare()`'s `docker run -d` argv: `compose_run_argv`'s own
         composed flags (identity, network, resource limits, ownership
@@ -978,10 +1004,11 @@ class DockerBackend:
         #183) changes nothing here."""
         argv = compose_run_argv(
             docker_bin=self.docker_bin, image=self.image, name=name, attempt_id=attempt_id,
-            subject_argv=_KEEPALIVE_ARGV, env=self.env, network=self.network, memory=self.memory,
+            subject_argv=_KEEPALIVE_ARGV, env={**self.env, **(extra_env or {})},
+            network=self.network if network is None else network, memory=self.memory,
             pids_limit=self.pids_limit, cpus=self.cpus, shm_size=self.shm_size,
             container_user=_container_user(), disk_limit=self.disk_limit,
-            trigger_socket_host_path=trigger_socket_host_path,
+            trigger_socket_host_path=trigger_socket_host_path, dns=dns,
         )
         argv.insert(argv.index("run") + 1, "-d")
         argv.remove("--rm")
@@ -1025,8 +1052,25 @@ class DockerBackend:
                 f"'docker run -d' pull it mid-trial with no bound on how long that takes"
             )
         name = _container_name(attempt_id)
-        channel, trigger_socket_host_path = self._start_trigger_channel(name, attempt_id)
-        argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path)
+        egress_network: str | None = None
+        egress_proxy: str | None = None
+        egress_args: dict[str, object] = {}
+        if self.egress:
+            egress_network, egress_proxy, proxy_ip = self._start_egress(name, attempt_id, env)
+            egress_args = {"network": egress_network, "extra_env": eg.agent_proxy_env(proxy_ip),
+                           "dns": eg.AGENT_DNS}
+        channel: DecideReplyChannel | None = None
+        try:
+            channel, trigger_socket_host_path = self._start_trigger_channel(name, attempt_id)
+            argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path, **egress_args)  # type: ignore[arg-type]
+        except BaseException:
+            # #442: egress is already up; nothing between acquiring it and
+            # handing back a handle may strand it - a refused channel, an
+            # invalid argv value, an interrupt. The original exception stands.
+            if channel is not None:
+                channel.close()
+            self._stop_egress(egress_proxy, egress_network, env)
+            raise
         try:
             started = subprocess.run(
                 argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
@@ -1041,18 +1085,115 @@ class DockerBackend:
             # socket with nothing ever going to mount it is exactly that.
             if channel is not None:
                 channel.close()
-            cleanup_note = self._best_effort_rm(name, env)
+            cleanup_note = self._best_effort_rm(name, env) + self._stop_egress(egress_proxy, egress_network, env)
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {exc}{cleanup_note}"
             ) from exc
+        except BaseException:
+            # #442: an interrupt mid-`run` still removes what this call made.
+            if channel is not None:
+                channel.close()
+            self._best_effort_rm(name, env)
+            self._stop_egress(egress_proxy, egress_network, env)
+            raise
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
-            cleanup_note = self._best_effort_rm(name, env)
+            cleanup_note = self._best_effort_rm(name, env) + self._stop_egress(egress_proxy, egress_network, env)
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}{cleanup_note}"
             )
-        return _Handle(attempt_id=attempt_id, name=name, env=env, trigger_channel=channel)
+        return _Handle(attempt_id=attempt_id, name=name, env=env, trigger_channel=channel,
+                       egress_network=egress_network, egress_proxy=egress_proxy)
+
+    def _egress_call(self, argv: list[str], env: Mapping[str, str], what: str) -> str:
+        """One bounded daemon call for #442's egress setup; raises
+        `BackendUnavailable` naming `what` on any failure, else returns stdout."""
+        try:
+            done = subprocess.run(argv, capture_output=True, text=True, env=env, check=False,
+                                  timeout=self.daemon_timeout)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(f"egress setup failed to {what}: {exc}") from exc
+        if done.returncode != 0:
+            raise BackendUnavailable(f"egress setup failed to {what}: {done.stderr.strip()}")
+        return done.stdout
+
+    def _start_egress(self, name: str, attempt_id: str, env: Mapping[str, str]) -> tuple[str, str, str]:
+        """#442: the attempt's internal network and its allowlisting proxy,
+        joined to it. Returns `(network, proxy container, proxy address on the
+        network)`. Whatever this call created is removed again before it
+        raises - a refused prepare() leaves no network and no proxy behind."""
+        network, proxy = eg.network_name(name), eg.proxy_name(name)
+        labels = {OWNER_LABEL_KEY: OWNER_LABEL_VALUE, ATTEMPT_LABEL_KEY: attempt_id}
+        # Marked BEFORE each call: a create that takes effect but whose answer is
+        # lost or late (a timeout) still leaves the object behind, so cleanup
+        # must try it. Removing something that was never made is harmless.
+        created_network = created_proxy = False
+        try:
+            created_network = True
+            self._egress_call(eg.create_network_argv(self.docker_bin, network, labels), env,
+                              f"create internal network {network}")
+            subnet = self._egress_call(eg.network_subnet_argv(self.docker_bin, network), env,
+                                       f"read {network}'s subnet").strip()
+            try:
+                ipaddress.ip_network(subnet)
+            except ValueError as exc:
+                raise BackendUnavailable(f"egress network {network} has no usable subnet: {subnet!r}") from exc
+            created_proxy = True  # `run -d` can create a container even when it fails to start
+            self._egress_call(eg.proxy_run_argv(self.docker_bin, image=self.image, name=proxy, labels=labels,
+                                                container_user=_container_user(), subnet=subnet,
+                                                hosts=self.egress_hosts),
+                              env, f"start egress proxy {proxy}")
+            self._egress_call(eg.network_connect_argv(self.docker_bin, network, proxy), env,
+                              f"connect {proxy} to {network}")
+            address = self._egress_call(eg.proxy_address_argv(self.docker_bin, network, proxy), env,
+                                        f"read {proxy}'s address on {network}").strip()
+            if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", address):
+                raise BackendUnavailable(f"egress proxy {proxy} has no IPv4 address on {network}: {address!r}")
+        except BackendUnavailable as exc:
+            note = self._stop_egress(proxy if created_proxy else None, network if created_network else None, env)
+            raise BackendUnavailable(f"{exc}{note}") from exc
+        except BaseException:
+            # Anything else - an interrupt, a bug - still removes what was
+            # made, and the original exception propagates unchanged.
+            self._stop_egress(proxy if created_proxy else None, network if created_network else None, env)
+            raise
+        return network, proxy, address
+
+    def _stop_egress(self, proxy: str | None, network: str | None, env: Mapping[str, str]) -> str:
+        """Best-effort, bounded removal of #442's proxy container and network.
+        Returns "" when everything named was removed, else a clause saying
+        what was left behind - never raises."""
+        notes = []
+        if proxy is not None:
+            note = self._best_effort_rm(proxy, env)
+            if note:
+                notes.append(note)
+        if network is not None:
+            try:
+                removed = subprocess.run(eg.remove_network_argv(self.docker_bin, network), capture_output=True,
+                                         text=True, env=env, check=False, timeout=self.daemon_timeout)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                notes.append(f"; cleanup 'docker network rm {network}' also failed: {exc}")
+            else:
+                if removed.returncode != 0 and "not found" not in removed.stderr.lower():
+                    notes.append(f"; cleanup 'docker network rm {network}' also failed: {removed.stderr.strip()}")
+        return "".join(notes)
+
+    def egress_log(self, handle: object) -> bytes | None:
+        """#442: the attempt's proxy log as the proxy wrote it, read while the
+        proxy is still running (before `destroy()`). `None` when this attempt
+        has no proxy or the log could not be read - never empty bytes standing
+        in for "could not read"."""
+        assert isinstance(handle, _Handle)
+        if handle.egress_proxy is None:
+            return None
+        try:
+            done = subprocess.run(eg.proxy_log_argv(self.docker_bin, handle.egress_proxy), capture_output=True,
+                                  env=handle.env, check=False, timeout=self.daemon_timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return done.stdout if done.returncode == 0 else None
 
     def _best_effort_rm(self, name: str, env: Mapping[str, str]) -> str:
         """prepare()'s failure-path cleanup: make sure no container is left
@@ -2898,6 +3039,10 @@ class DockerBackend:
             )
         except (OSError, subprocess.TimeoutExpired):
             pass  # best-effort; confirm_absent() independently verifies the outcome
+        if handle.egress_proxy is not None or handle.egress_network is not None:
+            # #442: the agent container goes first (it holds the network), then
+            # the proxy, then the network. Best-effort like the rest of destroy().
+            self._stop_egress(handle.egress_proxy, handle.egress_network, handle.env)
         channel = handle.trigger_channel
         if channel is not None:
             if self.confirm_absent(handle) is Confirmation.CONFIRMED:
@@ -2918,4 +3063,31 @@ class DockerBackend:
         reachable, absent, _status = self._inspect(handle)
         if not reachable:
             return Confirmation.UNKNOWN
-        return Confirmation.CONFIRMED if absent else Confirmation.NOT_CONFIRMED
+        if not absent:
+            return Confirmation.NOT_CONFIRMED
+        # #442: the attempt's proxy and network are its resources too - a
+        # teardown that left either behind is not a confirmed one.
+        for kind, name in (("container", handle.egress_proxy), ("network", handle.egress_network)):
+            if name is None:
+                continue
+            gone = self._object_absent(kind, name, handle.env)
+            if gone is None:
+                return Confirmation.UNKNOWN
+            if not gone:
+                return Confirmation.NOT_CONFIRMED
+        return Confirmation.CONFIRMED
+
+    def _object_absent(self, kind: str, name: str, env: Mapping[str, str]) -> bool | None:
+        """#442: whether a container or network is gone. `None` when the daemon
+        could not be asked or answered with something other than "not found"."""
+        argv = [*self.docker_bin, "network", "inspect", name] if kind == "network" \
+            else [*self.docker_bin, "inspect", name]
+        try:
+            done = subprocess.run(argv, capture_output=True, text=True, env=env, check=False,
+                                  timeout=self.daemon_timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if done.returncode == 0:
+            return False
+        err = done.stderr.lower()
+        return True if ("no such" in err or "not found" in err) else None

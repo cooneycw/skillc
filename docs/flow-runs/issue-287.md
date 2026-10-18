@@ -230,3 +230,61 @@ audit independently checked those identities and both seeded 20-slot orders
 and found no issue. The original three production patches remain unchanged
 from the audited endpoint checkpoint. Final integrated full verification and
 exact-head CI remain required before root merges PR #372.
+
+<!-- flow-run n=2 id=9b4f404bf06d4492b0c19488deedf2c1 -->
+## Run 2
+
+- Run-id:            9b4f404bf06d4492b0c19488deedf2c1
+- Run-start:         dae6785166a0378612a29e3b1a05bd42a16af76c
+- Issue:             #287
+- Base SHA:          dae6785166a0378612a29e3b1a05bd42a16af76c
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated; plan P1-P5 approved 2026-10-17, this run is P1)
+- Recorded at:       2026-10-17T20:41:34Z
+
+### Section B evidence
+Accounting 2026-10-17 (sent to skillc-400): A1 partly, A2 partly/mostly not, A3 partly, A4 partly, A5 not met; both draft declarations refused by the parser. Sizing/cost/mutation artifacts only on parked branch prep-287-pilot-declarations@571d763 (diagnose taken at ea6dbfa). Pin ruling D1 recorded: https://github.com/cooneycw/skillc/issues/287#issuecomment-6240635285. Prior #287 PR: #372 (1b40509, partial).
+
+### Section C - the approved plan
+1. `evals/calibration-287/fisher_exact.py` - transplanted from 571d763.
+2. `evals/calibration-287/power_simulation.py` - transplanted from 571d763.
+3. `evals/calibration-287/power_cost_table.py` - transplanted; two 2-arm declarations; MEASURED token input cited from #237's report; wall time UNKNOWN until #375's final run; no dollar figure (cost cap superseded).
+4. `evals/calibration-287/power_cost_table.json` - regenerated.
+5. `evals/calibration-287/evidence/scan_mutation_closure.py` - transplanted; subject named from the inventory, defaults at 86641e8.
+6. `evals/calibration-287/evidence/discrimination-mutation-diagnose.json` - RETAKEN at 86641e8 (positive control held, claim holds, 0 agent-facing leftovers).
+7. `evals/calibration-287/pilot-discrimination-declaration.json` - mutation.diagnose_evidence points at the retaken evidence (unapproved draft; no other field).
+8. `evals/calibration-287/README.md` - P1 section.
+9. `tests/test_calibration_287_fisher_exact.py` - transplanted.
+10. `tests/test_calibration_287_power_simulation.py` - transplanted.
+11. `tests/test_calibration_287_power_table.py` - transplanted; cited token cells tied to #237's report, with a red case; totals over both declarations.
+12. `tests/test_calibration_287_scan_mutation_closure.py` - transplanted.
+13. `CHANGELOG.md` - entry.
+
+Scope: medium, mostly transplant. Risk: #237's tokens were measured on a level-1 task, not gate-stops-early (cited as the nearest measured figure, not an estimate for this task). Note: the transplant and retake edits were made before this record was written.
+
+<!-- flow-run n=3 id=fb082cff81df403b940535b927e24ef9 -->
+## Run 3
+
+- Run-id:            fb082cff81df403b940535b927e24ef9
+- Run-start:         eead69306ff2f376736393e0b28c4689be529fde
+- Issue:             #287
+- Base SHA:          eead69306ff2f376736393e0b28c4689be529fde (stacked on the P1 branch)
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated; P2 design approved 2026-10-17 with D-P2a, D-P2b and the P1-digest tie)
+- Recorded at:       2026-10-17T21:06:12Z
+
+### Section B evidence
+P2 mapping against main 53e87d0: calibration-run loads only calibration-declaration (cli.py:1703-1707); no run-time mutation check exists (calibration.py:148-153); discrimination approval binds only attempts_per_arm and mutated_digest; tolerance_non_evaluable_per_arm is never consumed; no --rehearse anywhere. Committed approved declarations: calibration-203, -203-c3, -203-low, -204 (none carries declaration_digest).
+
+### Section C - the approved plan
+1. `skillc/calibration.py` - approval.declaration_digest REQUIRED for both kinds, except the four committed historical approvals pinned by digest (LEGACY set); require_degraded_mutation (removed_text exactly once, degraded sha256 == mutated_digest).
+2. `skillc/calibration_run.py` - per-arm treatments; discrimination planning and running; degraded treatment derived in memory from the intact treatment (both copies, verify_home_files, git: label asserted); tolerance_non_evaluable_per_arm enforced in the report (over tolerance -> that arm UNKNOWN, naming the count); kind-aware report snapshot.
+3. `skillc/cli.py` - calibration-run dispatches on kind; --rehearse (real approval/plan/store/schedule/report path, deterministic in-process attempt function, slot/cap accounting).
+4. `tests/test_calibration_approval_binding.py` - legacy approvals still validate; any field changed after approval refused (client, model, effort, image, caps, seed); legacy edited -> refused.
+5. `tests/test_calibration_discrimination_run.py` - mutation check (count != 1, digest mismatch), degraded derivation, tie to P1's verified digest, tolerance boundary, rehearsal accounting and refusal controls (over-cap, unapproved, stale digest, mutated identity).
+6. `docs/specs/evaluation-facility/calibration.md` or the existing calibration spec - approval binding and discrimination run (if a spec documents calibration-run).
+7. `CHANGELOG.md` - entry.
+
+Scope: large (~300-400 lines plus tests). Risks: duplicate file copies in surface and closure; skill-relative vs container paths; BASELINE assumptions in shared code; rehearsal fixtures synthetic until P3.

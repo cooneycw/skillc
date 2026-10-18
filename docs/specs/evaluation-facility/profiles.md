@@ -280,14 +280,22 @@ caller-supplied home is recorded verbatim; an absolute home is omitted rather
 than leaking host identity. `verify_installed(inventory, home)` re-reads the full
 population: byte or mode drift is `violated`, missing/unreadable is `unknown`.
 
-Tools are supplied, never installed. Their IDs are looked up literally on PATH.
-Numeric operator-plus-dotted-version constraints (optionally followed by a
-parenthesized explanation) are compared as padded numeric tuples. `any` or no
-constraint accepts a found executable. Missing tools, unsupported constraints
-and failed probes report `unknown` with a reason; mismatches report `violated`.
-This uses the project's satisfied/violated/unknown vocabulary rather than
-introducing a fourth `missing` state. Tool problems remain visible in receipts
-and the CLI summary; file verification failure refuses receipt publication.
+Tools are supplied, never installed. Since #334 a tool is checked through its
+declared `probes`, never by treating its ID as a command name
+(`profile.evaluate_command_probe`, shared by the host check and the
+in-container preflight). A `command` probe whose executable is not on PATH is
+`violated` (`command 'curl' not found`), and so is a found executable whose
+version fails a numeric operator-plus-dotted-version constraint (optionally
+followed by a parenthesized explanation, compared as padded numeric tuples).
+No constraint accepts a found executable. A version command that exits
+nonzero, prints nothing, or prints no parseable version is `unknown` with a
+reason, and a tool with no probes is `unknown` ("no probes declared") on the
+host - a live attempt's preflight refuses it outright instead. This uses the
+project's satisfied/violated/unknown vocabulary rather than introducing a
+fourth `missing` state. (This paragraph read "missing tools report `unknown`"
+until #280 aligned it with the code, which has said `violated` since #334.)
+Tool problems remain visible in receipts and the CLI summary; file
+verification failure refuses receipt publication.
 
 The historical real profile uses labels such as `tool-python`, grouped tool
 entries, and external package declarations. These are not bare executable
@@ -372,3 +380,49 @@ environment, stated as a boundary, never assumed covered), and no container
 isolation was attempted or claimed. A separate cold-container run with no
 operator skill, home, MCP, or secret mounts is still required for acceptance
 item 2.
+
+## The local CI/CD profile (#280)
+
+`evals/subjects/cpp-codex-cicd-86641e8/` declares CPP's six cicd skills
+(`cicd-init`, `-check`, `-health`, `-smoke`, `-verify`, `-pipeline`) at the
+flow-check profile's own pin. They run `lib.cicd` directly
+(`uv run --project "$CPP_DIR" python -m lib.cicd <command>`), so the profile
+has no `gate_entrypoint`; its closure is `lib/cicd` with the pin's
+`pyproject.toml`/`uv.lock`, the Makefile templates `cicd-init` copies, and the
+synthetic checkout marker the skills' `CPP_DIR` probe needs. Its snapshot is
+reproducible: `scripts/freeze_cpp_fixture.py` reads every byte from git's
+object store at the pin and `check` names any drift.
+
+Runtime. The pin's PyPI dependencies are the flow-check runtime's, but
+`lib.cicd`'s HTTP health probe shells out to `curl`, which the shared trial
+image does not carry. `runtime_supply.selected_runtime` therefore names two
+runtimes: `profile-runtime` (exactly `requires_supply`'s flow-check decision,
+every refusal unchanged) and `cicd-runtime`, selected only by a gateless
+closure at the supported pin that declares the policy project's import probe
+and a curl command probe. `docker/cicd-trial/` builds that runtime as ONE curl
+layer on a validated flow-check receipt, embedded whole in the cicd receipt;
+it refuses an image that is not exactly its base plus one layer, changes its
+base's user, working directory or environment, or carries a different runtime
+descriptor. A receipt serves only the runtime its closure selected.
+`docker/trial` and `docker/profile-trial` are unchanged, and
+`tests/test_cicd_trial_image.py` pins the flow-check build inputs to their
+pre-#280 hashes.
+
+Local semantics, exactly (PROFILE.md has the full account):
+
+- the project is one stdlib-only Python project
+  (`tests/fixtures/cicd-local/project`), every target offline through `uv run`;
+- services are loopback only, started inside the attempt's own
+  `--network none` container; nothing hosted is reached;
+- `run --plan check` detects offline itself: its github.com probe fails at
+  name resolution under `--network none` (CPP_OFFLINE is not set);
+- provider pipelines (GitHub Actions, Woodpecker) are generated and parsed as
+  text, never executed - their make targets must equal the ones the local
+  plan ran, and their `pip install uv` / `uv sync` steps and container images
+  are provider-only semantics;
+- zero configured probes is an explicit outcome (`health` "no checks
+  configured", `verify` REVIEW), never a pass.
+
+`tests/test_cicd_profile_live.py` is the real-Docker proof (floor entry, break
+family `cicdprofile:` - `no-curl`, `old-curl`, `service-down`, `no-probes`);
+`tests/test_cpp_codex_cicd_86641e8.py` holds the offline manifest controls.

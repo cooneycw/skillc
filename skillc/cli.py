@@ -1699,12 +1699,30 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     from . import matched_pilot as mp
     from . import runtime_supply as rs
 
+    rehearse = bool(getattr(args, "rehearse", False))
     try:
-        declaration = calibration.load_declaration(Path(args.declaration))
-        calibration.require_approved(declaration, cr.ROOT)
+        kind = json.loads(Path(args.declaration).read_text(encoding="utf-8")).get("kind")
+    except (OSError, ValueError, AttributeError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    discrimination: calibration.DiscriminationDeclaration | None = None
+    try:
+        declaration: cr.AnyDeclaration
+        if kind == calibration.DISCRIMINATION_KIND:
+            # #287 P2: the discrimination path. Its intact arm is acquired; the
+            # degraded arm is derived from it after the run-time mutation check.
+            discrimination = calibration.load_discrimination_declaration(Path(args.declaration))
+            calibration.require_approved_discrimination(discrimination, cr.ROOT)
+            cr.require_textual_evidence(discrimination, cr.ROOT)
+            declaration = discrimination
+            subject = discrimination.intact_subject
+        else:
+            calibration_declaration = calibration.load_declaration(Path(args.declaration))
+            calibration.require_approved(calibration_declaration, cr.ROOT)
+            declaration = calibration_declaration
+            subject = cr.treatment_subject(calibration_declaration)
         model, effort = cr.declared_model(declaration)
         client_name, client_version = cr.declared_client(declaration)
-        subject = cr.treatment_subject(declaration)
     except (calibration.DeclarationRefused, cr.CalibrationRefused, OSError, ValueError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
@@ -1718,23 +1736,30 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     except mp.ModelOverrideRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
-    try:
-        pinned = trial_bootstrap.pinned_cli_version(client_name)
-    except trial_bootstrap.PinnedVersionError as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
-        return 2
-    if pinned != client_version:
-        print(f"skillc: the declaration names {client_name} {client_version}, but the trial image pins "
-              f"{pinned}; refusing a run of a client other than the declared one", file=sys.stderr)
-        return 2
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
-    image = args.image or demo.DEFAULT_IMAGE
     declared_digest = cr._shared_str(declaration, "image", "digest")
-    image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
-    if image_digest != declared_digest:
-        print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
-              f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
-        return 2
+    if rehearse:
+        # A rehearsal starts no container, so the image and the pinned client
+        # are not resolved; it plans against the DECLARED image digest and says so.
+        image_digest: str | None = declared_digest
+        print("skillc: REHEARSAL - no container, client or model; the pinned-client and image-digest checks are "
+              "skipped; every other step is the real path", file=sys.stderr)
+    else:
+        try:
+            pinned = trial_bootstrap.pinned_cli_version(client_name)
+        except trial_bootstrap.PinnedVersionError as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+        if pinned != client_version:
+            print(f"skillc: the declaration names {client_name} {client_version}, but the trial image pins "
+                  f"{pinned}; refusing a run of a client other than the declared one", file=sys.stderr)
+            return 2
+        image = args.image or demo.DEFAULT_IMAGE
+        image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        if image_digest != declared_digest:
+            print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
+                  f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
+            return 2
 
     private_root = Path(args.private_dir).expanduser() if args.private_dir else cr.DEFAULT_PRIVATE_ROOT
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -1760,17 +1785,19 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         treatment = cr.build_treatment(
             acquired, subject_profile=subject_profile, root=cr.ROOT if subject_profile is not None else None,
         )
-        needs_supply = rs.requires_supply(
+        selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
             gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
             tools=treatment.preflight_tools,
         )
         receipt_path = args.runtime_supply_receipt
-        if needs_supply and not receipt_path:
+        if selected and not receipt_path and not rehearse:
             raise rs.Refused("supported profile requires --runtime-supply-receipt")
-        if receipt_path and not needs_supply:
+        if receipt_path and not selected:
             raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
         supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
+        if supply is not None:
+            rs.require_kind(supply, selected)
         if supply is not None and supply.image_id != image_digest:
             raise rs.Refused("runtime receipt image differs from the approved resolved image")
     except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
@@ -1780,17 +1807,28 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         cc.discard_acquisition(run_dir, subject_name)
 
     interrupted = False
+    run_backends = lambda: cc.agent_backends(
+        # By the resolved immutable digest, never the tag (pilot-run's rule).
+        image=str(image_digest), base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        runtime_supply=supply,
+    )
     try:
-        experiment, outcomes = cr.run_calibration(
-            declaration, run_dir=run_dir, treatment=treatment, image_digest=image_digest,
-            # By the resolved immutable digest, never the tag (pilot-run's rule).
-            backends=lambda: cc.agent_backends(
-                image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
-                runtime_supply=supply,
-            ),
-            argv_for=lambda _scheduled: client_argv,
-            credential_explicit_path=Path(args.credential) if args.credential else None,
-        )
+        if discrimination is not None:
+            experiment, outcomes = cr.run_discrimination(
+                discrimination, run_dir=run_dir, intact=treatment, image_digest=image_digest,
+                backends=run_backends, argv_for=lambda _scheduled: client_argv,
+                credential_explicit_path=Path(args.credential) if args.credential else None, rehearse=rehearse,
+            )
+        else:
+            assert isinstance(declaration, calibration.CalibrationDeclaration)
+            experiment, outcomes = cr.run_calibration(
+                declaration, run_dir=run_dir, treatment=treatment, image_digest=image_digest,
+                backends=run_backends, argv_for=lambda _scheduled: client_argv,
+                credential_explicit_path=Path(args.credential) if args.credential else None, rehearse=rehearse,
+            )
+    except cr.CalibrationRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         # The runner already reconciled and persisted every planned attempt.
         print("skillc: interrupted; reporting every planned attempt from the private record", file=sys.stderr)
@@ -1799,10 +1837,16 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     try:
         # build_report verifies the immutable ledger before reconciling a
         # mutable checkpoint or selecting the launch-bound outcome endpoint.
-        report = cr.build_report(
-            experiment, outcomes, declared_model=model, declared_effort=effort,
-            named_skills=cr.named_skills_by_arm(declaration),
-        )
+        if discrimination is not None:
+            report = cr.build_discrimination_report(experiment, outcomes, discrimination, rehearsal=rehearse)
+        else:
+            assert isinstance(declaration, calibration.CalibrationDeclaration)
+            report = cr.build_report(
+                experiment, outcomes, declared_model=model, declared_effort=effort,
+                named_skills=cr.named_skills_by_arm(declaration),
+            )
+        if rehearse:
+            report["rehearsal_accounting"] = cr.rehearsal_accounting(declaration, outcomes)
     except (trial.Refused, ValueError, OSError) as exc:
         print(f"skillc: cannot report calibration: {exc}", file=sys.stderr)
         return 2
@@ -1812,6 +1856,14 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     except demo.PasteBackRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
+    if rehearse:
+        accounting = report["rehearsal_accounting"]
+        assert isinstance(accounting, dict)
+        print(f"skillc: rehearsal accounted for {accounting['slots_accounted']} of {accounting['slots_declared']} "
+              f"declared slots {accounting['accounted_by_arm']}; worst case {accounting['worst_case_seconds']:.0f}s "
+              f"at per_attempt_seconds={accounting['per_attempt_seconds']:.0f} (total cap "
+              f"{accounting['total_seconds']:.0f}s)", file=sys.stderr)
+        return 0 if accounting["every_slot_accounted"] and not interrupted else 1
     return 130 if interrupted else _refuse_ineligible(report)
 
 
@@ -1876,14 +1928,16 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
         if found != (frozen_subject["locator"], frozen_subject["revision"]):
             raise lc.CampaignRefused(f"acquired subject {found} is not the frozen one")
         treatment = cr.build_treatment(acquired, subject_profile=str(frozen_subject["profile"]), root=cr.ROOT)
-        needs_supply = rs.requires_supply(
+        selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
             gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
             tools=treatment.preflight_tools,
         )
-        if not needs_supply:
+        # The Level 3 campaign runs the flow-check gate; the cicd runtime has none.
+        if selected != rs.PROFILE_RUNTIME:
             raise lc.CampaignRefused("the frozen subject does not select the supported pinned runtime")
         supply = rs.RuntimeSupply.from_path(Path(args.runtime_supply_receipt))
+        rs.require_kind(supply, selected)
     except (lc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused,
             OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
@@ -2651,6 +2705,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_calibration_run.add_argument(
         "--private-dir",
         help="where the private run directory is created (default: ~/.local/share/skillc/calibration-runs)",
+    )
+    p_calibration_run.add_argument(
+        "--rehearse", action="store_true",
+        help="#287: run the real approval, acquisition, mutation check, plan, store, cap-enforcing schedule and "
+             "report with a deterministic in-process attempt instead of an agent (no container, client or model); "
+             "prints the slot accounting",
     )
     p_calibration_run.set_defaults(func=cmd_calibration_run)
 

@@ -27,8 +27,10 @@ steps:
       # test_provenance/test_profile/test_materialize) previously skipped here
       # silently - AGENTS.md's "the git and real-client tests skip there and
       # run on a host" was true of this image. Same apt line changelog-check
-      # already uses.
-      - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
+      # already uses. #276: jq too - the fixture service evaluates --jq
+      # filters with REAL jq 1.7.x on the controller, and its tests skip
+      # without it (git-tests-control below refuses a jq-named skip).
+      - apt-get update -qq && apt-get install -y -qq --no-install-recommends git jq > /dev/null
       - pip install uv
       # --locked refuses a stale uv.lock; --no-sync stops each run re-locking.
       - uv sync --locked --extra dev

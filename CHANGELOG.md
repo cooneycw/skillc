@@ -10,6 +10,177 @@ do not add to `[Unreleased]` by hand.
 
 ## [Unreleased]
 
+- **The local CI/CD capability profile for one Python project** (#280).
+  `evals/subjects/cpp-codex-cicd-86641e8/` declares CPP's six cicd skills
+  (`init`, `check`, `health`, `smoke`, `verify`, `pipeline`) at the
+  flow-check study pin, over a snapshot `scripts/freeze_cpp_fixture.py`
+  reproduces from git's object store. The skills need curl, which the
+  shared trial image lacks. `runtime_supply.selected_runtime` therefore
+  adds a `cicd-runtime` beside `profile-runtime` (its selection and
+  refusals unchanged), and `docker/cicd-trial/` builds it as ONE curl layer
+  on a validated flow-check receipt. It refuses an image that is not its
+  base plus one layer with the base's configuration and descriptor. A
+  receipt serves only the runtime its closure selected. `docker/trial`,
+  `docker/profile-trial` and their receipts are byte-identical; the
+  flow-check build inputs are pinned to their pre-#280 hashes with a
+  one-byte negative control. `tests/test_cicd_profile_live.py` (floor entry,
+  break family `cicdprofile:`) runs every command as the INSTALLED skill
+  documents it, in a cold `--network none` container. It covers detect,
+  check, `run --plan check`, health and smoke against a loopback service,
+  `verify` PROCEED then ROLLBACK, zero probes as REVIEW, and provider YAML
+  parsed (never executed) with its make targets equal to the local plan's.
+  CPP's own template drift found on the way: claude-power-pack#1476. The
+  profiles spec now says what the code has done since #334: a missing
+  declared tool is `violated`, not `unknown`.
+
+- **A flow:auto necessity task: an already-fixed issue, and its must-act twin**
+  (#434, PR 1 of 3, carrying #270 item 2). `evals/level3/flow-auto-necessity/`
+  runs `/flow:auto 1` in two fixtures with identical issue text, following
+  FixedBench (Gloaguen et al., arXiv 2605.07769, CC BY 4.0, idea only):
+  - CLEAN: the fix is merged as PR #2. The agent must say "No longer needed",
+    cite the real PR or commit, recommend closing #1, and change nothing.
+  - TWIN: no fix. The agent must say "Still needed" with a plan, and implement
+    nothing before approval.
+
+  Seven criteria, all graded from controller-held records (the #276 service
+  record, a git capture, the gate witness), never from candidate files. A
+  flow:auto Step-1 worktree counts as clean only at the base commit with an
+  empty status. Edits and file modes are read from the filesystem, so an
+  `assume-unchanged` edit or a `core.filemode=false` chmod is still caught. A
+  commit parked on a side branch, a detached HEAD on an older commit, and an
+  index-only change also count. `qualify.py` plays 43 scripted attempts through the real
+  fixture service and certifies the grader. It refuses the 5 broken graders,
+  and 3 blinding controls each flip their red to PASS. Every criterion's check
+  was also mutation-tested and goes red. No attempt has run: the live wiring
+  is PR 2 (after #442), and the campaign is PR 3.
+
+- **Live agent containers reach only their model provider** (#442). Live
+  attempts ran on Docker's default bridge with open egress (#11), and skillc's
+  graders are public. `DockerBackend(egress=True)` now gives each live attempt
+  its own `--internal` network (no route out, no external DNS) and a per-attempt
+  allowlisting CONNECT proxy to `chatgpt.com` and `auth.openai.com` only,
+  measured with the pinned codex. The proxy log is captured as the attempt's
+  `egress-proxy-log` manifest stream. Server-side channels, which container
+  egress cannot reach, are closed in the codex argv: `--strict-config -c
+  web_search="disabled" --disable apps --disable plugins --disable
+  remote_plugin` (measured: by default the client lists 16 OpenAI-curated
+  remote plugins to the model, GitHub among them). `run_one_attempt` refuses a
+  live codex attempt missing any of them, or on an open network with no egress
+  policy, before any container exists. After the run, any server-side tool use
+  in the transcript blocks grading as "not credited", and the attempt stays in
+  every report. The real-Docker runner's floor gains
+  `tests/test_agent_egress_live.py` with an `egress:` break family
+  (`allow-all`, `bridge-network`, `dns-hosts`).
+
+- **#287 P2: discrimination runs, whole-declaration approval, and rehearsal**
+  (Refs #287).
+  - **Approval binds the whole declaration** (orchestrator ruling D-P2a):
+    `approval.declaration_digest` must equal the declaration's canonical digest,
+    for both kinds, so a client, model, effort, image, cap or seed changed after
+    approval is refused. The four committed pre-rule approvals are pinned by their
+    own digests, so they keep their meaning; editing one drops it out of the pin.
+  - **`skillc calibration-run` runs a `discrimination-declaration`.** The
+    degraded arm is derived in memory from the intact treatment after the
+    run-time mutation check (`removed_text` exactly once, degraded bytes hash to
+    `mutated_digest`). It is tied to P1's textual evidence at that same digest.
+  - **The report applies `tolerance.non_evaluable_per_arm`:** more non-evaluable
+    attempts than the tolerance makes that arm UNKNOWN, naming the count.
+  - **`--rehearse`** runs the real approval, plan, store, cap-enforcing schedule
+    and report with a deterministic in-process attempt (no container, client or
+    model), for either kind, and exits 1 unless every declared slot is accounted
+    for. Fixtures are synthetic until P3.
+
+- **#287 P1: sizing, measured cost inputs and mutation evidence at CPP 86641e8**
+  (Refs #287). This transplants the parked `prep-287-pilot-declarations@571d763`
+  statistics (exact one-sided Fisher, the P1-P6 pilot-to-main sizing simulation)
+  and its mutation scan onto main. The power and cost table now sizes the two
+  separate 2-arm pilot declarations: 40 attempts at n=10. Its token input is
+  MEASURED and cited (#237: mean 140,500 tokens per attempt; the 175,000 largest
+  cell mean is a scenario, not a bound), with
+  a test tying every cited cell to #237's report. Live wall time stays UNKNOWN; #375's final run supplies a
+  SCRIPTED per-attempt floor (median 36 s). There is no dollar figure. The degraded arm's mutation
+  evidence is retaken at the ruled pin `86641e8`: the declared `mutated_digest`
+  reproduces, and the rebuilt scan (all 97 installed files, verdicts
+  NO_TEXTUAL_SURVIVOR/SURVIVES/NEEDS_REVIEW/UNKNOWN) reports NO_TEXTUAL_SURVIVOR, a
+  necessary but not sufficient textual check. The pre-registered discrimination
+  pilot is the evidence that the degraded arm is degraded. The original scan reported
+  success on a missing tree, a pre-existing copy and an incomplete diagnose.
+- **A controller-owned issue and PR fixture service** (#276). flow:auto talks
+  to GitHub throughout, and a trial has no network or `gh`. A file-backed fake
+  inside the container would be subject-writable. `skillc/fixture_service.py`
+  makes the controller the only GitHub. A `gh` shim
+  (`docker/fixture-service/skillc-gh-shim.py`) forwards each call over the attempt's one
+  #183 socket. The service parses it against a closed grammar, records an event
+  (its own sequence number, decision, effect, and state digests before and
+  after) and only then replies.
+  - The grammar is exactly the 59 calls the pinned CPP 86641e8 lane makes,
+    committed as an inventory with `source:line`.
+  - `--jq` runs through the controller's real jq 1.7.x, and only for the
+    allowlisted pinned filters. Anything else is recorded as unsupported, never
+    approximated.
+  - The squash merge is built and the ref is moved by the controller, so the
+    merge SHA is never subject-authored. Closing keywords close issues as merge
+    effects. One shared matcher, `closing_references()`, follows GitHub's
+    documented keyword grammar. A form the doc leaves unsettled, such as
+    `Fixes:#42`, is recorded as ambiguous and closes nothing.
+  - Scenario authority, duplicate create, invalid transitions and the wrong
+    repository are refused and recorded.
+  - Declared `lost-response` and `stale-read` faults fire on the first
+    admitted matching request, so a junk flood cannot move them.
+  - `dispatch()` multiplexes `gh` and the gate witness's ops on the one socket,
+    with closed per-route key sets.
+  - Remote ref rewrites are DETECTED as `remote_integrity: VIOLATED`, never
+    reconciled. Prevention is #436.
+  - Running git as the controller against a remote the subject can write
+    would run subject-chosen code on the host, through a written `commondir`
+    or a config swapped between check and use. `LocalGitRemote` therefore
+    refuses, fail-closed and before any git runs, a remote with any of these:
+    an entry owned by another uid; an entry that is group- or other-writable;
+    a symlink; an unsafe ancestor; an unlistable root; a `..` path. A live
+    attempt's remote must run git inside its containment (#434 hard
+    acceptance).
+  - CI installs jq. `ci/check_git_tests_ran.py` now maps each tool-dependent
+    module to the tools it needs (git, jq), and a committed jq-skip bad control
+    fails it. The pre-change checker passed that control.
+  - Proven host-side over a real socket with the real shim. Live wiring is
+    #434's.
+  - The shim lives in `docker/fixture-service/`, not `docker/trial/`, because
+    every `docker/trial/` file enters the pinned flow-check build context.
+    `tests/test_fixture_service_runtime_pin.py` pins that context and recipe
+    digest at #276's base, with a control in which the shim is placed back
+    under `docker/trial/` and the digest moves.
+
+- **Research: how to build #270's clean-project case, and where Kyle fits** (#431).
+  `docs/research/clean-project-case-2026-10.md` checks the benchmark literature for cases where the
+  right action is to change nothing (FixedBench, ImpossibleBench, BouncerBench, SkillsBench, the
+  SWE-bench family), with pins and licences. It recommends two sibling clean-project tasks that share
+  the must-act tasks' goal text and run on the existing `fresh` actor, so no frozen #375 identity
+  moves. It also ranks where Kyle could help skillc's evals, with the contamination risks. Research
+  only; nothing was run.
+
+- **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under
+  `make verify`'s parallel load, `run_case`'s 15s whole-attempt limit (and the
+  scripted actor's equal socket wait, #407) could expire before an honest
+  attempt's later gate calls were witnessed. That gave a false red on
+  `test_actual_gate_history_binds_each_call_to_its_own_snapshot[rerun]` in
+  #432's gate. Both now share `RUN_CASE_TIMEOUT = 60`. The tests assert
+  witness history binding, never timing. Red: with a gate call delayed 20s,
+  `[rerun]` fails on the old bound (the witness drain is refused, so no
+  witness is graded) and passes on the new one. #407's slow-second-call
+  `[stale]` reproduction still reads stale.
+- **A profile narrower than its install builds again** (#432). #424's
+  cross-check in `calibration_run.build_treatment` required the profile
+  inventory's skill pins to EQUAL the pins of every installed skill. A real
+  CPP profile selects one skill (`flow-check`) while its subject installs the
+  whole collection (74 skills at 86641e8), so every profiled treatment was
+  refused, blocking the Level-3 campaigns and the #287 calibration arms. The
+  check is now per path and a subset: each inventory pin needs an installed
+  pin at the same path with equal `body_digest` and `description_digest`, and
+  a pin for an uninstalled path is refused. `Treatment.skill_digests` is
+  unchanged: every installed skill, pinned from its installed bytes.
+  `tests/test_calibration_run_real_profile.py` runs the real profile with its
+  full install when a local claude-power-pack checkout holds 86641e8, and
+  skips with the missing prerequisite named otherwise.
 - **The real-Docker runner no longer deletes other workloads' images** (#414).
   `run-real-docker` ended every run with host-wide `docker container prune -f`
   and `docker image prune -f`. `docker/profile-trial/build.py` built its

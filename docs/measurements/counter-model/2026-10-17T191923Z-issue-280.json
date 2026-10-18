@@ -1,0 +1,25 @@
+{
+  "branch": "issue-280-prove-the-local-cicd-capability-profile-for-one-py",
+  "counts": {
+    "accepted": 7,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "986a8648a00b8d776fe2ecd36f5e90458dae7c39",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "280",
+  "passes": 2,
+  "recorded_at": "2026-10-17T19:19:23Z",
+  "red_cases": {
+    "already_covered": 25,
+    "proposed": 30
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T15-12-55-01a14b48-0ce7-7271-918d-2e3f67c4d82c.jsonl",
+    "thread_id": "01a14b48-0ce7-7271-918d-2e3f67c4d82c"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
