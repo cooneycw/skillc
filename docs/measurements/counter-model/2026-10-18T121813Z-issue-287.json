@@ -1,0 +1,27 @@
+{
+  "branch": "issue-287-p5-owner-approval",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "fe7b097",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-18T12:18:13Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/18/rollout-2026-10-18T08-16-41-01a14ef1-57a0-7552-a605-bd9262c05f4c.jsonl",
+    "thread_id": "01a14ef1-57a0-7552-a605-bd9262c05f4c"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
