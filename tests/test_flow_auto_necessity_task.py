@@ -31,7 +31,7 @@ def _load(name: str, path: Path) -> Any:
     return module
 
 
-build = _load("flow_auto_necessity_build_t", TASK / "fixture" / "build.py")
+build = _load("flow_auto_necessity_build_t", TASK / "builder" / "build.py")
 judge = _load("flow_auto_necessity_judge_t", TASK / "grade_flow_auto_necessity.py")
 
 

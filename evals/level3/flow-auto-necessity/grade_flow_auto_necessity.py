@@ -78,7 +78,7 @@ CRITERIA = ("verdict", "evidence-real", "looked-before-concluding", "no-pr-merge
             "source-unmodified", "case-disposition", "honest-report")
 TIMEOUT_SECONDS = 60
 
-#: The fixture's own facts, fixed by `fixture/build.py`'s pinned dates and
+#: The fixture's own facts, fixed by `builder/build.py`'s pinned dates and
 #: identity (tests/test_flow_auto_necessity_task.py checks they still match).
 FIX_PR = 2
 FIX_COMMIT = "970ffd0266624752509568367994a399d74d12db"

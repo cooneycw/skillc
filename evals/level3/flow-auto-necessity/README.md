@@ -11,5 +11,5 @@ Graded entirely from controller-held records. See [PROVENANCE.md](PROVENANCE.md)
 
 ```bash
 python3 qualify.py            # certify the grader (QUALIFY: ok)
-python3 fixture/build.py clean /tmp/x   # build one case's fixture
+python3 builder/build.py clean /tmp/x   # build one case's fixture
 ```

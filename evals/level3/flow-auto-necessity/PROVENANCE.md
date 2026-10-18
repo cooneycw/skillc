@@ -46,7 +46,9 @@ The fuller survey is in `docs/research/clean-project-case-2026-10.md` (#431).
 
 ## The fixture
 
-`fixture/build.py` builds, deterministically (fixed dates and a neutral identity, so
+The builder lives in `builder/`, deliberately not `fixture/`. A task's `fixture/` is the tree skillc delivers to the agent's workspace (`collection_conformance.task_surface`), and this task's workspace is BUILT: the checkout and its remote are produced per attempt, so the builder and its declarations never reach the agent.
+
+`builder/build.py` builds, deterministically (fixed dates and a neutral identity, so
 the same SHAs everywhere):
 
 - a small `widget` parser whose `parse("")` raises `IndexError`;

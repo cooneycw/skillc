@@ -16,10 +16,10 @@ A candidate is not a finished tree: it is a scripted attempt. Its
 `actions.json` names the case (`clean`/`twin`), the gh requests the attempt
 makes and the git operations it performs; its `report.md` is the final
 report the transcript would record. For every candidate this harness builds
-a FRESH fixture (`fixture/build.py`), runs the gh requests through the REAL
+a FRESH fixture (`builder/build.py`), runs the gh requests through the REAL
 `skillc.fixture_service.FixtureService` on a controller-owned host remote
 (`LocalGitRemote`, within its contract), performs the git operations,
-captures the git state with the same `fixture/build.capture` a live attempt
+captures the git state with the same `builder/build.capture` a live attempt
 uses, builds a real (empty) gate-witness record, and grades the candidate
 through `skillc.verify.grade_directory` with all of it as the trusted
 observation - the channel a real attempt's records arrive through.
@@ -58,7 +58,7 @@ from skillc.backend import ExecuteResult, Limits
 from skillc.decide_reply_channel import ChannelRefusal
 from skillc.gate_witness import GateWitness
 
-_build_spec = importlib.util.spec_from_file_location("flow_auto_necessity_build", HERE / "fixture" / "build.py")
+_build_spec = importlib.util.spec_from_file_location("flow_auto_necessity_build", HERE / "builder" / "build.py")
 assert _build_spec is not None and _build_spec.loader is not None
 build = importlib.util.module_from_spec(_build_spec)
 _build_spec.loader.exec_module(build)
