@@ -75,8 +75,11 @@ def _closure_sources() -> set[str]:
 
 
 def test_the_snapshot_is_exactly_the_closure() -> None:
+    # Tool caches are local, gitignored and never committed: the snapshot holds
+    # CPP's own pyproject.toml, so ruff caches beside it.
+    caches = {"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"}
     present = {path.relative_to(SNAPSHOT).as_posix() for path in SNAPSHOT.rglob("*")
-               if path.is_file() and "__pycache__" not in path.parts}
+               if path.is_file() and not caches & set(path.relative_to(SNAPSHOT).parts)}
     assert present - NOT_CLOSURE == _closure_sources()
 
 
