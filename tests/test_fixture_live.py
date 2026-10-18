@@ -220,8 +220,10 @@ def test_a_dry_rehearsal_accounts_for_every_slot_and_reports_unapproved(tmp_path
 
 
 def test_a_live_run_needs_an_approved_declaration(tmp_path: Path) -> None:
+    unapproved = _draft()
+    unapproved.pop("approval", None)
     with pytest.raises(fl.LiveRefused, match="no approval record"):
-        fl.run_live(fl.load_declaration(DRAFT), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
+        fl.run_live(fl.parse_declaration(unapproved), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
                     image_digest=None, backends=lambda: (None, None), client_argv=["codex", "exec"],
                     credential_explicit_path=None)
     assert not (tmp_path / "store").exists()  # ADR 0005: nothing before authorization
@@ -343,7 +345,9 @@ def test_the_census_must_cover_the_transcript_through_the_production_parser(raw:
 
 
 def test_a_rehearsal_is_identifiable_in_the_ledger_before_any_report(tmp_path: Path) -> None:
-    declaration = fl.load_declaration(DRAFT)
+    unapproved = _draft()
+    unapproved.pop("approval", None)
+    declaration = fl.parse_declaration(unapproved)
     experiment, _, _ = fl.run_live(declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(),
                                    image_digest=None, backends=lambda: (None, None), client_argv=["codex", "exec"],
                                    credential_explicit_path=None, rehearse="dry")
