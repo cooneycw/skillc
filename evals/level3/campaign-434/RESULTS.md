@@ -1,5 +1,8 @@
 # Campaign 434: results, manifest revision 1
 
+> Revision 2's run certifies: see [RESULTS-rev2.md](RESULTS-rev2.md). This page is revision 1's
+> result, kept as it was recorded.
+
 The pre-registered certifying run of the #434 production-path campaign
 ([pre-registration](https://github.com/cooneycw/skillc/issues/434#issuecomment-6247128286)). Run
 `20261018T072709Z-30a0b3` on evals26 (#315's isolated runner), 07:27:09-07:57:57Z, once, with no

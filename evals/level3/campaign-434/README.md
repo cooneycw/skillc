@@ -14,8 +14,12 @@ agent runs on network `none` with a generated dummy credential.
 
 - Manifest: [manifest.json](manifest.json), derived by [freeze.py](freeze.py) (a test
   fails if they differ)
-- Results: [RESULTS.md](RESULTS.md), manifest revision 1's pre-registered run (38/40 MATCH, the 2
-  MISMATCHes diagnosed), with [report.json](report.json) and [verification.json](verification.json)
+- Results:
+  - [RESULTS-rev2.md](RESULTS-rev2.md): revision 2's pre-registered run, which **certifies**
+    (43/43 MATCH). With [report-rev2.json](report-rev2.json) and
+    [verification-rev2.json](verification-rev2.json).
+  - [RESULTS.md](RESULTS.md): revision 1's run (38/40 MATCH, the 2 MISMATCHes diagnosed). With
+    [report.json](report.json) and [verification.json](verification.json).
 
 ## What the actor does
 

@@ -1,0 +1,25 @@
+{
+  "branch": "issue-434-live-campaign-wiring",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "98b6ba0b897c65a8ae29d7af5999d7d5b1dc633c",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "434",
+  "passes": 2,
+  "recorded_at": "2026-10-18T13:21:33Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 12
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/18/rollout-2026-10-18T09-16-27-01a14f28-0c19-7473-96ef-c23defe7225b.jsonl",
+    "thread_id": "01a14f28-0c19-7473-96ef-c23defe7225b"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

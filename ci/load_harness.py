@@ -246,12 +246,14 @@ def read_loadavg(loadavg_path: Path) -> float:
 
 
 def uptime() -> str:
+    """Uptime and load averages from /proc, in `uptime`'s shape. Not the
+    `uptime` binary: it comes from procps, which slim CI images (python:3.12-slim)
+    do not carry."""
     try:
-        out = subprocess.run(
-            ["uptime"], capture_output=True, text=True, timeout=10, check=False
-        )
-        return out.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        up = float(Path("/proc/uptime").read_text().split()[0])
+        load = Path("/proc/loadavg").read_text().split()[:3]
+        return f"up {up:.0f}s, load average: {', '.join(load)}"
+    except (OSError, ValueError, IndexError) as exc:
         return f"uptime unavailable: {exc}"
 
 
@@ -609,7 +611,7 @@ def phase(args: argparse.Namespace) -> int:
             finally:
                 # Hold the load for at least MIN_WINDOW_SECONDS of measurement
                 # (never past the phase deadline), then close the window.
-                hold = min(window["start"] + MIN_WINDOW_SECONDS, phase_deadline)
+                hold = min(window["start"] + args.min_window_seconds, phase_deadline)
                 while time.monotonic() < hold and not sampler_error:
                     time.sleep(0.1)
                 stop.set()
@@ -641,7 +643,7 @@ def phase(args: argparse.Namespace) -> int:
     if sampler_error or (record["warmup_reached"] and not covered):
         verdict = "INVALID"
     # A window cut short by the phase deadline is too thin to judge.
-    if record["warmup_reached"] and span < MIN_WINDOW_SECONDS:
+    if record["warmup_reached"] and span < args.min_window_seconds:
         verdict = "INVALID"
     if no_load:
         verdict = "INVALID"
@@ -751,6 +753,8 @@ def main(argv: list[str] | None = None) -> int:
     ph.add_argument("--reps", type=int, required=True)
     ph.add_argument("--max-seconds", type=float, default=PHASE_CAP_SECONDS)
     ph.add_argument("--warmup-seconds", type=float, default=WARMUP_SECONDS)
+    ph.add_argument("--min-window-seconds", type=float, default=MIN_WINDOW_SECONDS,
+                    help="the shortest measured window a phase may be judged over")
     ph.add_argument("--out", required=True)
     ph.add_argument("--docker-churn", type=int, default=0,
                     help="loops of labelled `docker run --rm IMAGE true`")

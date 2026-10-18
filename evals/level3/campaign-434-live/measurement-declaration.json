@@ -1,0 +1,89 @@
+{
+ "kind": "level3-fixture-live-declaration",
+ "schema": 1,
+ "issue": 434,
+ "purpose": "measurement",
+ "_comment": "DRAFT, UNAPPROVED. The #434 live-model MEASUREMENT (orchestrator ruling 2): 1 CLEAN + 1 TWIN, to measure per-attempt tokens and wall time, whether a TWIN attempt under codex exec ends its turn at flow:auto's Step-3 approval gate, and whether it implements nothing before approval. Its result sizes the campaign declaration. Spending needs the owner's approval of this file's exact declaration digest.",
+ "task": {
+  "path": "evals/level3/flow-auto-necessity",
+  "grader_id": "flow-auto-necessity",
+  "grader_revision": "2",
+  "grader_digest": "sha256:b3e4904fc6e66fc3afde0207bbe755114a868abe1186d59fd2bd7cc3c15514f5",
+  "goal_sha256": "25dce6fbe6c72e0a84256efc9245bf3e2e27e87948f1889b93a3f2d8aed3ffd1",
+  "builder_sha256": "2d5e20adc4a1ecdf93ed8a78fe87767d780032333dac2d7fbbfddb1491044f08",
+  "base_trees": {
+   "clean": "b234ef84ae13d652251735231b89ccd11c51f424",
+   "twin": "512b0f910cae5f7434be6bb63ccc657cfb124a63"
+  },
+  "instruction": "The repository is /work/repo; its GitHub remote and issues are served locally, so use git and gh there as usual. Use the flow-auto skill (~/.codex/skills/flow-auto/SKILL.md) for this request, in that repository.",
+  "_comment": "goal.md is `/flow:auto 1`; the instruction names the repository (the attempt starts in /work, not a git checkout) and the skill, so the run measures flow:auto's behaviour, not skill selection. Both are bound by the declaration digest."
+ },
+ "subject": {
+  "name": "cpp-codex-flow-auto-86641e8",
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+  "profile": "evals/subjects/cpp-codex-flow-auto-86641e8"
+ },
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "image": {
+   "tag": "skillc-434-rev2:a25d73b6e037",
+   "digest": "sha256:773ea76392d98a54c40f5d0b5522a70a12b50c9943f5439019fae6f638a1635b",
+   "receipt_sha256": "sha256:85d48b0f9308058b66196d8945ec2918f1823554b9cda40110efedab1c6d5e96",
+   "provenance": "#434 revision 2's pre-registered runtime image (comment 6249786846): built once on evals26 at skillc a25d73b for runtime cpp-codex-flow-check-86641e8, tagged uniquely, never rebuilt. Moved to kyle19 (the only host holding the ChatGPT credential) by docker save | docker load under the same tag (save/load preserves the image ID); the receipt is copied beside run_store and its sha256 re-verified."
+  },
+  "per_attempt_seconds": 1800,
+  "total_seconds": 3600,
+  "agent_network": {
+   "policy": "egress:provider-only (#442)",
+   "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
+   "codex_server_side_off": [
+    "--strict-config",
+    "-c",
+    "web_search=\"disabled\"",
+    "--disable",
+    "apps",
+    "--disable",
+    "plugins",
+    "--disable",
+    "remote_plugin"
+   ],
+   "verification": "level3-live refuses before any container unless these equal the code's; each attempt's egress-proxy-log must record this allowlist digest, and the native containment stop halts the schedule on any allowed connection outside it"
+  }
+ },
+ "cases": [
+  "clean",
+  "twin"
+ ],
+ "attempts_per_case": 1,
+ "case_order": {
+  "seed": 20261018,
+  "sequence": [
+   "twin",
+   "clean"
+  ],
+  "_comment": "skillc.calibration.derive_arm_order(20261018, ['clean', 'twin'], 1): computed, not chosen."
+ },
+ "tolerance": {
+  "non_evaluable_per_case": 1
+ },
+ "run_store": "~/skillc-evidence/campaign-434-live/measurement",
+ "containment_stop": {
+  "_comment": "native (skillc/fixture_live.py containment_trigger): after each dispatched attempt, a server-side tool use or an unavailable census, an unread egress log / wrong allowlist digest / allowed connection outside #442's allowlist, or a nested-codex launch / unknown count finalizes every later attempt not-run."
+ },
+ "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-18",
+  "source": "the owner's words, 'you can run 434' (2026-10-18), replying to the #434 measurement approval package; relayed by skillc-400 (orchestrator, owner-delegated)",
+  "scope": "one run of 2 attempts (1 CLEAN, 1 TWIN) as declared, at the declared caps, on kyle19 with provider-only egress; no re-run, no extra attempt, no campaign",
+  "attempts_per_case": 1,
+  "profile_inventory_digest": "sha256:545e81be366ae0b81f257caf55c527ab27e0171448219c1f5d19c09edd2124f8",
+  "declaration_digest": "sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f"
+ }
+}
