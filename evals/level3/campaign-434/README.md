@@ -87,10 +87,17 @@ From a clean checkout, on evals26, with run.lock held and the runner timer disab
 (coordinated with whoever operates the runner):
 
 ```bash
+mkdir -p -m 700 /root/campaign-434/tmp && export TMPDIR=/root/campaign-434/tmp
 uv run --no-sync python docker/profile-trial/build.py --receipt /path/to/receipt.json   # the 86641e8 runtime
 uv run --no-sync skillc level3-campaign --manifest evals/level3/campaign-434/manifest.json \
     --runtime-supply-receipt /path/to/receipt.json
 ```
+
+Run as root, set a private `TMPDIR`. The attempt's trigger socket directory defaults
+to `$TMPDIR/skillc-trigger`, and on the runner `/tmp/skillc-trigger` belongs to the
+runner's service user, so `DockerBackend` refuses it (it must own the directory). The
+branch rehearsal found this: every row was refused before it started until `TMPDIR`
+was private.
 
 The flow-auto closure selects the existing `cpp-codex-flow-check-86641e8` profile runtime.
 It has the same pin, gate entrypoint and project metadata, and a test asserts that
