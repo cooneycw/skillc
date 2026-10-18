@@ -85,6 +85,9 @@ def test_the_committed_drafts_stay_unapproved(path: Path) -> None:
     ("client.version", "codex 0.157.1 PROPOSED"),
     ("image.tag", "skillc-375-final:UNKNOWN"),
     ("image.digest", "sha256:PENDING"),
+    ("tools", "PENDING"),
+    ("permissions", "PROPOSED"),
+    ("public_requirements", "UNKNOWN (to be supplied)"),
 ])
 @pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
 def test_c1_a_placeholder_token_in_an_identity_leaf_is_refused(path: Path, field: str, value: str) -> None:
@@ -113,15 +116,25 @@ def test_c1_a_placeholder_outside_shared_is_refused(root: str, edit: Any) -> Non
 @pytest.mark.parametrize("field, prose", [
     ("provenance", "Recorded image replaces the PROPOSED image in the earlier draft."),
     ("provenance", "PENDING in the parked draft; measured at P3"),
-    ("tools", "the client's defaults; the UNKNOWN-tool policy is #442's"),
+    ("treatment", "the intact install, replacing the PROPOSED one"),
 ])
 def test_c1_prose_that_mentions_a_marker_is_not_a_placeholder(field: str, prose: str) -> None:
     """Counter-model finding: commentary about an earlier placeholder is bound
     by the whole-declaration digest, not refused as a placeholder."""
     data = _draft(IMPROVEMENT)
-    target = data["shared"]["image"] if field == "provenance" else data["shared"]
+    target = data["shared"]["image"] if field == "provenance" else data["arms"][0]
     target[field] = prose
     _authorize(_approve(data))
+
+
+def test_c1_the_older_exact_unknown_rule_still_covers_prose() -> None:
+    """Deliberate: a prose value that is EXACTLY `UNKNOWN` is an unresolved
+    marker, not commentary; the pre-P3 rule refuses it everywhere under
+    `shared` and `arms`, and P3 does not loosen it."""
+    data = _draft(IMPROVEMENT)
+    data["shared"]["image"]["provenance"] = "UNKNOWN"
+    with pytest.raises(calibration.DeclarationRefused, match="UNKNOWN"):
+        _authorize(_approve(data))
 
 
 # ------------------------------------------------------------------- C2

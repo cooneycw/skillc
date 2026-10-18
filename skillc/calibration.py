@@ -632,9 +632,11 @@ _PLACEHOLDER = re.compile(r"\b(?:" + "|".join(PLACEHOLDER_MARKERS) + r")\b")
 IDENTITY_ROOTS = ("shared", "arms", "task", "task_content", "run_store", "attempts_per_arm", "tolerance",
                   "arm_order", "skill_pins", "outcome_endpoint")
 #: Prose inside the identity roots: commentary, bound by the whole-declaration
-#: digest, never parsed as an identity (`_`-prefixed keys too).
-PROSE_KEYS = frozenset({"provenance", "tools", "permissions", "public_requirements", "treatment",
-                        "verification", "rule", "removed_text"})
+#: digest, never parsed as an identity (`_`-prefixed keys too). Never a
+#: REQUIRED_IDENTITY field (`tools`, `permissions` and `public_requirements` are
+#: identities; counter-model finding). The older exact-`UNKNOWN` rule
+#: (`_unknown_leaves`) still covers every leaf under `shared` and `arms`.
+PROSE_KEYS = frozenset({"provenance", "treatment", "verification", "rule", "removed_text"})
 
 
 def _placeholder_leaves(value: object, where: str) -> list[str]:
