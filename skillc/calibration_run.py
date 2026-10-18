@@ -593,6 +593,82 @@ def run_calibration(
     return experiment, outcomes
 
 
+# --------------------------------------- #287 P3: image, store and egress bindings
+
+
+def require_image_binding(declaration: AnyDeclaration, *, image_arg: str, resolved_digest: str | None,
+                          receipt_path: Path | None) -> None:
+    """C3: the run's image is the DECLARED one three ways - the tag the
+    operator passed is `shared.image.tag`, the daemon resolves it to
+    `shared.image.digest` (a tag re-pointed at another image is refused), and
+    the runtime-supply receipt file's bytes hash to `shared.image.receipt_sha256`
+    when the declaration names one."""
+    image = declaration.shared.get("image")
+    image = image if isinstance(image, dict) else {}
+    tag, digest, receipt_sha = image.get("tag"), image.get("digest"), image.get("receipt_sha256")
+    if image_arg != tag:
+        raise CalibrationRefused(f"image tag {image_arg!r} is not the declared shared.image.tag {tag!r}")
+    if resolved_digest != digest:
+        raise CalibrationRefused(f"the declared tag {tag!r} resolves to {resolved_digest or 'nothing'}, not the "
+                                 f"declared {digest}; a tag re-pointed at another image is refused")
+    if receipt_sha is not None:
+        if receipt_path is None or not receipt_path.is_file():
+            raise CalibrationRefused("the declaration names a runtime receipt (shared.image.receipt_sha256) but "
+                                     "no receipt file was supplied")
+        measured = m.sha256_bytes(receipt_path.read_bytes())
+        if measured != receipt_sha:
+            raise CalibrationRefused(f"runtime receipt {receipt_path} hashes to {measured}, not the declared "
+                                     f"shared.image.receipt_sha256 {receipt_sha}")
+
+
+def private_root(declaration: AnyDeclaration, private_dir: str | None) -> Path:
+    """C5: a declaration that names a `run_store` stores its run there, expanded
+    and durability-checked against this run's HOME; a different `--private-dir`
+    is refused. Without one, the CLI's own default."""
+    store = declaration.data.get("run_store")
+    if store is None:
+        return Path(private_dir).expanduser() if private_dir else DEFAULT_PRIVATE_ROOT
+    try:
+        resolved = calibration.resolve_run_store(store)
+    except calibration.DeclarationRefused as exc:
+        raise CalibrationRefused(str(exc)) from None
+    if private_dir is not None and Path(private_dir).expanduser() != resolved:
+        raise CalibrationRefused(f"--private-dir {private_dir!r} differs from the declared run_store {store!r} "
+                                 f"(expanded {str(resolved)!r})")
+    return resolved
+
+
+def declared_allowlist_digest(declaration: AnyDeclaration) -> str | None:
+    network = declaration.shared.get("agent_network")
+    digest = network.get("allowlist_digest") if isinstance(network, dict) else None
+    return digest if isinstance(digest, str) else None
+
+
+def egress_eligibility(record: Mapping[str, object], declared_digest: str) -> tuple[bool | None, str | None]:
+    """C4, per attempt: a DISPATCHED attempt is eligible only when its egress
+    proxy log was read and recorded the declared allowlist digest. `None` for
+    an attempt never dispatched (not-run, unavailable: nothing to check)."""
+    if record.get("disposition") in ("not-run", "unavailable"):
+        return None, None
+    observation = record.get("observation")
+    summary = observation.get("egress") if isinstance(observation, dict) else None
+    if not isinstance(summary, dict):
+        return False, "no egress evidence recorded for this attempt"
+    if summary.get("status") != "read":
+        return False, f"the egress proxy log was not read ({summary.get('reason')})"
+    if summary.get("allowlist_digest") != declared_digest:
+        return False, (f"the proxy recorded allowlist {summary.get('allowlist_digest')!r}, not the declared "
+                       f"{declared_digest}")
+    return True, None
+
+
+def _apply_egress(report: dict[str, object], outcomes: Sequence[mp.AttemptOutcome], declared_digest: str) -> None:
+    for entry, outcome in zip(report["attempts"], outcomes, strict=True):  # type: ignore[call-overload]
+        ok, reason = egress_eligibility(outcome.record, declared_digest)
+        entry["egress_eligible"], entry["egress_reason"] = ok, reason
+    report["agent_network_allowlist_digest"] = declared_digest
+
+
 # ------------------------------------------------- #287 P2: discrimination run
 
 
@@ -934,6 +1010,9 @@ def build_discrimination_report(
     report["declaration_digest"] = calibration.declaration_digest(declaration.data)
     report["mutated_digest"] = declaration.mutation.get("mutated_digest")
     report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
+    allowlist = declared_allowlist_digest(declaration)
+    if allowlist is not None:
+        _apply_egress(report, reconcile(experiment, outcomes), allowlist)
     report["rehearsal"] = rehearsal
     return report
 
@@ -1143,7 +1222,7 @@ def build_report(
             "transcript_retention": record.get("transcript_retention", UNKNOWN),
             "runner_note": outcome.runner_note,
         })
-    return {
+    report: dict[str, object] = {
         "version": 2 if endpoint is not None else 1,
         "kind": REPORT_KIND,
         "experiment_id": experiment.id,
@@ -1154,6 +1233,14 @@ def build_report(
             "task_content": declaration.data["task_content"]}
            if endpoint is not None and declaration is not None else {}),
     }
+    if declaration is not None:
+        # #287 P3: the launch-bound declaration's tolerance (C2) and egress (C4).
+        if declaration.tolerance_non_evaluable_per_arm is not None:
+            report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
+        allowlist = declared_allowlist_digest(declaration)
+        if allowlist is not None:
+            _apply_egress(report, outcomes, allowlist)
+    return report
 
 
 def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[str, object]]:

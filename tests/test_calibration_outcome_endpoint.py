@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import p3_bindings
 
-from skillc import calibration, trial, verify
+from skillc import calibration, egress, trial, verify
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import matched_pilot as mp
@@ -43,6 +44,7 @@ def _data() -> dict[str, Any]:
             [path, executable, trial.sha256_bytes(body)] for path, body, executable in files
         ])),
     }
+    p3_bindings(data)
     data["approval"] = {"by": "test-only", "at": "2026-10-12", "attempts_per_arm": 1, "task_fixture": "discrimination/fixture"}
     _approve(data)
     return data
@@ -414,7 +416,8 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
     outcomes = _outcomes(schedule)
     for outcome in outcomes:
         outcome.record["observation"] = {"run_metadata": {"model": data["shared"]["model"],
-                                                          "reasoning_effort": "high"}}
+                                                          "reasoning_effort": "high"},
+                                         "egress": {"status": "read", "allowlist_digest": egress.allowlist_digest()}}
     if damaged:
         planned, _ = next(experiment.attempts())
         binding = planned["config"]
@@ -432,6 +435,8 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
     monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
     monkeypatch.setattr(cr, "run_calibration", lambda *_a, **_kw: (experiment, outcomes))
     private = tmp_path / "private"
+    # The declared run_store is durable by construction (C5, its own tests); pytest's tmp_path is not.
+    monkeypatch.setattr(cr, "private_root", lambda *_: private)
     result = cli.main(["calibration-run", str(declaration_path), "--private-dir", str(private)])
     captured = capsys.readouterr()
     assert result == (2 if damaged else 0)

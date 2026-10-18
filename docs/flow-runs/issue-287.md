@@ -288,3 +288,30 @@ P2 mapping against main 53e87d0: calibration-run loads only calibration-declarat
 7. `CHANGELOG.md` - entry.
 
 Scope: large (~300-400 lines plus tests). Risks: duplicate file copies in surface and closure; skill-relative vs container paths; BASELINE assumptions in shared code; rehearsal fixtures synthetic until P3.
+
+<!-- flow-run n=4 id=91508b2bfc444514b1ce88024747c18c -->
+## Run 4
+
+- Run-id:            91508b2bfc444514b1ce88024747c18c
+- Run-start:         41407f9a197fc10ede40d84b6e24a678f23bb44b
+- Issue:             #287
+- Base SHA:          41407f9a197fc10ede40d84b6e24a678f23bb44b
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated; P3 plan go 2026-10-17 with rulings (i) reuse image 6343d33b, (ii) run_store on evals26, and conditions 1-4)
+- Recorded at:       2026-10-17T23:50:34Z
+
+### Section B evidence
+Both committed drafts refused by the parser (caps are text); placeholders pass approval (only UNKNOWN refused); shared.image.tag never compared; no declaration field for egress or run store; improvement kind ignores tolerance. Fixture drift: 9a37df6 (#380, Refs #376) added lint/test entries to discrimination/fixture/report.json (fixture_digest 03d514e4 -> 3dc9df49), intended (revision-5 grading records all three checks). Image 6343d33b + receipt 0eb308d3 verified on evals26.
+
+### Section C - the approved plan
+1. `skillc/calibration.py` - C1 placeholder refusal; C2 parse tolerance for endpoint calibration declarations; C4 agent-network binding in require_approved*; C5 run_store validation.
+2. `skillc/calibration_run.py` - C2 evaluability in the endpoint report; C4 per-attempt egress eligibility.
+3. `skillc/cli.py` - C3 --image must equal shared.image.tag and the receipt file sha256 must equal shared.image.receipt_sha256 (the tag-to-ID daemon resolution already compared); C5 run_store as the private root, refusing a different --private-dir.
+4. `evals/calibration-287/pilot-discrimination-declaration.json` - completed (pins, image, agent_network, run_store, prose fields, grader revision 5).
+5. `evals/calibration-287/pilot-improvement-declaration.json` - completed, task_content refreshed.
+6. `tests/test_calibration_p3_bindings.py` - every C1-C5 red, each run against pre-change code.
+7. `evals/calibration-287/README.md` - P3 section incl. the fixture drift account.
+8. `CHANGELOG.md` - entry.
+
+Scope: ~200 src lines + tests. Risks: C4 couples declarations to code constants (a later allowlist change needs re-approval, intended); C5 path rules are heuristics. Review cap: 2 passes.
