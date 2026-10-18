@@ -1013,6 +1013,6 @@ def test_a_do_nothing_attempt_lowers_the_pass_rate_never_leaves_the_denominator(
         assert isinstance(primary, dict)
         return primary.get("PASS", 0) / int(str(arm["scheduled"]))
 
-    passing = [{"arm": "treated", "primary_endpoint": {"status": "PASS"}} for _ in range(3)]
-    do_nothing = {"arm": "treated", "primary_endpoint": {"status": "INCONCLUSIVE"}}
+    passing: list[dict[str, object]] = [{"arm": "treated", "primary_endpoint": {"status": "PASS"}} for _ in range(3)]
+    do_nothing: dict[str, object] = {"arm": "treated", "primary_endpoint": {"status": "INCONCLUSIVE"}}
     assert rate([*passing, do_nothing]) < rate(passing)
