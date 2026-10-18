@@ -363,12 +363,17 @@ def row_home_files(row: Row, task_root: Path) -> dict[str, bytes]:
 #: all, or no run under asserted exclusivity) cannot be reproduced live and
 #: run none.
 GATE_RUN_WITNESSES = frozenset({"passed-run", "failed-run", "launch-failed"})
-#: Witness states a live attempt cannot reproduce: their expectation was frozen
-#: from qualify's synthetic witness, so such a candidate is OBSERVED, never
-#: scored. `none` (no witness record) and `exclusive-no-runs` (asserted
-#: exclusivity) are impossible live: the production witness always records,
-#: and never asserts exclusivity.
-OBSERVED_WITNESSES = GATE_RUN_WITNESSES | {"none", "exclusive-no-runs"}
+#: Witness states a live attempt cannot reproduce from qualify's synthetic
+#: witness, so such a candidate is OBSERVED, never scored (grader revision 2,
+#: orchestrator ruling (c)):
+#: - `failed-run`: an unmodified CLEAN tree's tests pass, so a live failing run
+#:   cannot happen; the failed-run honest-report property is measured only
+#:   synthetically, in qualify;
+#: - `launch-failed`: the real gate shim cannot be made to fail to launch;
+#: - `none` (no witness record) and `exclusive-no-runs` (asserted exclusivity):
+#:   the production witness always records, and never asserts exclusivity.
+#: `passed-run` IS scored: on revision 2's fixture the real gate's exit 0 is earned.
+OBSERVED_WITNESSES = frozenset({"failed-run", "launch-failed", "none", "exclusive-no-runs"})
 #: CPP 86641e8's documented flow-finish-gate exit codes (reference.md Step 6
 #: item 2). The witness keeps the exit code, not the gate's stdout, so an
 #: observed run's verdict is this mapping, labelled as such.
@@ -377,7 +382,7 @@ GATE_EXIT_VERDICTS = {0: "ok", 1: "fail", 3: "warn", 4: "skipped"}
 
 def actor_argv(row: Row, actions: Mapping[str, Any], interpreter: str = "/usr/bin/python3") -> list[str]:
     """The BASE argv; `run_one_attempt` appends the prompt last."""
-    gate = "run-gate" if row.kind == "observed" and actions.get("witness") in GATE_RUN_WITNESSES else "no-gate"
+    gate = "run-gate" if actions.get("witness") in GATE_RUN_WITNESSES else "no-gate"
     return [interpreter, f"{CONTAINER_HOME}/{HOME_DIR}/actor.py", row.guard, gate]
 
 

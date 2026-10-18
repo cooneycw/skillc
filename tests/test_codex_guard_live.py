@@ -3,8 +3,9 @@
 synthetic `/proc`; this file is the evidence that the real `/proc` walk, in a
 real container, under the real launch, decides correctly.
 
-It needs the locally built `skillc-trial` image (it carries the pinned codex
-that the guard matches against) and skips without it. No model is ever
+It builds its own `skillc-trial` image from `docker/trial` (the pinned codex the
+guard matches against), or reuses `SKILLC_TRIAL_IMAGE` when named. It never skips
+for a missing image: it is on the real-Docker floor (#434 revision 2). No model is ever
 called: the container's network is `none`, and the only codex subcommands run
 are `--version` and `sandbox`, which start no turn.
 
@@ -47,7 +48,12 @@ from skillc import fixture_overlay as fo
 from skillc.backend import Limits
 from skillc.fixture_service import dispatch
 
-IMAGE = os.environ.get("SKILLC_TRIAL_IMAGE", "skillc-trial:latest")
+#: An image to reuse instead of building one (a local convenience). Unset - as on
+#: the certifying runner - the test BUILDS its own trial image from
+#: docker/trial under a unique tag and removes it afterwards (#434 revision 2):
+#: a missing image is then a failure, never a skip that certification counts.
+PREBUILT = os.environ.get("SKILLC_TRIAL_IMAGE")
+TRIAL_DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker" / "trial"
 _DOCKER = shutil.which("docker") is not None
 pytestmark = [
     pytest.mark.real_docker,
@@ -63,9 +69,17 @@ _DUMP = ('n=$(awk \'{print $4}\' /proc/$PPID/stat); '
          'od -An -tx1 -v /proc/$n/environ | tr -d " \\n"; echo')
 
 
-def _image_present() -> bool:
-    return subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True, timeout=20,
-                          check=False).returncode == 0
+def _trial_image() -> tuple[str, bool]:
+    """(tag, built here): the prebuilt image when named, else a fresh build."""
+    if PREBUILT:
+        found = subprocess.run(["docker", "image", "inspect", PREBUILT], capture_output=True, timeout=20, check=False)
+        assert found.returncode == 0, f"SKILLC_TRIAL_IMAGE={PREBUILT!r} is not present"
+        return PREBUILT, False
+    tag = "skillc-trial-test:434-codex-guard-" + uuid.uuid4().hex[:12]
+    build = subprocess.run(["docker", "build", "--target", "trial", "-t", tag, str(TRIAL_DOCKERFILE_DIR)],
+                           capture_output=True, timeout=1800, check=False)
+    assert build.returncode == 0, f"the trial image build failed: {build.stderr.decode(errors='replace')[-2000:]}"
+    return tag, True
 
 
 def _ok(result: Any) -> bytes:
@@ -74,13 +88,20 @@ def _ok(result: Any) -> bytes:
 
 
 def test_the_guard_decides_correctly_in_a_real_trial_container() -> None:
-    if not _image_present():
-        pytest.skip(f"{IMAGE!r} is not built locally")
+    image, built = _trial_image()
+    try:
+        _run(image)
+    finally:
+        if built:
+            subprocess.run(["docker", "image", "rm", "-f", image], capture_output=True, check=False)
+
+
+def _run(image: str) -> None:
     session = cg.CodexGuardSession("live")
     base = Path(tempfile.mkdtemp(prefix="sk-codex-guard-live-"))
     trigger_dir = Path(tempfile.mkdtemp(prefix="sk-cg-trig-"))
     backend = d.DockerBackend(
-        image=IMAGE, base_dir=base, network="none", witness_io=True, daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
+        image=image, base_dir=base, network="none", witness_io=True, daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=dispatch({"codex_guard": (session.decide, cg.REQUEST_KEYS)}),
         trigger_socket_dir=trigger_dir,
     )
