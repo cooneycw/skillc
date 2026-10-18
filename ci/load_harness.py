@@ -145,8 +145,19 @@ class Load:
         self.proc = None
 
 
+def scrub(text: str) -> str:
+    """Host-specific paths out of anything the measurement file keeps: the
+    working tree becomes `<root>`, the home directory `~`, and pytest's
+    per-user temp root `pytest-of-<user>`. A committed measurement must not
+    carry the account name or the home layout."""
+    root, home = os.getcwd(), str(Path.home())
+    user = os.path.basename(home)
+    text = text.replace(root, "<root>").replace(home, "~")
+    return text.replace(f"pytest-of-{user}", "pytest-of-<user>")
+
+
 def _tail(text: str) -> str:
-    return "\n".join(text.splitlines()[-TAIL_LINES:])
+    return scrub("\n".join(text.splitlines()[-TAIL_LINES:]))
 
 
 def run_rep(cmd: list[str], remaining: float, load_pgid: int | None) -> dict[str, Any]:
@@ -193,7 +204,7 @@ def phase(args: argparse.Namespace) -> int:
     record: dict[str, Any] = {
         "cpu": args.cpu, "churn": args.churn, "target": args.target,
         "nproc": os.cpu_count(), "reps_requested": args.reps,
-        "max_seconds": args.max_seconds, "command": args.cmd,
+        "max_seconds": args.max_seconds, "command": [scrub(a) for a in args.cmd],
         "started_at": time.time(), "uptime_before": uptime(),
     }
     print(f"load_harness: before: {record['uptime_before']}", file=sys.stderr)

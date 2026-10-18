@@ -359,16 +359,42 @@ def test_a_timeout_is_captured_not_omitted(store: Path, base: Path) -> None:
 def test_an_operator_cancellation_is_captured_and_reported(store: Path, base: Path) -> None:
     experiment, attempt_id = _planned(store)
     backend = FakeBackend(base)
-    # A short head start before cancelling, not an immediate `lambda: True`:
-    # the fake client needs a moment to touch its canary and write output
-    # before the driver tears it down, or this test would measure a startup
-    # race instead of a cancellation.
-    deadline = time.monotonic() + 0.15
+    # Cancel only once the fake client has touched its canary and written its
+    # output, so this measures a cancellation, not a startup race. It used to
+    # be a fixed 0.15 s head start, which a loaded host overran (#462: 1 of
+    # 20 `inconclusive` at 2x nproc). The client writes the canary result
+    # before `out.txt`, so a complete `out.txt` means both are on disk. If the
+    # client never gets there, `timeout=5` ends the attempt as `timeout`, and
+    # the reason assertion fails visibly instead of hanging.
+    handle_root = base / f"handle-{attempt_id}"
+
+    def client_ready() -> bool:
+        try:
+            return (handle_root / "out.txt").read_text() == "hello from the fake client\n"
+        except OSError:
+            return False
+
     record = lifecycle.run_through_backend(
         backend, experiment, attempt_id, _argv("hang"), {"skill": "x"}, Limits(timeout=5, grace=0.5), base,
-        cancel=lambda: time.monotonic() > deadline,
+        cancel=client_ready,
     )
     assert record["disposition"] == "captured"
+    assert _stop(record)["reason"] == "operator-cancelled"
+
+
+def test_a_cancellation_before_the_client_is_ready_is_inconclusive(store: Path, base: Path) -> None:
+    """The control for the test above: cancelling before the client has
+    touched its canary is the startup race #462 removed from that test, and
+    the driver must report it `inconclusive`. Without this, the readiness wait
+    above could be waiting for nothing."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, [sys.executable, "-c", "import time; time.sleep(3600)"],
+        {"skill": "x"}, Limits(timeout=5, grace=0.5), base,
+        cancel=lambda: True,
+    )
+    assert record["disposition"] == "inconclusive"
     assert _stop(record)["reason"] == "operator-cancelled"
 
 

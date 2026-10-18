@@ -276,3 +276,16 @@ def test_the_driver_refuses_a_pause_under_the_floor(tmp_path):
     )
     assert proc.returncode == 2
     assert "floor" in proc.stderr
+
+
+def test_scrub_removes_the_root_the_home_and_the_user(monkeypatch, tmp_path):
+    home = tmp_path / "someuser"
+    root = home / "Projects" / "skillc"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)  # conftest pins Path.home
+    monkeypatch.chdir(root)
+    text = (f"{root}/.venv/bin/python {home}/x "
+            "/tmp/pytest-of-someuser/pytest-1/t0")
+    out = lh.scrub(text)
+    assert out == "<root>/.venv/bin/python ~/x /tmp/pytest-of-<user>/pytest-1/t0"
+    assert "someuser" not in out

@@ -1,0 +1,340 @@
+{
+ "member": "lifecycle",
+ "test_id": "tests/test_lifecycle.py::test_an_operator_cancellation_is_captured_and_reported",
+ "label": "pre",
+ "sha": "728f17342f43",
+ "phases": 1,
+ "load_factors": [
+  2.0
+ ],
+ "meets_2x_nproc": true,
+ "invalid_phases": 0,
+ "pause_gaps_seconds": [],
+ "pauses_ok": true,
+ "phases_within_cap": true,
+ "counted_reps": 20,
+ "failed": 1,
+ "passed": 19,
+ "truncated": 0,
+ "red_rate": 0.05,
+ "reps_for_post": 90,
+ "rep_seconds": [
+  0.83,
+  0.848,
+  1.248,
+  0.714,
+  1.82,
+  1.158,
+  1.038,
+  3.92,
+  1.192,
+  0.625,
+  0.98,
+  1.063,
+  0.957,
+  0.894,
+  0.584,
+  0.583,
+  0.798,
+  1.107,
+  0.86,
+  1.224
+ ],
+ "phase_records": [
+  {
+   "cpu": 48,
+   "churn": 0,
+   "target": 48.0,
+   "nproc": 24,
+   "reps_requested": 20,
+   "max_seconds": 900.0,
+   "command": [
+    "<root>/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "tests/test_lifecycle.py::test_an_operator_cancellation_is_captured_and_reported"
+   ],
+   "started_at": 1792313015.463979,
+   "uptime_before": "04:43:35 up 28 days, 17:42,  2 users,  load average: 22.10, 39.02, 28.64",
+   "load_pgid": 1210211,
+   "warmup_reached": true,
+   "ended_at": 1792313042.9237237,
+   "uptime_after": "04:44:02 up 28 days, 17:43,  2 users,  load average: 38.79, 41.42, 29.76",
+   "verdict": "VALID",
+   "running_mean": 60.26,
+   "running_min": 50,
+   "samples": [
+    {
+     "t": 1792313015.47,
+     "running": 7,
+     "loadavg1": 22.1
+    },
+    {
+     "t": 1792313016.47,
+     "running": 54,
+     "loadavg1": 22.1
+    },
+    {
+     "t": 1792313017.47,
+     "running": 61,
+     "loadavg1": 25.14
+    },
+    {
+     "t": 1792313018.47,
+     "running": 57,
+     "loadavg1": 25.14
+    },
+    {
+     "t": 1792313019.47,
+     "running": 49,
+     "loadavg1": 25.14
+    },
+    {
+     "t": 1792313020.47,
+     "running": 54,
+     "loadavg1": 25.14
+    },
+    {
+     "t": 1792313020.48,
+     "running": 55,
+     "loadavg1": 25.14
+    },
+    {
+     "t": 1792313021.48,
+     "running": 56,
+     "loadavg1": 25.14
+    },
+    {
+     "t": 1792313022.48,
+     "running": 58,
+     "loadavg1": 28.09
+    },
+    {
+     "t": 1792313023.48,
+     "running": 57,
+     "loadavg1": 28.09
+    },
+    {
+     "t": 1792313024.48,
+     "running": 51,
+     "loadavg1": 28.09
+    },
+    {
+     "t": 1792313025.48,
+     "running": 50,
+     "loadavg1": 28.09
+    },
+    {
+     "t": 1792313026.48,
+     "running": 54,
+     "loadavg1": 28.09
+    },
+    {
+     "t": 1792313027.49,
+     "running": 71,
+     "loadavg1": 30.73
+    },
+    {
+     "t": 1792313028.49,
+     "running": 65,
+     "loadavg1": 30.73
+    },
+    {
+     "t": 1792313029.49,
+     "running": 63,
+     "loadavg1": 30.73
+    },
+    {
+     "t": 1792313030.49,
+     "running": 55,
+     "loadavg1": 30.73
+    },
+    {
+     "t": 1792313031.49,
+     "running": 57,
+     "loadavg1": 30.73
+    },
+    {
+     "t": 1792313032.5,
+     "running": 58,
+     "loadavg1": 33.63
+    },
+    {
+     "t": 1792313033.5,
+     "running": 62,
+     "loadavg1": 33.63
+    },
+    {
+     "t": 1792313034.5,
+     "running": 58,
+     "loadavg1": 33.63
+    },
+    {
+     "t": 1792313035.5,
+     "running": 63,
+     "loadavg1": 33.63
+    },
+    {
+     "t": 1792313036.5,
+     "running": 62,
+     "loadavg1": 33.63
+    },
+    {
+     "t": 1792313037.51,
+     "running": 60,
+     "loadavg1": 35.9
+    },
+    {
+     "t": 1792313038.51,
+     "running": 63,
+     "loadavg1": 35.9
+    },
+    {
+     "t": 1792313039.51,
+     "running": 64,
+     "loadavg1": 35.9
+    },
+    {
+     "t": 1792313040.51,
+     "running": 64,
+     "loadavg1": 35.9
+    },
+    {
+     "t": 1792313041.51,
+     "running": 73,
+     "loadavg1": 35.9
+    },
+    {
+     "t": 1792313042.51,
+     "running": 67,
+     "loadavg1": 38.79
+    }
+   ],
+   "reps": [
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.83,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.848,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.248,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.714,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.82,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.158,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.038,
+     "tail": ""
+    },
+    {
+     "outcome": "failed",
+     "exit": 1,
+     "seconds": 3.92,
+     "tail": "F                                                                        [100%]\n=================================== FAILURES ===================================\n____________ test_an_operator_cancellation_is_captured_and_reported ____________\n\nstore = PosixPath('/tmp/pytest-of-<user>/pytest-10673/test_an_operator_cancellation_0/store')\nbase = PosixPath('/tmp/pytest-of-<user>/pytest-10673/test_an_operator_cancellation_0/work')\n\n    def test_an_operator_cancellation_is_captured_and_reported(store: Path, base: Path) -> None:\n        experiment, attempt_id = _planned(store)\n        backend = FakeBackend(base)\n        # A short head start before cancelling, not an immediate `lambda: True`:\n        # the fake client needs a moment to touch its canary and write output\n        # before the driver tears it down, or this test would measure a startup\n        # race instead of a cancellation.\n        deadline = time.monotonic() + 0.15\n        record = lifecycle.run_through_backend(\n            backend, experiment, attempt_id, _argv(\"hang\"), {\"skill\": \"x\"}, Limits(timeout=5, grace=0.5), base,\n            cancel=lambda: time.monotonic() > deadline,\n        )\n>       assert record[\"disposition\"] == \"captured\"\nE       AssertionError: assert 'inconclusive' == 'captured'\nE         \nE         - captured\nE         + inconclusive\n\ntests/test_lifecycle.py:371: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_lifecycle.py::test_an_operator_cancellation_is_captured_and_reported\n1 failed in 2.44s"
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.192,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.625,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.98,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.063,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.957,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.894,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.584,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.583,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.798,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.107,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 0.86,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 1.224,
+     "tail": ""
+    }
+   ]
+  }
+ ]
+}
