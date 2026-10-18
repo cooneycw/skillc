@@ -21,7 +21,7 @@ def _verify_json(verdict: str, *, diffs: list[dict[str, object]] | None = None,
         "diffs": diffs if diffs is not None else [
             {"name": "calc answers 5", "kind": "smoke", "classification": "regression",
              "baseline_passed": True, "current_passed": False, "baseline_ms": 3.0, "current_ms": 3.1, "detail": ""}],
-        "snapshot": {}, "baseline": None,
+        "snapshot": {"probes": [{}] * (1 if diffs is None else len(diffs))}, "baseline": None,
     }, indent=2)
 
 
@@ -32,9 +32,19 @@ def test_a_rollback_reads_with_its_probe_classes() -> None:
     assert got.reasons == ("1 regression probe: smoke:calc answers 5",)
 
 
+_OK_DIFF = {"name": "service health", "kind": "health", "classification": "ok",
+            "baseline_passed": True, "current_passed": True, "baseline_ms": 1.0, "current_ms": 1.0, "detail": ""}
+
+
 @pytest.mark.parametrize("verdict,code", [("proceed", 0), ("review", 0)])
 def test_advisory_verdicts_exit_zero(verdict: str, code: int) -> None:
-    assert dv.read_verify(code, _verify_json(verdict, diffs=[])).verdict == verdict.upper()
+    assert dv.read_verify(code, _verify_json(verdict, diffs=[_OK_DIFF])).verdict == verdict.upper()
+
+
+def test_zero_probes_reviews() -> None:
+    """CPP's own zero-probe outcome (and the template-shape case): REVIEW, no classes."""
+    got = dv.read_verify(0, _verify_json("review", diffs=[], has_baseline=False))
+    assert got.verdict == dv.REVIEW and got.classes == {}
 
 
 @pytest.mark.parametrize("code,stdout,why", [
@@ -48,6 +58,17 @@ def test_advisory_verdicts_exit_zero(verdict: str, code: int) -> None:
     (1, _verify_json("proceed", diffs=[]), "contradicts"),
     (2, _verify_json("review", diffs=[]), "contradicts"),       # a crash is not a verdict
     (0, _verify_json("proceed", diffs=[{"name": "x"}]), "unreadable probe diff"),
+    # #282 counter-model review: no evidence is not a PROCEED.
+    (0, json.dumps({"verdict": "proceed"}), "no probe list"),
+    (0, _verify_json("proceed", diffs=[]), "zero probes"),
+    (1, _verify_json("rollback", diffs=[]), "zero probes"),
+    (0, json.dumps({"verdict": "proceed", "diffs": 7}), "no probe list"),
+    (0, json.dumps({"verdict": "proceed", "diffs": True}), "no probe list"),
+    (0, json.dumps({"verdict": "proceed", "diffs": {"a": 1}}), "no probe list"),
+    (0, json.dumps({"verdict": "proceed", "diffs": "abc"}), "no probe list"),
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF]}), "do not match"),       # no snapshot
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF],
+                    "snapshot": {"probes": [{}, {}]}}), "do not match"),               # 2 ran, 1 diffed
 ])
 def test_no_established_verdict_is_unknown(code: int | None, stdout: str, why: str) -> None:
     got = dv.read_verify(code, stdout)
@@ -97,26 +118,29 @@ def test_restart_is_read_from_pids(before: str | None, after: str | None, alive:
     assert dv.restart_observed(before, after, alive) == want
 
 
-def _order(saw: bool | None, captured: str | None = None, started: float | None = None,
+def _order(saw: bool | None, done: float | None = None, started: float | None = None,
            pre: str | None = "r1") -> str:
     return dv.baseline_order(baseline_saw_intended=saw, pre_deploy_release=pre, intended="r2",
-                             baseline_captured_at=captured, deploy_started=started)
+                             baseline_done=done, deploy_started=started)
 
 
-def test_baseline_order_from_the_release_probe() -> None:
-    assert _order(False) == "before_deploy"
-    assert _order(True) == "after_deploy"          # the intended release was already served
-    assert _order(None) == "unknown"
-    assert _order(True, pre="r2") == "unknown"     # it served r2 before the deploy too: no evidence
+def test_baseline_order_needs_a_capture_before_the_deploy() -> None:
+    assert _order(None, 100.1, 100.2) == "before_deploy"
+    assert _order(False, 100.1, 100.2) == "before_deploy"
+    assert _order(None, 100.3, 100.2) == "after_deploy"
+    assert _order(None, None, 100.2) == "unknown"
+    assert _order(None, 100.1, None) == "unknown"
 
 
-def test_baseline_order_from_timestamps() -> None:
-    t = "2026-10-17T21:00:00+0000"
-    epoch = 1792270800.0  # that instant
-    assert _order(None, t, epoch + 5) == "before_deploy"
-    assert _order(None, t, epoch - 5) == "after_deploy"
-    assert _order(None, t, epoch + 0.5) == "unknown"   # the same second proves nothing
-    assert _order(None, "not a time", epoch + 5) == "unknown"
-    # Any evidence of "after" wins over "before".
-    assert _order(False, t, epoch - 5) == "after_deploy"
-    assert _order(True, t, epoch + 5) == "after_deploy"
+def test_a_failed_identity_probe_is_no_evidence_of_order() -> None:
+    """#282 counter-model review: a baseline captured AFTER a deploy whose
+    restart was skipped still sees the old release, so its failed identity
+    probe must not read as "before"."""
+    assert _order(False) == "unknown"
+    assert _order(False, 100.3, 100.2) == "after_deploy"
+
+
+def test_an_identity_probe_that_saw_the_intended_release_means_after() -> None:
+    assert _order(True) == "after_deploy"
+    assert _order(True, 100.1, 100.2) == "after_deploy"   # any evidence of "after" wins
+    assert _order(True, pre="r2") == "unknown"            # it served r2 before the deploy too

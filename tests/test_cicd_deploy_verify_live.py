@@ -347,13 +347,18 @@ def _configure(a: _Attempt, text: str, *, intended: str, require_baseline: bool 
     return text
 
 
-def _take_baseline(a: _Attempt) -> dict[str, object]:
+def _take_baseline(a: _Attempt) -> tuple[dict[str, object], float]:
+    """The baseline snapshot, and a clock reading taken after its capture
+    returned - the same container clock deploy.sh stamps its start with, at
+    nanosecond resolution (CPP's own `captured_at` is whole seconds)."""
     code, out = a.cicd("baseline")
     assert code == 0 and "Saved baseline" in out, f"verify --baseline did not capture: {out}"
+    code, done = a.run("date +%s.%N")
+    assert code == 0, "could not read the container clock"
     code, out = a.run("cat .claude/deploy-baseline.json")
     assert code == 0, "no baseline file after verify --baseline"
     snapshot: dict[str, object] = json.loads(out)
-    return snapshot
+    return snapshot, float(done)
 
 
 def _baseline_saw_intended(snapshot: dict[str, object]) -> bool | None:
@@ -370,11 +375,11 @@ def _scenario(a: _Attempt, *, start: str, deploy_to: str, config: str = RELEASE_
     _configure(a, config, intended=deploy_to, require_baseline=require_baseline)
     pre = _served(a)
     assert pre == start, f"the fresh start serves {pre!r}, not {start!r}"
-    snapshot = _take_baseline(a) if take_baseline and not baseline_after else None
+    baseline = _take_baseline(a) if take_baseline and not baseline_after else None
     pid_before, _ = _pid(a)
     _deploy(a, deploy_to, skip_restart=skip_restart)
     if take_baseline and baseline_after:
-        snapshot = _take_baseline(a)
+        baseline = _take_baseline(a)
     pid_after, alive = _pid(a)
     code, out = a.cicd("verify", " --json")
     reading = dv.read_verify(code, out)
@@ -382,11 +387,11 @@ def _scenario(a: _Attempt, *, start: str, deploy_to: str, config: str = RELEASE_
     _code, started = a.run("cat deploy/deploy.started")
     served = _served(a)
     order = "none"
-    if snapshot is not None:
-        captured = snapshot.get("captured_at")
+    if baseline is not None:
+        snapshot, done = baseline
         order = dv.baseline_order(
             baseline_saw_intended=_baseline_saw_intended(snapshot), pre_deploy_release=pre, intended=deploy_to,
-            baseline_captured_at=captured if isinstance(captured, str) else None,
+            baseline_done=done,
             deploy_started=float(started) if re.fullmatch(r"\d+(\.\d+)?\s*", started) else None)
     return _Outcome(reading=reading, pre=pre, served=served, identity=dv.release_identity(served, deploy_to),
                     restart=dv.restart_observed(pid_before, pid_after, alive), order=order, pid_after=pid_after)
