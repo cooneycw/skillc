@@ -1,0 +1,1 @@
+- **#287's option-1 pre-check is owner-approved** (#287). `auto6-precheck-declaration.json` gains an approval block only, quoting the owner's "Approve 287" (2026-10-20) as relayed by the orchestrator, for one run of 1 attempt per arm. Its digest `sha256:e44ae179…` is unchanged by the stamp. The pilot stays unstamped until the pre-check evaluates MET.
