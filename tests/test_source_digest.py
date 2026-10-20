@@ -170,3 +170,38 @@ def test_a_nested_git_directory_is_part_of_what_the_gate_saw(tmp_path: Path) -> 
     (repo / "sub" / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     assert "sub/.git/HEAD" in sd.tree_entries(repo)
     assert sd.digest_tree(repo) != _commit_digest(repo)
+
+
+@pytest.mark.parametrize(("mode", "committed", "matches"), [(0o645, 0o644, True), (0o645, 0o755, False),
+                                                            (0o744, 0o755, True)])
+def test_the_executable_mode_follows_gits_owner_bit(tmp_path: Path, mode: int, committed: int,
+                                                     matches: bool) -> None:
+    """Counter-model review: git records 100755 from the OWNER execute bit only."""
+    repo = _repo(tmp_path)
+    (repo / "tool.py").write_text("print(1)\n")
+    (repo / "tool.py").chmod(committed)
+    _git(repo, "add", "tool.py")
+    _git(repo, "commit", "-qm", "tool")
+    (repo / "tool.py").chmod(mode)
+    assert (sd.digest_tree(repo) == _commit_digest(repo)) is matches
+
+
+def test_budgets_bound_a_subject_written_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Counter-model review: a large file anywhere (`.claude` included) and a
+    flood of empty directories are refused, never read without bound."""
+    repo = _repo(tmp_path)
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "cache.bin").write_bytes(b"\0" * 4096)
+    monkeypatch.setattr(sd, "MAX_FILE_BYTES", 1024)
+    with pytest.raises(sd.SourceUnreadable, match="larger than"):
+        sd.digest_tree(repo)
+    monkeypatch.setattr(sd, "MAX_FILE_BYTES", 1 << 30)
+    monkeypatch.setattr(sd, "MAX_TOTAL_BYTES", 1024)
+    with pytest.raises(sd.SourceUnreadable, match="more than 1024 bytes"):
+        sd.digest_tree(repo)
+    monkeypatch.setattr(sd, "MAX_TOTAL_BYTES", 1 << 30)
+    for k in range(5):
+        (repo / f"empty-{k}").mkdir()
+    monkeypatch.setattr(sd, "MAX_ENTRIES", 8)
+    with pytest.raises(sd.SourceUnreadable, match="directory entries"):
+        sd.digest_tree(repo)

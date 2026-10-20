@@ -42,7 +42,13 @@ from pathlib import Path
 #: Paths at the repository root that are never part of the population.
 EXEMPT = (".claude/friction.jsonl",)
 MAX_DEPTH = 64
+#: Every directory entry listed counts (directories too), checked WHILE a
+#: directory is listed; and file bytes are hashed in chunks under a per-file
+#: and a total budget (counter-model review: the export is subject-written).
 MAX_ENTRIES = 200_000
+MAX_FILE_BYTES = 64 * 1024 * 1024
+MAX_TOTAL_BYTES = 512 * 1024 * 1024
+_CHUNK = 1024 * 1024
 NOT_A_FILE = "not-a-file"
 
 
@@ -61,25 +67,52 @@ def digest_entries(entries: Mapping[str, str]) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+def _file_blob(path: str, size: int, budget: list[int]) -> str:
+    """The git blob id of a regular file, hashed in chunks: never more than
+    `MAX_FILE_BYTES` of one file or `MAX_TOTAL_BYTES` in all, and refused when
+    the bytes read are not the size the listing reported (the file changed)."""
+    if size > MAX_FILE_BYTES:
+        raise SourceUnreadable(f"a file is larger than {MAX_FILE_BYTES} bytes")
+    budget[0] += size
+    if budget[0] > MAX_TOTAL_BYTES:
+        raise SourceUnreadable(f"the tree holds more than {MAX_TOTAL_BYTES} bytes")
+    digest = hashlib.sha1(b"blob %d\0" % size)
+    read = 0
+    with open(path, "rb") as handle:
+        while chunk := handle.read(min(_CHUNK, size - read + 1)):
+            read += len(chunk)
+            if read > size:
+                break
+            digest.update(chunk)
+    if read != size:
+        raise SourceUnreadable("a file changed size while it was read")
+    return digest.hexdigest()
+
+
 def tree_entries(root: Path) -> dict[str, str]:
     """`{path: "MODE BLOB"}` for the population under `root`, read without
-    following any symlink."""
+    following any symlink, under the entry, depth and byte budgets above."""
     entries: dict[str, str] = {}
+    listed = [0]
+    budget = [0]
 
     def walk(directory: Path, rel: str, depth: int) -> None:
         if depth > MAX_DEPTH:
             raise SourceUnreadable(f"{rel or '.'}: the tree nests deeper than {MAX_DEPTH}")
+        children = []
         try:
             with os.scandir(directory) as listing:
-                children = sorted(listing, key=lambda e: e.name)
+                for child in listing:
+                    listed[0] += 1
+                    if listed[0] > MAX_ENTRIES:
+                        raise SourceUnreadable(f"more than {MAX_ENTRIES} directory entries")
+                    children.append(child)
         except OSError as exc:
             raise SourceUnreadable(f"{rel or '.'}: cannot list ({type(exc).__name__})") from exc
-        for child in children:
+        for child in sorted(children, key=lambda e: e.name):
             path = f"{rel}/{child.name}" if rel else child.name
             if not rel and child.name == ".git":
                 continue
-            if len(entries) >= MAX_ENTRIES:
-                raise SourceUnreadable(f"more than {MAX_ENTRIES} entries")
             try:
                 info = child.stat(follow_symlinks=False)
             except OSError as exc:
@@ -90,10 +123,11 @@ def tree_entries(root: Path) -> dict[str, str]:
                 entries[path] = f"120000 {blob_id(os.fsencode(os.readlink(child.path)))}"
             elif stat.S_ISREG(info.st_mode):
                 try:
-                    data = Path(child.path).read_bytes()
+                    blob = _file_blob(child.path, info.st_size, budget)
                 except OSError as exc:
                     raise SourceUnreadable(f"{path}: cannot read ({type(exc).__name__})") from exc
-                entries[path] = f"{'100755' if info.st_mode & 0o111 else '100644'} {blob_id(data)}"
+                # Git's own rule: the OWNER execute bit alone (counter-model review).
+                entries[path] = f"{'100755' if info.st_mode & stat.S_IXUSR else '100644'} {blob}"
             else:
                 entries[path] = NOT_A_FILE
 
