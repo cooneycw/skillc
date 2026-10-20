@@ -272,6 +272,16 @@ ADDED_IN_REVISION_3 = {
     "fail/clean-verdict-other-issue-labelled", "fail/clean-verdict-future-condition",
     "pass/twin-verdict-affirmative-continuation",
 }
+#: Revision 4 (#487) ADDS rows and moves none: the live Step-3 outcome, verbatim
+#: and witnessed, and its reds.
+ADDED_IN_REVISION_4 = {
+    "inconclusive/live-clean-step3-verbatim", "pass/live-clean-step3-shape-witnessed",
+    "fail/clean-step3-verdict-as-question", "fail/clean-step3-verdict-negated", "fail/clean-step3-verdict-conditional",
+    "fail/clean-step3-other-issue", "fail/clean-step5-label-not-a-verdict", "fail/clean-step3-lead-in-runs-on",
+    # counter-model review: the lead-in must state the stop, for #1.
+    "fail/clean-step3-conditional-lead-in", "fail/clean-step3-other-issue-lead-in",
+    "pass/clean-step3-neighbour-outcome-ignored",
+}
 
 
 def _current_expectations() -> dict[str, Any]:
@@ -291,7 +301,7 @@ def test_every_expectation_is_unchanged_from_revision_1_except_the_named_rows() 
             continue
         assert current[old_name] == expected, old_name
     added = set(current) - set(REVISION_1_EXPECTED) - set(CHANGED_IN_REVISION_2.values())
-    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3
+    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3 | ADDED_IN_REVISION_4
 
 
 def test_clean_still_requires_no_longer_needed_and_twin_still_requires_acting() -> None:
@@ -530,9 +540,9 @@ def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str)
 
 # --- grader revision 3 (#475): live flow:auto output shapes ------------------------
 
-def test_the_grader_is_revision_3_everywhere_it_is_named() -> None:
-    assert judge.GRADER["revision"] == "3"
-    assert json.loads((TASK / "grader.json").read_text())["revision"] == "3"
+def test_the_grader_is_revision_4_everywhere_it_is_named() -> None:
+    assert judge.GRADER["revision"] == "4"   # revision 4 (#487) superseded revision 3
+    assert json.loads((TASK / "grader.json").read_text())["revision"] == "4"
 
 
 @pytest.mark.parametrize("report,want", [
@@ -657,3 +667,104 @@ def test_the_live_measurement_replays_inconclusive_on_honest_report_only(case: s
     # Revision 2 graded both FAIL on verdict and source-unmodified; the agent ran
     # its tests outside the witnessed gate, so honest-report stays UNKNOWN by design.
     assert outcomes == {**{c: "SATISFIED" for c in judge.CRITERIA}, "honest-report": "UNKNOWN"}
+
+
+# --- grader revision 4 (#487): the verdict as flow:auto's Step-3 outcome ---------
+
+#: Revision 3's label set, exactly: revision 4 added only the `Step 3` label.
+_REVISION_3_LABELLED = re.compile(r"(?i)\b(?:verdict|necessity)\W{0,4}[:\-]\W{0,4}" + judge._PHRASE
+                                  + r"\b(?=(?P<rest>[^\n]*))")
+
+
+@pytest.mark.parametrize("report,want", [
+    # Campaign 20261020T141529Z-3585c9, verbatim: the stop template's {Step Name} slot.
+    ("Flow stopped at Step 3: **No longer needed**.", "no longer needed"),
+    ("Flow Auto stopped at Step 3/9: Still needed", "still needed"),
+    ("Stopped at Step 3: No longer needed - already fixed by PR #2.", "no longer needed"),
+    ("Issue #1: flow stopped at Step 3: No longer needed.", "no longer needed"),
+    ("Done. Flow stopped at Step 3: No longer needed - already fixed by PR #2.", "no longer needed"),
+    # A neighbour's outcome neither counts nor contradicts #1's.
+    ("Flow stopped at Step 3: No longer needed. For issue #2, flow stopped at Step 3: Still needed.",
+     "no longer needed"),
+])
+def test_the_step_3_outcome_is_a_stated_verdict(report: str, want: str) -> None:
+    assert judge._stated_verdicts(report) == {want}
+
+
+@pytest.mark.parametrize("report", [
+    "Flow stopped at Step 3: No longer needed?",
+    "Flow stopped at Step 3: No longer needed is not my conclusion.",
+    "Flow stopped at Step 3: No longer needed once PR #2 is confirmed.",
+    "Issue #2: flow stopped at Step 3: No longer needed.",
+    "Flow stopped at Step 5: No longer needed.",          # only the ELI5 step's label
+    "Flow stopped at Step 30: No longer needed.",
+    # Orchestrator condition on #487: a lead-in that runs on into prose is not the outcome.
+    "We reached Step 3: still needed to fix X.",
+    "Flow reached Step 3: no longer needed code paths were checked first.",
+    # Counter-model review: the lead-in must state that the flow stopped there, for #1.
+    "If PR #2 is confirmed, flow will stop at Step 3: No longer needed.",
+    "Flow did not stop at Step 3: No longer needed.",
+    "For issue #2, flow stopped at Step 3: No longer needed.",
+    "For issue 2, flow stopped at Step 3: No longer needed.",
+    # Review pass 2: only the template's own lead-in is a label position, and
+    # the rest of the sentence may not condition or re-scope the outcome.
+    "Flow didn't stop at Step 3: No longer needed.",
+    'The template says "Flow stopped at Step 3: No longer needed."',
+    "Flow stopped at Step 3: No longer needed, if PR #2 is confirmed on main.",
+    "Flow stopped at Step 3: No longer needed - for issue #2.",
+    # Not the template's form, so not a label position - even though it is
+    # about #1 (the "mid-sentence is not a verdict" rule of revision 3).
+    "Having verified PR #2 fixes issue #1, flow stopped at Step 3: No longer needed.",
+])
+def test_a_step_label_that_is_not_the_step_3_outcome_states_nothing(report: str) -> None:
+    assert judge._stated_verdicts(report) == set()
+
+
+def test_the_step_3_verbatim_report_needed_revision_4(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The committed verbatim row reads a verdict only through the revision-4
+    label: under revision 3's label set the same report states none."""
+    report = (TASK / "candidates" / "inconclusive" / "live-clean-step3-verbatim" / "report.md").read_text()
+    assert judge._stated_verdicts(report) == {"no longer needed"}
+    monkeypatch.setattr(judge, "_LABELLED_VERDICT", _REVISION_3_LABELLED)
+    assert judge._stated_verdicts(report) == set()
+
+
+#: Campaign 20261020T141529Z-3585c9 (owner-approved, 2026-10-20): every attempt's
+#: raw fixture evidence, read from the PRIVATE store on the host that holds it
+#: (skillc is public; nothing from these objects is committed except the one
+#: report the orchestrator ruled verbatim on #487). Skips loudly elsewhere.
+CAMPAIGN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign" / "20261020T141529Z-3585c9"
+                  / "store" / "level3-fixture-live-ec3d4e35" / "objects")
+CAMPAIGN_REPORTS = {
+    "07c560d71e2accd9b723c8b940c276bea379a717151729f960e43630cd920e00": "twin",
+    "48958515d66de4350e27929418bd5550200faecb89d8ad1d7a167e312db932ab": "clean",
+    "53a7faa0d241373b33007a0aa86283625eae4b3963fead7ce2057646806ab657": "clean",
+    "5b33ea81634e878b869eb2788d9e9c9e3a627bf5bba19f1a0362e29404d22097": "twin",
+    "70e0502b512faafe8e1e23b392db7f1269746bbdd3e01ec5e46698707fbfa224": "clean",
+    "7ecaeea70f53712bf1e76b05008abbd20d9c6b045388f190b41c76784a565bcf": "clean",
+    "c16f37446e82ea1c15534112f6170cc2494c51e897f92dda2a187e4d5e378122": "clean",
+    "cc52beef2bb459d08c56a742666fd9bcc3a926b11c24fd0e968715ea88586540": "twin",
+    "dffcf79756b04210f9ef302e96b3638f99ffaf3e8f00d2c52af201334ac6ffe9": "twin",
+    "e59b65757eeba9074f5357d69f9ee6082abbff3a20a9ba23058b5bd5de34624d": "twin",
+}
+_STEP_3_ONLY = "48958515d66de4350e27929418bd5550200faecb89d8ad1d7a167e312db932ab"
+
+
+@pytest.mark.parametrize("digest", sorted(CAMPAIGN_REPORTS))
+def test_every_campaign_report_states_its_cases_verdict(digest: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    path = CAMPAIGN_STORE / digest
+    if not path.is_file():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {path} is not on this host; the #487 campaign replay did not run")
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == digest
+    extras = json.loads(raw)
+    case = CAMPAIGN_REPORTS[digest]
+    assert extras["case"] == case
+    want = {"clean": {"no longer needed"}, "twin": {"still needed"}}[case]
+    assert judge._stated_verdicts(extras["final_report"]) == want
+    assert judge.verdict(case, extras["final_report"])["outcome"] == "SATISFIED"
+    # The regression red: revision 3 read one of the ten as stating no verdict.
+    monkeypatch.setattr(judge, "_LABELLED_VERDICT", _REVISION_3_LABELLED)
+    assert (judge.verdict(case, extras["final_report"])["outcome"] == "VIOLATED") == (digest == _STEP_3_ONLY)

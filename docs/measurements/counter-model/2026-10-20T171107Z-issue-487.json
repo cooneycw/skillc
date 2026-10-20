@@ -1,0 +1,27 @@
+{
+  "branch": "issue-487-flow-auto-necessity-grader-verdict-after-a-step-3",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 1
+  },
+  "head": "860a00f0daf69ca571f3de0ec5bc3a18ebdd10cb",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "487",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-20T17:11:07Z",
+  "red_cases": {
+    "already_covered": 10,
+    "proposed": 13
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T12-59-07-01a15a40-9f7f-7262-b39f-dc48de06cf86.jsonl",
+    "thread_id": "01a15a40-9f7f-7262-b39f-dc48de06cf86"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
