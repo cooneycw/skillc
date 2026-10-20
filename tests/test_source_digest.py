@@ -205,3 +205,28 @@ def test_budgets_bound_a_subject_written_tree(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(sd, "MAX_ENTRIES", 8)
     with pytest.raises(sd.SourceUnreadable, match="directory entries"):
         sd.digest_tree(repo)
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt"])
+def test_a_shipped_blob_that_cannot_be_read_is_unreadable_never_a_match(tmp_path: Path, damage: str) -> None:
+    """Counter-model review, pass 2: a tree lists blob ids only, so the commit
+    side reads every blob before it may claim a source."""
+    repo = _repo(tmp_path)
+    blob = sd.blob_id(b"x = 1\n")
+    loose = repo / ".git" / "objects" / blob[:2] / blob[2:]
+    assert loose.is_file()
+    loose.chmod(0o644)
+    if damage == "missing":
+        loose.unlink()
+    else:
+        loose.write_bytes(b"not a zlib stream")
+    with pytest.raises(sd.SourceUnreadable):
+        _commit_digest(repo)
+
+
+@pytest.mark.parametrize(("cwd", "rel"), [
+    ("/work", ""), ("/work/repo", "repo"), ("/work/..issue-279", "..issue-279"), (None, ""),
+    ("/work/../etc", None), ("/elsewhere", None),
+])
+def test_only_a_real_parent_segment_is_outside_the_workspace(cwd: str | None, rel: str | None) -> None:
+    assert sd.workspace_relative(cwd, "/work") == rel

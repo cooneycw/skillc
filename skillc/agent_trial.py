@@ -79,7 +79,6 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-import os
 import re
 import secrets
 import shlex
@@ -568,10 +567,8 @@ class _WitnessSession:
         def source_snapshot(cwd: str | None) -> str:
             """#279 PR-2a: the SOURCE digest of the checkout containing the
             gate's working directory, from the controller's own export."""
-            rel = os.path.relpath(cwd, CONTAINER_WORKSPACE) if cwd else ""
-            if rel == ".":
-                rel = ""
-            if rel.startswith(".."):
+            rel = sd.workspace_relative(cwd, CONTAINER_WORKSPACE)
+            if rel is None:
                 return "unreadable: the gate's working directory is outside the workspace"
             with tempfile.TemporaryDirectory(prefix="skillc-gate-source-") as directory:
                 backend.export(handle, Path(directory))

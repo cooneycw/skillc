@@ -155,7 +155,38 @@ def repository_root(export_root: Path, rel_cwd: str) -> Path | None:
         here = here.parent
 
 
+def workspace_relative(cwd: str | None, workspace: str) -> str | None:
+    """`cwd` relative to the container `workspace` ("" for the workspace
+    itself), or None when it is outside. Only a real `..` path segment is
+    outside: a name that merely starts with two dots is inside (counter-model
+    review, pass 2)."""
+    if not cwd:
+        return ""
+    rel = os.path.relpath(cwd, workspace)
+    if rel == ".":
+        return ""
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return None
+    return rel
+
+
 def digest_commit(gitdir: object, commit: str) -> str:
-    """The same digest of a commit, read through a `git_snapshot.GitDir`."""
+    """The same digest of a commit, read through a `git_snapshot.GitDir`.
+    Every blob the tree names is READ and must be a blob (counter-model
+    review, pass 2): a tree only lists ids, so a missing or corrupt shipped
+    blob would otherwise digest as if it shipped. A submodule entry (160000)
+    names no object here and is left as listed: it can never match a gated
+    working tree."""
     tree = gitdir.tree_of(commit)  # type: ignore[attr-defined]
-    return digest_entries(gitdir.tree_files(tree))  # type: ignore[attr-defined]
+    files = gitdir.tree_files(tree)  # type: ignore[attr-defined]
+    for path, value in files.items():
+        mode, _, blob = str(value).partition(" ")
+        if mode == "160000":
+            continue
+        try:
+            kind, _payload = gitdir.object(blob)  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise SourceUnreadable(f"{path}: blob {blob[:10]} cannot be read ({type(exc).__name__})") from exc
+        if kind != "blob":
+            raise SourceUnreadable(f"{path}: {blob[:10]} is a {kind}, not a blob")
+    return digest_entries(files)

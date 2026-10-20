@@ -246,6 +246,6 @@ def _remote_ref_sources(export_root: Path, remote_relpath: str, refs: object) ->
     for ref, sha in sorted(refs.items()):
         try:
             out[str(ref)] = sd.digest_commit(bare, str(sha))
-        except (gs.Unreadable, ValueError) as exc:
+        except (gs.Unreadable, sd.SourceUnreadable, ValueError) as exc:
             out[str(ref)] = f"unreadable: {exc}"
     return out
