@@ -1722,6 +1722,13 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             discrimination = calibration.load_discrimination_declaration(Path(args.declaration))
             calibration.require_approved_discrimination(discrimination, cr.ROOT)
             cr.require_textual_evidence(discrimination, cr.ROOT)
+            # #287 option 1 (ruling A): a precondition gates spend, so it is
+            # checked here, before any run directory, acquisition or container.
+            precondition = cr.require_precondition(
+                discrimination, Path(args.precondition_report) if getattr(args, "precondition_report", None) else None,
+                cr.ROOT, rehearse=rehearse)
+            if precondition is not None and precondition.get("checked") is False:
+                print(f"skillc: PRECONDITION NOT CHECKED - {precondition['reason']}", file=sys.stderr)
             declaration = discrimination
             subject = discrimination.intact_subject
         else:
@@ -1845,6 +1852,8 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
                 discrimination, run_dir=run_dir, intact=treatment, image_digest=image_digest,
                 backends=run_backends, argv_for=lambda _scheduled: client_argv,
                 credential_explicit_path=Path(args.credential) if args.credential else None, rehearse=rehearse,
+                precondition_report=(Path(args.precondition_report)
+                                     if getattr(args, "precondition_report", None) else None),
             )
         else:
             assert isinstance(declaration, calibration.CalibrationDeclaration)
@@ -2966,6 +2975,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_calibration_run.add_argument(
         "--private-dir",
         help="where the private run directory is created (default: ~/.local/share/skillc/calibration-runs)",
+    )
+    p_calibration_run.add_argument(
+        "--precondition-report",
+        help="#287: the pre-check's calibration-report.json, for a discrimination declaration carrying a "
+             "`precondition`: its bytes must hash to the approval's cited report_sha256 and it must evaluate MET, "
+             "or the run is refused before any container",
     )
     p_calibration_run.add_argument(
         "--rehearse", action="store_true",

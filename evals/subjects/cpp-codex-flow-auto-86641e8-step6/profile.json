@@ -1,0 +1,598 @@
+{
+ "profile_schema": 1,
+ "name": "cpp-codex-flow-auto-step6",
+ "subject": "./subject.json",
+ "select": [
+  "flow-auto",
+  "flow-eli5"
+ ],
+ "treatment_question": "product",
+ "allowed_destinations": [
+  ".codex/skills",
+  ".claude/scripts",
+  "Projects/claude-power-pack"
+ ],
+ "reference_patterns": [
+  {
+   "name": "home-path",
+   "class": "home-relative",
+   "pattern": "(?:~|\\$HOME|\\$\\{HOME\\})/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a path under the user's home; inside a trial that is the disposable home"
+  },
+  {
+   "name": "plugin-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CLAUDE_PLUGIN_ROOT(?::-)?\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "the Claude Code plugin's bundle directory, another client's surface"
+  },
+  {
+   "name": "checkout-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CPP_DIR\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a file inside the subject's own checkout, located by the procedure's probe order"
+  },
+  {
+   "name": "absolute-system-path",
+   "class": "absolute",
+   "pattern": "(?<![\\w.~}$/-])/(?:opt|usr/local|srv|home)/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "an absolute install location outside any home; never satisfiable by a disposable home"
+  }
+ ],
+ "dependencies": [
+  {
+   "id": "helper-flow-finish-gate",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "the audited gate helper; reference.md Step 6 item 2 invokes it bare at this installed path, which the harness witnesses (gate_entrypoint)",
+   "source_root": "scripts",
+   "paths": [
+    "flow-finish-gate.sh"
+   ],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {
+     "reference": "~/.claude/scripts/flow-finish-gate.sh",
+     "path": "flow-finish-gate.sh"
+    }
+   ]
+  },
+  {
+   "id": "helper-gate-lib",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "library sourced by flow-finish-gate.sh from beside itself, else from the installed helper directory (flow-finish-gate.sh:170-200)",
+   "source_root": "scripts",
+   "paths": [
+    "gate-lib.sh"
+   ],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {
+     "reference": "$HOME/.claude/scripts",
+     "path": null
+    },
+    {
+     "reference": "~/.claude/scripts",
+     "path": null
+    }
+   ]
+  },
+  {
+   "id": "helper-counter-model-receipt",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "receipt writer reference.md Step 6 item 1 resolves first at this installed path, and flow-finish-gate.sh looks for on its finish path",
+   "source_root": "scripts",
+   "paths": [
+    "counter-model-receipt.py"
+   ],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {
+     "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
+     "path": "counter-model-receipt.py"
+    },
+    {
+     "reference": "~/.claude/scripts/counter-model-receipt.py",
+     "path": "counter-model-receipt.py"
+    }
+   ]
+  },
+  {
+   "id": "helper-flow-auto",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "the flow helpers reference.md invokes at the installed path (Steps 1-9; each `~/.claude/scripts/<name>` call site), installed from the checkout's scripts/, byte-identical to the skill's bundled copies (mirrors)",
+   "source_root": "scripts",
+   "paths": [
+    "check-ignored-additions.sh",
+    "flow-ci-status.sh",
+    "flow-driver-capability.sh",
+    "flow-live-driver-guard.sh",
+    "flow-plan-record.py",
+    "flow-stale-check.sh",
+    "flow-start-resolve.sh",
+    "flow-worktree-claim.sh",
+    "flow-worktree-guard.sh",
+    "friction-log.sh",
+    "gh-pr-merge.sh",
+    "nit-store-resolve.sh",
+    "speckit-context.py",
+    "worktree-remove.sh"
+   ],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {
+     "reference": "~/.claude/scripts/check-ignored-additions.sh",
+     "path": "check-ignored-additions.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-ci-status.sh",
+     "path": "flow-ci-status.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-driver-capability.sh",
+     "path": "flow-driver-capability.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-live-driver-guard.sh",
+     "path": "flow-live-driver-guard.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-plan-record.py",
+     "path": "flow-plan-record.py"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-stale-check.sh",
+     "path": "flow-stale-check.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-start-resolve.sh",
+     "path": "flow-start-resolve.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-worktree-claim.sh",
+     "path": "flow-worktree-claim.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/flow-worktree-guard.sh",
+     "path": "flow-worktree-guard.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/friction-log.sh",
+     "path": "friction-log.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/gh-pr-merge.sh",
+     "path": "gh-pr-merge.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/nit-store-resolve.sh",
+     "path": "nit-store-resolve.sh"
+    },
+    {
+     "reference": "~/.claude/scripts/speckit-context.py",
+     "path": "speckit-context.py"
+    },
+    {
+     "reference": "~/.claude/scripts/worktree-remove.sh",
+     "path": "worktree-remove.sh"
+    },
+    {
+     "reference": "$HOME/.claude/scripts/flow-worktree-claim.sh",
+     "path": "flow-worktree-claim.sh"
+    }
+   ]
+  },
+  {
+   "id": "checkout-libraries",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "the CPP checkout's Python packages the procedure runs through `uv run --project` (reference.md:24-34, 100; flow-finish-gate.sh:343-373)",
+   "source_root": ".",
+   "paths": [
+    "pyproject.toml",
+    "uv.lock",
+    "lib/cicd",
+    "lib/security"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "traverse": false,
+   "no_traverse_reason": "Python packages: their dependencies are imports resolved by the interpreter, not path text a reference pattern can read. At this pin lib/cicd and lib/security import only themselves and PyPI packages (see tool-pypi-runtime). Whether they import cleanly in a disposable home is #266's installed-path proof.",
+   "satisfies": [
+    {
+     "reference": "~/Projects/claude-power-pack",
+     "path": null
+    },
+    {
+     "reference": "$HOME/Projects/claude-power-pack",
+     "path": null
+    },
+    {
+     "reference": "$CPP_DIR/lib/cicd/__init__.py",
+     "path": "lib/cicd/__init__.py"
+    }
+   ]
+  },
+  {
+   "id": "checkout-detection-marker",
+   "kind": "synthetic",
+   "scope": "treatment",
+   "role": "Existence-only checkout detection marker",
+   "source_root": ".",
+   "paths": [
+    "CLAUDE.md"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "content": "# Synthetic checkout marker only - not agent instructions.\n# See skillc#303.\n",
+   "unreferenced_reason": "scripts/flow-finish-gate.sh:347 tests directory and CLAUDE.md existence only.",
+   "replaces_pinned": true,
+   "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
+  },
+  {
+   "id": "checkout-scripts",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "scripts the procedure and flow-finish-gate.sh run from the checkout rather than from the installed helper directory ($CPP_DIR/scripts/...)",
+   "source_root": ".",
+   "paths": [
+    "scripts/check-ignored-additions.sh",
+    "scripts/counter-model-receipt.py",
+    "scripts/execution-evidence-verify.py",
+    "scripts/flow-stale-check.sh"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "satisfies": [
+    {
+     "reference": "$CPP_DIR/scripts/check-ignored-additions.sh",
+     "path": "scripts/check-ignored-additions.sh"
+    },
+    {
+     "reference": "$CPP_DIR/scripts/counter-model-receipt.py",
+     "path": "scripts/counter-model-receipt.py"
+    },
+    {
+     "reference": "$CPP_DIR/scripts/execution-evidence-verify.py",
+     "path": "scripts/execution-evidence-verify.py"
+    },
+    {
+     "reference": "$CPP_DIR/scripts/flow-stale-check.sh",
+     "path": "scripts/flow-stale-check.sh"
+    }
+   ]
+  },
+  {
+   "id": "tool-python",
+   "kind": "tool",
+   "scope": "common",
+   "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
+   "version": ">=3.11 (pyproject.toml requires-python at the pin)",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:100), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "python3",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=3.11"
+    }
+   ]
+  },
+  {
+   "id": "tool-uv",
+   "kind": "tool",
+   "scope": "common",
+   "role": "runs the checkout's packages (`uv run --project`)",
+   "version": "unpinned by the subject; #266 pins it in the image",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:100; flow-finish-gate.sh:355), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "uv",
+     "version_args": [
+      "--version"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tool-pypi-runtime",
+   "kind": "tool",
+   "scope": "common",
+   "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
+   "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
+   "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+   "probes": [
+    {
+     "kind": "python-import",
+     "modules": [
+      "pydantic",
+      "yaml"
+     ],
+     "uv_project": "Projects/claude-power-pack"
+    }
+   ]
+  },
+  {
+   "id": "tool-make-git-bash",
+   "kind": "tool",
+   "scope": "common",
+   "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
+   "version": "unpinned by the subject; any POSIX-conforming version the image carries",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "make"
+    },
+    {
+     "kind": "command",
+     "name": "git"
+    },
+    {
+     "kind": "command",
+     "name": "bash"
+    }
+   ]
+  }
+ ],
+ "unsupported": [
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/counter-model-receipt.py",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-ci-status.sh",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-finish-gate.sh",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-plan-record.py",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-stale-check.sh",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-worktree-guard.sh",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/friction-log.sh",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/speckit-context.py",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts/counter-model-receipt.py",
+   "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+  },
+  {
+   "reference": "$HOME/.claude-power-pack",
+   "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+  },
+  {
+   "reference": "/opt/claude-power-pack",
+   "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+  },
+  {
+   "reference": "~/Projects",
+   "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+  },
+  {
+   "reference": "$HOME/Projects",
+   "reason": "the same PROJECT lookup root as ~/Projects, spelled with $HOME in flow-start-resolve.sh"
+  },
+  {
+   "reference": "/home/user/Projects/my-project",
+   "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+  },
+  {
+   "reference": "/home/user/Projects/my-repo",
+   "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+  },
+  {
+   "reference": "/home/user/Projects/nhl-api-issue-42",
+   "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+  },
+  {
+   "reference": "~/.claude/projects",
+   "reason": "a live Claude Code client's transcript store, read by counter-model-receipt.py to derive the implementer; client state, never materialized"
+  },
+  {
+   "reference": "~/.codex/sessions",
+   "reason": "a live codex client's session store, read by counter-model-receipt.py to derive the reviewer model; client state, never materialized"
+  },
+  {
+   "reference": "~/.claude/settings.json",
+   "reason": "Claude Code's own settings (hook registration by /cpp:init): another client's configuration, never materialized"
+  },
+  {
+   "reference": "~/.claude/CLAUDE.md",
+   "reason": "the operator's private global instructions, cited by CPP's ADR text; never part of a trial"
+  },
+  {
+   "reference": "~/.claude/daemon/roster.json",
+   "reason": "a Claude Code fleet daemon's roster, cited by ADR 0007's history; host state, never materialized"
+  },
+  {
+   "reference": "~/.claude/commands",
+   "reason": "Claude Code command surface (the source of the generated codex skill); another client's surface"
+  },
+  {
+   "reference": "~/.claude/commands/flow/eli5.md",
+   "reason": "Claude Code command surface for /flow:eli5; the codex client reads the selected flow-eli5 skill instead"
+  },
+  {
+   "reference": "~/.claude/skills/flow-eli5/SKILL.md",
+   "reason": "Claude Code native-skill surface; another client's surface - the codex path is supplied by the selection"
+  },
+  {
+   "reference": "~/.claude/scripts/hook-permission-census.sh",
+   "reason": "a Claude Code PermissionRequest hook (registered in ~/.claude/settings.json); never run by a codex trial"
+  },
+  {
+   "reference": "~/.codex",
+   "reason": "codex-skill-sync.py install-time root: the installer is not run inside a trial, the harness installs the selected skills"
+  },
+  {
+   "reference": "~/.codex/.cpp-skill-install.lock",
+   "reason": "codex-skill-sync.py install-time lock; the installer is not run inside a trial"
+  },
+  {
+   "reference": "~/.codex/config.toml",
+   "reason": "codex-skill-sync.py install-time config edit; the installer is not run inside a trial, and the trial's codex config is the harness's"
+  },
+  {
+   "reference": "~/.codex/skills",
+   "reason": "codex-skill-sync.py install-time destination; the harness installs the selected skills there itself"
+  },
+  {
+   "reference": "$HOME/.local/bin/aws",
+   "reason": "the AWS CLI, used by flow-ci-status.sh to read a Woodpecker token secret: services and network are not provided to trials (client_profiles.services)"
+  },
+  {
+   "reference": "~/.codex/skills/flow-eli5/SKILL.md",
+   "reason": "SUPPLIED BY THE SELECTION, not by a dependency: path 2 of reference.md's ordered ELI5 lookup (Step 3), and flow-eli5 is in `select`, so the harness installs it at exactly this path. The validator does not resolve a reference against a selected skill's own install destination, and a dependency claiming it would be a second owner of the skill's file (conflicting-destination). Recorded here so the reference is accounted for; it is not a gap in what the trial receives"
+  }
+ ],
+ "declared_empty_kinds": [
+  "startup-context"
+ ],
+ "client_profiles": {
+  "codex": {
+   "status": "declared",
+   "reason": "the subject's own surface (codex-skills); this inventory describes it, and #266 owns the proof that it installs and runs"
+  },
+  "claude-code": {
+   "status": "unsupported",
+   "reason": "Claude Code commands, plugin and native skills are a different surface with different helpers (CLAUDE_PLUGIN_ROOT); a Codex inventory does not establish Claude parity"
+  },
+  "browser": {
+   "status": "unsupported",
+   "reason": "flow-check needs no browser; the browser/MCP capability profile is #283's to prove"
+  },
+  "security-scanner": {
+   "status": "unsupported",
+   "reason": "external scanners and live advisory feeds are #285's profile; this one carries only the checkout's lib.security"
+  },
+  "services": {
+   "status": "unsupported",
+   "reason": "GitHub, Docker, AWS, MCP servers and network are not provided to trials (spec.md section 4)"
+  }
+ },
+ "gate_entrypoint": ".claude/scripts/flow-finish-gate.sh",
+ "gate_witness": "flow-finish",
+ "mirrors": [
+  {
+   "generated": "codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+   "source": "scripts/check-ignored-additions.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+   "source": "scripts/counter-model-receipt.py"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-ci-status.sh",
+   "source": "scripts/flow-ci-status.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+   "source": "scripts/flow-driver-capability.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+   "source": "scripts/flow-finish-gate.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+   "source": "scripts/flow-live-driver-guard.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-plan-record.py",
+   "source": "scripts/flow-plan-record.py"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-stale-check.sh",
+   "source": "scripts/flow-stale-check.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+   "source": "scripts/flow-start-resolve.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+   "source": "scripts/flow-worktree-claim.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+   "source": "scripts/flow-worktree-guard.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/friction-log.sh",
+   "source": "scripts/friction-log.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/gate-lib.sh",
+   "source": "scripts/gate-lib.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+   "source": "scripts/gh-pr-merge.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/nit-store-resolve.sh",
+   "source": "scripts/nit-store-resolve.sh"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/speckit-context.py",
+   "source": "scripts/speckit-context.py"
+  },
+  {
+   "generated": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+   "source": "scripts/worktree-remove.sh"
+  }
+ ],
+ "generated_from": [
+  {
+   "generated": "codex/skills/flow-auto/SKILL.md",
+   "source": ".claude/commands/flow/auto.md"
+  },
+  {
+   "generated": "codex/skills/flow-auto/reference.md",
+   "source": ".claude/commands/flow/auto.md"
+  },
+  {
+   "generated": "codex/skills/flow-eli5/SKILL.md",
+   "source": ".claude/commands/flow/eli5.md"
+  },
+  {
+   "generated": "codex/skills/flow-eli5/reference.md",
+   "source": ".claude/commands/flow/eli5.md"
+  }
+ ],
+ "notes": "The flow:auto Step-6 treatment for skillc#287 option 1 (gate-stops-early-auto6): the same closure as cpp-codex-flow-auto-86641e8 - flow-auto plus flow-eli5 at claude-power-pack 86641e817711d8a7746270745a5dfa7cacf04b0c, so flow-check's sibling SKIP rule (its reference.md:72-73) is not delivered - with gate_witness flow-finish: the witnessed gate is the bare finish call reference.md Step 6 item 2 prescribes, witnessed as flow-auto-finish by docker/fixture-service/flow-auto-gate-shim.py (#477). A separate profile from cpp-codex-flow-auto-86641e8, whose inventory digest an approved declaration pins: a different witness is a different treatment."
+}

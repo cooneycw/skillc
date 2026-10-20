@@ -1,0 +1,28 @@
+{
+  "branch": "issue-287-auto6-step6-pilot-b",
+  "counts": {
+    "accepted": 9,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "orchestrator skillc-400 approved one more review cycle scoped to the dispatch guard (ruling (A) on the pass-1/pass-2 HIGH), 2026-10-20",
+  "head": "973e2b491e5333f511d4c273b3e2970ac6bd097d",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-20T19:06:57Z",
+  "red_cases": {
+    "already_covered": 13,
+    "proposed": 21
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T15-04-50-01a15ab3-b9f1-76a2-9f3d-2f95b201e0a4.jsonl",
+    "thread_id": "01a15ab3-b9f1-76a2-9f3d-2f95b201e0a4"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

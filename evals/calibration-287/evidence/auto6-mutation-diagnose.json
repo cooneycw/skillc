@@ -1,0 +1,29 @@
+{
+ "evidence_schema": 2,
+ "purpose": "skillc#287 option 1, mutation.diagnose_evidence for the auto6 degraded arm (cpp-codex-flow-auto-86641e8-step6, flow-auto skill, reference.md lines 1221-1262 at the pin: the whole verdict-rules block).",
+ "removed_text": "   The helper ends with a machine-readable marker. Each verdict now has its OWN\n   exit code (issue #1027) - `ok`, `warn` and `skipped` used to share exit 0,\n   so a caller reading only `$?` could not tell \"passed cleanly\" from \"passed\n   but proved nothing\" from \"did not run at all\". Read the exit code, not just\n   the word, if you are scripting around this helper:\n   - `FLOW_FINISH_GATE: ok` (exit 0): gates passed - via the runner, or its\n     documented Makefile fallback when the runner is unavailable (the helper\n     prints a NOTE naming which path ran). Proceed to commit.\n   - `FLOW_FINISH_GATE: warn` (exit 3, issue #621): the gate PASSED but a test\n     step exited 0 having executed no tests - every test skipped, or none were\n     collected. Proceed, but report the counts to the user verbatim (they are in\n     the runner's `warnings` array above the marker) and say plainly that this\n     gate proved nothing about the change. Never summarize such a run as \"tests\n     passed\". `warn` also means a test failed on the first attempt and PASSED\n     when re-run against only its failed ids (issue #769) - the ids are on the\n     `RERUN_PASSED:` line above the marker. Proceed, but report those ids and\n     never call the run a clean pass. If the skips look load-bearing (a suite\n     that needs a live database, a service, a credential), say which prerequisite\n     is missing and offer to run the fuller target - the agentic-poker case was\n     `make test-pg` sitting unused beside the `make test` the gate ran.\n   - `FLOW_FINISH_GATE: warn (zero coverage: <gates>)` (exit 3, issue #1027):\n     the named gates RAN, exited 0, and a MEASURED PART of them examined\n     NOTHING - a check with no input produces a green that is not evidence\n     about this change. Proceed, but report which gates, and **repeat the\n     runner's warning verbatim rather than paraphrasing it**: for a\n     multi-check gate the measurement is that CHECK, not the whole gate.\n     `warn (zero coverage: security_scan)` can mean only that the secrets\n     scan examined no source files while the gitignore and permissions checks\n     examined theirs - so \"security_scan proved nothing\" is an overclaim about\n     checks the number never looked at. Do not summarize such a run as \"the\n     gates passed\" either.\n   - `FLOW_FINISH_GATE: fail` (exit 1): parse the runner/make output above the\n     marker, report the failed step, **STOP**.\n   - `FLOW_FINISH_GATE: skipped` (exit 4): no runner AND no Makefile gate\n     targets at all - this gate did NOT run and proved nothing; warn the user,\n     then proceed.\n   - `FLOW_FINISH_GATE: warn (skipped gates: verify)` is the ORDINARY verdict in\n     a repository with no `verify:` target (issue #1147), and it is #628's\n     existing rule applied to a new gate rather than a new policy: a gate that\n     did not run proved nothing, exactly as a repo with no typecheck route\n     already reported. It does not stop the flow. If you see it in a repo that\n     DOES have a verify target, the target was not found - check the Makefile.\n",
+ "removed_text_occurrences_in_intact": 1,
+ "mutated_digest": "sha256:a4cc27d11eafe5529ba00bbfdb014af38e01a93c818a8d3a900edec4ee8c1973",
+ "measured_degraded_reference_digest": "sha256:a4cc27d11eafe5529ba00bbfdb014af38e01a93c818a8d3a900edec4ee8c1973",
+ "mutated_digest_matches": true,
+ "closure_file_count": 118,
+ "closure_source": "evals/subjects/cpp-codex-flow-auto-86641e8-step6/evidence/inventory.json",
+ "matching_rule": "calibration_run.require_no_delivered_survivor: a whole copy, or any line of 3+ words contained in the removed text, whitespace-normalized",
+ "occurrence_scan": {
+  "positive_control_held": true,
+  "intact": {
+   "full_copies": [
+    "codex/skills/flow-auto/reference.md"
+   ],
+   "contained_line_count": 41,
+   "coverage_errors": []
+  },
+  "degraded": {
+   "full_copies": [],
+   "contained_lines": [],
+   "coverage_errors": []
+  },
+  "verdict": "NO_TEXTUAL_SURVIVOR",
+  "verdict_meaning": "NO_TEXTUAL_SURVIVOR means only: at the verified mutated_digest, no full copy and no 3+-word line of the removed block was found in any installed file, under the runner's own matching rule. It is a NECESSARY but NOT SUFFICIENT textual check, NOT evidence that the obligation is absent: a text scan cannot rule out a paraphrase, another surface form, or the gate's own runtime warnings (pre-registration i). The evidence that the degraded arm is degraded is the pre-registered pre-check and pilot."
+ }
+}
