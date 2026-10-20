@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .decide_reply_channel import ChannelRefusal, DecideFn
+from .ordering import Order
 
 SCHEMA_VERSION = 1
 
@@ -687,8 +688,12 @@ class FixtureService:
     """
 
     def __init__(self, declaration: Mapping[str, Any], remote: GitRemote, attempt_id: str, *,
-                 jq_path: str | None = None) -> None:
+                 jq_path: str | None = None, order: Order | None = None) -> None:
         self._declaration = copy.deepcopy(dict(declaration))
+        #: #279 PR-2a: the attempt's controller-owned ordering counter, or None.
+        #: Supplied only for a multi-turn attempt; then every event (a malformed
+        #: request's too) carries `order`, taken here, in the controller.
+        self._order = order
         self._remote = remote
         self.attempt_id = attempt_id
         self._lock = threading.Lock()
@@ -803,7 +808,8 @@ class FixtureService:
             problem = self._schema_problem(request)
             if problem is not None:
                 self._events.append({"seq": seq, "attempt_id": self.attempt_id, "decision": "malformed",
-                                     "reason": problem, "request_digest": _digest(_jsonable(request))})
+                                     "reason": problem, "request_digest": _digest(_jsonable(request)),
+                                     **({"order": self._order.next()} if self._order is not None else {})})
                 raise ChannelRefusal(f"fixture service: {problem}")
             raw_argv = request["argv"]
             assert isinstance(raw_argv, list)  # established by _schema_problem
@@ -816,6 +822,8 @@ class FixtureService:
                                      "argv_digest": _digest(argv), "context": context, "at": at,
                                      "repository": None, "op": None, "effect": None, "fault": None,
                                      "state_before": before}
+            if self._order is not None:
+                event["order"] = self._order.next()
             try:
                 command = parse_argv(argv)
                 event["op"] = command.op

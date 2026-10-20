@@ -119,6 +119,7 @@ from .backend import (
     Limits,
     TurnCapableBackend,
 )
+from .ordering import Order
 
 #: The key `surface` carries the per-attempt liveness nonce under, passed to
 #: `install()`. Never sent in the prompt or any other input the subject reads
@@ -247,6 +248,7 @@ def _run_turns(
     backend: ExecutionBackend, handle: object, experiment: trial.Experiment, attempt_id: str, argv: Sequence[str],
     limits: Limits, cancel: Callable[[], bool] | None,
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None],
+    order: Order | None = None,
 ) -> ExecuteResult:
     """#279: one attempt as controller-delivered turns, each in the SAME
     still-running container (`TurnCapableBackend.execute_turn`). A further turn
@@ -258,8 +260,14 @@ def _run_turns(
     `confirm_stopped()` then verifies it as for any attempt. Each turn is a
     pair of `controller-turn` detail events (dispatched, then ended with
     `delivered` = it actually launched); the returned result is the last
-    turn's, which the stop record describes."""
+    turn's, which the stop record describes. With `order` (#279 PR-2a) every
+    controller-turn record carries the attempt's ordering counter, so a grader
+    can place a service event or a gate run before or after a turn."""
     assert isinstance(backend, TurnCapableBackend)
+
+    def stamp() -> dict[str, object]:
+        return {"order": order.next()} if order is not None else {}
+
     started_at = time.monotonic()
     try:
         result = backend.execute_turn(handle, argv, limits, cancel)
@@ -271,7 +279,7 @@ def _run_turns(
                 # operator stop between turns must never let an approval start
                 # (#279 counter-model review). The attempt reads as cancelled.
                 experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
-                                  reason="cancelled between turns")
+                                  reason="cancelled between turns", **stamp())
                 result = dataclasses.replace(result, reason="operator-cancelled")
                 break
             nxt = next_turn(backend, handle, turn, result)
@@ -280,17 +288,17 @@ def _run_turns(
             remaining = limits.timeout - (time.monotonic() - started_at)
             if remaining <= 0:
                 experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
-                                  reason="the attempt's wall budget was spent before this turn")
+                                  reason="the attempt's wall budget was spent before this turn", **stamp())
                 break
             turn += 1
-            experiment.record(attempt_id, "controller-turn", index=turn, dispatched=True)
+            experiment.record(attempt_id, "controller-turn", index=turn, dispatched=True, **stamp())
             result = backend.execute_turn(handle, list(nxt), dataclasses.replace(limits, timeout=remaining), cancel)
             assert isinstance(result, ExecuteResult)
             # Delivered only if the resume actually launched (#279 counter-
             # model review, pass 2): a turn the backend never started is not
             # an approval the agent received, nor a launch the guard expects.
             experiment.record(attempt_id, "controller-turn", index=turn, ended=result.reason,
-                              exit_code=result.exit_code, delivered=result.reason not in _NEVER_STARTED)
+                              exit_code=result.exit_code, delivered=result.reason not in _NEVER_STARTED, **stamp())
         return result
     finally:
         backend.end_attempt(handle)
@@ -312,6 +320,7 @@ def run_through_backend(
     transcript_for_capture: Callable[[], trial.TranscriptEvidence | None] | None = None,
     imports_for_capture: Callable[[], Sequence[trial.Import]] | None = None,
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None] | None = None,
+    order: Order | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -469,7 +478,8 @@ def run_through_backend(
                 if next_turn is None:
                     result = backend.execute(handle, argv, limits, cancel)
                 else:
-                    result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel, next_turn)
+                    result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel, next_turn,
+                                        order=order)
                 assert isinstance(result, ExecuteResult)
                 if result.reason != "exited":
                     experiment.record(attempt_id, "stop-requested", reason=result.reason)

@@ -114,6 +114,7 @@ from threading import Lock
 
 from .backend import ExecuteResult, ExecutionBackend, Limits
 from .decide_reply_channel import ChannelRefusal
+from .ordering import Order
 from .stage_capture import unavailable as _stages_unavailable
 
 #: Computes the CURRENT tree's content identity, called by this module
@@ -162,6 +163,12 @@ class _Run:
     #: read from this run's own controller-held stdout when it resolved;
     #: `None` for every other gate.
     stages: Mapping[str, object] | None = None
+    #: #279 PR-2a: the attempt's ordering counter at this run's request and at
+    #: its resolution, and the SOURCE digest of the gated repository at its
+    #: start (`source_digest`). All None unless the witness was given an order.
+    order_requested: int | None = None
+    order_completed: int | None = None
+    source_digest_at_start: str | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +184,10 @@ class GateRunRecord:
     stop_confirmed: bool | None
     #: #376: present only for a stage-bearing gate's runs - see `_Run.stages`.
     stages: Mapping[str, object] | None = None
+    #: #279 PR-2a: present only for an ordered (multi-turn) attempt.
+    order_requested: int | None = None
+    order_completed: int | None = None
+    source_digest_at_start: str | None = None
 
     def to_json(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -189,6 +200,12 @@ class GateRunRecord:
         }
         if self.stages is not None:
             data["stages"] = dict(self.stages)
+        if self.order_requested is not None:
+            # Only an ordered attempt's runs carry these, so every other
+            # record is byte-identical (#279 PR-2a).
+            data["order_requested"] = self.order_requested
+            data["order_completed"] = self.order_completed
+            data["source_digest_at_start"] = self.source_digest_at_start
         return data
 
 
@@ -303,7 +320,14 @@ class GateWitness:
         declared_env: Mapping[str, Mapping[str, str]] | None = None,
         workspace_root: str | None = None,
         stage_capture: Mapping[str, StageReader] | None = None,
+        order: Order | None = None,
+        source_digest_fn: Callable[[str | None], str] | None = None,
     ) -> None:
+        #: #279 PR-2a: the attempt's ordering counter and the source-digest
+        #: function (given the gate's working directory). Both None for every
+        #: attempt without controller turns, whose record is then unchanged.
+        self._order = order
+        self._source_digest_fn = source_digest_fn
         if not declared_gates:
             raise ValueError(
                 "declared_gates must be non-empty - a witness declaring nothing cannot "
@@ -461,8 +485,17 @@ class GateWitness:
                 # A gate waiting behind another gate must snapshot AFTER it,
                 # not measure the tree that existed when its request arrived.
                 tree_digest = self._tree_digest_fn()
+                source: str | None = None
+                if self._order is not None:
+                    try:
+                        source = (self._source_digest_fn(gate_cwd) if self._source_digest_fn is not None
+                                  else "unreadable: no source-digest function")
+                    except Exception as exc:  # noqa: BLE001 - an unreadable tree never matches a commit
+                        source = f"unreadable: {type(exc).__name__}"
                 with self._lock:
-                    run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest)
+                    run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest,
+                               order_requested=self._order.next() if self._order is not None else None,
+                               source_digest_at_start=source)
                     self._runs[gate].append(run)
                     unsupported = self._backend_unsupported
                 if unsupported:
@@ -491,6 +524,8 @@ class GateWitness:
                     if result.stop_confirmed is False:
                         self._workspace_integrity_unknown = True
                     run.completed_at = time.time()
+                    if self._order is not None:
+                        run.order_completed = self._order.next()
                     run.exit_code = result.exit_code
                     run.reason = result.reason
                     run.stop_confirmed = result.stop_confirmed
@@ -569,6 +604,8 @@ class GateWitness:
                         stages=(r.stages if r.stages is not None
                                 else _stages_unavailable("run never resolved") if gate in self._stage_capture
                                 else None),
+                        order_requested=r.order_requested, order_completed=r.order_completed,
+                        source_digest_at_start=r.source_digest_at_start,
                     )
                     for r in runs
                 )

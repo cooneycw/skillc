@@ -63,3 +63,35 @@ Scope: about 9 files, 1 PR. Risks: the guard count semantics (a looser count cou
 7. `changelog.d/279-turns-wiring.md` - one bullet
 
 Scope: medium. Risks: G1 containment semantics; receipt-writer stall before the gate (unmeasured); 900 s may be tight for Step 6; controller clock dependency (tested).
+
+<!-- flow-run n=3 id=c6e8c67944254c6194dd04d83068bbdf -->
+## Run 3
+
+- Run-id:            c6e8c67944254c6194dd04d83068bbdf
+- Run-start:         7cdf37af481a5568f42a102fe1df28306ed2a781
+- Issue:             #279
+- Base SHA:          7cdf37af481a5568f42a102fe1df28306ed2a781
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE GO-WITH-CONDITIONS #279 PR-2 (R1-R5), 2026-10-20
+- Recorded at:       2026-10-20T22:20:00Z
+
+### Section B evidence
+#279 OPEN; PR-1 #495 (7cdf37a) left residuals (1)-(5) recorded in evals/level3/flow-auto-step6-gate/DESIGN.md. Nothing merged since touches them. Duplicates: none. Existing #434 records are not retro-fitted (they predate the counter and never reach Step 6).
+
+### Section C - the approved plan (this run is PR-2a, the recording layer; the grader is PR-2b)
+1. `skillc/ordering.py` - a per-attempt, lock-guarded, controller-owned monotonic counter
+2. `skillc/source_digest.py` - sha256 over sorted (path, git mode, git blob id) of the gated repository root, minus .git and .claude/friction.jsonl, ignore rules not applied
+3. `skillc/fixture_service.py` - event["order"] when a counter is supplied
+4. `skillc/gate_witness.py` - run order_requested/order_completed and source digest at start when supplied
+5. `skillc/lifecycle.py` - controller-turn records carry order when supplied
+6. `skillc/agent_trial.py` - one counter per attempt, only when turns are declared; turn orders in the trusted observation
+7. `skillc/fixture_attempt.py` - the counter reaches the fixture service
+8. `skillc/git_snapshot.py` - source digests of shipped heads (remote ref heads) without a git process
+9. `skillc/fixture_campaign.py` - builder cache keyed by the resolved builder path
+10. `skillc/fixture_live.py` - closed task registry (task.path selects cases, identities, rehearsal candidates)
+11. `evals/level3/flow-auto-step6-gate/builder/build.py` - capture records shipped source digests
+12. tests (append-only on existing hot-path modules): `tests/test_ordering.py`, `tests/test_source_digest.py`, `tests/test_fixture_service.py`, `tests/test_gate_witness.py`, `tests/test_fixture_live.py`, `tests/test_fixture_campaign.py`, `tests/test_flow_auto_step6_gate_task.py`
+13. `changelog.d/279-recording-layer.md` - one bullet
+
+Scope: large. Risks: shared hot-path stamping (turns-only, byte-identical controls, existing tests unmodified); population rule (mismatch reads UNKNOWN in PR-2b, never SATISFIED).

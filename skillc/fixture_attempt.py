@@ -44,8 +44,10 @@ from . import codex_guard as cg
 from . import fixture_overlay as fo
 from . import fixture_service as fs
 from . import git_snapshot as gs
+from . import source_digest as sd
 from .decide_reply_channel import ChannelRefusal
 from .exec_git_remote import ExecGitRemote
+from .ordering import Order
 
 FLOW_AUTO_GATE_SHIM = Path(__file__).resolve().parent.parent / "docker" / "fixture-service" / "flow-auto-gate-shim.py"
 
@@ -100,6 +102,11 @@ class FixtureSession:
     #: #279: the declaration's nested-codex policy (`codex_guard.NESTED_POLICIES`),
     #: or None; recorded beside the counts only when declared.
     nested_policy: str | None = None
+    #: #279 PR-2a: the attempt's ordering counter (a multi-turn attempt only),
+    #: given to the fixture service; with it, the git record gains the SOURCE
+    #: digest of every remote ref head and the extras the controller turns.
+    order: Order | None = None
+    turn_records: list[dict[str, Any]] | None = None
     _finishing: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -141,7 +148,7 @@ class FixtureSession:
             self.overlays["gh"] = fo.install_gh_shim(backend, handle, environment).__dict__
             self.overlays["codex_guard"] = fo.install_codex_guard(backend, handle, environment)
             remote = ExecGitRemote(backend, handle, git_dir=self.fixture.git_dir)
-            service = fs.FixtureService(self.fixture.declaration, remote, self.attempt_id)
+            service = fs.FixtureService(self.fixture.declaration, remote, self.attempt_id, order=self.order)
         except Exception as exc:
             self.failure = f"fixture binding failed: {type(exc).__name__}: {exc}"
             raise
@@ -190,6 +197,9 @@ class FixtureSession:
                     self.git = self.fixture.capture(export_root, self.fixture.facts)
                 except gs.Unreadable as exc:
                     self.git_unreadable = str(exc)
+            if self.order is not None and self.git is not None:
+                self.git["remote_ref_sources"] = _remote_ref_sources(export_root, self.fixture.remote_relpath,
+                                                                     self.git.get("remote_refs"))
         self.guard.finalize()
 
     def guard_record(self) -> dict[str, Any]:
@@ -197,9 +207,14 @@ class FixtureSession:
                             expected_top_level=self.expected_top_level, nested_policy=self.nested_policy)
 
     def extras(self, final_report: str | None) -> dict[str, object]:
-        return {"case": self.fixture.case, "service": self.record, "git": self.git,
-                "git_unreadable": self.git_unreadable, "final_report": final_report,
-                "codex_guard": self.guard_record()}
+        extras: dict[str, object] = {
+            "case": self.fixture.case, "service": self.record, "git": self.git,
+            "git_unreadable": self.git_unreadable, "final_report": final_report,
+            "codex_guard": self.guard_record()}
+        if self.order is not None:
+            # #279 PR-2a: the turns as the controller recorded them, ordered.
+            extras["controller_turns"] = list(self.turn_records or [])
+        return extras
 
 
 class _UnreadableRemote:
@@ -214,3 +229,23 @@ class _UnreadableRemote:
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         raise gs.Unreadable(self.reason)
+
+
+def _remote_ref_sources(export_root: Path, remote_relpath: str, refs: object) -> dict[str, str]:
+    """#279 PR-2a: the SOURCE digest (`source_digest`) of the commit every
+    remote ref names - what a pushed branch or a merged main actually ships -
+    read from the exported remote with no git process. A ref that cannot be
+    read is `unreadable: ...`, which never matches a gated tree."""
+    out: dict[str, str] = {}
+    if not isinstance(refs, Mapping):
+        return out
+    try:
+        bare = gs.GitDir(gs.SafeTree(export_root), remote_relpath)
+    except gs.Unreadable as exc:
+        return {str(ref): f"unreadable: {exc}" for ref in refs}
+    for ref, sha in sorted(refs.items()):
+        try:
+            out[str(ref)] = sd.digest_commit(bare, str(sha))
+        except (gs.Unreadable, ValueError) as exc:
+            out[str(ref)] = f"unreadable: {exc}"
+    return out

@@ -1282,3 +1282,41 @@ def test_the_judge_replay_applies_the_declared_nested_policy(tmp_path: Path, dec
     [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
     assert entry["re_decided"] is True
     assert ("nested codex observed" in str(entry["replay_blocked_reason"])) is blocked, entry["replay_blocked_reason"]
+
+
+# ------------------------------- #279 PR-2a: the task registry and extras
+
+def test_the_task_registry_selects_cases_and_keeps_434_byte_identical() -> None:
+    assert fl.TASKS[fl.TASK_PATH] == fl.CASES == ("clean", "twin")
+    for path, digest in ((CAMPAIGN, CAMPAIGN_DIGEST), (CAMPAIGN_REV4, CAMPAIGN_REV4_DIGEST), (DRAFT, PACKAGED_DIGEST)):
+        declaration = fl.load_declaration(path)
+        assert declaration.digest == digest and declaration.task_path == fl.TASK_PATH
+    assert fl.required_identities(fl.TASK_PATH) == fl.REQUIRED_IDENTITIES
+
+
+def test_a_step6_declaration_takes_its_own_cases() -> None:
+    data = _draft()
+    data["task"]["path"] = fl.STEP6_TASK_PATH
+    with pytest.raises(fl.LiveRefused, match="cases must be distinct names from"):
+        fl.parse_declaration(data)  # #434's cases are not this task's
+    data["cases"] = ["twin-gate"]
+    data["attempts_per_case"] = 1
+    data["case_order"] = {"seed": 1, "sequence": calibration.derive_arm_order(1, ["twin-gate"], 1)}
+    assert fl.parse_declaration(data).task_path == fl.STEP6_TASK_PATH
+    assert ("task", "base_trees", "twin-gate") in fl.required_identities(fl.STEP6_TASK_PATH)
+    with pytest.raises(fl.LiveRefused, match="no loadable grader"):
+        fl.task_identity(ROOT, fl.STEP6_TASK_PATH)  # until #279 PR-2b builds it
+
+
+def test_an_unregistered_task_path_is_refused(tmp_path: Path) -> None:
+    data = _draft()
+    data["task"]["path"] = "evals/level3/somewhere-else"
+    with pytest.raises(fl.LiveRefused, match="must be one of"):
+        fl.require_approved(fl.parse_declaration(data), ROOT, approval_required=False)
+    with pytest.raises(fl.LiveRefused, match="must be one of"):
+        fl.task_identity(ROOT, "evals/level3/somewhere-else")
+
+
+def test_raw_extras_with_ordered_turns_keep_their_provenance() -> None:
+    assert fl._RAW_EXTRAS_KEYS | {"controller_turns"} in fl._RAW_EXTRAS_KEY_SETS
+    assert fl._RAW_EXTRAS_KEYS | {"anything"} not in fl._RAW_EXTRAS_KEY_SETS

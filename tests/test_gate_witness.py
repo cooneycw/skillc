@@ -1377,3 +1377,55 @@ def test_queued_gate_rechecks_prior_stop_before_snapshot_or_execution(
     if errors:
         assert isinstance(errors[0], ChannelRefusal)
         assert "workspace-integrity-unknown" in str(errors[0])
+
+
+# ------------------------- #279 PR-2a: run order and the gated source digest
+
+def test_an_ordered_run_records_its_order_and_its_gated_source() -> None:
+    from skillc.ordering import Order
+    order = Order()
+    seen_cwd: list[str | None] = []
+
+    def source(cwd: str | None) -> str:
+        seen_cwd.append(cwd)
+        return "sha256:source-for-test"
+
+    backend = _FakeBackend(results={("lint",): _exited(1)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+        order=order, source_digest_fn=source,
+    )
+    order.next()  # a service event before the gate
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    run = witness.finalize("a-1").gates["lint"].runs[0].to_json()
+    assert (run["order_requested"], run["order_completed"]) == (2, 3)
+    assert run["source_digest_at_start"] == "sha256:source-for-test" and len(seen_cwd) == 1
+
+
+def test_an_unreadable_source_is_recorded_never_a_digest() -> None:
+    from skillc.ordering import Order
+
+    def broken(_cwd: str | None) -> str:
+        raise OSError("export failed")
+
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): _exited(0)}), handle=None, limits=_limits(),
+        gate_exclusivity=False, exclusivity_basis="", order=Order(), source_digest_fn=broken,
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    run = witness.finalize("a-1").gates["lint"].runs[0].to_json()
+    assert str(run["source_digest_at_start"]).startswith("unreadable: ")
+
+
+def test_an_unordered_run_record_is_byte_identical() -> None:
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): _exited(0)}), handle=None, limits=_limits(),
+        gate_exclusivity=False, exclusivity_basis="",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    run = witness.finalize("a-1").gates["lint"].runs[0].to_json()
+    assert set(run) == {"requested_at", "completed_at", "exit_code", "reason", "tree_digest_at_start",
+                        "stop_confirmed"}

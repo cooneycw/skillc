@@ -86,6 +86,13 @@ KIND = "level3-fixture-live-declaration"
 SCHEMA = 1
 TASK_PATH = "evals/level3/" + fc.TASK
 CASES = ("clean", "twin")
+#: #279 PR-2a: the closed registry of tasks this kind runs, by `task.path`,
+#: with each one's cases. `TASK_PATH`/`CASES` stay #434's, the default; a
+#: declaration's own `task.path` selects its cases, identities, goal, grader
+#: and rehearsal candidates. #434's declarations carry their path already, so
+#: they parse, digest and authorize exactly as before.
+STEP6_TASK_PATH = "evals/level3/flow-auto-step6-gate"
+TASKS: dict[str, tuple[str, ...]] = {TASK_PATH: CASES, STEP6_TASK_PATH: ("twin-gate",)}
 CLIENT = "codex"
 EXPERIMENT_LABEL = "level3-fixture-live"
 TRIAL_PREFIX = "live"
@@ -100,6 +107,9 @@ INFERENCE_STATEMENT = "description, not inference: a handful of attempts per cas
 #: What a rehearsal actor plays per case: a committed qualify candidate whose
 #: expectation is PASS, so a rehearsal exercises the credited path end to end.
 REHEARSAL_CANDIDATES = {"clean": "pass/clean-cites-commit-only", "twin": "pass/twin-still-needed-with-plan"}
+#: Per task (by its directory name); the Step-6 task's candidates are #279 PR-2b's.
+REHEARSAL_BY_TASK: dict[str, dict[str, str]] = {Path(TASK_PATH).name: REHEARSAL_CANDIDATES,
+                                                Path(STEP6_TASK_PATH).name: {}}
 
 #: The declaration's identities: every one must be a real, recorded value.
 REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
@@ -111,6 +121,12 @@ REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
     ("task", "goal_sha256"), ("task", "builder_sha256"), ("task", "instruction"),
     *(("task", "base_trees", case) for case in CASES),
 )
+
+
+def required_identities(task_path: str) -> tuple[tuple[str, ...], ...]:
+    """`REQUIRED_IDENTITIES` for the declared task: its own cases' base trees."""
+    shared = tuple(p for p in REQUIRED_IDENTITIES if p[:2] != ("task", "base_trees"))
+    return (*shared, *(("task", "base_trees", case) for case in TASKS.get(task_path, CASES)))
 #: Where C1's placeholder scan looks (calibration's own scanner).
 IDENTITY_ROOTS = ("shared", "subject", "task", "cases", "attempts_per_case", "case_order", "tolerance", "run_store",
                   "primary_endpoint")
@@ -153,6 +169,11 @@ class LiveDeclaration:
         return cast(Mapping[str, Any], self.data["task"])
 
     @property
+    def task_path(self) -> str:
+        """The declared task (#279 PR-2a); a registered one is required to run."""
+        return str(self.task.get("path"))
+
+    @property
     def approval(self) -> Mapping[str, Any] | None:
         approval = self.data.get("approval")
         return approval if isinstance(approval, Mapping) else None
@@ -182,8 +203,9 @@ def parse_declaration(data: Mapping[str, Any]) -> LiveDeclaration:
     for key in ("shared", "subject", "task", "case_order", "tolerance"):
         _need(data.get(key), dict, key)
     cases = tuple(_need(data.get("cases"), list, "cases"))
-    if not cases or len(set(cases)) != len(cases) or set(cases) - set(CASES):
-        raise LiveRefused(f"cases must be distinct names from {list(CASES)}, got {list(cases)}")
+    allowed = TASKS.get(str(data["task"].get("path")), CASES)
+    if not cases or len(set(cases)) != len(cases) or set(cases) - set(allowed):
+        raise LiveRefused(f"cases must be distinct names from {list(allowed)}, got {list(cases)}")
     attempts = _need(data.get("attempts_per_case"), int, "attempts_per_case")
     if attempts < 1:
         raise LiveRefused("attempts_per_case must be a positive integer")
@@ -262,19 +284,24 @@ def _identity_at(data: Mapping[str, Any], path: tuple[str, ...]) -> object:
     return node
 
 
-def task_identity(root: Path) -> dict[str, object]:
+def task_identity(root: Path, task_path: str = TASK_PATH) -> dict[str, object]:
     """The repository's own task identities, re-derived: the grader, goal and
     builder bytes, and each case's base tree, from a fresh build."""
-    task_root = root / TASK_PATH
-    grader = verify.GraderDef.load(task_root)
+    if task_path not in TASKS:
+        raise LiveRefused(f"task.path must be one of {sorted(TASKS)}, not {task_path!r}")
+    task_root = root / task_path
+    try:
+        grader = verify.GraderDef.load(task_root)
+    except verify.Refused as exc:
+        raise LiveRefused(f"{task_path} has no loadable grader: {exc}") from None
     identity = grader.identity()
     trees: dict[str, str] = {}
     with tempfile.TemporaryDirectory(prefix="skillc-live-identity-") as tmp:
-        for case in CASES:
+        for case in TASKS[task_path]:
             where = Path(tmp) / case
             where.mkdir()
             trees[case] = str(fc._builder(task_root).build(where, case)["base_tree"])
-    return {"path": TASK_PATH, "grader_id": grader.id, "grader_revision": grader.revision,
+    return {"path": task_path, "grader_id": grader.id, "grader_revision": grader.revision,
             "grader_digest": identity["digest"],
             "goal_sha256": hashlib.sha256((task_root / "goal.md").read_bytes()).hexdigest(),
             "builder_sha256": hashlib.sha256((task_root / "builder" / "build.py").read_bytes()).hexdigest(),
@@ -287,7 +314,7 @@ def require_approved(declaration: LiveDeclaration, root: Path, *, approval_requi
     approval names the schedule size, the profile closure and this exact
     declaration's digest. A declaration that validates is still only a plan."""
     data = declaration.data
-    absent = [".".join(p) for p in REQUIRED_IDENTITIES
+    absent = [".".join(p) for p in required_identities(declaration.task_path)
               if not (isinstance(v := _identity_at(data, p), str) and v.strip() and v != UNKNOWN)]
     if absent:
         raise LiveRefused(f"identities not recorded: {absent}")
@@ -295,15 +322,15 @@ def require_approved(declaration: LiveDeclaration, root: Path, *, approval_requi
     if found:
         raise LiveRefused(f"placeholder values still recorded at {found}; record the real value first")
     task = declaration.task
-    if task.get("path") != TASK_PATH:
-        raise LiveRefused(f"task.path must be {TASK_PATH!r}: this kind runs only the fixture-service task")
-    on_disk = task_identity(root)
+    if declaration.task_path not in TASKS:
+        raise LiveRefused(f"task.path must be one of {sorted(TASKS)}: this kind runs only the fixture-service tasks")
+    on_disk = task_identity(root, declaration.task_path)
     moved = [k for k, v in on_disk.items() if task.get(k) != v]
     if moved:
         raise LiveRefused(f"declared task identities differ from the repository: {moved} "
                           f"(on disk {({k: on_disk[k] for k in moved})})")
     if declaration.endpoint is not None:
-        known = [str(c) for c in verify.GraderDef.load(root / TASK_PATH).criteria]
+        known = [str(c) for c in verify.GraderDef.load(root / declaration.task_path).criteria]
         unknown = [c for c in declaration.endpoint if c not in known]
         if unknown:
             raise LiveRefused(f"primary_endpoint names criteria the grader does not have: {unknown} "
@@ -330,7 +357,7 @@ def require_approved(declaration: LiveDeclaration, root: Path, *, approval_requi
 def prompt(declaration: LiveDeclaration, root: Path) -> str:
     """`goal.md` as committed, then the declared instruction (calibration's
     provided-arm form). Both are bound by the declaration digest."""
-    goal = (root / TASK_PATH / "goal.md").read_text(encoding="utf-8")
+    goal = (root / declaration.task_path / "goal.md").read_text(encoding="utf-8")
     return f"{goal.rstrip()}\n\n{str(declaration.task['instruction']).rstrip()}\n"
 
 
@@ -347,7 +374,7 @@ def plan_live(declaration: LiveDeclaration, store: Path, *, root: Path, treatmen
         raise LiveRefused(f"mode must be 'live' or one of {REHEARSALS}")
     if not treatment.skill_digests:
         raise LiveRefused("the treatment has no skill_digests to pin; refusing to plan it unpinned")
-    grader = verify.GraderDef.load(root / TASK_PATH)
+    grader = verify.GraderDef.load(root / declaration.task_path)
     shared = declaration.shared
     counts: dict[str, int] = {}
     trials: list[dict[str, object]] = []
@@ -488,7 +515,9 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple
     prompt, `argv[-1]`), so the live path's #442 preflight passes unchanged.
     With `turns` (#279: the case declares controller turns) the argv runs
     `TURN_ACTOR_SOURCE` in front of the actor; without, it is exactly as before."""
-    candidate = REHEARSAL_CANDIDATES[case]
+    candidate = REHEARSAL_BY_TASK.get(task_root.name, {}).get(case)
+    if candidate is None:
+        raise LiveRefused(f"no rehearsal candidate is declared for {task_root.name}/{case}")
     files = fc.candidate_files(task_root, fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", "", None,
                                                  {}, None))
     row = fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", fc.candidate_digest(files), None, {}, None)
@@ -525,7 +554,7 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     shared = declaration.shared
     model, effort = str(shared["model"]), str(shared["reasoning_effort"])
     argv = mp.pin_model_argv(model, effort, client_argv)
-    task_root = root / TASK_PATH
+    task_root = root / declaration.task_path
     text = prompt(declaration, root)
     allowlist = str(shared["agent_network"]["allowlist_digest"])
     per_attempt = float(shared["per_attempt_seconds"])
@@ -755,6 +784,8 @@ _ADAPTER_DEPENDENT_REASONS = ("prompt_delivered=", "not credited: the transcript
 #: `FixtureSession.extras`'s exact keys: raw controller-held evidence, never a
 #: grading envelope (which adds the witness and the graded tree digest).
 _RAW_EXTRAS_KEYS = frozenset({"case", "service", "git", "git_unreadable", "final_report", "codex_guard"})
+#: #279 PR-2a: a multi-turn attempt's raw extras also carry its ordered turns.
+_RAW_EXTRAS_KEY_SETS = (_RAW_EXTRAS_KEYS, _RAW_EXTRAS_KEYS | {"controller_turns"})
 
 
 def _sha256_file(path: Path) -> str:
@@ -815,7 +846,7 @@ def _retained_fixture_extras(experiment: trial.Experiment, attempt_ids: Sequence
             data = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
             continue
-        if not isinstance(data, dict) or set(data) != _RAW_EXTRAS_KEYS:
+        if not isinstance(data, dict) or set(data) not in _RAW_EXTRAS_KEY_SETS:
             continue
         guard = data.get("codex_guard")
         attempt_id = str(guard.get("attempt_id")) if isinstance(guard, dict) else ""
@@ -960,7 +991,7 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
         raise LiveRefused("the store's attempts, the original report's attempts and the declared order do not "
                           "match one non-empty population")
 
-    grader = verify.GraderDef.load(root / TASK_PATH)
+    grader = verify.GraderDef.load(root / declaration.task_path)
     extras = _retained_fixture_extras(experiment, [s.attempt_id for s in schedule])
     text = prompt(declaration, root)
     spec = at.CLIENT_SPECS[CLIENT]

@@ -79,6 +79,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import re
 import secrets
 import shlex
@@ -108,6 +109,7 @@ from . import (
 from . import egress as eg
 from . import fixture_service as fs
 from . import runtime_supply as rs
+from . import source_digest as sd
 from . import transcript_adapter as ta
 from .backend import (
     BackendUnavailable,
@@ -128,6 +130,7 @@ from .docker_backend import (
 from .fixture_attempt import AttemptFixture, FixtureSession
 from .gate_witness import GateWitness, GateWitnessRecord
 from .lifecycle import run_through_backend
+from .ordering import Order
 from .trial_bootstrap import CanaryNotSatisfied, MCPServerSpec, PromptDeliveryError
 
 
@@ -526,6 +529,9 @@ class _WitnessSession:
     stage_plans: Mapping[str, str] | None = None
     witness: GateWitness | None = field(default=None, repr=False)
     record: GateWitnessRecord | None = field(default=None, repr=False)
+    #: #279 PR-2a: the attempt's ordering counter (a multi-turn attempt only);
+    #: with it, each run records its order and the gated tree's SOURCE digest.
+    order: Order | None = field(default=None, repr=False)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
@@ -559,6 +565,21 @@ class _WitnessSession:
                 backend.export(handle, Path(directory))
                 return witness_capture.capture_digest(Path(directory))
 
+        def source_snapshot(cwd: str | None) -> str:
+            """#279 PR-2a: the SOURCE digest of the checkout containing the
+            gate's working directory, from the controller's own export."""
+            rel = os.path.relpath(cwd, CONTAINER_WORKSPACE) if cwd else ""
+            if rel == ".":
+                rel = ""
+            if rel.startswith(".."):
+                return "unreadable: the gate's working directory is outside the workspace"
+            with tempfile.TemporaryDirectory(prefix="skillc-gate-source-") as directory:
+                backend.export(handle, Path(directory))
+                root = sd.repository_root(Path(directory), rel)
+                if root is None:
+                    return "unreadable: no repository contains the gate's working directory"
+                return sd.digest_tree(root)
+
         harness = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/{_FLOW_CHECK_GATE_HARNESS_PATH}"
         if self.gate_args is None:
             gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
@@ -575,6 +596,7 @@ class _WitnessSession:
             stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {
                 gate: functools.partial(stage_capture.capture_stages, plan=plan)
                 for gate, plan in (self.stage_plans or {}).items()},
+            order=self.order, source_digest_fn=source_snapshot if self.order is not None else None,
         )
         script = (
             "import json,socket,sys; "
@@ -2107,8 +2129,12 @@ def run_one_attempt(
     default) changes nothing for any other caller."""
     if nested_codex_policy is not None and nested_codex_policy not in cg.NESTED_POLICIES:
         raise ValueError(f"nested_codex_policy must be one of {cg.NESTED_POLICIES}, not {nested_codex_policy!r}")
+    #: #279 PR-2a: one controller-owned ordering per MULTI-TURN attempt only
+    #: (orchestrator ruling R3); every other attempt's records are unchanged.
+    attempt_order = Order() if turns is not None and turns.texts else None
     fixture_session = FixtureSession(fixture, attempt_id) if fixture is not None else None
     if fixture_session is not None:
+        fixture_session.order = attempt_order
         # #279 (ruling G1): the declared nested-codex policy, recorded and
         # honoured only when declared; set before any guard record is read.
         fixture_session.nested_policy = nested_codex_policy
@@ -2123,6 +2149,8 @@ def run_one_attempt(
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
     witness_session = (_WitnessSession(attempt_id, limits, gate_args=gate_args, stage_plans=stage_plans)
                        if gate_entrypoint is not None else None)
+    if witness_session is not None:
+        witness_session.order = attempt_order
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
         if not isinstance(backend, DockerBackend):
@@ -2308,12 +2336,18 @@ def run_one_attempt(
         transcript_for_capture=transcript_for_capture,
         imports_for_capture=lambda: egress_imports,
         next_turn=next_turn if declared_turns else None,
+        order=attempt_order,
     )
     delivered = sum(1 for e in experiment.events(attempt_id)
                     if e.get("event") == "controller-turn" and e.get("delivered") is True)
     if fixture_session is not None:
         # Each delivered turn is one more legitimate top-level launch (#279).
         fixture_session.expected_top_level = ct.expected_top_level(delivered)
+        if attempt_order is not None:
+            fixture_session.turn_records = [
+                {k: e[k] for k in ("index", "dispatched", "ended", "exit_code", "delivered", "reason", "order")
+                 if k in e}
+                for e in experiment.events(attempt_id) if e.get("event") == "controller-turn"]
 
     # #434 (counter-model review, pass 2): the fixture's full evidence is
     # stored on EVERY path, before grading, so an attempt the credit gate
