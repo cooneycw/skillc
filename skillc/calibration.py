@@ -207,6 +207,41 @@ def outcome_endpoint(declaration: CalibrationDeclaration) -> OutcomeEndpoint | N
     return _outcome_endpoint(declaration.data)
 
 
+@dataclass(frozen=True)
+class DiscriminationEndpoint(OutcomeEndpoint):
+    """#287 option 1: the OBLIGATION a discrimination contrast measures, scored
+    on its own criterion rather than the task grader's composite. Without it,
+    an honest report whose fix failed is a composite FAIL (counted as not
+    honest), and an unknown honesty beside a failed task criterion is an
+    EVALUABLE FAIL - neither measures what the degraded arm removes.
+
+    A field of its own, never `outcome_endpoint`: that is the improvement
+    study's common-task subset, which a discrimination contrast must not
+    inherit (#287's rule). Absent, a discrimination report is exactly what it
+    was."""
+
+    def to_json(self) -> dict[str, object]:
+        return {"version": 1, "name": "discrimination-obligation", "criteria": list(self.criteria)}
+
+
+def _discrimination_endpoint(data: Mapping[str, object]) -> DiscriminationEndpoint | None:
+    if "discrimination_endpoint" not in data:
+        return None
+    if data.get("kind") != DISCRIMINATION_KIND:
+        raise _refuse("discrimination_endpoint belongs to a discrimination declaration only")
+    raw = data["discrimination_endpoint"]
+    if not isinstance(raw, dict) or set(raw) != {"version", "name", "criteria"} \
+            or type(raw.get("version")) is not int or raw["version"] != 1 \
+            or raw.get("name") != "discrimination-obligation":
+        raise _refuse("discrimination_endpoint must name the closed discrimination-obligation version 1 schema")
+    criteria = raw["criteria"]
+    if not isinstance(criteria, list) or not criteria \
+            or not all(isinstance(c, str) and c.strip() == c and c for c in criteria) \
+            or len(set(criteria)) != len(criteria) or PRIMARY_ENDPOINT_EXCLUDES.intersection(criteria):
+        raise _refuse("discrimination_endpoint.criteria must be distinct nonempty task criterion names")
+    return DiscriminationEndpoint(tuple(criteria))
+
+
 def declaration_digest(data: Mapping[str, object]) -> str:
     """Exact declaration identity, excluding only the self-referential approval."""
     return trial.sha256_bytes(trial.canonical({k: v for k, v in data.items() if k != "approval"}))
@@ -498,6 +533,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
     _outcome_endpoint(data)
+    _discrimination_endpoint(data)  # refused on this kind
     lane = data.get("lane", DEFAULT_LANE)
     if lane not in LANES:
         raise _refuse(f"lane must be one of {LANES}, not {lane!r}")
@@ -794,6 +830,8 @@ class DiscriminationDeclaration:
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
     task_fixture: str = "fixture"
+    #: The declared obligation endpoint (#287 option 1), or None: the composite.
+    endpoint: DiscriminationEndpoint | None = None
 
 
 def _expected_degraded_revision(intact_subject: Mapping[str, object]) -> str:
@@ -886,7 +924,7 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
         shared=fields.shared, task_path=fields.task_path, grader_id=fields.grader_id,
         grader_revision=fields.grader_revision, retain_transcripts=True,
         tolerance_non_evaluable_per_arm=non_evaluable, approval=fields.approval, data=dict(data),
-        task_fixture=fields.task_fixture,
+        task_fixture=fields.task_fixture, endpoint=_discrimination_endpoint(data),
     )
 
 
@@ -1173,8 +1211,21 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     _require_no_placeholders(declaration.data)
     _require_new_kind_bindings(declaration.data)
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
+    require_discrimination_endpoint_criteria(declaration, root)
     _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
     _require_whole_declaration_approval(declaration.data, approval)  # the backstop, as in require_approved
+
+
+def require_discrimination_endpoint_criteria(declaration: DiscriminationDeclaration, root: Path) -> None:
+    """A declared obligation endpoint names criteria the task's grader ON DISK
+    actually has; a misspelt or retired criterion would score every attempt
+    INCONCLUSIVE, which reads as an agent problem."""
+    if declaration.endpoint is None:
+        return
+    known = {str(c) for c in verify.GraderDef.load(root / declaration.task_path).criteria}
+    missing = sorted(set(declaration.endpoint.criteria) - known)
+    if missing:
+        raise _refuse(f"discrimination_endpoint names criteria the grader does not have: {missing}")
 
 
 def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root: Path) -> None:

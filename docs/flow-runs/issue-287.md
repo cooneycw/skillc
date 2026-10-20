@@ -363,3 +363,29 @@ Bare finish gate on the fixture (pinned 86641e8 snapshot): `FLOW_FINISH_GATE: wa
 6. Tests: shim map, profile field, stage capture (finish), witness selection, judge cells, the flow-check route unchanged.
 
 Scope: large (#376-sized). Risks: changing the flow-check path (guarded by unchanged-route tests); the finish plan's stage ids differing from check's (mapped explicitly). Review: counter-model, cap 2.
+
+<!-- flow-run n=7 id=60ca96f7cf9a4254a6cf7a5f7c4e7891 -->
+## Run 7
+
+- Run-id:            60ca96f7cf9a4254a6cf7a5f7c4e7891
+- Run-start:         043279f48a2e5248997dbdd159b1aae34904478e
+- Issue:             #287
+- Base SHA:          043279f
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE: GO-WITH-CONDITIONS #287, rulings R1-R5 plus the pre-check evaluator red condition
+- Recorded at:       2026-10-20T13:30:00Z
+
+### Section B evidence
+#287 OPEN; option 1 parked 2026-10-18 (comment 6254060450). Since then: 796aae3 (#477, auto6 grader rev 1), 48f56db (#480), 043279f (#482); none builds a step6 subject, auto6 declarations or a discrimination endpoint. Merged PRs #468-#482 inspected. Superseded: issue-287-step6-precheck (0ee7170, cancelled). Duplicates: none.
+
+### Section C - the approved plan (this run is PR-A)
+1. `skillc/calibration.py` - opt-in discrimination_endpoint (closed v1 schema, criteria in the grader, never installation-ready), refused on non-discrimination kinds; absent byte-identical
+2. `skillc/calibration_run.py` - the discrimination report scores the selected endpoint when declared; composite and raw criteria beside it
+3. `evals/level3/gate-stops-early-auto6/grade_gate_stops_early_auto6.py` - revision 2: non-mandatory gate-definition-unmodified criterion (measured, never graded)
+4. `evals/level3/gate-stops-early-auto6/grader.json` - revision 2, the new criterion
+5. `evals/level3/gate-stops-early-auto6/qualify.py` - re-certify rev 2 with a tamper red and an untouched control
+6. `tests/test_calibration_discrimination_endpoint.py` - endpoint parse reds, scoring, the approved-declaration negative control
+7. `tests/test_gate_stops_early_auto6.py` - the tamper criterion's reds and controls
+8. `changelog.d/287-auto6-pilot.md` - one bullet
+Scope: medium-large. Risks: runner change on the approved pilots' path (opt-in, approved digest as negative control); grader revision bump; tolerance 1/arm.

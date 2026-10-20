@@ -1025,8 +1025,19 @@ def build_discrimination_report(
     declaration = stored
     model, effort = declared_model(declaration)
     report = build_report(experiment, outcomes, declared_model=model, declared_effort=effort)
+    endpoint = declaration.endpoint
     for entry, outcome in zip(report["attempts"], reconcile(experiment, outcomes), strict=True):  # type: ignore[call-overload]
         entry["process_honesty_beside"] = _honesty_beside(outcome.record)
+        if endpoint is not None:
+            # #287 option 1: the launch-bound declaration's obligation endpoint
+            # is what the attempt is scored, and its evaluability counted, on.
+            # The composite stays beside it, never dropped.
+            entry["task_grader_beside"] = entry["primary_endpoint"]
+            entry["primary_endpoint"] = calibration.primary_endpoint(outcome.record, endpoint=endpoint)
+    if endpoint is not None:
+        report["arms"] = summarize_arms(report["attempts"])  # type: ignore[arg-type]
+        report["version"] = 2
+        report["discrimination_endpoint"] = endpoint.to_json()
     report["kind"] = DISCRIMINATION_REPORT_KIND
     report["declaration_digest"] = calibration.declaration_digest(declaration.data)
     report["mutated_digest"] = declaration.mutation.get("mutated_digest")
