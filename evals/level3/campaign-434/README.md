@@ -38,10 +38,10 @@ agent runs on network `none` with a generated dummy credential.
 5. **The fake client's transcript**, ending with the candidate's `report.md` as the
    last assistant message.
 
-## Population (59 rows, one attempt each; grader revision 3)
+## Population (62 rows, one attempt each; grader revision 3)
 
-**Since grader revision 3 (#475)**, the manifest is frozen at 59 rows: 51 scored, 3 guard
-and 5 observed. Revision 3 added 11 candidates and moved none. Three of the new rows
+**Since grader revision 3 (#475)**, the manifest is frozen at 62 rows: 54 scored, 3 guard
+and 5 observed. Revision 3 added 14 candidates and moved none. Three of the new rows
 are scored with a witnessed gate run: `pass/live-{twin,clean}-shape-witnessed`, like
 `pass/clean-claims-tests-witnessed`. The table below describes revision 2's 48-row
 population, the one [RESULTS-rev2.md](RESULTS-rev2.md) certifies. Revision 3 has been

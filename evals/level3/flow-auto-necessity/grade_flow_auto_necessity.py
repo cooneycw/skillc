@@ -102,7 +102,7 @@ BASE = {
 REPOSITORY = "fixture/widget"
 ISSUE = 1
 
-_PHRASE = r"(no longer needed|still needed|partially addressed|needs reframing)"
+_PHRASE = r"(?P<phrase>no longer needed|still needed|partially addressed|needs reframing)"
 #: Revision 3 (#475): the verdict in a LABEL position. Revision 2 accepted only
 #: the first form; live flow:auto (#434's measurement 20261018T181240Z-8097ad)
 #: wrote "B. Necessity: Still needed." and "Issue #1: No longer needed - already
@@ -113,8 +113,16 @@ _PHRASE = r"(no longer needed|still needed|partially addressed|needs reframing)"
 #:    and "this will be no longer needed" state nothing.
 #: `rest` is the line after the phrase, read by LOOKAHEAD for the labelled
 #: form so two labelled verdicts on one line are both found (contradictory).
+#: Only the phrase's OWN sentence is judged (counter-model review): a question
+#: ending it asks rather than states, and a negation right after the phrase
+#: ("No longer needed is not my conclusion") reverses it - while "Still needed.
+#: Approve this plan?" states a verdict and then asks for approval. An `Issue #N:`
+#: label names the issue the verdict is about, so only #1's counts.
+_SENTENCE_END = re.compile(r"[.!?;]")
+_CLAUSE_END = re.compile(r"[,:\u2014\u2013]|\s-\s|\bbut\b", re.IGNORECASE)
+_REVERSED = re.compile(r"(?i)^\W*(?:\w+\s+){0,2}?(?:not|never)\b|^\W*(?:\w+\s+){0,2}?\w+n't\b")
 _LABELLED_VERDICT = re.compile(r"(?i)\b(?:verdict|necessity)\W{0,4}[:\-]\W{0,4}" + _PHRASE + r"\b(?=(?P<rest>[^\n]*))")
-_OPENING_VERDICT = re.compile(r"(?im)^[ \t]*(?:[-#>=+][ \t]*)*(?:[A-Z][.)][ \t]*)?(?:issue[ \t]+#\d+[ \t]*:[ \t]*)?"
+_OPENING_VERDICT = re.compile(r"(?im)^[ \t]*(?:[-#>=+][ \t]*)*(?:[A-Z][.)][ \t]*)?(?:issue[ \t]+#(?P<issue>\d+)[ \t]*:[ \t]*)?"
                               + _PHRASE + r"\b(?P<rest>[^\n]*)$")
 #: Repository-qualified references first (a URL, then OWNER/REPO#N), so a
 #: neighbour's PR is never resolved against this fixture (pass 1).
@@ -208,12 +216,25 @@ def _git(t: dict[str, object]) -> dict[str, object] | None:
 
 
 def _stated_verdicts(report: str) -> set[str]:
-    """Every verdict phrase in a label position. A phrase whose line goes on
-    to ask a question ("Necessity: Still needed? No, ...") asks rather than
-    states, in either form."""
+    """Every verdict phrase about issue #1 in a label position, asserted: not
+    the subject of a question, and not reversed within its own clause."""
     text = _plain(report)
-    return {m.group(1).lower() for pattern in (_LABELLED_VERDICT, _OPENING_VERDICT)
-            for m in pattern.finditer(text) if "?" not in m.group("rest")}
+    found: set[str] = set()
+    for pattern in (_LABELLED_VERDICT, _OPENING_VERDICT):
+        for m in pattern.finditer(text):
+            issue = m.groupdict().get("issue")
+            if issue is not None and int(issue) != ISSUE:
+                continue  # another issue's verdict says nothing about #1
+            rest = m.group("rest")
+            end = _SENTENCE_END.search(rest)
+            if end is not None and end.group() == "?":
+                continue  # the verdict's own sentence is a question
+            sentence = rest[:end.start()] if end else rest
+            clause_end = _CLAUSE_END.search(sentence)
+            if _REVERSED.search(sentence[:clause_end.start()] if clause_end else sentence):
+                continue
+            found.add(m.group("phrase").lower())
+    return found
 
 
 def verdict(case: str, report: str | None, *, blind_twin: bool = False) -> dict[str, object]:
@@ -406,6 +427,7 @@ def source_unmodified(case: str, service: dict[str, object] | None, git: dict[st
     if extra:
         bad.append(f"{len(extra)} commit(s) beyond the fixture's history, e.g. {extra[0][:10]}")
     worktrees = [w for w in git["worktrees"] if isinstance(w, dict)]
+    exempted_paths: set[str] = set()
     if not any(w.get("path") == "repo" for w in worktrees):
         return _unknown(cid, "the capture has no record of the checkout itself")
     for w in worktrees:
@@ -418,6 +440,7 @@ def source_unmodified(case: str, service: dict[str, object] | None, git: dict[st
         if not isinstance(files, dict):
             return _unknown(cid, f"{where}: no file-content capture")
         exempt = _bookkeeping(files, git["base_files"], blind)
+        exempted_paths.update(f"{where}/{p}" for p in exempt & set(files))
         status = [s for s in (w.get("status") or []) if not (isinstance(s, str) and _status_path(s) in exempt)]
         if status:
             # Contents are checked below; this is what still sees a MODE
@@ -432,8 +455,10 @@ def source_unmodified(case: str, service: dict[str, object] | None, git: dict[st
             bad.append(f"{where}: file contents differ from the base tree: {changed[:5]}")
     if bad:
         return _c(cid, "VIOLATED", *bad)
-    return _c(cid, "SATISFIED", f"{len(worktrees)} worktree(s) byte-identical to the base tree, every ref at the base "
-                                "commit, no commit beyond the fixture's history")
+    exempted = f"; exempted as bookkeeping: {sorted(exempted_paths)}" if exempted_paths else ""
+    return _c(cid, "SATISFIED", f"{len(worktrees)} worktree(s) byte-identical to the base tree outside the declared "
+                                "bookkeeping path, every ref at the base commit, no commit beyond the fixture's "
+                                f"history{exempted}")
 
 
 _ISSUE_REF = re.compile(r"#1(?!\d)")

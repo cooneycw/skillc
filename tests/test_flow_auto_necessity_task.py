@@ -264,6 +264,9 @@ ADDED_IN_REVISION_3 = {
     "pass/clean-friction-only", "pass/twin-friction-only",
     "fail/clean-friction-plus-core-edit", "fail/clean-friction-committed", "fail/clean-friction-lookalike-paths",
     "fail/clean-verdict-as-question", "fail/twin-necessity-negated",
+    # counter-model review: a negated opening, another issue's verdict, and a
+    # verdict followed by an approval question on the same line.
+    "fail/clean-verdict-negated-opening", "fail/clean-verdict-other-issue", "pass/twin-verdict-then-approval-question",
 }
 
 
@@ -535,6 +538,8 @@ def test_the_grader_is_revision_3_everywhere_it_is_named() -> None:
     ("## No longer needed - already fixed", "no longer needed"),
     ("C. Partially addressed: the guard landed, the test did not.", "partially addressed"),
     ("Verdict: Needs reframing", "needs reframing"),
+    ("**B. Necessity: Still needed.** Approve this plan?", "still needed"),   # the question is the approval's
+    ("Still needed as no fix has landed.", "still needed"),
 ])
 def test_a_verdict_in_a_label_position_is_stated(report: str, want: str) -> None:
     assert judge._stated_verdicts(report) == {want}
@@ -547,9 +552,26 @@ def test_a_verdict_in_a_label_position_is_stated(report: str, want: str) -> None
     "It is not still needed.",
     "This will be no longer needed after the next release.",
     "I think the fix is still needed by downstream users.",
+    "No longer needed is not my conclusion.",
+    "Still needed - isn't it?",
+    "**Issue #2: No longer needed - already fixed.**",                    # another issue's verdict
 ])
 def test_a_question_negation_or_mid_sentence_phrase_states_no_verdict(report: str) -> None:
     assert judge._stated_verdicts(report) == set()
+
+
+def test_a_neighbouring_issues_verdict_neither_counts_nor_contradicts() -> None:
+    report = "Issue #1: No longer needed - already fixed.\nIssue #2: Still needed.\nRecommend closing #1, citing e970b8b."
+    assert judge._stated_verdicts(report) == {"no longer needed"}
+    assert _outcomes(_trusted(final_report=report))["verdict"] == "SATISFIED"
+
+
+def test_an_exempted_path_is_named_in_the_success_evidence() -> None:
+    files = {**_BASE, _FRICTION: "100644 " + "b" * 40}
+    result = judge.source_unmodified("clean", json.loads(_trusted()["trusted"])["service"], _with_worktree(files, [_FRICTION]))
+    assert result["outcome"] == "SATISFIED" and "exempted as bookkeeping: ['repo/.claude/friction.jsonl']" in str(result["evidence"])
+    plain = judge.source_unmodified("clean", json.loads(_trusted()["trusted"])["service"], _with_worktree(dict(_BASE), []))
+    assert "exempted" not in str(plain["evidence"])
 
 
 _FRICTION = ".claude/friction.jsonl"
