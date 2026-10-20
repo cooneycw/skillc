@@ -1621,3 +1621,102 @@ def test_redaction_replaces_only_the_protected_values() -> None:
     assert at.transcript_leak_findings(kept) == []
     assert at.transcript_leak_findings(line) != []  # the unredacted input is refused
 
+
+
+# --- #486 PR-2: the observation core and the credit gate, extracted as pure functions ---
+
+_PROMPT = "Invoke the demo-skill skill, then use a tool to write the exact text 'touched:x' to a file."
+
+
+def _live_hook_observation(raw: bytes, prompt: str = _PROMPT) -> dict[str, object]:
+    """What the REAL live teardown hook stores for one transcript's bytes: the
+    hook, called with a backend that serves exactly that one transcript file."""
+    class _Serving(d.DockerBackend):
+        def read_home_tree(self, handle: object, container_reldir: str, *, max_bytes: int | None = None,
+                           max_files: int | None = None) -> dict[str, bytes]:
+            return {"2026/10/20/rollout-x.jsonl": raw}
+
+    backend = object.__new__(_Serving)  # no container: only the transcript read is served
+    hook = at._make_observe_before_teardown(spec=at.CLIENT_SPECS["codex"], expected_prompt=prompt, skill_name=None,
+                                            delivered_credential_bytes={})
+    return dict(hook(backend, None))
+
+
+def _pure_observation(raw: bytes, prompt: str = _PROMPT) -> dict[str, object]:
+    observation, census, run_metadata = at.observe_transcript_bytes(
+        at.CLIENT_SPECS["codex"], raw, expected_prompt=prompt, skill_name=None)
+    return {**observation.to_fields(), **census, "run_metadata": run_metadata}
+
+
+@pytest.mark.parametrize("name", sorted(p.stem for p in _CODEX_FIXTURES.glob("*.jsonl")))
+def test_the_pure_observation_is_exactly_what_the_live_hook_stores(name: str) -> None:
+    """Orchestrator condition on #486 PR-2: the re-grade derives observations
+    with the SAME code a live attempt runs. Every field the pure function
+    returns equals what the live hook stores for the same bytes."""
+    raw = (_CODEX_FIXTURES / f"{name}.jsonl").read_bytes()
+    pure, live = _pure_observation(raw), _live_hook_observation(raw)
+    assert pure and {k: live[k] for k in pure} == pure
+
+
+#: #434's 2026-10-20 campaign transcripts: the owner's private run evidence,
+#: never committed. Elsewhere this skips, loudly, naming the store.
+_CAMPAIGN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign" / "20261020T141529Z-3585c9"
+                   / "store" / "level3-fixture-live-ec3d4e35" / "objects")
+
+
+def test_the_pure_observation_matches_the_live_hook_on_the_campaign_transcripts() -> None:
+    if not _CAMPAIGN_STORE.is_dir():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {_CAMPAIGN_STORE} is not on this host; the #486 equivalence over the "
+                    "real campaign transcripts did not run")
+    transcripts = [p for p in _CAMPAIGN_STORE.iterdir()
+                   if p.stat().st_size > 300_000 and p.read_bytes()[:200].count(b'"session_meta"')]
+    assert len(transcripts) == 10
+    for path in transcripts:
+        raw = path.read_bytes()
+        pure, live = _pure_observation(raw), _live_hook_observation(raw)
+        assert {k: live[k] for k in pure} == pure, path.name
+        assert pure["canary_satisfied"] is True and pure["transcript_unrecognized_types"] == []
+
+
+def _observed(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "status": "observed", "grading_eligible": True, "prompt_delivered": True, "canary_satisfied": True,
+        "server_side_tool_uses": [], "transcript_response_items_inspected": 5,
+        "transcript_line_types": {"response_item/message": 5}, "transcript_unrecognized_types": [],
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.parametrize(("kwargs", "observation", "starts"), [
+    ({"witness_failure": "witness broke"}, _observed(), "witness broke"),
+    ({"disposition": "unavailable"}, _observed(), "attempt disposition is 'unavailable'"),
+    ({}, None, "the transcript observation is unknown"),
+    ({}, _observed(grading_eligible=False, canary_satisfied=False), "prompt_delivered=True, canary_satisfied=False"),
+    ({}, _observed(server_side_tool_uses=None), "not credited: server-side tool inspection unavailable"),
+    ({}, _observed(server_side_tool_uses=["web_search_call"]), "not credited: server-side tool observed"),
+    ({}, _observed(transcript_line_types={"<unparseable>": 1}), "not credited: the transcript census is incomplete"),
+    ({}, _observed(transcript_unrecognized_types=None), "not credited: the transcript census could not assess"),
+    ({}, _observed(transcript_unrecognized_types=["x"]), "not credited: transcript format drift"),
+    ({"fixture_block": lambda: "not credited: nested codex"}, _observed(), "not credited: nested codex"),
+])
+def test_the_credit_gate_refuses_in_its_order(kwargs: dict[str, object], observation: object, starts: str) -> None:
+    args: dict[str, object] = {"client": "codex", "disposition": "captured", **kwargs}
+    reason = at.credit_block(observation, **args)  # type: ignore[arg-type]
+    assert isinstance(reason, str) and reason.startswith(starts)
+
+
+def test_the_credit_gate_passes_a_clean_attempt_and_spares_claude_the_codex_census_rules() -> None:
+    assert at.credit_block(_observed(), client="codex", disposition="captured") is None
+    claude = _observed(transcript_response_items_inspected=None, transcript_unrecognized_types=None,
+                       transcript_line_types={"assistant": 3})
+    assert at.credit_block(claude, client="claude-code", disposition="captured") is None
+    called: list[int] = []
+
+    def block() -> str:
+        called.append(1)
+        return "x"
+
+    assert at.credit_block(_observed(grading_eligible=False), client="codex", disposition="captured",
+                           fixture_block=block) is not None
+    assert called == []  # the fixture block is consulted only once everything earlier has passed

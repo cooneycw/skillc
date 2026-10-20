@@ -2028,6 +2028,57 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
 
 
 def cmd_level3_live(args: argparse.Namespace) -> int:
+    if getattr(args, "judge_replay", None):
+        return _cmd_level3_live_judge_replay(args)
+    return _cmd_level3_live_run(args)
+
+
+def _cmd_level3_live_judge_replay(args: argparse.Namespace) -> int:
+    """#486: a judge replay over a retained run. Nothing is spent, so no approval
+    is checked; the declaration must be the one the run was declared at, and the
+    skillc checkout must be clean, since its HEAD is the adapter revision. The
+    output is never called a grade or a result."""
+    import subprocess
+    from datetime import UTC, datetime
+
+    from . import calibration_run as cr
+    from . import fixture_live as fl
+
+    try:
+        declaration = fl.load_declaration(Path(args.declaration))
+    except (fl.LiveRefused, OSError, ValueError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    git = ["git", "-C", str(cr.ROOT)]
+    dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    if dirty.returncode != 0 or head.returncode != 0 or dirty.stdout.strip():
+        print("skillc: the skillc checkout must be a clean git tree; the judge replay binds its HEAD", file=sys.stderr)
+        return 2
+    run_dir = Path(args.judge_replay).expanduser().resolve()
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        path, report = fl.judge_replay(run_dir, declaration, root=cr.ROOT, adapter_revision=head.stdout.strip(),
+                                       stamp=stamp, assume_fixture_finalized=args.assume_fixture_finalized)
+    except (fl.LiveRefused, OSError, ValueError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    label = report["judge_replay"]
+    print(f"skillc: JUDGE REPLAY - not a verified result; decided after seeing results; no spend - of {run_dir}",
+          file=sys.stderr)
+    print(f"skillc: fixture finalization: {label['fixture_finalization']}", file=sys.stderr)
+    print(f"skillc: original report sha256 before {label['source_report_sha256']} "
+          f"after {label['source_report_sha256_after']}", file=sys.stderr)
+    for case, counts in report["cases"].items():
+        print(f"skillc: {case}: {counts}", file=sys.stderr)
+    for attempt in report["attempts"]:
+        print(f"skillc: {attempt['trial_id']}: replay {attempt['replay_status']} "
+              f"(re-decided: {attempt['re_decided']}; blocked: {attempt['replay_blocked_reason']})", file=sys.stderr)
+    print(f"skillc: judge replay report: {path}", file=sys.stderr)
+    return 0
+
+
+def _cmd_level3_live_run(args: argparse.Namespace) -> int:
     """Issue #434: run an APPROVED `level3-fixture-live-declaration`: the MODEL
     runs CPP's real flow:auto on the fixture-service task, CLEAN and TWIN, with
     provider-only egress (#442), the nested-codex guard and the native
@@ -2957,6 +3008,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--rehearse", choices=["dry", "actor"], default=None,
         help="spend nothing: 'dry' starts no container; 'actor' runs the real live path with a scripted actor "
              "and a dummy credential. Either may run an unapproved declaration (the report says so)",
+    )
+    p_level3_live.add_argument(
+        "--judge-replay", metavar="RUN_DIR", default=None,
+        help="issue #486: re-run the CURRENT judge over a RETAINED run's evidence, re-deciding only what the "
+             "transcript adapter decided; spends nothing (no agent container, client or model). NOT a verified "
+             "result: writes RUN_DIR/judge-replay-<stamp>/judge-replay-report.json and never touches the originals",
+    )
+    p_level3_live.add_argument(
+        "--assume-fixture-finalized", action="store_true",
+        help="with --judge-replay only: take complete fixture evidence as standing for a clean fixture "
+             "finalization, which no retained record establishes; recorded verbatim in the replay's label "
+             "(default: not assumed, so such attempts are not judged)",
     )
     p_level3_live.set_defaults(func=cmd_level3_live)
 

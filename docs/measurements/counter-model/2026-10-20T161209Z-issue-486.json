@@ -1,0 +1,27 @@
+{
+  "branch": "issue-486-regrade-tool",
+  "counts": {
+    "accepted": 11,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "6cbbf32399da297ddf95435f0c9eaa9a5e709928",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "486",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-20T16:12:09Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 11
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T11-56-05-01a15a06-ea8b-78f2-9127-d2b8038e99cd.jsonl",
+    "thread_id": "01a15a06-ea8b-78f2-9127-d2b8038e99cd"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
