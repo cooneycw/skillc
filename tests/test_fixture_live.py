@@ -478,11 +478,32 @@ def test_the_campaign_declaration_carries_the_owners_approval_at_the_packaged_di
     approval = declaration.approval
     assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
     assert declaration.digest == approval["declaration_digest"] == CAMPAIGN_DIGEST
-    fl.require_approved(declaration, ROOT)
+
+
+def test_the_spent_campaign_declaration_is_refused_since_grader_revision_4() -> None:
+    """The owner approved a campaign at grader REVISION 3, and it ran
+    (20261020T141529Z-3585c9). Revision 4 (#487) moved the grader, so the
+    approval does not carry over: the committed file is the historical record
+    and authorizes nothing. A campaign at revision 4 needs its own declaration
+    and its own approval."""
+    declaration = fl.load_declaration(CAMPAIGN)
+    assert declaration.task["grader_revision"] == "3"
+    with pytest.raises(fl.LiveRefused, match=r"differ from the repository: \['grader_revision', 'grader_digest'\]"):
+        fl.require_approved(declaration, ROOT)
+
+
+def _campaign_draft() -> dict[str, Any]:
+    """The committed campaign declaration with its task identities re-derived
+    from THIS tree (the `_draft()` pattern): the committed file is never
+    edited, and since grader revision 4 (#487) the repository refuses it."""
+    data: dict[str, Any] = json.loads(CAMPAIGN.read_text(encoding="utf-8"))
+    data["task"].update(copy.deepcopy(_identity()))
+    return data
 
 
 def test_the_campaign_approval_does_not_survive_a_changed_field() -> None:
-    data = json.loads(CAMPAIGN.read_text())
+    data = _approve(_campaign_draft())
+    fl.require_approved(fl.parse_declaration(data), ROOT)  # approved as is
     data["shared"]["per_attempt_seconds"] = 901
     with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
         fl.require_approved(fl.parse_declaration(data), ROOT)
@@ -518,7 +539,7 @@ def test_a_malformed_primary_endpoint_is_refused(endpoint: Any, match: str) -> N
 
 
 def test_an_endpoint_naming_a_criterion_the_grader_lacks_is_refused() -> None:
-    data = json.loads(CAMPAIGN.read_text())
+    data = _campaign_draft()
     data["primary_endpoint"]["criteria"] = [*ENDPOINT, "tests-pass"]
     with pytest.raises(fl.LiveRefused, match=r"criteria the grader does not have: \['tests-pass'\]"):
         fl.require_approved(fl.parse_declaration(data), ROOT, approval_required=False)

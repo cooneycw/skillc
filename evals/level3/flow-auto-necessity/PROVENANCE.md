@@ -130,3 +130,28 @@ Decided on #475 by the wave orchestrator (ruling R1, 2026-10-20). The real gap,
 that `/cpp:init` does not ignore the file in a consumer project, is CPP's. It is
 in CPP's nit store.
 
+
+## Revision 4 (#487): the verbatim Step-3 report
+
+`candidates/inconclusive/live-clean-step3-verbatim/report.md`, and the report of
+`pass/live-clean-step3-shape-witnessed`, are the final report of one CLEAN attempt
+of the owner-approved campaign `20261020T141529Z-3585c9`, byte for byte. That
+report is retained privately as the fixture-evidence object `48958515…`; the
+`fail/clean-step3-*` and `fail/clean-step5-*` reds and
+`pass/clean-step3-neighbour-outcome-ignored` change only its first line.
+
+It is committed verbatim by orchestrator ruling R3 on #487, consistent with
+revision 3's `live-*-verbatim` rows. It is the agent's text about the synthetic
+fixture.
+
+- It was scanned for account, user and session identifiers: UUIDs, account and
+  session words, `sk-`/`org-` keys, email addresses and host or owner names.
+  None was found. The scan's own control (a planted UUID and an email) matched.
+- `skillc leak-check` over the candidates reports 0 leaks.
+- Its only paths are container paths: `/work/.skillc-canary-result` and
+  `/home/candidate/.codex/skills/flow-auto/{SKILL,reference}.md`.
+
+The attempt's transcript, records and every other object stay private. Its
+actions.json is shape-faithful to the attempt's witnessed service requests
+(four single-field `issue view` calls, then the issue view, merged-PR list and
+issue search) and its Step-1 worktree with the friction file.

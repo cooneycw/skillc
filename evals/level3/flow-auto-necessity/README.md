@@ -141,3 +141,63 @@ misread real output. Revision 3 changes the judge, not the fixture:
 Revision 3 is certified by qualify (62 candidates). The scripted real-container campaign
 ([campaign-434](../campaign-434/)) was re-frozen at revision 3 (65 rows) but not re-run.
 Its committed results certify revision 2.
+
+## Grader revision 4 (#487): the verdict as flow:auto's Step-3 outcome
+
+The owner-approved campaign `20261020T141529Z-3585c9` ran 5 CLEAN and 5 TWIN
+attempts. Nine of the ten reports state their verdict in a form revision 3
+already reads. The tenth opened with:
+
+    Flow stopped at Step 3: **No longer needed**.
+
+That verdict was right, and revision 3 read it as no verdict. Step 3 is
+flow:auto's ELI5 gate, and the line follows flow:auto's own stop template at the
+pinned subject (CPP 86641e8, `codex/skills/flow-auto/reference.md`):
+"Flow Auto stopped at Step N/9: {Step Name}". The verdict sits in the name slot.
+
+Revision 4 adds exactly one label: `Step 3` (or `Step 3/N`). It counts **only**
+as the whole outcome of that step. The verdict's clause must end at the phrase,
+so "Stopped at Step 3: No longer needed - already fixed." states a verdict, and
+"We reached Step 3: still needed to fix X." does not. Every revision-3 refusal
+still applies to the new label: a question, a copula negation, a conditional,
+and another issue's `Issue #N:` prefix. Another step's label (Step 5, Step 30)
+is never a verdict. The label counts only in the template's own form, opening
+a line or a sentence: `[Issue #1:] [Flow [Auto]] stopped at Step 3:`. This is a
+positive grammar, not a list of refused words. A conditional, negated, quoted or
+other-issue lead-in ("If PR #2 is confirmed, flow will stop at Step 3: ...",
+"Flow didn't stop at ...", "For issue #2, flow stopped at ...") is not the
+template, so it states nothing. The rest of the verdict's sentence may not
+condition the outcome or scope it to another issue ("..., if PR #2 lands",
+"- for issue #2"). A neighbour's outcome neither counts nor contradicts #1's. Revision 4 was decided AFTER seeing the campaign's results.
+The fresh campaign is what tests it.
+
+Candidates (11 added, none moved):
+
+- `inconclusive/live-clean-step3-verbatim`: the live report verbatim (see
+  PROVENANCE). It is INCONCLUSIVE on its unwitnessed test claim, as the replay
+  found.
+- `pass/live-clean-step3-shape-witnessed`: the same report with a witnessed
+  gate run.
+- `pass/clean-step3-neighbour-outcome-ignored`: issue #2's Step-3 outcome beside
+  #1's.
+- Reds:
+  - `fail/clean-step3-verdict-as-question`;
+  - `fail/clean-step3-verdict-negated`;
+  - `fail/clean-step3-verdict-conditional`;
+  - `fail/clean-step3-other-issue`;
+  - `fail/clean-step5-label-not-a-verdict`;
+  - `fail/clean-step3-lead-in-runs-on`;
+  - `fail/clean-step3-conditional-lead-in`;
+  - `fail/clean-step3-other-issue-lead-in`.
+
+On revision 3 both new positive rows grade FAIL on `verdict`. With the
+whole-clause rule removed, `fail/clean-step3-lead-in-runs-on` grades PASS, and
+without the lead-in guard the two lead-in reds grade PASS. Qualify refuses each. A private regression test replays all ten campaign
+reports from the owner's store: each states its case's verdict at revision 4,
+and exactly one (`48958515…`) states none at revision 3's label set. It skips
+loudly where the store is absent.
+
+Revision 4 is certified by qualify (73 candidates). The scripted real-container
+campaign ([campaign-434](../campaign-434/)) was re-frozen at revision 4 (76 rows)
+but not re-run. The owner-approved revision-3 campaign declaration is now refused
+as spent; a campaign at revision 4 needs its own declaration and approval.
