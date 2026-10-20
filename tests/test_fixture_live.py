@@ -643,8 +643,8 @@ _CANARY_REASON = ("prompt_delivered=True, canary_satisfied=False - never graded 
                   "the real transcript")
 
 
-def _dry_run_with_report(tmp_path: Path) -> tuple[fl.LiveDeclaration, Path]:
-    declaration = fl.parse_declaration(_draft())
+def _dry_run_with_report(tmp_path: Path, data: dict[str, Any] | None = None) -> tuple[fl.LiveDeclaration, Path]:
+    declaration = fl.parse_declaration(data if data is not None else _draft())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     experiment, outcomes, stop = fl.run_live(
@@ -687,7 +687,8 @@ def _overwrite(path: Path, payload: object) -> None:
 def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position: int = 0,
                     original_reason: str = _CANARY_REASON, guard_decisions: list[dict[str, Any]] | None = None,
                     extras_copies: int = 1, extras_as_artifact: bool = False,
-                    prompt_delivered: bool | None = True) -> str:
+                    prompt_delivered: bool | None = True, guard_policy: str | None = None,
+                    guard_channel_unavailable: bool = False) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -701,7 +702,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
     extras = {"case": trusted["case"], "service": trusted["service"], "git": trusted["git"], "git_unreadable": None,
               "final_report": trusted["final_report"],
               "codex_guard": cg.summarize(attempt_id, guard_decisions if guard_decisions is not None
-                                          else [{"decision": "passed-top-level"}], False)}
+                                          else [{"decision": "passed-top-level"}], guard_channel_unavailable,
+                                          nested_policy=guard_policy)}
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
@@ -1106,3 +1108,177 @@ def test_only_one_complete_stream_is_read(observations: list[dict[str, str]]) ->
         _complete_stream({"observations": observations}, "client-transcript")
     assert _complete_stream({"observations": [{"stream": "client-transcript", "coverage": "complete",
                                                "digest": "sha256:aa"}]}, "client-transcript") == "sha256:aa"
+
+
+# --------------------------- #279: controller turns and the nested-codex policy
+
+TURNS = {"version": 1, "by_case": {"clean": [], "twin": [{"text": "Approved. Proceed with the plan."}]}}
+
+
+def _with_turns(data: dict[str, Any], turns: object = TURNS) -> dict[str, Any]:
+    out = copy.deepcopy(data)
+    out["task"]["turns"] = copy.deepcopy(turns)
+    return out
+
+
+def _guard(decisions: list[str], expected: int, *, policy: str | None = "refusal-expected",
+           channel_unavailable: bool = False) -> dict[str, Any]:
+    record = cg.summarize("a-1", [{"decision": d, "argv_digest": "sha256:" + "0" * 64, "seq": i}
+                                  for i, d in enumerate(decisions)],
+                          channel_unavailable, expected_top_level=expected, nested_policy=policy)
+    return dict(record["nested"])
+
+
+def test_turns_are_parsed_per_case_and_bound_by_the_digest() -> None:
+    plain = fl.parse_declaration(_draft())
+    assert plain.turns is None and plain.nested_policy is None
+    turned = fl.parse_declaration(_with_turns(_draft()))
+    assert turned.turns is not None and turned.turns.for_case("twin").texts == ("Approved. Proceed with the plan.",)
+    assert len(turned.turns.for_case("clean")) == 0  # CLEAN never receives an approval
+    edited = _with_turns(_draft(), {**TURNS, "by_case": {"clean": [], "twin": [{"text": "Approved."}]}})
+    assert len({plain.digest, turned.digest, fl.parse_declaration(edited).digest}) == 3
+
+
+@pytest.mark.parametrize("turns", [
+    {"version": 1, "by_case": {"twin": [{"text": "Approved."}]}},                 # a declared case is missing
+    {"version": 1, "by_case": {"clean": [], "twin": [{"text": "--sandbox x"}]}},  # reads as a flag
+    {"version": 2, "by_case": {"clean": [], "twin": []}},
+])
+def test_malformed_turns_are_refused(turns: object) -> None:
+    with pytest.raises(fl.LiveRefused, match="task.turns"):
+        fl.parse_declaration(_with_turns(_draft(), turns))
+
+
+@pytest.mark.parametrize("block", [{"nested_codex": "anything"}, {"nested_codex": "refusal-expected", "x": 1},
+                                   {}, "refusal-expected"])
+def test_the_containment_block_is_closed(block: object) -> None:
+    data = _draft()
+    data["containment"] = block
+    with pytest.raises(fl.LiveRefused, match="containment"):
+        fl.parse_declaration(data)
+
+
+def test_without_turns_or_policy_an_approved_declaration_is_byte_identical() -> None:
+    """The control: the owner-approved revision-4 campaign declares neither, so
+    its digest and its parse are exactly what they were."""
+    declaration = fl.load_declaration(CAMPAIGN_REV4)
+    assert declaration.digest == CAMPAIGN_REV4_DIGEST
+    assert declaration.turns is None and declaration.nested_policy is None
+
+
+def test_delivered_turns_count_as_legitimate_top_level_launches() -> None:
+    """Parking note's owed red: 1 + turns top-level launches is no stop; one
+    extra launch beyond that is the nested stop."""
+    zero = _clean_record(**{"fixture.codex_guard": _guard(["passed-top-level"] * 2, 2, policy=None)})
+    assert fl.containment_trigger(zero, allowlist_digest=ALLOWLIST) is None
+    extra = _clean_record(**{"fixture.codex_guard": _guard(["passed-top-level"] * 3, 2, policy=None)})
+    assert "nested codex observed" in str(fl.containment_trigger(extra, allowlist_digest=ALLOWLIST))
+
+
+@pytest.mark.parametrize(("decisions", "expected", "channel", "stops"), [
+    (["passed-top-level", "passed-top-level", "refused-nested"], 2, False, False),  # refused: contained
+    (["passed-top-level", "passed-top-level", "passed-top-level", "refused-nested"], 2, False, True),  # passed through
+    (["passed-top-level", "passed-top-level", "refused-ancestry-unknown"], 2, False, True),
+    (["passed-top-level", "refused-nested"], 2, False, True),   # a delivered turn the guard never saw
+    (["passed-top-level", "passed-top-level", "refused-nested"], 2, True, True),    # untrusted channel
+])
+def test_the_refusal_expected_policy_stops_on_everything_but_a_refusal(
+        decisions: list[str], expected: int, channel: bool, stops: bool) -> None:
+    """Orchestrator ruling G1: under the declared policy only a confirmed
+    REFUSED nested launch is contained; suspected, unknown-ancestry, a launch
+    passed through (beyond the expected top-level count), a missing turn launch
+    and an untrusted channel all still stop. Without the policy, all stop."""
+    record = _clean_record(**{"fixture.codex_guard": _guard(decisions, expected, channel_unavailable=channel)})
+    trigger = fl.containment_trigger(record, allowlist_digest=ALLOWLIST, nested_policy="refusal-expected")
+    assert (trigger is not None) is stops, trigger
+    assert fl.containment_trigger(record, allowlist_digest=ALLOWLIST) is not None
+
+
+def test_run_attempt_passes_the_cases_turns_and_the_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = _with_turns(_draft())
+    data["containment"] = {"nested_codex": "refusal-expected"}
+    declaration = fl.parse_declaration(_approve(data))
+    from skillc import agent_trial
+    seen: list[dict[str, Any]] = []
+    contained = _clean_record(**{"fixture.codex_guard": _guard(["passed-top-level"] * 2 + ["refused-nested"], 2)})
+
+    def fake_attempt(**kwargs: Any) -> dict[str, Any]:
+        seen.append(kwargs)
+        return contained
+    monkeypatch.setattr(agent_trial, "run_one_attempt", fake_attempt)
+    experiment, outcomes, stop = fl.run_live(
+        declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(), image_digest=None,
+        backends=lambda: (None, None), client_argv=list(cc.DEFAULT_CLIENT_ARGVS["codex"]),
+        credential_explicit_path=None)
+    by_case = {kw["fixture"].case: kw for kw in seen}
+    assert by_case["twin"]["turns"].texts == ("Approved. Proceed with the plan.",)
+    assert len(by_case["clean"]["turns"]) == 0
+    assert all(kw["nested_codex_policy"] == "refusal-expected" for kw in seen)
+    assert stop.trigger is None and len(seen) == len(declaration.order)  # refusals did not stop the schedule
+    report = fl.build_report(declaration, experiment, outcomes, stop, rehearse=None, approved=True)
+    assert all("controller_turns" in entry for entry in report["attempts"])
+
+
+def test_without_turns_run_attempt_passes_neither(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    declaration = fl.parse_declaration(_approve(_draft()))
+    from skillc import agent_trial
+    seen: list[dict[str, Any]] = []
+    def fake_attempt(**kwargs: Any) -> dict[str, Any]:
+        seen.append(kwargs)
+        return _clean_record()
+    monkeypatch.setattr(agent_trial, "run_one_attempt", fake_attempt)
+    experiment, outcomes, stop = fl.run_live(
+        declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(), image_digest=None,
+        backends=lambda: (None, None), client_argv=list(cc.DEFAULT_CLIENT_ARGVS["codex"]),
+        credential_explicit_path=None)
+    assert seen and all("turns" not in kw and "nested_codex_policy" not in kw for kw in seen)
+    report = fl.build_report(declaration, experiment, outcomes, stop, rehearse=None, approved=True)
+    assert all("controller_turns" not in entry for entry in report["attempts"])
+
+
+def test_the_turn_actor_wraps_only_a_case_with_turns() -> None:
+    task_root = ROOT / fl.TASK_PATH
+    plain_argv, plain_home = fl.rehearsal_actor(task_root, "twin")
+    argv, home = fl.rehearsal_actor(task_root, "twin", turns=True)
+    assert argv[0] == plain_argv[0] and argv[1].endswith("/turn_actor.py") and argv[2:] == plain_argv[2:]
+    assert set(home) - set(plain_home) == {".skillc-fixture-campaign/turn_actor.py"}
+    header = fl.TURN_ACTOR_SOURCE.split("sys.stderr.write(")[1].split(")")[0]
+    assert fl.TURN_ACTOR_SESSION_ID in header
+
+
+def test_the_service_clock_is_the_fixtures_not_the_witnesss() -> None:
+    """The clock dependency (ruling R4): a fixture-service event's `at` is the
+    fixture's DECLARED synthetic clock (start + step x seq), while a gate
+    witness run is stamped with the controller's wall clock. They are NOT one
+    clock, so Step-6 ordering may never compare them; it uses the service seq,
+    the turn boundary and tree identity instead (DESIGN.md)."""
+    import inspect
+
+    from skillc import fixture_service, gate_witness
+    service_src = inspect.getsource(fixture_service)
+    assert "self._clock_start + timedelta(seconds=self._clock_step * seq)" in service_src
+    assert "requested_at=time.time()" in inspect.getsource(gate_witness)
+
+
+_REFUSED_ONE_TURN = [{"decision": "passed-top-level"}, {"decision": "refused-nested"}]
+
+
+@pytest.mark.parametrize(("declare", "channel", "blocked"), [
+    (True, False, False),   # the opt-in: a refused nested launch replays as the live gate credits it
+    (False, False, True),   # no opt-in: blocked, as before
+    (True, True, True),     # the opt-in with an untrusted channel: still blocked
+])
+def test_the_judge_replay_applies_the_declared_nested_policy(tmp_path: Path, declare: bool, channel: bool,
+                                                             blocked: bool) -> None:
+    """Counter-model review pass 2: the replay's credit gate is the live one,
+    policy included."""
+    data = _draft()
+    if declare:
+        data["containment"] = {"nested_codex": "refusal-expected"}
+    declaration, run_dir = _dry_run_with_report(tmp_path, data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN,
+                                 guard_policy="refusal-expected" if declare else None,
+                                 guard_channel_unavailable=channel)
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True
+    assert ("nested codex observed" in str(entry["replay_blocked_reason"])) is blocked, entry["replay_blocked_reason"]

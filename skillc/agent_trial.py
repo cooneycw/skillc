@@ -1968,7 +1968,7 @@ def _fixture_credit_block(session: FixtureSession) -> str | None:
         return f"not credited: {session.failure}"
     if session.record is None:
         return "not credited: the fixture service record was never finalized"
-    return cg.credit_block(session.guard_record())
+    return cg.credit_block(session.guard_record(), nested_policy=session.nested_policy)
 
 
 def _fixture_extras(session: FixtureSession | None,
@@ -2013,6 +2013,7 @@ def run_one_attempt(
     receipt_context: InstallationReceiptContext | None = None,
     fixture: AttemptFixture | None = None,
     turns: ct.Turns | None = None,
+    nested_codex_policy: str | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2104,7 +2105,13 @@ def run_one_attempt(
     record, a nested-codex count that is not zero), and grading receives the
     controller-held evidence as `verify`'s `trusted_extras`. `None` (the
     default) changes nothing for any other caller."""
+    if nested_codex_policy is not None and nested_codex_policy not in cg.NESTED_POLICIES:
+        raise ValueError(f"nested_codex_policy must be one of {cg.NESTED_POLICIES}, not {nested_codex_policy!r}")
     fixture_session = FixtureSession(fixture, attempt_id) if fixture is not None else None
+    if fixture_session is not None:
+        # #279 (ruling G1): the declared nested-codex policy, recorded and
+        # honoured only when declared; set before any guard record is read.
+        fixture_session.nested_policy = nested_codex_policy
     if fixture is not None:
         if gate_entrypoint is None:
             raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required")

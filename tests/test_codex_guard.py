@@ -548,3 +548,42 @@ def test_an_empty_interior_environment_entry_is_refused_not_dropped(
     proc = subprocess.run([sys.executable, "-c", raw], capture_output=True, timeout=30, check=False)
     assert proc.returncode == 3 and not out.exists(), proc.stderr
     assert [line["decision"] for line in rec.lines] == ["refused-ancestry-unknown"]
+
+
+# ------------------------- #279 (ruling G1): the declared refusal-expected policy
+
+def _record(decisions: list[str], expected: int = 2, *, policy: str | None = "refusal-expected",
+            channel_unavailable: bool = False) -> dict[str, object]:
+    return cg.summarize("a-1", [{"decision": d, "argv_digest": "sha256:" + "0" * 64, "seq": i}
+                                for i, d in enumerate(decisions)],
+                        channel_unavailable, expected_top_level=expected, nested_policy=policy)
+
+
+REFUSED = ["passed-top-level", "passed-top-level", "refused-nested"]
+
+
+def test_a_refusals_only_record_is_credited_only_under_the_policy() -> None:
+    assert cg.credit_block(_record(REFUSED), nested_policy="refusal-expected") is None
+    assert "nested codex observed" in str(cg.credit_block(_record(REFUSED)))   # no policy: as before
+    assert "nested codex observed" in str(cg.credit_block(_record(REFUSED, policy=None),
+                                                          nested_policy="refusal-expected"))  # no channel field
+
+
+@pytest.mark.parametrize(("decisions", "channel"), [
+    (["passed-top-level", "passed-top-level", "passed-top-level", "refused-nested"], False),  # passed through
+    (["passed-top-level", "passed-top-level", "refused-ancestry-unknown"], False),
+    (["passed-top-level", "refused-nested"], False),                                         # a turn never seen
+    (REFUSED, True),                                                                          # untrusted channel
+])
+def test_the_policy_still_blocks_everything_but_a_refusal(decisions: list[str], channel: bool) -> None:
+    assert cg.credit_block(_record(decisions, channel_unavailable=channel), nested_policy="refusal-expected")
+
+
+def test_an_unknown_policy_blocks_credit() -> None:
+    assert "unknown nested-codex policy" in str(cg.credit_block(_record(REFUSED), nested_policy="anything"))
+
+
+def test_without_a_policy_the_record_is_byte_identical() -> None:
+    nested = _record(["passed-top-level"], expected=1, policy=None)["nested"]
+    assert isinstance(nested, dict)
+    assert set(nested) == {"status", "top_level", "confirmed", "suspected", "ancestry_unknown"}

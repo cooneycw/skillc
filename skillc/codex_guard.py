@@ -104,7 +104,7 @@ class CodexGuardSession:
 
 
 def summarize(attempt_id: str, decisions: list[dict[str, Any]], channel_unavailable: bool,
-              expected_top_level: int = 1) -> dict[str, Any]:
+              expected_top_level: int = 1, *, nested_policy: str | None = None) -> dict[str, Any]:
     top = sum(1 for d in decisions if d["decision"] == "passed-top-level")
     confirmed = sum(1 for d in decisions if d["decision"] == "refused-nested")
     ancestry_unknown = sum(1 for d in decisions if d["decision"] == "refused-ancestry-unknown")
@@ -121,19 +121,55 @@ def summarize(attempt_id: str, decisions: list[dict[str, Any]], channel_unavaila
         # Only a multi-turn attempt (#279) records it, so a single-turn
         # attempt's stored record is byte-identical to before.
         nested["expected_top_level"] = expected_top_level
+    if nested_policy is not None:
+        # Only an attempt under a declared nested-codex policy (#279) records
+        # the channel's health beside the counts, so `refusals_only` can see it
+        # wherever only `nested` travels; every other record is unchanged.
+        nested["nested_policy"] = nested_policy
+        nested["channel_unavailable"] = channel_unavailable
     return {
         "kind": "codex-guard", "attempt_id": attempt_id, "decisions": decisions,
         "channel_unavailable": channel_unavailable, "nested": nested,
     }
 
 
-def credit_block(record: Mapping[str, Any] | None) -> str | None:
+#: #279 (orchestrator ruling G1): what a declaration may declare about nested
+#: codex. `refusal-expected`: flow:auto's Step 6 improvises its counter-model
+#: review as a nested codex (CPP 86641e8 ships no review skill), and the guard
+#: REFUSING it (exit 3, before any model contact) is containment working.
+#: Absent, every refusal stops and blocks credit, exactly as before.
+NESTED_POLICIES = ("refusal-expected",)
+
+
+def refusals_only(nested: Mapping[str, Any] | None) -> bool:
+    """True only when every nested launch the guard saw was REFUSED: at least
+    one confirmed refusal, none suspected (a top-level launch beyond the
+    expected count - a nested launch that was passed through), none of unknown
+    ancestry, exactly the expected top-level launches, and a channel the
+    record says was healthy (`channel_unavailable` False, which only an
+    opted-in attempt records). Anything else is not a refusal-only record."""
+    if not isinstance(nested, Mapping) or nested.get("status") != "observed" \
+            or nested.get("channel_unavailable") is not False:
+        return False
+    expected = nested.get("expected_top_level", 1)
+    return (isinstance(nested.get("confirmed"), int) and nested["confirmed"] > 0
+            and nested.get("suspected") == 0 and nested.get("ancestry_unknown") == 0
+            and nested.get("top_level") == expected)
+
+
+def credit_block(record: Mapping[str, Any] | None, *, nested_policy: str | None = None) -> str | None:
     """The credit gate's reason, or `None` when the attempt may be credited
     (orchestrator ruling: enforced where #442 enforces a server-side tool, never
-    in the frozen judge). A missing record is unknown, never zero."""
+    in the frozen judge). A missing record is unknown, never zero. Under the
+    declared `refusal-expected` policy (#279) a refusals-only record is
+    credited; a channel the guard could not trust still is not."""
+    if nested_policy is not None and nested_policy not in NESTED_POLICIES:
+        return f"not credited: unknown nested-codex policy {nested_policy!r}"
     nested = record.get("nested") if isinstance(record, Mapping) else None
     if not isinstance(nested, Mapping) or nested.get("status") not in ("zero", "observed", "unknown"):
         return "not credited: nested-codex count unknown (no guard record)"
+    if nested_policy == "refusal-expected" and refusals_only(nested):
+        return None
     if nested["status"] == "observed":
         return (f"not credited: nested codex observed (confirmed={nested.get('confirmed')}, "
                 f"suspected={nested.get('suspected')}, ancestry-unknown={nested.get('ancestry_unknown')})")

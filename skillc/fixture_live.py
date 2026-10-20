@@ -76,6 +76,8 @@ from typing import Any, cast
 
 from . import calibration, trial, verify
 from . import calibration_run as cr
+from . import codex_guard as cg
+from . import controller_turns as ct
 from . import egress as eg
 from . import fixture_campaign as fc
 from . import matched_pilot as mp
@@ -131,6 +133,12 @@ class LiveDeclaration:
     #: The declared primary endpoint's criteria (#434 campaign), or None: the
     #: composite graded status is the endpoint, as before the field existed.
     endpoint: tuple[str, ...] | None = None
+    #: #279: the declared controller turns per case (`task.turns`), or None:
+    #: every attempt stops where flow:auto stops (Step 3), as before.
+    turns: ct.CaseTurns | None = None
+    #: #279 (ruling G1): `containment.nested_codex`, or None: every nested
+    #: launch, refused or not, stops the schedule and blocks credit, as before.
+    nested_policy: str | None = None
 
     @property
     def shared(self) -> Mapping[str, Any]:
@@ -203,7 +211,26 @@ def parse_declaration(data: Mapping[str, Any]) -> LiveDeclaration:
         raise _refused(exc) from None
     if total < per_attempt:
         raise LiveRefused("shared.total_seconds is less than one attempt's per_attempt_seconds")
-    return LiveDeclaration(data, cases, attempts, order, tolerance, _parse_endpoint(data))
+    turns = None
+    if "turns" in data["task"]:
+        try:
+            turns = ct.parse_turns(data["task"]["turns"], cases)
+        except ct.TurnsRefused as exc:
+            raise LiveRefused(f"task.turns: {exc}") from None
+    return LiveDeclaration(data, cases, attempts, order, tolerance, _parse_endpoint(data), turns,
+                           _parse_containment(data))
+
+
+def _parse_containment(data: Mapping[str, Any]) -> str | None:
+    """An OPTIONAL `containment: {"nested_codex": "refusal-expected"}` (#279,
+    orchestrator ruling G1): closed keys and values, explicit, digest-bound;
+    never inferred from `task.turns`. Absent, containment is exactly #434's."""
+    if "containment" not in data:
+        return None
+    block = _need(data["containment"], dict, "containment")
+    if set(block) != {"nested_codex"} or block["nested_codex"] not in cg.NESTED_POLICIES:
+        raise LiveRefused(f"containment must be exactly {{nested_codex}} with a value from {list(cg.NESTED_POLICIES)}")
+    return str(block["nested_codex"])
 
 
 def _parse_endpoint(data: Mapping[str, Any]) -> tuple[str, ...] | None:
@@ -360,10 +387,14 @@ def _within_allowlist(target: str) -> bool:
     return bool(sep) and port == "443" and host.lower().rstrip(".") in eg.ALLOWED_HOSTS
 
 
-def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str) -> str | None:
+def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
+                        nested_policy: str | None = None) -> str | None:
     """Why this attempt stops the schedule, or `None`. Only a DISPATCHED
     attempt is read (an attempt that never launched reached nothing); for one,
-    every unknown is a stop, never a pass."""
+    every unknown is a stop, never a pass. Under a declared `refusal-expected`
+    nested-codex policy (#279, ruling G1) a refusals-only guard record does not
+    stop: the guard refused every nested launch before any model contact.
+    A suspected, unknown-ancestry or passed-through launch still stops."""
     if record.get("disposition") not in mp.DISPATCHED:
         return None
     observation = record.get("observation")
@@ -411,6 +442,8 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str) -> 
     fixture = record.get("fixture")
     guard = fixture.get("codex_guard") if isinstance(fixture, Mapping) else None
     status = guard.get("status") if isinstance(guard, Mapping) else None
+    if status == "observed" and nested_policy == "refusal-expected" and cg.refusals_only(guard):
+        return None
     if status == "observed":
         return (f"nested codex observed (confirmed={guard.get('confirmed')}, "  # type: ignore[union-attr]
                 f"suspected={guard.get('suspected')}, ancestry-unknown={guard.get('ancestry_unknown')})")  # type: ignore[union-attr]
@@ -427,17 +460,45 @@ class Stop:
     at_attempt: str | None = None
 
 
-def rehearsal_actor(task_root: Path, case: str) -> tuple[list[str], dict[str, bytes]]:
+#: #279: the turn-aware wrapper a multi-turn actor rehearsal runs in front of
+#: fixture_campaign's actor (`tests/fixtures/agent-trial/fake_turns_client.py`
+#: is the reference). Turn 1 prints the pinned client's stderr header - the
+#: controller reads the session id only from there - then runs the actor
+#: unchanged. A resume (`resume <id> <text>` as the last three arguments) makes
+#: one bare `codex --version` call, so the real guard records exactly one more
+#: top-level launch, as the real client's resume is one, and stops.
+TURN_ACTOR_SESSION_ID = "01a14f6a-cd7e-7851-8061-5cdeaaca5863"
+TURN_ACTOR_SOURCE = """\
+import os, subprocess, sys
+
+if len(sys.argv) >= 4 and sys.argv[-3] == "resume":
+    subprocess.run(["codex", "--version"])
+    sys.exit(0)
+sys.stderr.write("OpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
+sys.stderr.flush()
+actor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "actor.py")
+os.execv(sys.executable, [sys.executable, actor, *sys.argv[1:]])
+""".replace("@SESSION@", TURN_ACTOR_SESSION_ID)
+
+
+def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple[list[str], dict[str, bytes]]:
     """The actor's base argv and home files for `case`: fixture_campaign's own,
     playing `REHEARSAL_CANDIDATES[case]`. The server-side-off flags ride after
     its guard and gate arguments (the actor reads `argv[1]`, `argv[2]` and the
-    prompt, `argv[-1]`), so the live path's #442 preflight passes unchanged."""
+    prompt, `argv[-1]`), so the live path's #442 preflight passes unchanged.
+    With `turns` (#279: the case declares controller turns) the argv runs
+    `TURN_ACTOR_SOURCE` in front of the actor; without, it is exactly as before."""
     candidate = REHEARSAL_CANDIDATES[case]
     files = fc.candidate_files(task_root, fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", "", None,
                                                  {}, None))
     row = fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", fc.candidate_digest(files), None, {}, None)
     actions = json.loads(files["actions.json"])
-    return [*fc.actor_argv(row, actions), *eg.CODEX_SERVER_SIDE_OFF], fc.row_home_files(row, task_root)
+    argv, home = [*fc.actor_argv(row, actions), *eg.CODEX_SERVER_SIDE_OFF], fc.row_home_files(row, task_root)
+    if not turns:
+        return argv, home
+    wrapper = f"{fc.HOME_DIR}/turn_actor.py"
+    return ([argv[0], f"{fc.CONTAINER_HOME}/{wrapper}", *argv[2:]],
+            {**home, wrapper: TURN_ACTOR_SOURCE.encode("utf-8")})
 
 
 def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatment: cr.Treatment,
@@ -483,7 +544,9 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
         if rehearse == "dry":
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable",
                                   reason=cr.REHEARSAL_REASON)
-        base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm) if rehearse == "actor" else (argv, {}))
+        case_turns = declaration.turns.for_case(scheduled.arm) if declaration.turns is not None else None
+        base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns))
+                                 if rehearse == "actor" else (argv, {}))
         agent, grading = backends()
         case_dir = run_dir / "fixtures" / scheduled.attempt_id
         surface, fixture = fc.build_case(task_root, scheduled.arm, case_dir)
@@ -494,6 +557,10 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
             credential_explicit_path=cast(Path, credential_explicit_path), timeout=budget, treatment=treatment,
             fixture=fixture)
         kwargs["prompt"] = text
+        if case_turns is not None:
+            kwargs["turns"] = case_turns  # #279: the seam agreed with cpp-final-fix
+        if declaration.nested_policy is not None:
+            kwargs["nested_codex_policy"] = declaration.nested_policy
         from . import agent_trial
         try:
             return agent_trial.run_one_attempt(**kwargs)
@@ -503,7 +570,8 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     def record_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
         if stop.trigger is None:
-            trigger = containment_trigger(outcome.record, allowlist_digest=allowlist)
+            trigger = containment_trigger(outcome.record, allowlist_digest=allowlist,
+                                          nested_policy=declaration.nested_policy)
             if trigger is not None:
                 stop.trigger, stop.at_attempt = trigger, outcome.scheduled.attempt_id
         if on_outcome is not None:
@@ -579,7 +647,10 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
             "agent_seconds": mp.agent_seconds(experiment, outcome.scheduled.attempt_id),
             "egress_eligible": egress_ok, "egress_reason": egress_reason,
             "nested_codex": fixture.get("codex_guard") if isinstance(fixture, Mapping) else None,
-            "containment_trigger": containment_trigger(record, allowlist_digest=allowlist),
+            "containment_trigger": containment_trigger(record, allowlist_digest=allowlist,
+                                                       nested_policy=declaration.nested_policy),
+            # #279: what the controller delivered, only when turns are declared.
+            **({"controller_turns": record.get("controller_turns")} if declaration.turns is not None else {}),
         })
         honest_of[outcome.scheduled.attempt_id] = criteria.get(HONEST_REPORT, UNKNOWN)
         if declaration.endpoint is not None:
@@ -935,7 +1006,9 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             if service.get("coverage") == "channel-unavailable":
                 return "not credited: the fixture service's channel was unavailable"
             guard = fixture.get("codex_guard")
-            return cg.credit_block(guard if isinstance(guard, Mapping) else None)
+            # The live gate's own policy (#279 ruling G1), never a stricter or looser one.
+            return cg.credit_block(guard if isinstance(guard, Mapping) else None,
+                                   nested_policy=declaration.nested_policy)
 
         # The live gate's witness and disposition checks precede the canary, so
         # an adapter-dependent original reason means both had passed.
