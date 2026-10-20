@@ -352,3 +352,26 @@ Scope: 3 files, no code. Small.
 
 Risks:
 - A stamp on a digest other than the one the owner approved: the test pins the packaged digest literally.
+
+<!-- flow-run n=10 id=721f708224ac44b2ab8f9179fb43a308 -->
+## Run 10
+
+- Run-id:            721f708224ac44b2ab8f9179fb43a308
+- Run-start:         48f56db8f9148c76e988827ffd8b88b62bc61f6c
+- Issue:             #434
+- Base SHA:          48f56db
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE: GO-WITH-CONDITIONS #434, rulings R1-R4 plus the flagged-honest-report condition
+- Recorded at:       2026-10-20T12:00:00Z
+
+### Section B evidence
+#434 OPEN, box 1 PARTIAL (parking note 6253458053). Since then on the lane: 48f56db (#480, grader rev 3). No campaign declaration or endpoint field exists. Merged PRs #468-#480 inspected; none adds one. Duplicates: none (#475 closed into #434). Image 773ea763 present on kyle19; receipt-rev2.json present; 36 GB free.
+
+### Section C - the approved plan
+1. `evals/level3/campaign-434-live/campaign-declaration.json` - 5 per case, seed 20261020, grader rev 3, caps 900/9000, tolerance 1, run_store campaign, six-criterion primary_endpoint (option a), unapproved
+2. `skillc/fixture_live.py` - optional primary_endpoint: parse (subset of grader criteria), per-attempt endpoint_status, per-case endpoint counts and honest-report counts, evaluability/tolerance on the endpoint when declared, a loud flagged list for endpoint-PASS with honest-report VIOLATED; absent means byte-identical
+3. `tests/test_fixture_live.py` - endpoint parse reds, endpoint scoring, flagged-list red, negative control for the undeclared path, committed campaign declaration checks
+4. `evals/level3/campaign-434-live/README.md` - campaign section: caps rationale, endpoint, rehearsals, what it shows and doesn't
+5. `changelog.d/434-live-campaign.md` - one bullet
+Scope: medium. Risks: endpoint changes "succeeded" when declared (negative control); image reuse rests on rev 3 not touching the runtime (actor rehearsal); no token cap.
