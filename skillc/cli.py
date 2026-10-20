@@ -2028,20 +2028,20 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
 
 
 def cmd_level3_live(args: argparse.Namespace) -> int:
-    if getattr(args, "regrade", None):
-        return _cmd_level3_live_regrade(args)
+    if getattr(args, "judge_replay", None):
+        return _cmd_level3_live_judge_replay(args)
     return _cmd_level3_live_run(args)
 
 
-def _cmd_level3_live_regrade(args: argparse.Namespace) -> int:
-    """#486: re-grade a retained run. No approval is checked, because nothing is
-    spent; the declaration must be the one the run was declared at, and the
-    skillc checkout must be clean, since its HEAD is the adapter revision."""
+def _cmd_level3_live_judge_replay(args: argparse.Namespace) -> int:
+    """#486: a judge replay over a retained run. Nothing is spent, so no approval
+    is checked; the declaration must be the one the run was declared at, and the
+    skillc checkout must be clean, since its HEAD is the adapter revision. The
+    output is never called a grade or a result."""
     import subprocess
     from datetime import UTC, datetime
 
     from . import calibration_run as cr
-    from . import collection_conformance as cc
     from . import fixture_live as fl
 
     try:
@@ -2053,29 +2053,27 @@ def _cmd_level3_live_regrade(args: argparse.Namespace) -> int:
     dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
     head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
     if dirty.returncode != 0 or head.returncode != 0 or dirty.stdout.strip():
-        print("skillc: the skillc checkout must be a clean git tree; the re-grade binds its HEAD", file=sys.stderr)
+        print("skillc: the skillc checkout must be a clean git tree; the judge replay binds its HEAD", file=sys.stderr)
         return 2
-    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
-    run_dir = Path(args.regrade).expanduser().resolve()
-    grading = cc.TrackingDockerBackend(image=str(declaration.shared["image"]["digest"]), base_dir=run_dir,
-                                       docker_bin=docker_bin, daemon_timeout=args.timeout)
+    run_dir = Path(args.judge_replay).expanduser().resolve()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     try:
-        path, report = fl.regrade(run_dir, declaration, root=cr.ROOT, grading_backend=grading,
-                                  adapter_revision=head.stdout.strip(), stamp=stamp)
+        path, report = fl.judge_replay(run_dir, declaration, root=cr.ROOT, adapter_revision=head.stdout.strip(),
+                                       stamp=stamp)
     except (fl.LiveRefused, OSError, ValueError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
-    label = report["regraded"]
-    print(f"skillc: RE-GRADE (no spend; decided after seeing results) of {run_dir}", file=sys.stderr)
+    label = report["judge_replay"]
+    print(f"skillc: JUDGE REPLAY - not a verified result; decided after seeing results; no spend - of {run_dir}",
+          file=sys.stderr)
     print(f"skillc: original report sha256 before {label['source_report_sha256']} "
           f"after {label['source_report_sha256_after']}", file=sys.stderr)
     for case, counts in report["cases"].items():
         print(f"skillc: {case}: {counts}", file=sys.stderr)
     for attempt in report["attempts"]:
-        print(f"skillc: {attempt['trial_id']}: {attempt['graded_status']} "
-              f"(blocked: {attempt['grading_blocked_reason']})", file=sys.stderr)
-    print(f"skillc: regraded report: {path}", file=sys.stderr)
+        print(f"skillc: {attempt['trial_id']}: replay {attempt['replay_status']} "
+              f"(re-decided: {attempt['re_decided']}; blocked: {attempt['replay_blocked_reason']})", file=sys.stderr)
+    print(f"skillc: judge replay report: {path}", file=sys.stderr)
     return 0
 
 
@@ -3011,10 +3009,10 @@ def build_parser() -> argparse.ArgumentParser:
              "and a dummy credential. Either may run an unapproved declaration (the report says so)",
     )
     p_level3_live.add_argument(
-        "--regrade", metavar="RUN_DIR", default=None,
-        help="issue #486: re-derive a RETAINED run's grading with the current adapter and grader, spending nothing "
-             "(no agent container, client or model); writes RUN_DIR/regrade-<stamp>/regraded-report.json and never "
-             "touches the original files",
+        "--judge-replay", metavar="RUN_DIR", default=None,
+        help="issue #486: re-run the CURRENT judge over a RETAINED run's evidence, re-deciding only what the "
+             "transcript adapter decided; spends nothing (no agent container, client or model). NOT a verified "
+             "result: writes RUN_DIR/judge-replay-<stamp>/judge-replay-report.json and never touches the originals",
     )
     p_level3_live.set_defaults(func=cmd_level3_live)
 
