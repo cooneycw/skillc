@@ -5,16 +5,16 @@
     "deferred": 0,
     "rejected": 0
   },
-  "head": "d55f6678cced72c6497fac0e358462029bca5219",
+  "head": "56a56d9e54c7262984cd521629c2857185d7767d",
   "implementer": "claude/claude-opus-5-5",
   "issue": "279",
   "local_credentials": "absent",
   "network": "blocked",
   "passes": 2,
-  "recorded_at": "2026-10-20T21:48:05Z",
+  "recorded_at": "2026-10-20T21:48:16Z",
   "red_cases": {
-    "already_covered": 8,
-    "proposed": 12
+    "already_covered": 9,
+    "proposed": 13
   },
   "reviewer": "codex/gpt-6-astra",
   "reviewer_evidence": {
