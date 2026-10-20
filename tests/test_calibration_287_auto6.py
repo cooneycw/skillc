@@ -73,7 +73,13 @@ def test_the_step6_profile_is_flow_autos_with_only_the_witness_added() -> None:
     differs = {k for k in set(step6) | set(flow_auto) if step6.get(k) != flow_auto.get(k)}
     assert differs == {"name", "gate_witness", "notes"}, differs
     assert step6["gate_witness"] == "flow-finish" and step6["select"] == ["flow-auto", "flow-eli5"]
-    assert _json(STEP6 / "subject.json") == _json(FLOW_AUTO / "subject.json")
+    subject, sibling = _json(STEP6 / "subject.json"), _json(FLOW_AUTO / "subject.json")
+    assert {k for k in set(subject) | set(sibling) if subject.get(k) != sibling.get(k)} == {"select"}
+    # The SUBJECT's selection is what a run installs; it must be the profile's
+    # two skills, or flow-finish's and flow-check's copies of the verdict rules
+    # are delivered to the degraded arm (found by the PR-B rehearsal, whose
+    # runner survivor check refused a subject that selected "all").
+    assert subject["select"] == step6["select"] == ["flow-auto", "flow-eli5"]
 
 
 def test_the_step6_inventory_is_the_committed_evidence(tmp_path: Path) -> None:

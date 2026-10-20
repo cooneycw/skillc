@@ -3,7 +3,7 @@
  "profile": "cpp-codex-flow-auto-step6",
  "profile_digest": "sha256:f27aaf64529a46522356c4aa6c7bbd4707b756e31542c21d3abddae5671f2c3b",
  "subject": {
-  "declaration_digest": "sha256:50c3aaa0547ab7cb53e4e3dad24c36a8a0649574fbb6803e8cc262339a3ee71f",
+  "declaration_digest": "sha256:68700d25c9a5e4127641475c817d5e14c6cbf23b547916195cfe72e5619c8d5d",
   "locator": "github.com/cooneycw/claude-power-pack",
   "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
   "source_kind": "git",

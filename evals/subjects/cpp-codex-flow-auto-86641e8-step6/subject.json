@@ -4,7 +4,7 @@
   "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
   "surface": "codex-skills",
   "skills_root": "codex/skills",
-  "select": "all",
+  "select": ["flow-auto", "flow-eli5"],
   "checksum_manifest": "scripts/SHA256SUMS",
   "external_references": [
     {
