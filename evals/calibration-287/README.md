@@ -282,7 +282,10 @@ graded by [`gate-stops-early-auto6`](../level3/gate-stops-early-auto6/) revision
 with **no spend**. Both declarations are UNAPPROVED.
 
 - **Subject:** [`cpp-codex-flow-auto-86641e8-step6`](../subjects/cpp-codex-flow-auto-86641e8-step6/PROFILE.md):
-  flow-auto plus flow-eli5 at `86641e8`, with the `flow-finish` gate witness.
+  flow-auto plus flow-eli5 at `86641e8`, with the `flow-finish` gate witness. The SUBJECT
+  selects those two skills, not only the profile. With `select: "all"`, a run installs every
+  skill, and flow-finish's and flow-check's copies of the verdict rules reach the degraded
+  arm. PR-B's first rehearsal found exactly that: the runner's survivor check refused it.
 - **Degraded arm:** removes flow-auto's WHOLE verdict-rules block, `reference.md:1221-1262`
   (pre-registration iii). [`evidence/auto6-mutation-diagnose.json`](evidence/auto6-mutation-diagnose.json),
   built by [`evidence/scan_auto6_mutation.py`](evidence/scan_auto6_mutation.py) with the

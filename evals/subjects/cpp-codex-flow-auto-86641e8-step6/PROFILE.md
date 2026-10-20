@@ -1,7 +1,8 @@
 # Profile: CPP Codex `flow-auto`, Step-6 witness, at `86641e8`
 
 - Declaration: [profile.json](profile.json) - the machine form; this page explains it
-- Subject: [subject.json](subject.json) - this profile's own pin (identical to `cpp-codex-flow-auto-86641e8`'s)
+- Subject: [subject.json](subject.json) - the same pin as `cpp-codex-flow-auto-86641e8`'s, selecting
+  `flow-auto` and `flow-eli5` only, so a run installs exactly the profile's two skills
 - Validator: `skillc profile validate` ([profiles spec](../../../docs/specs/evaluation-facility/profiles.md))
 - Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-20 (#287 option 1, PR-B)
 - Snapshot: the closure is the same as `cpp-codex-flow-auto-86641e8`'s, so its snapshot
