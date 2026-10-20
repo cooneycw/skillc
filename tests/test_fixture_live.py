@@ -896,3 +896,202 @@ def test_a_missing_manifest_makes_provenance_unknown(tmp_path: Path) -> None:
     (_experiment(run_dir).root / f"manifest-{sibling}.json").unlink()
     [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
     assert "provenance unknown - no artifact manifest retained" in str(entry["replay_blocked_reason"])
+
+
+# ------------------------------- the revision-4 campaign (#434, after #487)
+
+CAMPAIGN_REV4 = ROOT / "evals" / "level3" / "campaign-434-live" / "campaign-declaration-rev4.json"
+#: The draft's content digest, as it goes into the owner's approval package. A
+#: changed field must change this line on purpose.
+CAMPAIGN_REV4_DIGEST = "sha256:90accda59cc7d5a377e32db8cff02856cad4204315d0faa25435cc57cb017f08"
+#: The ONLY fields the revision-4 draft may differ in from the owner-approved
+#: revision-3 campaign (694e2b82), as (path...) tuples. Orchestrator condition:
+#: an allow-list, so ANY other difference fails.
+_REV4_MAY_DIFFER = {("_comment",), ("run_store",), ("approval",), ("task", "grader_revision"),
+                    ("task", "grader_digest"), ("task", "goal_sha256"), ("task", "builder_sha256"),
+                    ("task", "base_trees")}
+
+
+def _differences(a: Any, b: Any, path: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    if isinstance(a, dict) and isinstance(b, dict) and path not in _REV4_MAY_DIFFER:
+        return {d for k in set(a) | set(b) for d in _differences(a.get(k, _ABSENT), b.get(k, _ABSENT), (*path, k))}
+    return set() if a == b else {path}
+
+
+_ABSENT = object()
+
+
+def test_the_revision_4_campaign_differs_from_the_approved_one_only_where_allowed() -> None:
+    approved, draft = json.loads(CAMPAIGN.read_text()), json.loads(CAMPAIGN_REV4.read_text())
+    differences = _differences(approved, draft)
+    assert differences <= _REV4_MAY_DIFFER, sorted(differences - _REV4_MAY_DIFFER)
+    # Each allowed difference is real, not a field quietly dropped.
+    assert ("approval",) in differences and "approval" not in draft
+    assert draft["task"]["grader_revision"] == "4" and draft["run_store"] != approved["run_store"]
+
+
+def test_the_allow_list_catches_any_other_difference() -> None:
+    """The instrument's own red: a changed term outside the allow-list is named."""
+    draft = json.loads(CAMPAIGN_REV4.read_text())
+    for path, value in ((("shared", "per_attempt_seconds"), 901), (("case_order", "seed"), 1),
+                        (("tolerance", "non_evaluable_per_case"), 2), (("task", "instruction"), "x")):
+        tampered = copy.deepcopy(draft)
+        tampered[path[0]][path[1]] = value
+        # Rejected, not merely named (review): the path must survive the allow-list.
+        assert path in _differences(json.loads(CAMPAIGN.read_text()), tampered) - _REV4_MAY_DIFFER, path
+
+
+def test_the_revision_4_campaign_is_this_trees_unapproved_and_pinned() -> None:
+    declaration = fl.load_declaration(CAMPAIGN_REV4)
+    fl.require_approved(declaration, ROOT, approval_required=False)
+    with pytest.raises(fl.LiveRefused, match="carries no approval record"):
+        fl.require_approved(declaration, ROOT)
+    assert declaration.task["grader_revision"] == "4" and declaration.attempts_per_case == 5
+    assert declaration.order == tuple(calibration.derive_arm_order(20261020, ["clean", "twin"], 5))
+    assert declaration.order == fl.load_declaration(CAMPAIGN).order   # the same order, kept on purpose
+    assert declaration.endpoint == ENDPOINT and declaration.tolerance == 1
+    assert declaration.digest == CAMPAIGN_REV4_DIGEST
+
+
+#: The owner-approved revision-3 campaign run (20261020T141529Z-3585c9). Its
+#: records are the owner's evidence and are NOT committed (skillc is public): the
+#: check below reads them as plain files by manifest digest - never through
+#: Experiment.open - on the host that holds them, and skips loudly elsewhere.
+CAMPAIGN_RUN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign" / "20261020T141529Z-3585c9"
+                      / "store" / "level3-fixture-live-ec3d4e35")
+CAMPAIGN_RUN_ATTEMPTS = ("a-103b50d6d776", "a-5f554edfaee4", "a-6dbfa1eb1db5", "a-96c8263722f6", "a-9975917f3c94",
+                         "a-a3f256d70fd7", "a-af20400ffabb", "a-be1a469503e8", "a-c403275ce730", "a-ef44b344fbf6")
+#: A response item the adapter has never seen: the census must stop on it.
+_UNKNOWN_ITEM = b'{"type": "response_item", "payload": {"type": "future_item_type"}}\n'
+
+
+def _retained_object(store: Path, digest: str) -> bytes:
+    raw = (store / "objects" / digest.removeprefix("sha256:")).read_bytes()
+    assert trial.sha256_bytes(raw) == digest, f"content-address mismatch: {digest}"
+    return raw
+
+
+def _retained_guard(store: Path, attempt_id: str) -> Any:
+    """The attempt's nested-codex summary from its controller-held raw fixture
+    extras, by provenance (review): a content-verified object with exactly the
+    raw-extras keys, never a candidate artifact, unique for the attempt."""
+    artifacts = {a["digest"] for m in store.glob("manifest-*.json")
+                 for a in json.loads(m.read_text()).get("artifacts", [])}
+    found = []
+    for path in sorted((store / "objects").iterdir()):
+        raw = path.read_bytes()
+        try:
+            data = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict) or set(data) != set(fl._RAW_EXTRAS_KEYS):
+            continue
+        guard = data.get("codex_guard")
+        if not isinstance(guard, dict) or guard.get("attempt_id") != attempt_id:
+            continue
+        digest = "sha256:" + path.name
+        assert trial.sha256_bytes(raw) == digest, f"content-address mismatch: {digest}"
+        if digest not in artifacts:
+            found.append(guard["nested"])
+    assert len(found) == 1, f"{attempt_id}: {len(found)} controller-held guard records"
+    return found[0]
+
+
+def _require_complete(store: Path) -> None:
+    """Present means complete (review): a store holding fewer than the ten
+    attempts fails, never quietly checks fewer."""
+    missing = [a for a in CAMPAIGN_RUN_ATTEMPTS if not (store / f"manifest-{a}.json").is_file()]
+    assert not missing, f"the retained campaign store is incomplete: {missing}"
+
+
+def _complete_stream(manifest: dict[str, Any], stream: str) -> str:
+    """The digest of the ONE complete observation of `stream` (review pass 2):
+    a partial or duplicated stream is not evidence the replay would accept."""
+    matches = [o for o in manifest.get("observations", []) if o.get("stream") == stream]
+    assert len(matches) == 1 and matches[0].get("coverage") == "complete", f"{stream}: {matches!r}"
+    return str(matches[0]["digest"])
+
+
+def _retained_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict[str, Any]:
+    """The containment record the live run builds, rebuilt from the retained
+    transcript (with THIS tree's adapter and census), proxy log and guard."""
+    manifest = json.loads((CAMPAIGN_RUN_STORE / f"manifest-{attempt_id}.json").read_text())
+    transcript = (_retained_object(CAMPAIGN_RUN_STORE, _complete_stream(manifest, "client-transcript"))
+                  + transcript_suffix)
+    observation, census, metadata = at.observe_transcript_bytes(
+        at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV4), ROOT),
+        skill_name=None)
+    proxy = _retained_object(CAMPAIGN_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id)},
+            "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
+
+
+@pytest.mark.parametrize("attempt_id", CAMPAIGN_RUN_ATTEMPTS)
+def test_the_fail_closed_census_does_not_stop_on_the_retained_campaign(attempt_id: str) -> None:
+    """Orchestrator condition on the revision-4 campaign: #486's fail-closed
+    census must not false-stop on real codex output. Every retained attempt
+    passes the containment trigger; the same transcript with one unknown
+    response item appended stops it (the control: the check can say STOP)."""
+    if not CAMPAIGN_RUN_STORE.is_dir():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {CAMPAIGN_RUN_STORE} is not on this host; "
+                    "the #434 no-false-stop check did not run")
+    _require_complete(CAMPAIGN_RUN_STORE)
+    allowlist = str(fl.load_declaration(CAMPAIGN_REV4).shared["agent_network"]["allowlist_digest"])
+    assert fl.containment_trigger(_retained_record(attempt_id), allowlist_digest=allowlist) is None
+    stopped = fl.containment_trigger(_retained_record(attempt_id, transcript_suffix=_UNKNOWN_ITEM),
+                                     allowlist_digest=allowlist)
+    assert stopped is not None and "future_item_type" in stopped
+
+
+def _guard_store(tmp_path: Path, guard_attempt: str = "a-1") -> Path:
+    store = tmp_path / "store"
+    (store / "objects").mkdir(parents=True)
+    extras: dict[str, Any] = {k: None for k in fl._RAW_EXTRAS_KEYS}
+    extras["codex_guard"] = {"attempt_id": guard_attempt, "nested": {"status": "zero"}}
+    raw = json.dumps(extras).encode()
+    (store / "objects" / trial.sha256_bytes(raw).removeprefix("sha256:")).write_bytes(raw)
+    (store / "manifest-a-1.json").write_text(json.dumps({"observations": [], "artifacts": []}))
+    return store
+
+
+def test_the_retained_guard_is_read_by_provenance(tmp_path: Path) -> None:
+    """Controls for the no-false-stop check's evidence reads (review)."""
+    store = _guard_store(tmp_path)
+    assert _retained_guard(store, "a-1") == {"status": "zero"}
+    # An unrelated object naming the attempt (not the raw-extras shape) is ignored.
+    other = json.dumps({"codex_guard": {"attempt_id": "a-1", "nested": {"status": "observed"}}}).encode()
+    (store / "objects" / trial.sha256_bytes(other).removeprefix("sha256:")).write_bytes(other)
+    assert _retained_guard(store, "a-1") == {"status": "zero"}
+    # The same shape as a candidate ARTIFACT is not controller evidence.
+    [obj] = [p for p in (store / "objects").iterdir() if json.loads(p.read_bytes()).keys() == set(fl._RAW_EXTRAS_KEYS)]
+    (store / "manifest-a-1.json").write_text(json.dumps({"artifacts": [{"digest": "sha256:" + obj.name}]}))
+    with pytest.raises(AssertionError, match="0 controller-held guard records"):
+        _retained_guard(store, "a-1")
+    # Corrupted bytes under the old content address are refused.
+    store = _guard_store(tmp_path / "corrupt")
+    [obj] = list((store / "objects").iterdir())
+    obj.write_bytes(obj.read_bytes().replace(b'"zero"', b'"zerO"'))
+    with pytest.raises(AssertionError, match="content-address mismatch"):
+        _retained_guard(store, "a-1")
+
+
+def test_an_incomplete_retained_store_fails_not_skips(tmp_path: Path) -> None:
+    for attempt in CAMPAIGN_RUN_ATTEMPTS[:-1]:
+        (tmp_path / f"manifest-{attempt}.json").write_text("{}")
+    with pytest.raises(AssertionError, match=CAMPAIGN_RUN_ATTEMPTS[-1]):
+        _require_complete(tmp_path)
+    (tmp_path / f"manifest-{CAMPAIGN_RUN_ATTEMPTS[-1]}.json").write_text("{}")
+    _require_complete(tmp_path)
+
+
+@pytest.mark.parametrize("observations", [
+    [{"stream": "client-transcript", "coverage": "partial", "digest": "sha256:aa"}],
+    [{"stream": "client-transcript", "coverage": "complete", "digest": "sha256:aa"}] * 2,
+    [],
+])
+def test_only_one_complete_stream_is_read(observations: list[dict[str, str]]) -> None:
+    with pytest.raises(AssertionError, match="client-transcript"):
+        _complete_stream({"observations": observations}, "client-transcript")
+    assert _complete_stream({"observations": [{"stream": "client-transcript", "coverage": "complete",
+                                               "digest": "sha256:aa"}]}, "client-transcript") == "sha256:aa"

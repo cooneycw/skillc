@@ -129,6 +129,35 @@ Only wall time is capped, per attempt and in total (`matched_pilot.run_schedule`
 records each attempt's tokens from its own rollout, and counts an unread one as UNKNOWN,
 never zero.
 
+## The revision-4 campaign (after #487)
+
+The owner-approved campaign above ran once (`20261020T141529Z-3585c9`). Grader revision 4
+(#487) then moved the grader, so the repository refuses `campaign-declaration.json` as spent.
+That file stays unchanged as the historical record. After seeing the result, the owner chose
+a fresh official campaign: `campaign-declaration-rev4.json` (unapproved).
+
+- **The terms are the approved campaign's, unchanged.** That covers the subject, client,
+  model, effort, image, egress, instruction, schedule size, caps, tolerance, primary endpoint
+  and containment. It also covers the **seed and order**: the owner's terms are "identical to
+  the approved campaign", and a fixed order does not bias the measure. Each attempt is
+  independent, and the order is computed, not chosen.
+- **Only these differ:**
+  - the task identities, re-derived at grader **revision 4**;
+  - the run store, `~/skillc-evidence/campaign-434-live/campaign-rev4`, kept apart from the
+    spent run;
+  - the comment;
+  - the approval, which is absent until the owner gives it.
+
+  A test compares the two files field by field against an allow-list of exactly these fields,
+  so any other difference fails.
+- **It runs with the post-#486 transcript adapter and the fail-closed census.** An
+  unrecognized or unassessable response-item type stops the schedule. To show that this does
+  not false-stop on real codex output, a private test rebuilds each of the spent run's 10
+  containment records. It uses the retained transcript (read with this tree's adapter), the
+  proxy log and the guard summary, read as plain files by manifest digest. Every record passes
+  the trigger. The same transcript with one unknown response item appended STOPS, which is the
+  control. Where the owner's store is absent, the test skips loudly.
+
 ## Running it
 
 Every command below is shown for the measurement. The campaign is the same with

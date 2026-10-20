@@ -1,0 +1,27 @@
+{
+  "branch": "issue-434-flow-auto-clean-project-case-an-already-fixed-issu-7",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "ca85892f4e49dd0fbf3aebc9822e24ebf42daa06",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "434",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-20T17:40:37Z",
+  "red_cases": {
+    "already_covered": 7,
+    "proposed": 11
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T13-37-47-01a15a64-071a-7793-9d5b-95b1db5acb3d.jsonl",
+    "thread_id": "01a15a64-071a-7793-9d5b-95b1db5acb3d"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
