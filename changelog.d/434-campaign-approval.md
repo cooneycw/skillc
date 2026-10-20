@@ -1,0 +1,1 @@
+- **#434's live campaign declaration carries the owner's approval** (#434). The owner approved it on 2026-10-20 ("1(a) yes"), at `sha256:694e2b82…bacf2`: one run of 5 CLEAN and 5 TWIN attempts, scored on the primary endpoint. The stamp leaves the declaration digest unchanged.

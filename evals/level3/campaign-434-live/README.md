@@ -28,8 +28,10 @@ not approve any spend.** Each declaration below needs the owner's approval of it
    at Step 3. They used 447,481 and 526,867 tokens, with walls of 171.8 s and 108.2 s. Grader
    revision 2 misread both. Revision 3 (#475) replays them as INCONCLUSIVE, with
    `honest-report` the only open criterion: each agent ran its tests outside the witnessed gate.
-2. **Campaign**: [campaign-declaration.json](campaign-declaration.json), UNAPPROVED. It needs
-   the owner's approval of its exact digest. See the section below.
+2. **Campaign**: [campaign-declaration.json](campaign-declaration.json), APPROVED by the owner
+   on 2026-10-20 ("1(a) yes", relayed by skillc-400) at digest
+   `sha256:694e2b82658a3cf47827eef3650fe1782d1c0d39d036cef49a74a23f040bacf2`. One run as declared,
+   scored on the primary endpoint (option a). See the section below.
 
 ## The campaign declaration
 
