@@ -1,6 +1,8 @@
 - **A retained live run can be judge-replayed without spending anything; the replay is labelled as NOT a verified result** (#486). `skillc level3-live DECLARATION --judge-replay RUN_DIR` re-runs the current judge over a retained run's evidence. No agent container, client or model is used.
   - It re-decides only what the transcript adapter decided: an attempt refused on prompt delivery, the canary, census coverage or format drift gets its observation and credit gate re-derived. Every other original refusal is carried over.
   - Fixture evidence is taken by provenance only: raw controller extras, never a grading envelope or a candidate-written file, unique per attempt.
+  - Strict by default: a live fixture session can latch a finalization failure that no retained record holds, so no attempt is judged unless `--assume-fixture-finalized` is passed. That flag takes complete fixture evidence as standing for a clean finalization, and the label's first line names the assumption.
+  - Prompt delivery is carried from the live run's own verdict: the exact prompt held a per-attempt canary nonce that no record retains. Objects are read content-address verified, and rejected judge output is never scored.
   - It writes `RUN_DIR/judge-replay-<stamp>/judge-replay-report.json` with its own report kind, which `succeeded()` and `rehearsal_succeeded()` refuse. It writes no verified result.
   - The label records the historical and current grader, the adapter revision, "decided after seeing results", and "witness not retained: honest-report UNKNOWN".
   - The original report and store are hashed before and after and never written. The replay is bound to the run's experiment, attempts and declared order, and the original containment stop is carried.

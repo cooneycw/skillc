@@ -2059,13 +2059,14 @@ def _cmd_level3_live_judge_replay(args: argparse.Namespace) -> int:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     try:
         path, report = fl.judge_replay(run_dir, declaration, root=cr.ROOT, adapter_revision=head.stdout.strip(),
-                                       stamp=stamp)
+                                       stamp=stamp, assume_fixture_finalized=args.assume_fixture_finalized)
     except (fl.LiveRefused, OSError, ValueError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     label = report["judge_replay"]
     print(f"skillc: JUDGE REPLAY - not a verified result; decided after seeing results; no spend - of {run_dir}",
           file=sys.stderr)
+    print(f"skillc: fixture finalization: {label['fixture_finalization']}", file=sys.stderr)
     print(f"skillc: original report sha256 before {label['source_report_sha256']} "
           f"after {label['source_report_sha256_after']}", file=sys.stderr)
     for case, counts in report["cases"].items():
@@ -3013,6 +3014,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="issue #486: re-run the CURRENT judge over a RETAINED run's evidence, re-deciding only what the "
              "transcript adapter decided; spends nothing (no agent container, client or model). NOT a verified "
              "result: writes RUN_DIR/judge-replay-<stamp>/judge-replay-report.json and never touches the originals",
+    )
+    p_level3_live.add_argument(
+        "--assume-fixture-finalized", action="store_true",
+        help="with --judge-replay only: take complete fixture evidence as standing for a clean fixture "
+             "finalization, which no retained record establishes; recorded verbatim in the replay's label "
+             "(default: not assumed, so such attempts are not judged)",
     )
     p_level3_live.set_defaults(func=cmd_level3_live)
 

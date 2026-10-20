@@ -19,7 +19,8 @@ from typing import Any
 
 import pytest
 
-from skillc import calibration, profile, trial
+from skillc import agent_trial as at
+from skillc import calibration, profile, trial, verify
 from skillc import calibration_run as cr
 from skillc import codex_guard as cg
 from skillc import collection_conformance as cc
@@ -363,7 +364,6 @@ def test_rehearsal_success_is_mode_specific() -> None:
 
 def _record_from_raw(raw: bytes) -> dict[str, Any]:
     """A clean record whose census comes from `raw` through the production parser."""
-    from skillc import agent_trial as at
     census = at.transcript_census("codex", raw.decode("utf-8", errors="replace"))
     census["server_side_tool_uses"] = at.server_side_tool_uses(raw, census.get("transcript_line_types"))  # type: ignore[arg-type]
     record = _clean_record()
@@ -665,7 +665,8 @@ def _overwrite(path: Path, payload: object) -> None:
 
 def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position: int = 0,
                     original_reason: str = _CANARY_REASON, guard_decisions: list[dict[str, Any]] | None = None,
-                    extras_copies: int = 1, extras_as_artifact: bool = False) -> str:
+                    extras_copies: int = 1, extras_as_artifact: bool = False,
+                    prompt_delivered: bool | None = True) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -683,7 +684,11 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
-    transcript = trial.put_object(experiment, _transcript(fl.prompt(declaration, ROOT), report_text))
+    # The live prompt carries a canary instruction with a nonce no record keeps;
+    # the planted transcript carries one too, so the replay cannot match it -
+    # it must carry the live run's own verdict instead.
+    live_prompt = f"{fl.prompt(declaration, ROOT)}\n\nBefore doing anything else, write 'touched:{position:032x}'."
+    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text))
     _overwrite(experiment.root / f"manifest-{attempt_id}.json", ({
         "observations": [{"stream": "client-transcript", "coverage": "complete", "digest": transcript}],
         "artifacts": [{"path": "evidence.json", "digest": d} for d in extras_digests] if extras_as_artifact else [],
@@ -693,12 +698,17 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
             {"event": "dispatched", "at": "2026-10-20T00:00:00+00:00"},
             {"event": "captured", "at": "2026-10-20T00:01:40+00:00"}]}))
     _overwrite(experiment.root / f"observation-{attempt_id}.json", ({
-        "grading": {"blocked_reason": original_reason, "graded_status": None}}))
+        "grading": {"blocked_reason": original_reason, "graded_status": None},
+        **({"transcript": {"prompt_delivered": prompt_delivered,
+                           "prompt_delivery_reason": None if prompt_delivered else "first message differs"}}
+           if prompt_delivered is not None else {})}))
     return attempt_id
 
 
-def _replay(run_dir: Path, declaration: fl.LiveDeclaration, stamp: str = "T1") -> tuple[Path, dict[str, Any]]:
-    return fl.judge_replay(run_dir, declaration, root=ROOT, adapter_revision="test-rev", stamp=stamp)
+def _replay(run_dir: Path, declaration: fl.LiveDeclaration, stamp: str = "T1", *,
+            assume: bool = True) -> tuple[Path, dict[str, Any]]:
+    return fl.judge_replay(run_dir, declaration, root=ROOT, adapter_revision="test-rev", stamp=stamp,
+                           assume_fixture_finalized=assume)
 
 
 def test_a_captured_eligible_attempt_goes_through_the_real_judge(tmp_path: Path) -> None:
@@ -794,3 +804,74 @@ def test_a_replay_never_overwrites_an_earlier_one(tmp_path: Path) -> None:
     _replay(run_dir, declaration, stamp="T")
     with pytest.raises(fl.LiveRefused, match="never overwrites"):
         _replay(run_dir, declaration, stamp="T")
+
+
+def test_by_default_an_unestablished_fixture_finalization_is_not_judged(tmp_path: Path) -> None:
+    """Counter-model review, scoped pass: a live fixture session can latch a
+    finalization failure no retained record holds. Not assumed, it fails closed."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration)
+    _path, report = _replay(run_dir, declaration, assume=False)
+    [entry] = [a for a in report["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and entry["replay_status"] == fl.UNKNOWN
+    assert "finalization failure state was not retained" in str(entry["replay_blocked_reason"])
+    assert report["judge_replay"]["fixture_finalization"].startswith("not assumed")
+    assumed = _replay(run_dir, declaration, stamp="T2", assume=True)[1]
+    assert assumed["judge_replay"]["fixture_finalization"].startswith("ASSUMED clean")
+
+
+def test_without_the_flag_a_fully_captured_run_judges_nothing(tmp_path: Path) -> None:
+    """Orchestrator ruling (#486): strict is the default, so a replay of a run
+    whose every attempt was captured judges NONE of them; and a flagged replay
+    names its assumption in the label's first line."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    planted = {_plant_captured(run_dir, declaration, position=k) for k in range(len(declaration.order))}
+    _path, strict = _replay(run_dir, declaration, assume=False)
+    entries = [a for a in strict["attempts"] if a["attempt_id"] in planted]
+    assert len(entries) == len(declaration.order) and all(a["re_decided"] for a in entries)
+    assert all(a["replay_status"] == fl.UNKNOWN for a in entries)
+    assert all("finalization failure state was not retained" in str(a["replay_blocked_reason"]) for a in entries)
+    assert not strict["judge_replay"]["what"].startswith("ASSUMES")
+    assumed = _replay(run_dir, declaration, stamp="T2", assume=True)[1]
+    first_line = next(iter(assumed["judge_replay"].values()))
+    assert first_line.startswith("ASSUMES fixture finalization was clean (--assume-fixture-finalized)")
+    assert any(a["replay_status"] != fl.UNKNOWN for a in assumed["attempts"] if a["attempt_id"] in planted)
+
+
+@pytest.mark.parametrize("delivered", [False, None])
+def test_prompt_delivery_is_the_live_runs_own_verdict(tmp_path: Path, delivered: bool | None) -> None:
+    """Counter-model review: the live prompt carries a per-attempt canary nonce
+    that no record keeps, so the replay carries the live run's verdict. A
+    refusal stays a refusal, and an unrecorded verdict is not delivered."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration, prompt_delivered=delivered)
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert str(entry["replay_blocked_reason"]).startswith("prompt_delivered=False")
+
+
+def test_rejected_judge_output_is_never_scored() -> None:
+    grader = verify.GraderDef.load(_TASK).with_judge(_TASK / "grader-controls" / "omits_criterion.py")
+    out = fl._run_judge(grader, {"case": "clean"})
+    assert out["status"] == "INCONCLUSIVE" and out["category"] == "criteria-set"
+    assert out["criteria"] is None and out["rejected_criteria"]
+
+
+def test_a_corrupted_object_is_refused(tmp_path: Path) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    _plant_captured(run_dir, declaration)
+    experiment = _experiment(run_dir)
+    target = next(p for p in (experiment.root / trial.OBJECTS).iterdir()
+                  if p.stat().st_size < 1_000_000 and b'"final_report"' in p.read_bytes())
+    target.chmod(0o600)
+    target.write_bytes(target.read_bytes().replace(b'"final_report"', b'"final_report" ', 1))
+    with pytest.raises(fl.LiveRefused, match="content-address check"):
+        _replay(run_dir, declaration)
+
+
+def test_a_missing_manifest_makes_provenance_unknown(tmp_path: Path) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration)
+    sibling = _plant_captured(run_dir, declaration, position=1)
+    (_experiment(run_dir).root / f"manifest-{sibling}.json").unlink()
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert "provenance unknown - no artifact manifest retained" in str(entry["replay_blocked_reason"])

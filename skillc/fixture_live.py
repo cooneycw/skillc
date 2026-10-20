@@ -69,7 +69,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -717,7 +717,18 @@ def _retained_fixture_extras(experiment: trial.Experiment, attempt_ids: Sequence
     object with exactly `FixtureSession.extras`'s keys (never a grading
     envelope), referenced by NO attempt's artifact manifest (so never a file
     the candidate wrote), naming this attempt in its guard record, and unique.
-    Anything else for an attempt is the string "evidence ambiguous: ..."."""
+    Anything else for an attempt is the string "evidence ambiguous: ...".
+
+    The exclusion needs every attempt's manifest: one that was captured or
+    dispatched without a retained manifest makes provenance UNKNOWN for all,
+    since its candidate-written objects could not be excluded (counter-model
+    review). Every object is read through `trial.read_object`, which refuses
+    bytes that no longer hash to their name."""
+    missing = [aid for aid in attempt_ids if not (experiment.root / f"manifest-{aid}.json").is_file()
+               and _lifecycle(experiment, aid)[0] not in (None, "unavailable", "not-run")]
+    if missing:
+        unknown = f"evidence ambiguous: provenance unknown - no artifact manifest retained for {sorted(missing)}"
+        return dict.fromkeys(attempt_ids, unknown)
     candidate_written = {str(a.get("digest")).removeprefix("sha256:")
                          for aid in attempt_ids for a in _manifest(experiment, aid).get("artifacts") or []
                          if isinstance(a, dict)}
@@ -726,7 +737,11 @@ def _retained_fixture_extras(experiment: trial.Experiment, attempt_ids: Sequence
         if path.name in candidate_written or path.stat().st_size > 1_000_000:
             continue
         try:
-            data = json.loads(path.read_bytes())
+            raw = trial.read_object(experiment, "sha256:" + path.name)
+        except trial.Refused as exc:
+            raise LiveRefused(f"a retained object fails its content-address check ({path.name}): {exc}") from None
+        try:
+            data = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
             continue
         if not isinstance(data, dict) or set(data) != _RAW_EXTRAS_KEYS:
@@ -754,6 +769,23 @@ def _lifecycle(experiment: trial.Experiment, attempt_id: str) -> tuple[str | Non
     if isinstance(dispatched, str) and isinstance(captured, str):
         wall = (datetime.fromisoformat(captured) - datetime.fromisoformat(dispatched)).total_seconds()
     return data.get("disposition"), data.get("reason"), wall
+
+
+def _original_prompt_delivery(experiment: trial.Experiment, attempt_id: str) -> tuple[bool, str | None]:
+    """The live run's OWN prompt-delivery verdict, as its observation record
+    stored it. The live check compared against the exact prompt sent, which
+    carried a per-attempt canary nonce that no retained record holds, so the
+    replay cannot recompute it; and #486 changed only tool-call parsing, never
+    message parsing, so the original verdict still stands. Not recorded is not
+    delivered (counter-model review)."""
+    path = experiment.root / f"observation-{attempt_id}.json"
+    transcript = json.loads(path.read_text(encoding="utf-8")).get("transcript") if path.is_file() else None
+    delivered = transcript.get("prompt_delivered") if isinstance(transcript, dict) else None
+    if delivered is True:
+        return True, None
+    reason = transcript.get("prompt_delivery_reason") if isinstance(transcript, dict) else None
+    return False, (str(reason) if delivered is False and reason else
+                   "the live run's prompt-delivery verdict was not retained")
 
 
 def _original_block_reason(experiment: trial.Experiment, attempt_id: str) -> tuple[bool, str | None]:
@@ -784,14 +816,17 @@ def _run_judge(grader: verify.GraderDef, trusted: Mapping[str, object]) -> dict[
     criteria = json.loads(done.stdout).get("criteria")
     problem = verify.criteria_problem(criteria, grader.criteria)
     if problem:
-        return {"status": "INCONCLUSIVE", "category": "criteria-set", "criteria": criteria, "detail": problem}
+        # Rejected output is kept as diagnostics only: never scored, so it can
+        # reach neither the composite nor the endpoint (counter-model review).
+        return {"status": "INCONCLUSIVE", "category": "criteria-set", "criteria": None,
+                "rejected_criteria": criteria, "detail": problem}
     from . import records
     status = records.derive_status(records.Record(path=Path("<judge replay>"), data={"criteria": criteria}))
     return {"status": status, "category": "verdict", "criteria": criteria, "detail": None}
 
 
 def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, adapter_revision: str,
-                 stamp: str) -> tuple[Path, dict[str, Any]]:
+                 stamp: str, assume_fixture_finalized: bool = False) -> tuple[Path, dict[str, Any]]:
     """Re-run the CURRENT judge over a RETAINED live run, spending nothing - NOT
     a grade and NOT a result (#486).
 
@@ -800,7 +835,14 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
     census coverage or format drift) gets its observation re-derived from its
     retained transcript by `agent_trial.observe_transcript_bytes` and the credit
     gate re-run by `agent_trial.credit_block`. Every other original reason is
-    carried over unchanged. An eligible attempt's retained raw fixture evidence
+    carried over unchanged.
+
+    A live fixture session can latch a FINALIZATION failure that no retained
+    record holds (`agent_trial` catches it into `FixtureSession.failure`, and
+    neither the observation record nor the journal stores it). By default that
+    is UNKNOWN and fails closed: the attempt is not judged. Only with
+    `assume_fixture_finalized` is complete fixture evidence taken as standing
+    for a clean finalization - an assumption the label records verbatim. An eligible attempt's retained raw fixture evidence
     (by provenance) is the judge's trusted envelope. The gate witness is not
     retained by a run whose grading never ran: honest-report reads UNKNOWN.
 
@@ -866,6 +908,8 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
         if transcript is not None:
             observation, census, run_metadata = at.observe_transcript_bytes(
                 spec, transcript, expected_prompt=text, skill_name=None)
+            delivered, delivery_reason = _original_prompt_delivery(experiment, attempt_id)
+            observation = replace(observation, prompt_delivered=delivered, prompt_delivery_reason=delivery_reason)
             proxy = _manifest_stream(experiment, attempt_id, eg.PROXY_LOG_STREAM)
             egress = ({"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}
                       if proxy is not None else {"status": "unread", "reason": "no egress proxy log retained"})
@@ -882,6 +926,9 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
         def fixture_block(fixture: dict[str, object] | str = fixture) -> str | None:
             if isinstance(fixture, str):
                 return f"not credited: {fixture}"
+            if not assume_fixture_finalized:
+                return ("not credited: the fixture session's finalization failure state was not retained, so a "
+                        "latched failure cannot be ruled out")
             service = fixture.get("service")
             if not isinstance(service, dict):
                 return "not credited: the fixture service record was never finalized"
@@ -917,7 +964,10 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
     ledger_grader = next((planned.get("grader") for planned, _a in experiment.attempts()), None)
     replay = {
         "judge_replay": {
-            "what": "judge replay: NOT a verified result and NOT a grade - the current judge re-run over retained "
+            # The assumption leads the label, so no reader of a flagged replay misses it (#486 ruling).
+            "what": ("ASSUMES fixture finalization was clean (--assume-fixture-finalized); "
+                     if assume_fixture_finalized else "")
+                    + "judge replay: NOT a verified result and NOT a grade - the current judge re-run over retained "
                     "evidence, deciding again only what the transcript adapter decided",
             "decided": "AFTER seeing the results (#486); not a result until the owner says it counts",
             "source_run": str(run_dir), "source_report_sha256": report_before,
@@ -929,6 +979,13 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
                                 "artifact, unique per attempt); the session's latched failure is not retained, so "
                                 "the service and guard records stand for it",
             "probe": "not run: this task's judge reads only the trusted observation",
+            "prompt_delivery": "carried from the live run's own verdict: the exact prompt held a per-attempt canary "
+                               "nonce no retained record holds, and #486 changed no message parsing",
+            "fixture_finalization": ("ASSUMED clean: complete fixture evidence taken as standing for a clean "
+                                     "finalization, which no retained record establishes (assume_fixture_finalized)"
+                                     if assume_fixture_finalized else
+                                     "not assumed: an attempt is judged only if its finalization is established; "
+                                     "no retained record establishes it, so none is"),
             "re_decided_attempts": len(re_decided),
             "spend": "none - no agent container, no client, no model",
         },
