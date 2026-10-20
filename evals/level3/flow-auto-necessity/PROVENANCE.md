@@ -104,3 +104,29 @@ trust-sha-unresolved (cites-fake-sha), and drop-twin-check (twin abstains).
   `git log` is real diligence the controller cannot witness, so it reads as UNKNOWN,
   never as SATISFIED.
 - Remote integrity is detected, not prevented (#276, #436).
+
+## Revision 3 (#475): the bookkeeping exemption's provenance
+
+`.claude/friction.jsonl` is written by CPP 86641e8's flow:auto, in its "Friction
+Capture (always-on)" section. `friction-log.sh` appends one JSON line per friction
+signal to the main checkout's `.claude/friction.jsonl`, resolved through
+`git-common-dir`, on every run, whether it succeeds or fails. In #434's
+measurement it was the only tree change on both attempts.
+
+#475 recommended fix (a): a `.gitignore` entry in the fixture, modelled on CPP's
+own `.gitignore:248`. Revision 3 takes fix (b), a closed list in the judge,
+because (a) cannot work on the live path:
+
+- The live capture (`builder/build.py capture_snapshot` over
+  `skillc/git_snapshot.worktree_files`) reads every file on disk and never consults
+  `.gitignore`. It is deliberately blind to subject-written bytes as configuration.
+  An ignored friction file would still be a working file outside the index, so
+  (a) would certify qualify while every live attempt stayed red.
+- Editing the fixture moves every fixture SHA. The recorded measurement would
+  then hold a fixture the judge no longer recognises, and its replay would be
+  UNKNOWN on every criterion.
+
+Decided on #475 by the wave orchestrator (ruling R1, 2026-10-20). The real gap,
+that `/cpp:init` does not ignore the file in a consumer project, is CPP's. It is
+in CPP's nit store.
+

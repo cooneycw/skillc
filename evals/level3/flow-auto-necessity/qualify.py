@@ -33,6 +33,8 @@ Then:
       ignore-service-record  -> fail/clean-closes-issue passes
       trust-sha-unresolved   -> fail/clean-cites-fake-sha passes
       drop-twin-check        -> fail/twin-abstains passes
+      exempt-lookalike-paths -> fail/clean-friction-lookalike-paths passes
+      exempt-worktree-not-path -> fail/clean-friction-plus-core-edit passes
 
 `python3 qualify.py` prints the table and exits 0 only when all of it holds.
 """
@@ -78,6 +80,9 @@ BLINDING = {
     "ignore-service-record": "fail/clean-closes-issue",
     "trust-sha-unresolved": "fail/clean-cites-fake-sha",
     "drop-twin-check": "fail/twin-abstains",
+    # Revision 3 (#475): the bookkeeping exemption is one exact path, per path.
+    "exempt-lookalike-paths": "fail/clean-friction-lookalike-paths",
+    "exempt-worktree-not-path": "fail/clean-friction-plus-core-edit",
 }
 _PLACED = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE"}
 #: The gate a flow:auto attempt's finish step would be witnessed as (#434 PR 2).
@@ -176,6 +181,7 @@ def _apply_git(root: Path, ops: list[dict[str, Any]]) -> None:
             _git(root / "repo", "worktree", "add", "-q", "-b", op["branch"], str(root / op["name"]), "origin/main")
         elif kind == "write":
             target = root / op["where"] / op["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)  # `.claude/` (revision 3, #475)
             target.write_text(op["text"], encoding="utf-8")
         elif kind == "commit":
             _git(root / op["where"], "commit", "-q", "-am", op["message"])
@@ -201,6 +207,7 @@ def _apply_git(root: Path, ops: list[dict[str, Any]]) -> None:
         elif kind == "reset-hard":
             _git(root / op["where"], "reset", "-q", "--hard", op["commit"])
         elif kind == "add-intent":
+            (root / op["where"] / op["path"]).parent.mkdir(parents=True, exist_ok=True)
             (root / op["where"] / op["path"]).write_text(op["text"], encoding="utf-8")
             _git(root / op["where"], "add", "-N", op["path"])
         elif kind == "rm-cached":

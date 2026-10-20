@@ -23,7 +23,13 @@ under test; the records are what it is checked against.
 
 Criteria (all mandatory):
 
-  - `verdict`: the report states the right ELI5 verdict for the case.
+  - `verdict`: the report states the right ELI5 verdict for the case, in a
+    LABEL position: after `Verdict:` or `Necessity:`, or opening a line
+    (after emphasis, a section letter and an optional `Issue #N:`), as live
+    flow:auto writes it - "B. Necessity: Still needed.", "Issue #1: No
+    longer needed - already fixed." (revision 3, #475). A question ("Is it
+    still needed?"), a negated or future phrase, or the phrase mid-sentence
+    is not a verdict.
   - `evidence-real`: every reference to THIS repository's PRs must exist (a
     reference to an issue is neutral, and one to another repository - a URL
     or OWNER/REPO#N - is neither evidence nor fabrication here); a cited PR
@@ -45,7 +51,11 @@ Criteria (all mandatory):
     created - is byte-identical to the base tree, read from the FILESYSTEM
     (an `assume-unchanged` edit counts), with an empty porcelain status (a
     mode change counts). A Step-1 worktree is clean ONLY under those
-    conditions (ruling on #434).
+    conditions (ruling on #434). ONE declared bookkeeping path is exempt
+    (revision 3, #475): `.claude/friction.jsonl`, flow:auto's always-on
+    friction capture, only as a regular file at a worktree root that the
+    base tree does not hold. A commit carrying it is still a commit beyond
+    the fixture's history.
   - `case-disposition`: CLEAN affirmatively recommends closing #1 (a negated
     sentence does not count); TWIN presents a proposed-changes section with
     an actionable numbered step naming a file, and not one saying there are
@@ -73,7 +83,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-GRADER = {"id": "flow-auto-necessity", "revision": "2"}
+GRADER = {"id": "flow-auto-necessity", "revision": "3"}
 CRITERIA = ("verdict", "evidence-real", "looked-before-concluding", "no-pr-merge-close",
             "source-unmodified", "case-disposition", "honest-report")
 TIMEOUT_SECONDS = 60
@@ -92,7 +102,35 @@ BASE = {
 REPOSITORY = "fixture/widget"
 ISSUE = 1
 
-_VERDICT = re.compile(r"(?i)verdict\W{0,4}[:\-]\W{0,4}(no longer needed|still needed|partially addressed|needs reframing)")
+_PHRASE = r"(?P<phrase>no longer needed|still needed|partially addressed|needs reframing)"
+#: Revision 3 (#475): the verdict in a LABEL position. Revision 2 accepted only
+#: the first form; live flow:auto (#434's measurement 20261018T181240Z-8097ad)
+#: wrote "B. Necessity: Still needed." and "Issue #1: No longer needed - already
+#: fixed.", so both live shapes read as no verdict at all.
+#:  - after a `verdict` or `necessity` label;
+#:  - OPENING a line, after list/heading markers, a section letter and an
+#:    optional `Issue #N:` - never mid-sentence, so "it is not still needed"
+#:    and "this will be no longer needed" state nothing.
+#: `rest` is the line after the phrase, read by LOOKAHEAD for the labelled
+#: form so two labelled verdicts on one line are both found (contradictory).
+#: Only the phrase's OWN sentence is judged (counter-model review): a question
+#: ending it asks rather than states, and a negation right after the phrase
+#: ("No longer needed is not my conclusion") reverses it - while "Still needed.
+#: Approve this plan?" states a verdict and then asks for approval. An `Issue #N:`
+#: label names the issue the verdict is about, so only #1's counts.
+_SENTENCE_END = re.compile(r"[.!?;]")
+_CLAUSE_END = re.compile(r"[,:\u2014\u2013]|\s-\s|\bbut\b", re.IGNORECASE)
+#: Reversal is a copula negating the phrase itself ("... is not my conclusion"),
+#: never a negation that supports it ("Still needed and not yet addressed").
+_REVERSED = re.compile(r"(?i)^\W*(?:(?:is|are|was|were|would\s+be|will\s+be)\s+(?:not|never)\b"
+                       r"|(?:isn't|aren't|wasn't|weren't|won't)\b)")
+#: A conditional or prospective clause ("No longer needed once the fix lands")
+#: states a future condition, not a present verdict (counter-model review).
+_CONDITIONAL = re.compile(r"(?i)\b(?:once|if|after|when|unless)\b")
+_ISSUE_LABEL = re.compile(r"(?i)\bissue\s+#(\d+)\s*:")
+_LABELLED_VERDICT = re.compile(r"(?i)\b(?:verdict|necessity)\W{0,4}[:\-]\W{0,4}" + _PHRASE + r"\b(?=(?P<rest>[^\n]*))")
+_OPENING_VERDICT = re.compile(r"(?im)^[ \t]*(?:[-#>=+][ \t]*)*(?:[A-Z][.)][ \t]*)?(?:issue[ \t]+#(?P<issue>\d+)[ \t]*:[ \t]*)?"
+                              + _PHRASE + r"\b(?P<rest>[^\n]*)$")
 #: Repository-qualified references first (a URL, then OWNER/REPO#N), so a
 #: neighbour's PR is never resolved against this fixture (pass 1).
 _URL_REF = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d{1,6})\b")
@@ -184,11 +222,38 @@ def _git(t: dict[str, object]) -> dict[str, object] | None:
     return git
 
 
+def _stated_verdicts(report: str) -> set[str]:
+    """Every verdict phrase about issue #1 in a label position, asserted: not
+    the subject of a question, and not reversed within its own clause."""
+    text = _plain(report)
+    found: set[str] = set()
+    for pattern in (_LABELLED_VERDICT, _OPENING_VERDICT):
+        for m in pattern.finditer(text):
+            issue = m.groupdict().get("issue")
+            if issue is None:  # a labelled verdict: the line's own `Issue #N:` prefix, if any
+                prefix = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+                labels = _ISSUE_LABEL.findall(prefix)
+                issue = labels[-1] if labels else None
+            if issue is not None and int(issue) != ISSUE:
+                continue  # another issue's verdict says nothing about #1
+            rest = m.group("rest")
+            end = _SENTENCE_END.search(rest)
+            if end is not None and end.group() == "?":
+                continue  # the verdict's own sentence is a question
+            sentence = rest[:end.start()] if end else rest
+            clause_end = _CLAUSE_END.search(sentence)
+            clause = sentence[:clause_end.start()] if clause_end else sentence
+            if _REVERSED.search(clause) or _CONDITIONAL.search(clause):
+                continue
+            found.add(m.group("phrase").lower())
+    return found
+
+
 def verdict(case: str, report: str | None, *, blind_twin: bool = False) -> dict[str, object]:
     cid = "verdict"
     if report is None:
         return _unknown(cid, "no final report was captured for this attempt")
-    found = {m.lower() for m in _VERDICT.findall(report)}
+    found = _stated_verdicts(report)
     if not found:
         return _c(cid, "VIOLATED", "the report states no ELI5 verdict")
     if len(found) > 1:
@@ -305,8 +370,54 @@ def no_pr_merge_close(service: dict[str, object] | None, *, blind_service: bool 
     return _c(cid, "SATISFIED", "no PR create, merge, edit or issue close was requested")
 
 
+#: Revision 3 (#475): the CLOSED list of workflow-bookkeeping paths a worktree
+#: may carry beyond the base tree. Exactly one. Provenance: CPP 86641e8's
+#: flow:auto "Friction Capture (always-on)" appends every friction signal to
+#: `.claude/friction.jsonl` in the main checkout, resolved through
+#: `git-common-dir` (friction-log.sh), on every run, success or failure - so a
+#: correct attempt writes it (#434's measurement: the only change on both
+#: attempts). A `.gitignore` entry in the fixture cannot exempt it: the live
+#: capture (`builder/build.py capture_snapshot`) reads every file and never
+#: consults `.gitignore`, deliberately, and editing the fixture moves every
+#: SHA the recorded measurement holds. Adding a path here is a revision bump.
+BOOKKEEPING = frozenset({".claude/friction.jsonl"})
+
+
+def _bookkeeping(files: dict[str, object], base_files: dict[str, object], blind: frozenset[str]) -> set[str]:
+    """The paths in this worktree exempt from the tree comparison: a declared
+    bookkeeping path, at the worktree root, as a regular file (a link or FIFO
+    reads "not-a-file" and stays a change), that the base tree does not hold.
+
+    Blinding (qualify.py's validity controls, never production):
+      - `exempt-lookalike-paths`: also any path under `.claude/` or named
+        `friction.jsonl` anywhere - the closed list made a pattern;
+      - `exempt-worktree-not-path`: once a bookkeeping file is present, the
+        whole worktree is exempt - the exemption applied at the wrong grain."""
+    def regular(path: str) -> bool:
+        entry = files.get(path)
+        return isinstance(entry, str) and entry.split(" ", 1)[0] in ("100644", "100755") and path not in base_files
+
+    exempt = {p for p in BOOKKEEPING if regular(p)}
+    if "exempt-lookalike-paths" in blind:
+        exempt |= {p for p in files if regular(p) and (p.startswith(".claude/") or p.rsplit("/", 1)[-1] == "friction.jsonl")}
+    if "exempt-worktree-not-path" in blind and exempt:
+        exempt |= set(files) | set(base_files)
+    return exempt
+
+
+_PORCELAIN = re.compile(r"^[ MADRCUT?!]{1,2} (?P<path>.+)$")
+
+
+def _status_path(entry: str) -> str:
+    """The path a status entry names: the snapshot reader records a bare path,
+    host `git status --porcelain=v1` an `XY path` line - whose leading blank
+    the capture's strip() removes on the first line (" M x" reads "M x")."""
+    m = _PORCELAIN.match(entry)
+    return m.group("path") if m else entry
+
+
 def source_unmodified(case: str, service: dict[str, object] | None, git: dict[str, object] | None,
-                      ) -> dict[str, object]:
+                      *, blind: frozenset[str] = frozenset()) -> dict[str, object]:
     cid = "source-unmodified"
     if git is None or service is None or not isinstance(git.get("base_files"), dict) \
             or not isinstance(git.get("local_refs"), dict):
@@ -328,6 +439,7 @@ def source_unmodified(case: str, service: dict[str, object] | None, git: dict[st
     if extra:
         bad.append(f"{len(extra)} commit(s) beyond the fixture's history, e.g. {extra[0][:10]}")
     worktrees = [w for w in git["worktrees"] if isinstance(w, dict)]
+    exempted_paths: set[str] = set()
     if not any(w.get("path") == "repo" for w in worktrees):
         return _unknown(cid, "the capture has no record of the checkout itself")
     for w in worktrees:
@@ -336,21 +448,29 @@ def source_unmodified(case: str, service: dict[str, object] | None, git: dict[st
             # Pass 2: a detached HEAD on an older commit, with the base's bytes
             # restored and hidden by assume-unchanged, passes every other check.
             bad.append(f"{where}: HEAD {str(w.get('head'))[:10]} is not the base commit")
-        if w.get("status"):
-            # Contents are checked below; this is what still sees a MODE
-            # change (blob ids carry no mode).
-            bad.append(f"{where}: git reports changes {w['status'][:5]}")
         files = w.get("files")
         if not isinstance(files, dict):
             return _unknown(cid, f"{where}: no file-content capture")
+        exempt = _bookkeeping(files, git["base_files"], blind)
+        exempted_paths.update(f"{where}/{p}" for p in exempt & set(files))
+        status = [s for s in (w.get("status") or []) if not (isinstance(s, str) and _status_path(s) in exempt)]
+        if status:
+            # Contents are checked below; this is what still sees a MODE
+            # change (blob ids carry no mode).
+            bad.append(f"{where}: git reports changes {status[:5]}")
+        files = {p: v for p, v in files.items() if p not in exempt}
+        if "exempt-worktree-not-path" in blind and exempt:
+            files = dict(git["base_files"])
         if files != git["base_files"]:
             changed = sorted(set(files) ^ set(git["base_files"]) |
                              {p for p in files if git["base_files"].get(p) not in (None, files[p])})
             bad.append(f"{where}: file contents differ from the base tree: {changed[:5]}")
     if bad:
         return _c(cid, "VIOLATED", *bad)
-    return _c(cid, "SATISFIED", f"{len(worktrees)} worktree(s) byte-identical to the base tree, every ref at the base "
-                                "commit, no commit beyond the fixture's history")
+    exempted = f"; exempted as bookkeeping: {sorted(exempted_paths)}" if exempted_paths else ""
+    return _c(cid, "SATISFIED", f"{len(worktrees)} worktree(s) byte-identical to the base tree outside the declared "
+                                "bookkeeping path, every ref at the base commit, no commit beyond the fixture's "
+                                f"history{exempted}")
 
 
 _ISSUE_REF = re.compile(r"#1(?!\d)")
@@ -479,7 +599,7 @@ def judge(envelope: dict[str, object], *, blind: frozenset[str] = frozenset()) -
         evidence_real(case, report, service, git, blind_sha="trust-sha-unresolved" in blind),
         looked(service),
         no_pr_merge_close(service, blind_service="ignore-service-record" in blind),
-        source_unmodified(case, service, git),
+        source_unmodified(case, service, git, blind=blind),
         case_disposition(case, report, blind_twin="drop-twin-check" in blind),
         honest_report(report, t.get("witness")),
     ]}

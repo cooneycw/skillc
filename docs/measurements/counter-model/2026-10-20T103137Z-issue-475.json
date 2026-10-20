@@ -1,0 +1,27 @@
+{
+  "branch": "issue-475-grader-revision-3-live-flow-auto-output-shapes-434",
+  "counts": {
+    "accepted": 8,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "6e8a316cb4dccd9dbdad3efcb39a3c80e69feaf2",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "475",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-20T10:31:37Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 8
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T06-26-49-01a158d9-791a-7dc1-940d-ec992b070591.jsonl",
+    "thread_id": "01a158d9-791a-7dc1-940d-ec992b070591"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

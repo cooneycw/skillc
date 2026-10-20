@@ -114,6 +114,7 @@ def apply_ops(root, remote, ops):
             git(os.path.join(root, "repo"), "worktree", "add", "-q", "-b", op["branch"],
                 os.path.join(root, op["name"]), "origin/main")
         elif kind == "write":
+            os.makedirs(os.path.dirname(os.path.join(where, op["path"])), exist_ok=True)
             with open(os.path.join(where, op["path"]), "w", encoding="utf-8") as handle:
                 handle.write(op["text"])
         elif kind == "commit":
@@ -138,6 +139,7 @@ def apply_ops(root, remote, ops):
         elif kind == "reset-hard":
             git(where, "reset", "-q", "--hard", op["commit"])
         elif kind == "add-intent":
+            os.makedirs(os.path.dirname(os.path.join(where, op["path"])), exist_ok=True)
             with open(os.path.join(where, op["path"]), "w", encoding="utf-8") as handle:
                 handle.write(op["text"])
             git(where, "add", "-N", op["path"])
