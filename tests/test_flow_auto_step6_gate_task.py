@@ -107,12 +107,19 @@ def test_the_service_accepts_the_case_and_authorizes_shipping(tmp_path: Path) ->
 
 
 def test_the_builder_offers_the_api_fixture_campaign_loads() -> None:
-    """The necessity builder's functions, by name (`fixture_campaign._builder`
-    caches ONE builder under a fixed module name, so it cannot load this one
-    beside #434's yet: PR-2's blocker, recorded in DESIGN.md)."""
     for name in ("build", "declaration", "capture", "capture_snapshot", "read_files", "blob_id", "CASES"):
         assert callable(getattr(build, name)) or name == "CASES", name
-    assert fc._builder.__code__.co_consts.count("flow_auto_necessity_builder_campaign") == 1
+
+
+def test_both_task_builders_load_side_by_side() -> None:
+    """#279 PR-2a (the nit-store fix): the builder cache is keyed by the
+    builder's path. With one fixed module name, whichever task loaded first was
+    returned for both, so the Step-6 task silently built #434's fixture."""
+    necessity = fc._builder(ROOT / "evals" / "level3" / "flow-auto-necessity")
+    step6 = fc._builder(TASK)
+    assert necessity is not step6
+    assert necessity.CASES == ("clean", "twin") and step6.CASES == ("twin-gate",)
+    assert fc._builder(TASK) is step6  # still cached, per path
 
 
 def _pinned_gate(tmp_path: Path, repo: Path) -> tuple[list[str], int]:

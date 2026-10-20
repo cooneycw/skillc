@@ -786,3 +786,23 @@ def test_merge_records_foreign_and_ambiguous_references(world: World) -> None:
     assert effect["closed_issues"] == [] and effect["ambiguous_closing_refs"] == ["Fixes:#3"]
     assert effect["foreign_closing_refs"] == ["other/repo#9"]
     assert service._state["issues"][3]["state"] == "OPEN"
+
+
+# -------------------------------------- #279 PR-2a: the controller-owned order
+
+def test_every_event_carries_the_controllers_order_only_when_given_one(world: World) -> None:
+    from skillc.ordering import Order
+    order = Order()
+    service = fs.FixtureService(world.declaration(), world.remote, "attempt-1", order=order)
+    ask(service, "issue", "view", "1")
+    order.next()  # a gate run between two requests took the next number
+    with pytest.raises(ChannelRefusal):
+        # A malformed request still gets the controller's stamp, and a
+        # request-supplied `order` never sets it.
+        service.decide({"op": "gh", "argv": ["issue", "view", "1"], "order": 1})
+    ask(service, "pr", "list")
+    events = service.finalize("attempt-1").to_json()["events"]
+    assert [e["order"] for e in events] == [1, 3, 4]
+    plain = world.service()
+    ask(plain, "issue", "view", "1")
+    assert all("order" not in e for e in plain.finalize("attempt-1").to_json()["events"])  # byte-identical control

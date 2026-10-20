@@ -403,12 +403,17 @@ def build_case(task_root: Path, case: str, where: Path) -> tuple[dict[str, objec
 
 
 def _builder(task_root: Path) -> Any:
+    """The task's builder module, loaded once PER BUILDER PATH (#279 PR-2a,
+    the nit-store fix): a fixed module name returned whichever task loaded
+    first, so a second fixture task silently built the first task's fixture."""
+    import hashlib
     import importlib.util
     import sys
-    name = "flow_auto_necessity_builder_campaign"
+    path = (task_root / "builder" / "build.py").resolve()
+    name = "fixture_builder_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:16]
     if name in sys.modules:
         return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, task_root / "builder" / "build.py")
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module

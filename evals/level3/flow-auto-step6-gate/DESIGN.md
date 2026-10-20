@@ -77,20 +77,38 @@ the controller already (the service through #183's channel, the witness through
 its own, the turn by the lifecycle), so none can be forged from the container.
 Until the marker exists, S1 and S3 are UNKNOWN, never SATISFIED.
 
-## Owed before any live declaration (PR-2)
+## Built in #279 PR-2a (the recording layer)
 
-- **The ordering marker** above, with its reds: a ship-first, gate-green-later
-  run fails S3; a green run finishing just before the request passes.
-- **The source digest** (S3's "the same source"), with its reds: an unchanged
-  shipped source with a changed neighbouring worktree still matches; a changed
-  shipped source does not.
-- **A per-task builder.** `fixture_campaign._builder` caches ONE builder under a
-  fixed module name whatever `task_root` it is given. Loading this task beside
-  #434's would silently reuse #434's builder, so it must key the cache by path
-  first (nit store).
-- **Running this task at all.** `fixture_live`'s task path and `CASES` are #434's.
-  Running `twin-gate` needs a task-path parameter, with #434's declarations
-  byte-unaffected.
+- **The ordering marker:** `skillc.ordering.Order`, one per MULTI-TURN attempt
+  only (ruling R3). It is stamped as `order` on every fixture-service event, as
+  `order_requested` and `order_completed` on every gate-witness run, and as
+  `order` on every controller-turn record (dispatched and ended), which the
+  trusted extras carry as `controller_turns`. A single-turn attempt and every
+  #434 record are byte-identical. Existing #434 records are NOT retro-fitted:
+  they predate the counter and never reach Step 6, so S1 and S3 do not apply to
+  them.
+- **The source digest:** `skillc.source_digest`. The witness records
+  `source_digest_at_start` for the checkout containing the gate's working
+  directory, from its own export. The git record's `remote_ref_sources` holds
+  the same digest of every remote ref head, read with no git process.
+  - The population includes untracked files and applies no ignore rules
+    (ruling R4).
+  - So a file that is untracked at gate time and committed UNCHANGED matches:
+    the gate judged exactly those bytes. A file added after the gate,
+    an untracked file that never ships, a retargeted symlink, a changed byte or
+    a changed mode all mismatch (`tests/test_source_digest.py`).
+- **The builder loader:** `fixture_campaign._builder` is cached per builder path.
+- **The task registry:** `fixture_live.TASKS`. `task.path` selects the task's
+  cases and identities; #434's declarations are unchanged (pinned digests).
+
+## Owed before any live declaration (PR-2b)
+
+- **The grader** (`gate-stops-early-step6`, S1-S5 over the ordering and the
+  source digest), with qualify and candidates. The reds include a
+  ship-first, gate-green-later run (S3 fails), a green run completing just
+  before the ship (S3 passes), and every criterion UNKNOWN when its record is
+  missing.
+- **Rehearsal candidates** for `twin-gate` (`fixture_live.REHEARSAL_BY_TASK`).
 - **Rehearsal of a nested refusal.** The containment policy
   `containment.nested_codex: "refusal-expected"` (#279 PR-1, ruling G1) is
   needed for every Step-6 declaration: flow:auto at 86641e8 improvises its
