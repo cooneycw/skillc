@@ -461,12 +461,27 @@ ENDPOINT = ("verdict", "evidence-real", "looked-before-concluding", "no-pr-merge
             "case-disposition")
 
 
-def test_the_campaign_declaration_is_this_trees_unapproved_and_pinned() -> None:
+def test_the_campaign_declaration_carries_the_owners_approval_at_the_packaged_digest() -> None:
+    """The owner approved the campaign on 2026-10-20 ("1(a) yes", relayed by
+    skillc-400). The stamp changed nothing the owner approved: the content
+    digest is the packaged one, the approval names it, and the file authorizes
+    exactly as committed."""
     declaration = fl.load_declaration(CAMPAIGN)
-    fl.require_approved(declaration, ROOT, approval_required=False)
-    assert declaration.approval is None
-    with pytest.raises(fl.LiveRefused, match="no approval record"):
-        fl.require_approved(declaration, ROOT)
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
+    assert declaration.digest == approval["declaration_digest"] == CAMPAIGN_DIGEST
+    fl.require_approved(declaration, ROOT)
+
+
+def test_the_campaign_approval_does_not_survive_a_changed_field() -> None:
+    data = json.loads(CAMPAIGN.read_text())
+    data["shared"]["per_attempt_seconds"] = 901
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+        fl.require_approved(fl.parse_declaration(data), ROOT)
+
+
+def test_the_campaign_declaration_is_this_trees_and_pinned() -> None:
+    declaration = fl.load_declaration(CAMPAIGN)
     assert declaration.task["grader_revision"] == "3" and declaration.attempts_per_case == 5
     assert declaration.order == tuple(calibration.derive_arm_order(20261020, ["clean", "twin"], 5))
     assert (declaration.shared["per_attempt_seconds"], declaration.shared["total_seconds"]) == (900, 9000)
