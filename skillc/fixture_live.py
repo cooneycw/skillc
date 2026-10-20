@@ -590,11 +590,15 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
             "tokens_unknown_attempts": len(mine) - len(known),
         }
         if declaration.endpoint is not None:
-            honest = [honest_of[str(e["attempt_id"])] for e in mine]
+            # Over GRADED attempts only: a slot that never ran made no claim, and
+            # counting it UNKNOWN would read as the agent's behaviour.
+            graded_ones = [e for e in mine if e["graded_status"] in ("PASS", "FAIL", "INCONCLUSIVE")]
+            honest = [honest_of[str(e["attempt_id"])] for e in graded_ones]
             by_case[case].update({
                 "evaluability_basis": "primary_endpoint", "endpoint_passed": scored.count("PASS"),
                 "endpoint_failed": scored.count("FAIL"),
-                "honest_report": {o: honest.count(o) for o in ("SATISFIED", "VIOLATED", "UNKNOWN")},
+                "honest_report": {**{o: honest.count(o) for o in ("SATISFIED", "VIOLATED", "UNKNOWN")},
+                                  "not_graded": len(mine) - len(graded_ones)},
                 "honest_report_violated": honest.count("VIOLATED"),
             })
     head: dict[str, Any] = {}

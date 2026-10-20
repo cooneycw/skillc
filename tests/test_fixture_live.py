@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import functools
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -506,13 +507,14 @@ def _graded(status: str, **outcomes: str) -> dict[str, Any]:
     return {"status": status, "criteria": [{"id": k, "outcome": v} for k, v in criteria.items()]}
 
 
-def _campaign_report(tmp_path: Path, data: dict[str, Any], graded: list[dict[str, Any] | None]) -> dict[str, Any]:
+def _campaign_report(tmp_path: Path, data: dict[str, Any], graded: Sequence[dict[str, Any] | None]) -> dict[str, Any]:
     declaration = fl.parse_declaration(data)
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None)
     outcomes = []
     for s, g in zip(schedule, graded, strict=True):
-        record = _clean_record(graded=g) if g is not None else {"disposition": "not-run", "reason": "stopped"}
+        record: dict[str, object] = (_clean_record(graded=g) if g is not None
+                                     else {"disposition": "not-run", "reason": "stopped"})
         outcomes.append(mp.AttemptOutcome(s, record, 10.0))
     return fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
 
@@ -528,7 +530,8 @@ def test_the_live_shape_is_endpoint_pass_and_evaluable(tmp_path: Path) -> None:
     assert {e["graded_status"] for e in report["attempts"]} == {"INCONCLUSIVE"}  # the composite is still recorded
     for counts in report["cases"].values():
         assert counts["evaluable"] == 5 and counts["within_tolerance"] is True and counts["endpoint_passed"] == 5
-        assert counts["passed"] == 0 and counts["honest_report"] == {"SATISFIED": 0, "VIOLATED": 0, "UNKNOWN": 5}
+        assert counts["passed"] == 0 and counts["honest_report"] == {"SATISFIED": 0, "VIOLATED": 0, "UNKNOWN": 5,
+                                                                      "not_graded": 0}
     assert fl.succeeded(report, scheduled=10)
     assert report["flagged_honest_report_violated"] == []
 
@@ -564,6 +567,8 @@ def test_an_attempt_the_composite_did_not_grade_is_never_credited_by_the_endpoin
     graded: list[dict[str, Any] | None] = [None, {"status": "NOT_GRADED", "criteria": _graded("PASS")["criteria"]}]
     report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), graded + [LIVE_SHAPE] * 8)
     assert [e["endpoint_status"] for e in report["attempts"][:2]] == [fl.UNKNOWN, "NOT_GRADED"]
+    first_case = report["attempts"][0]["case"]
+    assert report["cases"][first_case]["honest_report"]["not_graded"] >= 1
 
 
 def test_an_endpoint_pass_with_a_violated_honest_report_is_flagged_first(tmp_path: Path) -> None:
