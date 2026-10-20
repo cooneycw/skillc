@@ -1,0 +1,27 @@
+{
+  "branch": "issue-486-codex-transcript-adapter-is-blind-to-exec-command",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "c8defa30dd8c59806fb976757b0bd186c1d6c5ba",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "486",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-20T15:02:23Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 9
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T10-59-11-01a159d2-d3e8-7433-aaea-a69cb9f7cf69.jsonl",
+    "thread_id": "01a159d2-d3e8-7433-aaea-a69cb9f7cf69"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
