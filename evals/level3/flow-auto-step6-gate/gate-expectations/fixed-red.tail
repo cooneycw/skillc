@@ -1,0 +1,4 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-enrolled: this repository carries no counter-model receipts directory
+flow-finish-gate: the failing step is an aggregate; make stopped at prerequisite 'lint'.
+FLOW_FINISH_GATE: fail (at prerequisite lint)
+FLOW_FINISH_GATE_EXIT=1

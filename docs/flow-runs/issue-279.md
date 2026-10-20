@@ -37,3 +37,29 @@ none - no controller multi-turn mechanism exists on main; the #434 live-wiring b
 9. `docs/flow-runs/issue-279.md` - this record
 
 Scope: about 9 files, 1 PR. Risks: the guard count semantics (a looser count could hide a nested launch, so the reds pin both sides), and the shared wall budget across turns.
+
+<!-- flow-run n=2 id=af5f4e6d1f9c44e3aa5ebe5878d60a18 -->
+## Run 2
+
+- Run-id:            af5f4e6d1f9c44e3aa5ebe5878d60a18
+- Run-start:         7c1d408f18ce37e460e2c8942273581b0d6c079f
+- Issue:             #279
+- Base SHA:          7c1d408f18ce37e460e2c8942273581b0d6c079f
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE GO-WITH-CONDITIONS #279 (R1-R5), 2026-10-20
+- Recorded at:       2026-10-20T21:05:00Z
+
+### Section B evidence
+#279 OPEN, parked 2026-10-18 (6252677230); PR 1 merged #474 16732600. Since then 043279f (#482), 1eaac29 (#488), 21c20e2 (#490) touch fixture_live/controller_turns/codex_guard; none wires turns into the live path. #277 OPEN consumes the seam. Duplicates: none.
+
+### Section C - the approved plan (this run is PR-1, no spend)
+1. `skillc/fixture_live.py` - optional digest-bound `task.turns` (controller_turns.parse_turns) passed to run_one_attempt; per-attempt controller_turns in the report; turn-aware rehearsal actor; `containment.nested_codex: "refusal-expected"` (closed, explicit, digest-bound) in containment_trigger
+2. `skillc/codex_guard.py` - the opt-in reading of a confirmed refused-nested launch (no stop, no credit block; counted); suspected/ancestry_unknown/passed-through still stop
+3. `skillc/agent_trial.py` - the credit gate honours the opt-in only
+4. `tests/test_fixture_live.py` - turns digest/delivery/guard-count reds, absent turns byte-identical, opt-in reds incl. passed-through stops, clock test
+5. `tests/test_codex_guard.py` - opt-in credit reds
+6. `evals/level3/flow-auto-step6-gate/` - new task: builder reusing flow-auto-necessity's by import, case twin-gate (pre-existing fix-independent lint failure), measured gate tails, README, DESIGN.md (grading S1-S5, blind-validation rule, pre-registered risks)
+7. `changelog.d/279-turns-wiring.md` - one bullet
+
+Scope: medium. Risks: G1 containment semantics; receipt-writer stall before the gate (unmeasured); 900 s may be tight for Step 6; controller clock dependency (tested).

@@ -97,6 +97,9 @@ class FixtureSession:
     #: #279: the first turn plus each delivered controller turn; the guard's
     #: nested verdict is judged against it. Set by `run_one_attempt`.
     expected_top_level: int = 1
+    #: #279: the declaration's nested-codex policy (`codex_guard.NESTED_POLICIES`),
+    #: or None; recorded beside the counts only when declared.
+    nested_policy: str | None = None
     _finishing: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -191,7 +194,7 @@ class FixtureSession:
 
     def guard_record(self) -> dict[str, Any]:
         return cg.summarize(self.attempt_id, list(self.guard.decisions), self.guard.channel_unavailable,
-                            expected_top_level=self.expected_top_level)
+                            expected_top_level=self.expected_top_level, nested_policy=self.nested_policy)
 
     def extras(self, final_report: str | None) -> dict[str, object]:
         return {"case": self.fixture.case, "service": self.record, "git": self.git,
