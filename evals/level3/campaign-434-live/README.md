@@ -134,7 +134,9 @@ never zero.
 The owner-approved campaign above ran once (`20261020T141529Z-3585c9`). Grader revision 4
 (#487) then moved the grader, so the repository refuses `campaign-declaration.json` as spent.
 That file stays unchanged as the historical record. After seeing the result, the owner chose
-a fresh official campaign: `campaign-declaration-rev4.json` (unapproved).
+a fresh official campaign: `campaign-declaration-rev4.json`, **APPROVED** by the owner on
+2026-10-20 ("Approve 434", relayed by skillc-400) at digest `sha256:90accda5…`: one run of 10
+attempts as declared, no re-run.
 
 - **The terms are the approved campaign's, unchanged.** That covers the subject, client,
   model, effort, image, egress, instruction, schedule size, caps, tolerance, primary endpoint
@@ -146,7 +148,7 @@ a fresh official campaign: `campaign-declaration-rev4.json` (unapproved).
   - the run store, `~/skillc-evidence/campaign-434-live/campaign-rev4`, kept apart from the
     spent run;
   - the comment;
-  - the approval, which is absent until the owner gives it.
+  - the approval: the owner's, for this file's own digest.
 
   A test compares the two files field by field against an allow-list of exactly these fields,
   so any other difference fails.
