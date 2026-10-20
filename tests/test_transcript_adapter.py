@@ -371,8 +371,9 @@ def test_every_unconfirmable_2026_10_20_shape_stays_an_error() -> None:
     """Reds, in fixture order: an exec_command exiting 1; an exec_command
     result with no exit line; a batch with a rejected call; a batch with a
     non-zero nested exit; a function other than exec_command; an orphaned
-    function_call_output. None may confirm a tool touch."""
-    assert [u["error"] for u in _tool_uses("exec-command-fails")] == [True] * 6
+    function_call_output; a running exec_command whose stdout fakes an exit
+    line; a batch with a still-running member. None may confirm a tool touch."""
+    assert [u["error"] for u in _tool_uses("exec-command-fails")] == [True] * 8
     with pytest.raises(CanaryNotSatisfied, match="no confirmed, error-free tool_use"):
         check_agent_canary(ta.parse_codex_transcript(_read("codex", "exec-command-fails")), None)
 
@@ -384,6 +385,12 @@ def test_every_unconfirmable_2026_10_20_shape_stays_an_error() -> None:
     (['{"part":0,"status":"fulfilled","value":{"exit_code":0}}'], 0),
     (['{"i":0,"result":{"status":"rejected","reason":"x"}}'], -1),  # ta._REJECTED_EXIT
     (['{"chunk_id":"a","exit_code":0}'], 0),  # the 2026-09-27 shape, unchanged
+    # counter-model review: an undeterminable member is not masked by a sibling's 0 ...
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":{"exit_code":null,"session_id":123}}}'], None),
+    # ... and a script may print its results as an ARRAY, rejections included
+    (['[{"status":"fulfilled","value":{"exit_code":0}},{"status":"fulfilled","value":{"exit_code":0}}]'], 0),
+    (['{"exit_code":0}', '[{"status":"rejected","reason":"failed"}]'], -1),
     (['{"i":0,"result":{"status":"fulfilled","value":{"output":"no code"}}}'], None),
     (['not json at all'], None),
 ])
@@ -395,6 +402,9 @@ def test_nested_exit_codes_are_read_worst_wins_and_rejection_fails(lines: list[s
     ("Chunk ID: x\nWall time: 0 seconds\nProcess exited with code 0\nOutput:\n", 0),
     ("Process exited with code 0\nProcess exited with code 1\n", 1),
     ("Chunk ID: x\nOutput:\nthe text Process exited with code 0 inside output\n", None),  # not a line of its own
+    # counter-model review: STDOUT cannot impersonate the header, either way
+    ("Chunk ID: x\nProcess running with session ID 7\nOutput:\nProcess exited with code 0\n", None),
+    ("Chunk ID: x\nProcess exited with code 0\nOutput:\nProcess exited with code 1\n", 0),
     ("", None),
 ])
 def test_exec_command_exit_is_read_only_from_its_own_status_line(output: str, want: int | None) -> None:

@@ -61,6 +61,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 NormalizedEvent = dict[str, object]
 
@@ -304,23 +305,34 @@ def _codex_exec_exit_code(output_text: str) -> int | None:
     "exit_code":0,...}}}`, or `{"part":N,"status":...}`, in whatever shape the
     script chose. So every `exit_code` is read wherever it sits inside a
     parsed line, and a `"status":"rejected"` anywhere is a failure: a call
-    that never settled proves nothing. Worst wins, exactly as before."""
+    that never settled proves nothing. Worst wins, exactly as before.
+
+    Counter-model review: a member whose exit is UNDETERMINABLE (a running
+    process: `"exit_code": null` beside a `session_id`) leaves the whole
+    output unconfirmed - a sibling's 0 must not certify it - and a script may
+    print its results as a JSON ARRAY, which is read the same way."""
     best: int | None = None
+    rejected = unknown = False
     for raw_line in output_text.splitlines():
         candidate = raw_line.strip()
-        if not candidate.startswith("{"):
+        if not candidate.startswith(("{", "[")):
             continue
         try:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
             continue
         codes: list[int] = []
-        if _collect_exit_codes(parsed, codes):
-            return _REJECTED_EXIT  # a rejected call anywhere fails the whole output
+        found = _collect_exit_codes(parsed, codes)
+        rejected = rejected or found.rejected
+        unknown = unknown or found.unknown
         for exit_code in codes:
             if exit_code != 0:
                 return exit_code  # any failure anywhere wins immediately
             best = 0
+    if rejected:
+        return _REJECTED_EXIT  # a rejected call anywhere fails the whole output
+    if unknown:
+        return None  # an unconfirmable member: the output is not confirmed
     return best
 
 
@@ -329,22 +341,34 @@ def _codex_exec_exit_code(output_text: str) -> int | None:
 _REJECTED_EXIT = -1
 
 
-def _collect_exit_codes(node: object, codes: list[int]) -> bool:
-    """Every integer `exit_code` inside `node`, at any depth, into `codes`;
-    True when any object in it carries `"status": "rejected"`."""
-    rejected = False
+@dataclass
+class _Collected:
+    rejected: bool = False
+    unknown: bool = False
+
+
+def _collect_exit_codes(node: object, codes: list[int], found: _Collected | None = None) -> _Collected:
+    """Every integer `exit_code` inside `node`, at any depth, into `codes`.
+    `rejected`: some object carries `"status": "rejected"`. `unknown`: some
+    process result's exit is undeterminable - an `exit_code` key that is not
+    an integer, or a `session_id` (a still-running process) with no integer
+    `exit_code`."""
+    found = found if found is not None else _Collected()
     if isinstance(node, dict):
         if node.get("status") == "rejected":
-            rejected = True
+            found.rejected = True
         exit_code = node.get("exit_code")
-        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
-            codes.append(exit_code)
+        has_exit = isinstance(exit_code, int) and not isinstance(exit_code, bool)
+        if has_exit:
+            codes.append(exit_code)  # type: ignore[arg-type]
+        elif "exit_code" in node or "session_id" in node:
+            found.unknown = True
         for value in node.values():
-            rejected = _collect_exit_codes(value, codes) or rejected
+            _collect_exit_codes(value, codes, found)
     elif isinstance(node, list):
         for value in node:
-            rejected = _collect_exit_codes(value, codes) or rejected
-    return rejected
+            _collect_exit_codes(value, codes, found)
+    return found
 
 
 #: #486: a `function_call` `exec_command` result is a plain string carrying
@@ -353,9 +377,17 @@ _EXEC_COMMAND_EXIT_RE = re.compile(r"^Process exited with code (-?\d+)\s*$", re.
 
 
 def _exec_command_exit_code(output_text: str) -> int | None:
-    """The worst `Process exited with code N` in an `exec_command` result, or
-    `None` when it carries none - undeterminable, never assumed 0."""
-    codes = [int(c) for c in _EXEC_COMMAND_EXIT_RE.findall(output_text)]
+    """The worst `Process exited with code N` in an `exec_command` result's
+    HEADER, or `None` when it carries none - undeterminable, never assumed 0.
+
+    Only the tool-generated header counts: everything after the `Output:`
+    line is the command's own stdout, which can print any text, including a
+    fake exit line (counter-model review). A result with no `Output:` line is
+    read whole, since there is then no stdout to impersonate it."""
+    header, sep, _stdout = output_text.partition("\nOutput:")
+    if not sep and output_text.startswith("Output:"):
+        header = ""
+    codes = [int(c) for c in _EXEC_COMMAND_EXIT_RE.findall(header)]
     if not codes:
         return None
     return next((c for c in codes if c != 0), 0)

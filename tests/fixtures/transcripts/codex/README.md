@@ -68,6 +68,9 @@ Fixtures:
   - a batch with a non-zero nested `exit_code`;
   - a function call other than `exec_command`;
   - an orphaned `function_call_output`.
+  - a still-running `exec_command` whose STDOUT prints `Process exited with code 0`;
+  - a batch with one finished member and one still running (`exit_code: null`,
+    `session_id`).
 
   Red case.
 
