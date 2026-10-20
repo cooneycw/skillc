@@ -782,6 +782,141 @@ def require_textual_evidence(declaration: calibration.DiscriminationDeclaration,
     return evidence
 
 
+#: #287 option 1: a declaration's `precondition` gates SPEND, so the runner
+#: enforces it at dispatch (orchestrator ruling (A)): one implementation of the
+#: pre-check verdict, which `evals/calibration-287/auto6_precheck.py` wraps.
+PRECHECK_MET, PRECHECK_NOT_MET, PRECHECK_UNKNOWN = "MET", "NOT_MET", "UNKNOWN"
+#: A grader's UNKNOWN reason for the endpoint criterion, by category, matched
+#: in order (gate-stops-early-auto6's `_stage_outcomes` wording). Anything else
+#: is `other-unknown`, never a pass.
+PRECHECK_REASON_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("no-witnessed-run", ("run was witnessed", "no run is attributable", "no gate-witness record",
+                          "names no well-formed")),
+    ("stale-run", ("is stale against the graded tree",)),
+    ("run-not-exited", ("did not exit normally",)),
+)
+
+
+def precheck_unknown_category(missing: object) -> str:
+    text = str(missing or "")
+    for category, needles in PRECHECK_REASON_CATEGORIES:
+        if any(n in text for n in needles):
+            return category
+    return "other-unknown"
+
+
+def precheck_attempt_reason(entry: Mapping[str, object], criteria: Sequence[str]) -> str | None:
+    """None when the attempt is evaluable exactly as `apply_tolerance` counts
+    it (endpoint PASS or FAIL, egress not ineligible); else why not, from the
+    raw criterion rows `task_grader_beside` keeps (the endpoint rows drop the
+    reason)."""
+    endpoint = entry.get("primary_endpoint")
+    status = endpoint.get("status") if isinstance(endpoint, Mapping) else None
+    if status in EVALUABLE_STATUSES:
+        return None if entry.get("egress_eligible") is not False \
+            else f"egress-ineligible: {entry.get('egress_reason')!r}"
+    if status == calibration.NOT_GRADED:
+        return f"not-graded: {endpoint.get('reason') if isinstance(endpoint, Mapping) else None!r}"
+    beside = entry.get("task_grader_beside")
+    rows = beside.get("criteria") if isinstance(beside, Mapping) else None
+    unknown = [r for r in rows if isinstance(r, Mapping) and r.get("id") in criteria
+               and r.get("outcome") == UNKNOWN] if isinstance(rows, list) else []
+    if not unknown:
+        return f"endpoint {status!r} without a readable UNKNOWN row for {list(criteria)}"
+    return "; ".join(f"{precheck_unknown_category(r.get('missing'))}: {r.get('missing')!r}" for r in unknown)
+
+
+def precheck_verdict(report: object, precheck: calibration.DiscriminationDeclaration) -> tuple[str, list[str]]:
+    """MET only when `report` is a REAL run of exactly `precheck` (its digest,
+    its scheduled population, distinct attempt ids) and EVERY attempt is
+    evaluable on its endpoint; NOT_MET names each attempt that is not; UNKNOWN
+    when the report cannot be read as that run. Never MET by default."""
+    if not isinstance(report, Mapping):
+        return PRECHECK_UNKNOWN, ["the report is not a JSON object"]
+    if report.get("kind") != DISCRIMINATION_REPORT_KIND:
+        return PRECHECK_UNKNOWN, [f"report kind {report.get('kind')!r}, not {DISCRIMINATION_REPORT_KIND!r}"]
+    expected = calibration.declaration_digest(precheck.data)
+    if report.get("declaration_digest") != expected:
+        return PRECHECK_UNKNOWN, [(f"report declaration_digest {report.get('declaration_digest')!r}, not the "
+                                   f"pre-check's {expected}")]
+    if report.get("rehearsal") is not False:
+        return PRECHECK_UNKNOWN, [f"rehearsal is {report.get('rehearsal')!r}: a rehearsal runs no agent"]
+    if precheck.endpoint is None:
+        return PRECHECK_UNKNOWN, ["the pre-check declares no discrimination_endpoint to judge"]
+    attempts = report.get("attempts")
+    if not isinstance(attempts, list) or not all(isinstance(a, Mapping) for a in attempts):
+        return PRECHECK_UNKNOWN, ["the report holds no attempt list"]
+    declared: dict[str, int] = {}
+    for arm in precheck.arm_order:
+        declared[arm] = declared.get(arm, 0) + 1
+    found: dict[str, int] = {}
+    for a in attempts:
+        found[str(a.get("arm"))] = found.get(str(a.get("arm")), 0) + 1
+    if found != declared:
+        return PRECHECK_UNKNOWN, [f"the report's population {found} is not the declared {declared}"]
+    ids = [a.get("attempt_id") for a in attempts]
+    if not all(isinstance(i, str) and i for i in ids) or len(set(ids)) != len(ids):
+        return PRECHECK_UNKNOWN, ["attempt ids are missing or duplicated: the report does not establish the attempts"]
+    criteria = precheck.endpoint.criteria
+    reasons = [f"{a.get('arm')} {a.get('attempt_id')}: {why}" for a in attempts
+               if (why := precheck_attempt_reason(a, criteria))]
+    if reasons:
+        return PRECHECK_NOT_MET, reasons
+    return PRECHECK_MET, [f"{a.get('arm')} {a.get('attempt_id')}: judged "
+                          f"({a['primary_endpoint']['status']})" for a in attempts]  # type: ignore[index]
+
+
+def require_precondition(declaration: calibration.DiscriminationDeclaration, report_path: Path | None,
+                         root: Path, *, rehearse: bool = False) -> dict[str, object] | None:
+    """A declaration carrying `precondition` is dispatched only after a MET
+    pre-check (#287 option 1, ruling (A)): `report_path` is that pre-check's
+    report, its bytes hash to the sha256 the APPROVAL cites, it is a real run
+    of the named pre-check declaration (digest-checked on disk), and it
+    evaluates MET. Called before any run directory, acquisition or container.
+    None when the declaration has no precondition (byte-identical behaviour).
+    A rehearsal spends nothing: without a report it is told, loudly, that the
+    precondition was NOT checked; with one, the check is the real one."""
+    condition = declaration.data.get("precondition")
+    if condition is None:
+        return None
+    if not isinstance(condition, Mapping) or condition.get("required_verdict") != PRECHECK_MET \
+            or not isinstance(condition.get("declaration"), str) or not isinstance(condition.get("declaration_digest"), str):
+        raise CalibrationRefused("precondition must name a pre-check declaration, its declaration_digest and "
+                                 "required_verdict 'MET'")
+    if report_path is None and rehearse:
+        return {"checked": False, "reason": "rehearsal without a pre-check report: the precondition was NOT checked"}
+    if report_path is None:
+        raise CalibrationRefused("this declaration runs only after a MET pre-check: pass --precondition-report "
+                                 f"with the report of {condition['declaration']}")
+    try:
+        precheck = calibration.load_discrimination_declaration(root / str(condition["declaration"]))
+    except (OSError, ValueError, calibration.DeclarationRefused) as exc:
+        raise CalibrationRefused(f"the precondition's pre-check declaration cannot be read: {exc}") from exc
+    if calibration.declaration_digest(precheck.data) != condition["declaration_digest"]:
+        raise CalibrationRefused(f"{condition['declaration']} on disk is not the pre-check the precondition names "
+                                 f"({condition['declaration_digest']})")
+    approval = declaration.approval
+    cited = approval.get("precheck") if isinstance(approval, Mapping) else None
+    cited_sha = cited.get("report_sha256") if isinstance(cited, Mapping) else None
+    if not isinstance(cited_sha, str) or not cited_sha.startswith("sha256:"):
+        raise CalibrationRefused("the approval cites no pre-check report (approval.precheck.report_sha256)")
+    try:
+        raw = report_path.read_bytes()
+    except OSError as exc:
+        raise CalibrationRefused(f"the pre-check report cannot be read: {exc}") from exc
+    if trial.sha256_bytes(raw) != cited_sha:
+        raise CalibrationRefused(f"the pre-check report hashes to {trial.sha256_bytes(raw)}, not the approval's "
+                                 f"cited {cited_sha}")
+    try:
+        report = json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise CalibrationRefused(f"the pre-check report is not JSON: {exc}") from exc
+    verdict, reasons = precheck_verdict(report, precheck)
+    if verdict != PRECHECK_MET:
+        raise CalibrationRefused(f"the pre-check is {verdict}, not MET: {'; '.join(reasons)}")
+    return {"checked": True, "verdict": verdict, "report_sha256": cited_sha}
+
+
 def _norm_text(text: str) -> str:
     return " ".join(text.split())
 
@@ -868,6 +1003,7 @@ def run_discrimination(
     clock: Callable[[], float] = time.monotonic,
     total_seconds: float | None = None,
     rehearse: bool = False,
+    precondition_report: Path | None = None,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, derive the degraded arm, plan and run a discrimination
     declaration (#287 P2). Nothing - no store, no plan - before the approval
@@ -877,6 +1013,7 @@ def run_discrimination(
     reconciliation are the real ones, so a rehearsal accounts for every slot a
     live run would. `total_seconds` overrides the declared cap (tests only)."""
     calibration.require_approved_discrimination(declaration, root)
+    require_precondition(declaration, precondition_report, root, rehearse=rehearse)  # #287 option 1, ruling (A)
     if image_digest != _shared_str(declaration, "image", "digest"):
         raise CalibrationRefused("the run's image digest differs from the approved declaration's")
     require_textual_evidence(declaration, root)

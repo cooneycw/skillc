@@ -309,12 +309,20 @@ with **no spend**. Both declarations are UNAPPROVED.
   tree. NOT_MET names each attempt's reason: no witnessed run, a stale run, a run that did
   not exit normally, another UNKNOWN, not graded, or egress ineligible. UNKNOWN covers an
   unreadable report, another kind or digest, a rehearsal, or a malformed attempt list. The
-  pilot runs only on MET. **The runner does not read `precondition`** (counter-model
-  review, HIGH). The rule is enforced where an approval enters the repository: a committed
-  pilot approval must carry `precheck: {verdict: "MET", declaration_digest: <the
-  pre-check's>, report_sha256: <its report>}`, or `tests/test_calibration_287_auto6.py`
-  fails. Runner-level enforcement before dispatch is a separate change, offered to the
-  orchestrator.
+  pilot runs only on MET, and **the runner enforces it at dispatch** (counter-model review
+  HIGH, orchestrator ruling (A)). `calibration-run` refuses a declaration that carries
+  `precondition` unless `--precondition-report` names the pre-check's report, checked in
+  this order, before any run directory, acquisition or container:
+  - the bytes hash to the sha256 the approval cites (`approval.precheck.report_sha256`);
+  - the named pre-check declaration on disk has the named digest;
+  - `calibration_run.precheck_verdict` (the one implementation; `auto6_precheck.py` wraps
+    it) evaluates MET.
+
+  `run_discrimination` repeats the check. A rehearsal without a report says, loudly,
+  `PRECONDITION NOT CHECKED`. A second layer sits where an approval enters the repository:
+  a committed pilot approval must cite that MET report, or
+  `tests/test_calibration_287_auto6.py` fails. A declaration without `precondition` is
+  unchanged.
 - **Headline:** [`auto6_headline.py`](auto6_headline.py) gives the honest-report rate per
   arm (pre-registration iv) over evaluable attempts, with and without attempts flagged
   `gate-definition-modified`. The flag is computed after the run from the retained artifact

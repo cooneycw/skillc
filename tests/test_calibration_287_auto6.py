@@ -428,3 +428,105 @@ def test_the_rehearsal_stamp_never_reaches_a_committed_declaration() -> None:
     for path in (PRECHECK, PILOT):
         assert "REHEARSAL" not in path.read_text(encoding="utf-8")
     assert _json(PRECHECK).get("approval") is None and _json(PILOT).get("approval") is None
+
+
+# ------------------------------------------- the dispatch guard (ruling (A))
+
+def _stamped_pilot(report_sha: str | None = "sha256:" + "0" * 64) -> dict[str, Any]:
+    """The committed pilot with an approval as the owner's would read: bound
+    to its digest, citing a pre-check report. Never written into the repo."""
+    from skillc import profile as prof
+    data = _json(PILOT)
+    data["approval"] = {
+        "by": "TEST ONLY - not an owner approval", "at": "2026-10-20", "source": "test", "scope": "test",
+        "attempts_per_arm": data["attempts_per_arm"],
+        "profile_inventory_digest": prof.inventory_digest(_json(STEP6 / "evidence" / "inventory.json")),
+        "mutated_digest": MUTATED_DIGEST, "task_fixture": data["task"]["fixture"]}
+    if report_sha is not None:
+        data["approval"]["precheck"] = {"verdict": "MET", "declaration_digest": PRECHECK_DIGEST,
+                                        "report_sha256": report_sha}
+    data["approval"]["declaration_digest"] = calibration.declaration_digest(data)
+    return data
+
+
+def _precheck_report(tmp_path: Path, attempts: list[dict[str, Any]] | None = None, **over: Any) -> tuple[Path, str]:
+    path = _report(tmp_path, attempts if attempts is not None
+                   else [_entry("intact", "SATISFIED"), _entry("degraded", "VIOLATED")], **over)
+    return path, trial.sha256_bytes(path.read_bytes())
+
+
+def test_a_met_precheck_lets_the_pilot_through(tmp_path: Path) -> None:
+    report, sha = _precheck_report(tmp_path)
+    pilot = calibration.parse_discrimination_declaration(_stamped_pilot(sha))
+    calibration.require_approved_discrimination(pilot, ROOT)
+    assert cr.require_precondition(pilot, report, ROOT) == {"checked": True, "verdict": "MET", "report_sha256": sha}
+
+
+@pytest.mark.parametrize(("case", "match"), [
+    ("absent", "pass --precondition-report"),
+    ("not-met", "is NOT_MET"),
+    ("unknown", "is UNKNOWN"),
+    ("wrong-report-digest", "is UNKNOWN"),
+    ("wrong-sha", "not the approval's cited"),
+    ("tampered-body", "not the approval's cited"),
+    ("no-citation", "cites no pre-check report"),
+    ("other-precheck", "is not the pre-check the precondition names"),
+])
+def test_the_pilot_is_refused_without_a_met_precheck(tmp_path: Path, case: str, match: str) -> None:
+    attempts = None
+    over: dict[str, Any] = {}
+    if case == "not-met":
+        attempts = [_entry("intact", "SATISFIED"), _entry("degraded", "UNKNOWN", STALE)]
+    if case == "unknown":
+        over["rehearsal"] = True
+    if case == "wrong-report-digest":
+        over["declaration_digest"] = PILOT_DIGEST
+    report, sha = _precheck_report(tmp_path, attempts, **over)
+    data = _stamped_pilot(None if case == "no-citation" else "sha256:" + "f" * 64 if case == "wrong-sha" else sha)
+    if case == "other-precheck":
+        data["precondition"]["declaration_digest"] = PILOT_DIGEST
+        data["approval"]["declaration_digest"] = calibration.declaration_digest(data)
+    if case == "tampered-body":
+        report.write_text(report.read_text().replace('"VIOLATED"', '"SATISFIED"'))
+    pilot = calibration.parse_discrimination_declaration(data)
+    with pytest.raises(cr.CalibrationRefused, match=match):
+        cr.require_precondition(pilot, None if case == "absent" else report, ROOT)
+
+
+def test_a_rehearsal_without_a_report_says_the_precondition_was_not_checked() -> None:
+    pilot = calibration.parse_discrimination_declaration(_stamped_pilot())
+    result = cr.require_precondition(pilot, None, ROOT, rehearse=True)
+    assert result is not None and result["checked"] is False
+
+
+def test_no_precondition_is_byte_identical() -> None:
+    """The control: the approved option-0 declaration (pinned 40acebc5) carries
+    no precondition, and the guard is a no-op for it."""
+    approved = calibration.load_discrimination_declaration(CAL / "pilot-discrimination-declaration.json")
+    assert "precondition" not in approved.data
+    assert calibration.declaration_digest(approved.data) == \
+        "sha256:40acebc5cfd04313a24639f5298698b52449699f8aa44ba6dca0e6e05dd2490e"
+    assert cr.require_precondition(approved, None, ROOT) is None
+
+
+def test_the_cli_refuses_before_any_run_directory_or_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    from skillc import collection_conformance as cc
+    declaration = tmp_path / "pilot.json"
+    declaration.write_text(json.dumps(_stamped_pilot()))
+    acquired: list[object] = []
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a, **k: acquired.append(a))
+    private = tmp_path / "private"
+    assert cli.main(["calibration-run", str(declaration), "--private-dir", str(private)]) == 2
+    assert not private.exists() and acquired == []
+    assert "pass --precondition-report" in capsys.readouterr().err
+
+
+def test_run_discrimination_refuses_too(tmp_path: Path) -> None:
+    """The second layer: the runner itself, whoever calls it."""
+    pilot = calibration.parse_discrimination_declaration(_stamped_pilot())
+    run_dir = tmp_path / "run"
+    with pytest.raises(cr.CalibrationRefused, match="pass --precondition-report"):
+        cr.run_discrimination(pilot, run_dir=run_dir, intact=None,  # type: ignore[arg-type]
+                              image_digest=None, backends=lambda: (None, None), argv_for=lambda _s: [])
+    assert not run_dir.exists()
