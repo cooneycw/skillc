@@ -357,6 +357,15 @@ def _collect_exit_codes(node: object, codes: list[int], found: _Collected | None
     if isinstance(node, dict):
         if node.get("status") == "rejected":
             found.rejected = True
+        elif node.get("status") == "fulfilled":
+            # A settled batch member must itself carry an integer exit code:
+            # one without (a string result, an output with no code) is
+            # unconfirmable, and a sibling's 0 must not certify it
+            # (counter-model review, pass 2).
+            own: list[int] = []
+            _collect_exit_codes(node.get("value"), own, _Collected())
+            if not own:
+                found.unknown = True
         exit_code = node.get("exit_code")
         has_exit = isinstance(exit_code, int) and not isinstance(exit_code, bool)
         if has_exit:

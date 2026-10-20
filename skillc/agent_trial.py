@@ -210,6 +210,22 @@ CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "cus
                                              "function_call", "function_call_output"})
 
 
+def _census_incomplete(observation: Mapping[str, object]) -> str | None:
+    """Why a codex census does not cover its whole transcript, or `None`: no
+    response item inspected, a census error, or a line skipped as unparseable
+    or non-object (a truncated item parses as nothing). #486."""
+    inspected = observation.get("transcript_response_items_inspected")
+    if isinstance(inspected, bool) or not isinstance(inspected, int) or inspected < 1:
+        return f"response items inspected {inspected!r}"
+    if observation.get("transcript_census_error"):
+        return f"census error {observation.get('transcript_census_error')!r}"
+    line_types = observation.get("transcript_line_types")
+    if not isinstance(line_types, Mapping):
+        return "no line-type census"
+    skipped = {k: v for k, v in line_types.items() if k in ("<unparseable>", "<non-object>")}
+    return f"skipped lines {skipped}" if skipped else None
+
+
 def transcript_census(client: str, raw: str) -> dict[str, object]:
     """What the REAL transcript's own format looked like, independent of what
     the adapter made of it (issue #106): the client version and model the
@@ -2255,6 +2271,11 @@ def run_one_attempt(
             # controlled environment; the attempt stays in every account, but
             # is never credited.
             grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
+        elif client == "codex" and (incomplete := _census_incomplete(observation)):
+            # Counter-model review, pass 2: the same coverage `fixture_live.
+            # containment_trigger` requires - a stop that fires after grading
+            # does not undo a credit already given, and other callers have no stop.
+            grading_blocked_reason = f"not credited: the transcript census is incomplete ({incomplete})"
         elif client == "codex" and not isinstance(observation.get("transcript_unrecognized_types"), list):
             # #486: a census that could not assess the transcript's own item
             # types is unknown, never clean.

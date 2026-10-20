@@ -351,6 +351,10 @@ def _shim_argv(tmp_path: Path, plant: str, fake: list[str]) -> list[str]:
     shim.write_text(_SHIM.format(pinned=list(eg.CODEX_SERVER_SIDE_OFF)), encoding="utf-8")
     if plant == "none":
         planted = "none"
+    elif plant == "truncated-item":
+        # #486 (counter-model review, pass 2): a valid transcript plus a
+        # response item cut off mid-line - a census with a hole in it.
+        planted = '{"type": "response_item", "payload": {"type": "function_call", "name": "exec_comm'
     elif plant.endswith("+leak"):
         # The plant AND a line the leak check refuses, so the transcript is
         # never retained: the census must still see the plant (counter-model).
@@ -408,6 +412,18 @@ def test_red_control_format_drift_in_the_transcript_is_not_credited_and_stays_ac
     reason = record["grading_blocked_reason"]
     assert isinstance(reason, str) and reason.startswith("not credited: transcript format drift")
     assert "local_shell_call" in reason
+
+
+def test_red_control_a_census_with_an_unparseable_line_is_not_credited(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#486, counter-model review pass 2: `unrecognized_types == []` beside an
+    unparseable line is not a complete census, and must not reach grading."""
+    record = _live_attempt(store, base, docker_state, tmp_path, "truncated-item")
+    assert record["disposition"] == "captured" and record["graded"] is None
+    reason = record["grading_blocked_reason"]
+    assert isinstance(reason, str) and reason.startswith("not credited: the transcript census is incomplete")
+    assert "<unparseable>" in reason
 
 
 @pytest.mark.parametrize("plant, named", [

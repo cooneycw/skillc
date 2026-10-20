@@ -391,6 +391,11 @@ def test_every_unconfirmable_2026_10_20_shape_stays_an_error() -> None:
     # ... and a script may print its results as an ARRAY, rejections included
     (['[{"status":"fulfilled","value":{"exit_code":0}},{"status":"fulfilled","value":{"exit_code":0}}]'], 0),
     (['{"exit_code":0}', '[{"status":"rejected","reason":"failed"}]'], -1),
+    # counter-model review, pass 2: a fulfilled member with no code of its own
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":{"output":"no code"}}}'], None),
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":"a string result"}}'], None),
     (['{"i":0,"result":{"status":"fulfilled","value":{"output":"no code"}}}'], None),
     (['not json at all'], None),
 ])
