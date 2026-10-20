@@ -375,3 +375,26 @@ Risks:
 4. `evals/level3/campaign-434-live/README.md` - campaign section: caps rationale, endpoint, rehearsals, what it shows and doesn't
 5. `changelog.d/434-live-campaign.md` - one bullet
 Scope: medium. Risks: endpoint changes "succeeded" when declared (negative control); image reuse rests on rev 3 not touching the runtime (actor rehearsal); no token cap.
+
+<!-- flow-run n=11 id=58f83ce0e4a84af789c220f61b1bfff7 -->
+## Run 11
+
+- Run-id:            58f83ce0e4a84af789c220f61b1bfff7
+- Run-start:         ad38f824c07e9e5c57044e7339a27f345cfbe3ce
+- Issue:             #434
+- Base SHA:          ad38f824c07e9e5c57044e7339a27f345cfbe3ce
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 orchestrator (wave skillc-400, authority-model orchestrator-only), GO-WITH-CONDITIONS 2026-10-20; the owner chose a fresh official campaign after #487
+- Recorded at:       2026-10-20T17:45:00Z
+
+### Section B evidence
+#434 OPEN; no revision-4 declaration exists. Since ad38f82 (#491) the approved campaign declaration (694e2b82, #482 043279f, stamped #485 00a5e5a) is refused as spent. The official judge replay at 21c20e2 computed containment_trigger None on all 10 retained attempts.
+
+### Section C - the approved plan
+1. `evals/level3/campaign-434-live/campaign-declaration-rev4.json` - new DRAFT, terms identical to 694e2b82 (same seed and order) except task identities (grader rev 4), run_store, _comment; no approval
+2. `evals/level3/campaign-434-live/README.md` - revision-4 campaign section; the fixed order kept and why
+3. `tests/test_fixture_live.py` - allow-listed field-by-field identity to 694e2b82, parses/this tree's/unapproved, pinned digest, private no-false-stop check over the 10 retained transcripts with an appended-unknown-line control
+4. `changelog.d/434-campaign-rev4.md` - one bullet
+
+Scope: small. Risks: same order as the spent run (owner terms; a fixed order does not bias the measure); the no-false-stop check covers today's shapes only.
