@@ -177,6 +177,7 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
         "disposition": "captured",
         "observation": {"server_side_tool_uses": [],
                         "transcript_response_items_inspected": 4,
+                        "transcript_unrecognized_types": [],
                         "transcript_line_types": {"response_item/message": 4, "session_meta": 1},
                         "egress": {"status": "read", "allowlist_digest": ALLOWLIST, "unparsed_lines": 0,
                                    "allowed": {"chatgpt.com:443": 12, "auth.openai.com:443": 1}, "denied": {}},
@@ -210,6 +211,10 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"observation.transcript_response_items_inspected": 0}, "census is incomplete"),
     ({"observation.transcript_line_types": {"<unparseable>": 1, "response_item/message": 3}}, "census is incomplete"),
     ({"observation.transcript_census_error": "ValueError: x"}, "census is incomplete"),
+    # #486: format drift fails closed - an unread item type could be a server-side tool.
+    ({"observation.transcript_unrecognized_types": ["local_shell_call"]}, "unrecognized response-item types"),
+    ({"observation.transcript_unrecognized_types": _DELETE}, "could not assess its response-item types"),
+    ({"observation.transcript_unrecognized_types": None}, "could not assess its response-item types"),
     ({"observation.egress": {"status": "unread", "reason": "gone"}}, "egress proxy log was not read"),
     ({"observation.egress.allowlist_digest": "sha256:" + "1" * 64}, "the proxy recorded allowlist"),
     ({"observation.egress.allowed": {"chatgpt.com:443": 3, "github.com:443": 1}}, "outside #442's allowlist"),

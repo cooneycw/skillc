@@ -383,6 +383,14 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str) -> 
             or inspected < 1 or skipped is None or skipped):
         return (f"the server-side tool census is incomplete (response items inspected {inspected!r}, "
                 f"skipped lines {skipped!r}, error {obs.get('transcript_census_error')!r})")
+    # #486: an item type the adapter does not know could be a server-side
+    # tool, and is certainly a line nobody read: the census is incomplete.
+    unrecognized = obs.get("transcript_unrecognized_types")
+    if not isinstance(unrecognized, list):
+        return "the transcript census could not assess its response-item types for a dispatched attempt"
+    if unrecognized:
+        return (f"the transcript census met unrecognized response-item types "
+                f"({', '.join(sorted(map(str, unrecognized)))}); the adapter cannot read them")
     summary = obs.get("egress")
     if not isinstance(summary, Mapping) or summary.get("status") != "read":
         reason = summary.get("reason") if isinstance(summary, Mapping) else "no egress evidence"

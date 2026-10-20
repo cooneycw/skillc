@@ -57,3 +57,41 @@ Fixtures:
   token counts, so a reader that takes the first value instead of the last
   is caught. Shapes observed on a live codex-cli 0.157.1 rollout
   (2026-09-27); every value is fake.
+- `exec-command.jsonl` - #486 (2026-10-20). A skill-path read and a canary write,
+  each as a `function_call` named `exec_command`. Then one `exec` script that
+  batches two calls with `Promise.allSettled` and prints each settled result.
+  Every exit is 0. Green case.
+- `exec-command-fails.jsonl` - the same shapes, every one unconfirmable:
+  - an `exec_command` that exits 1;
+  - an `exec_command` result with no exit line;
+  - a batch with a REJECTED item;
+  - a batch with a non-zero nested `exit_code`;
+  - a function call other than `exec_command`;
+  - an orphaned `function_call_output`.
+
+  Red case.
+
+### The 2026-10-20 shapes (#486)
+
+On 2026-10-20, the same client (codex-cli 0.157.1) and model (gpt-6-astra)
+produced two shapes that none of the fixtures above contains. #434's live
+campaign then graded 0 of 10 attempts. These fixtures MIRROR that capture in
+shape only. The real lines are the owner's private run evidence and are not
+committed. `tests/test_transcript_adapter.py` reads them from the private store
+when it is present, and skips loudly, naming the path, when it is not.
+
+- `{"type": "function_call", "name": "exec_command", "call_id": ..., "arguments":
+  "<JSON string>"}`. The arguments are `{"cmd", "max_output_tokens"[, "workdir"]}`.
+  It pairs by `call_id` with `{"type": "function_call_output", "output":
+  "<string>"}`. The output is a plain string whose exit status is a line
+  `Process exited with code N`; there is no JSON `exit_code`.
+- `exec` is a SCRIPT runner. A script that batches calls prints each settled
+  result itself, e.g. `{"i":N,"result":{"status":"fulfilled","value":{"chunk_id":
+  ...,"exit_code":0,...}}}`. A rejected call reads `"status":"rejected"` with a
+  `reason`. Other observed prints are `{"status":...,"value":...}` and
+  `{"part":N,"status":...}`. So the exit code is NESTED, wherever the script put
+  it. The adapter reads every nested `exit_code` and treats any rejection as a
+  failure, and the worst result wins.
+- Lines also carry `id`, `internal_chat_message_metadata_passthrough`, and
+  top-level `timestamp`, `ordinal` and `metadata`. The adapter ignores them. The
+  fixtures carry fake values, so the shape is faithful.

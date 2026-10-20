@@ -202,7 +202,12 @@ def _codex_home_files(ctx: _AttemptContext) -> dict[str, bytes]:
 #: call arriving as a new payload type would never pair with its result, and
 #: the canary would read "no tool use" on a genuinely live run (issue #106's
 #: owed "real transcript format drift").
-CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "custom_tool_call_output", "reasoning"})
+#: #486 (2026-10-20): `function_call` / `function_call_output` (the model's
+#: `exec_command` calls) are now normalized too. A type outside this set is
+#: no longer only recorded: it blocks credit (the gate below) and, on the
+#: live fixture path, stops the schedule (`fixture_live.containment_trigger`).
+CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "custom_tool_call_output", "reasoning",
+                                             "function_call", "function_call_output"})
 
 
 def transcript_census(client: str, raw: str) -> dict[str, object]:
@@ -2250,6 +2255,16 @@ def run_one_attempt(
             # controlled environment; the attempt stays in every account, but
             # is never credited.
             grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
+        elif client == "codex" and not isinstance(observation.get("transcript_unrecognized_types"), list):
+            # #486: a census that could not assess the transcript's own item
+            # types is unknown, never clean.
+            grading_blocked_reason = "not credited: the transcript census could not assess its response-item types"
+        elif drift := observation.get("transcript_unrecognized_types"):
+            # #486: format drift FAILS CLOSED. On 2026-10-20 the census listed
+            # function_call/function_call_output on every attempt and nothing
+            # read it; 10 paid attempts went ungraded in silence.
+            grading_blocked_reason = (f"not credited: transcript format drift - unrecognized response-item types "
+                                      f"{sorted(map(str, drift))}; the adapter cannot read these lines")
         elif fixture_session is not None and (fixture_block := _fixture_credit_block(fixture_session)):
             # #434: the same posture for the fixture's own evidence and for a
             # nested codex (D3 ruling): in every account, never credited.

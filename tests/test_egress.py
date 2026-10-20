@@ -341,6 +341,8 @@ _PLANTS = {
     "remote-plugin-call": {"type": "response_item", "payload": {
         "type": "function_call", "name": "mcp__github__get_file_contents", "arguments": "{}"}},
     "web-search": {"type": "response_item", "payload": {"type": "web_search_call", "action": {"query": "skillc"}}},
+    # #486: an item type the adapter cannot read, and not a known server-side tool.
+    "unknown-item": {"type": "response_item", "payload": {"type": "local_shell_call", "call_id": "call_x"}},
 }
 
 
@@ -393,6 +395,19 @@ def test_green_control_a_clean_live_attempt_is_graded_and_its_proxy_log_is_captu
     manifest = json.loads(next(Path(str(record["_experiment_root"])).glob("manifest-*.json")).read_text())
     [stream] = [o for o in manifest["observations"] if o["stream"] == eg.PROXY_LOG_STREAM]
     assert stream["origin"] == "observed" and stream["digest"] == egress["digest"]
+
+
+def test_red_control_format_drift_in_the_transcript_is_not_credited_and_stays_accounted(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#486: a response-item type the adapter cannot read FAILS CLOSED. On
+    2026-10-20 the census listed such types on every attempt and nothing read
+    the field; the attempts went ungraded with no reason naming it."""
+    record = _live_attempt(store, base, docker_state, tmp_path, "unknown-item")
+    assert record["disposition"] == "captured" and record["graded"] is None
+    reason = record["grading_blocked_reason"]
+    assert isinstance(reason, str) and reason.startswith("not credited: transcript format drift")
+    assert "local_shell_call" in reason
 
 
 @pytest.mark.parametrize("plant, named", [
