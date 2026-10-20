@@ -210,6 +210,57 @@ CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "cus
                                              "function_call", "function_call_output"})
 
 
+def credit_block(
+    observation: object, *, client: str, disposition: object, witness_failure: str | None = None,
+    fixture_block: Callable[[], str | None] | None = None,
+) -> str | None:
+    """Why an attempt is NOT graded, or `None` when grading may run - the
+    credit gate, in the order it has always applied. Pure, so a retained run's
+    re-grade (#486) applies the SAME gate a live attempt does. `fixture_block`
+    is evaluated only when every earlier condition has passed, as before."""
+    if witness_failure is not None:
+        return witness_failure
+    if disposition != "captured":
+        return f"attempt disposition is {disposition!r}, not captured"
+    if not isinstance(observation, dict) or observation.get("status") == "unknown":
+        return "the transcript observation is unknown - never graded on an unconfirmed attempt"
+    if not observation.get("grading_eligible"):
+        return (
+            f"prompt_delivered={observation.get('prompt_delivered')!r}, "
+            f"canary_satisfied={observation.get('canary_satisfied')!r} - "
+            "never graded without both confirmed against the real transcript"
+        )
+    if not isinstance(observation.get("server_side_tool_uses"), list):
+        # #442: the census never inspected the raw transcript - unknown,
+        # never read as clean.
+        return "not credited: server-side tool inspection unavailable"
+    if server_side := observation["server_side_tool_uses"]:
+        # #442: a tool that ran at the provider reached outside the
+        # controlled environment; the attempt stays in every account, but
+        # is never credited.
+        return f"not credited: server-side tool observed ({', '.join(server_side)})"
+    if client == "codex" and (incomplete := _census_incomplete(observation)):
+        # Counter-model review, pass 2 (#486): the same coverage `fixture_live.
+        # containment_trigger` requires - a stop that fires after grading
+        # does not undo a credit already given, and other callers have no stop.
+        return f"not credited: the transcript census is incomplete ({incomplete})"
+    if client == "codex" and not isinstance(observation.get("transcript_unrecognized_types"), list):
+        # #486: a census that could not assess the transcript's own item
+        # types is unknown, never clean.
+        return "not credited: the transcript census could not assess its response-item types"
+    if drift := observation.get("transcript_unrecognized_types"):
+        # #486: format drift FAILS CLOSED. On 2026-10-20 the census listed
+        # function_call/function_call_output on every attempt and nothing
+        # read it; 10 paid attempts went ungraded in silence.
+        return (f"not credited: transcript format drift - unrecognized response-item types "
+                f"{sorted(map(str, drift))}; the adapter cannot read these lines")
+    if fixture_block is not None and (block := fixture_block()):
+        # #434: the same posture for the fixture's own evidence and for a
+        # nested codex (D3 ruling): in every account, never credited.
+        return block
+    return None
+
+
 def _census_incomplete(observation: Mapping[str, object]) -> str | None:
     """Why a codex census does not cover its whole transcript, or `None`: no
     response item inspected, a census error, or a line skipped as unparseable
@@ -1275,6 +1326,71 @@ def recompute_skill_invocations(experiment: trial.Experiment, attempt_id: str, c
     return skill_invocations_from_events(events)
 
 
+def observe_transcript_bytes(
+    spec: ClientSpec, raw: bytes, *, expected_prompt: str, skill_name: str | None,
+    local_mcp_servers: frozenset[str] = frozenset(),
+) -> tuple[TranscriptObservation, dict[str, object], dict[str, object] | None]:
+    """What one transcript's BYTES show: the observation (prompt delivery,
+    canary, skill invocations), the census and the run metadata - the exact
+    derivation the live teardown hook runs on the one transcript it found.
+
+    Pure, so a retained run can be re-derived with the CURRENT adapter without
+    a container (#486's re-grade), by the same code a live attempt runs."""
+    run_metadata: dict[str, object] | None = None
+    census: dict[str, object] = {
+        "transcript_client_version": None, "transcript_model": None,
+        "transcript_response_items_inspected": None,
+        "transcript_line_types": None, "transcript_unrecognized_types": None,
+        "server_side_tool_uses": None,
+    }
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        census = transcript_census(spec.name, text)
+    except Exception as exc:  # noqa: BLE001 - the census is context; it must never erase the observation
+        census = {**census, "transcript_census_error": f"{type(exc).__name__}: {exc}"}
+    # #442: from the RAW bytes, before any retention decision - a
+    # transcript the leak check refuses to store is still inspected.
+    census["server_side_tool_uses"] = server_side_tool_uses(
+        raw, census.get("transcript_line_types"), local_mcp_servers)  # type: ignore[arg-type]
+    events = spec.parse_transcript(text)
+    if spec.run_metadata is not None:
+        run_metadata = spec.run_metadata(text)
+    prompt_delivered = True
+    prompt_reason = None
+    try:
+        trial_bootstrap.verify_first_user_message(events, expected_prompt)
+    except PromptDeliveryError as exc:
+        prompt_delivered = False
+        prompt_reason = str(exc)
+    canary_satisfied = True
+    canary_reason = None
+    try:
+        trial_bootstrap.check_agent_canary(events, skill_name)
+    except CanaryNotSatisfied as exc:
+        canary_satisfied = False
+        canary_reason = str(exc)
+    # Every skill_invocation the transcript shows, in order - never
+    # only `skill_name`'s own (issue #26 review): `check_agent_canary`
+    # above answers "was THIS skill invoked", a different, narrower
+    # question than "which skill(s), if any, were invoked at all".
+    invocations = skill_invocations_from_events(events)
+    if spec.read_skill_listing is None:
+        listed, listed_source = None, f"not available: the {spec.name} transcript carries no skill listing"
+    else:
+        listed = spec.read_skill_listing(raw.decode("utf-8", errors="replace"))
+        listed_source = (
+            "transcript skill_listing attachment" if listed is not None
+            else "not observed: the transcript has no skill_listing attachment"
+        )
+    observation = TranscriptObservation(
+        files_found=1, prompt_delivered=prompt_delivered, prompt_delivery_reason=prompt_reason,
+        canary_satisfied=canary_satisfied, canary_reason=canary_reason,
+        skill_invocations=invocations, skill_invocation_detection=spec.skill_invocation_detection,
+        skills_listed=listed, skills_listed_source=listed_source,
+    )
+    return observation, census, run_metadata
+
+
 def _make_observe_before_teardown(
     *, spec: ClientSpec, expected_prompt: str, skill_name: str | None,
     delivered_credential_bytes: dict[str, bytes],
@@ -1334,51 +1450,9 @@ def _make_observe_before_teardown(
                 # be re-scanned against what the client actually wrote.
                 retained_transcript["path"] = matched_path
                 retained_transcript["bytes"] = kept
-            text = raw.decode("utf-8", errors="replace")
-            try:
-                census = transcript_census(spec.name, text)
-            except Exception as exc:  # noqa: BLE001 - the census is context; it must never erase the observation
-                census = {**census, "transcript_census_error": f"{type(exc).__name__}: {exc}"}
-            # #442: from the RAW bytes, before any retention decision - a
-            # transcript the leak check refuses to store is still inspected.
-            census["server_side_tool_uses"] = server_side_tool_uses(
-                raw, census.get("transcript_line_types"), local_mcp_servers)  # type: ignore[arg-type]
-            events = spec.parse_transcript(text)
-            if spec.run_metadata is not None:
-                run_metadata = spec.run_metadata(text)
-            prompt_delivered = True
-            prompt_reason = None
-            try:
-                trial_bootstrap.verify_first_user_message(events, expected_prompt)
-            except PromptDeliveryError as exc:
-                prompt_delivered = False
-                prompt_reason = str(exc)
-            canary_satisfied = True
-            canary_reason = None
-            try:
-                trial_bootstrap.check_agent_canary(events, skill_name)
-            except CanaryNotSatisfied as exc:
-                canary_satisfied = False
-                canary_reason = str(exc)
-            # Every skill_invocation the transcript shows, in order - never
-            # only `skill_name`'s own (issue #26 review): `check_agent_canary`
-            # above answers "was THIS skill invoked", a different, narrower
-            # question than "which skill(s), if any, were invoked at all".
-            invocations = skill_invocations_from_events(events)
-            if spec.read_skill_listing is None:
-                listed, listed_source = None, f"not available: the {spec.name} transcript carries no skill listing"
-            else:
-                listed = spec.read_skill_listing(raw.decode("utf-8", errors="replace"))
-                listed_source = (
-                    "transcript skill_listing attachment" if listed is not None
-                    else "not observed: the transcript has no skill_listing attachment"
-                )
-            observation = TranscriptObservation(
-                files_found=1, prompt_delivered=prompt_delivered, prompt_delivery_reason=prompt_reason,
-                canary_satisfied=canary_satisfied, canary_reason=canary_reason,
-                skill_invocations=invocations, skill_invocation_detection=spec.skill_invocation_detection,
-                skills_listed=listed, skills_listed_source=listed_source,
-            )
+            observation, census, run_metadata = observe_transcript_bytes(
+                spec, raw, expected_prompt=expected_prompt, skill_name=skill_name,
+                local_mcp_servers=local_mcp_servers)
 
         usage = credential.CredentialUsage(
             client=spec.name, delivered=cred_bytes is not None, refresh_observed_in_container=refresh_observed,
@@ -2250,47 +2324,14 @@ def run_one_attempt(
     grading_seconds: float | None = None
     observation = record.get("observation")
     if grader is not None:
-        if witness_session is not None and (witness_session.failure or witness_session.record is None):
-            grading_blocked_reason = witness_session.failure or "controller witness was never finalized"
-        elif record.get("disposition") != "captured":
-            grading_blocked_reason = f"attempt disposition is {record.get('disposition')!r}, not captured"
-        elif not isinstance(observation, dict) or observation.get("status") == "unknown":
-            grading_blocked_reason = "the transcript observation is unknown - never graded on an unconfirmed attempt"
-        elif not observation.get("grading_eligible"):
-            grading_blocked_reason = (
-                f"prompt_delivered={observation.get('prompt_delivered')!r}, "
-                f"canary_satisfied={observation.get('canary_satisfied')!r} - "
-                "never graded without both confirmed against the real transcript"
-            )
-        elif not isinstance(observation.get("server_side_tool_uses"), list):
-            # #442: the census never inspected the raw transcript - unknown,
-            # never read as clean.
-            grading_blocked_reason = "not credited: server-side tool inspection unavailable"
-        elif server_side := observation["server_side_tool_uses"]:
-            # #442: a tool that ran at the provider reached outside the
-            # controlled environment; the attempt stays in every account, but
-            # is never credited.
-            grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
-        elif client == "codex" and (incomplete := _census_incomplete(observation)):
-            # Counter-model review, pass 2: the same coverage `fixture_live.
-            # containment_trigger` requires - a stop that fires after grading
-            # does not undo a credit already given, and other callers have no stop.
-            grading_blocked_reason = f"not credited: the transcript census is incomplete ({incomplete})"
-        elif client == "codex" and not isinstance(observation.get("transcript_unrecognized_types"), list):
-            # #486: a census that could not assess the transcript's own item
-            # types is unknown, never clean.
-            grading_blocked_reason = "not credited: the transcript census could not assess its response-item types"
-        elif drift := observation.get("transcript_unrecognized_types"):
-            # #486: format drift FAILS CLOSED. On 2026-10-20 the census listed
-            # function_call/function_call_output on every attempt and nothing
-            # read it; 10 paid attempts went ungraded in silence.
-            grading_blocked_reason = (f"not credited: transcript format drift - unrecognized response-item types "
-                                      f"{sorted(map(str, drift))}; the adapter cannot read these lines")
-        elif fixture_session is not None and (fixture_block := _fixture_credit_block(fixture_session)):
-            # #434: the same posture for the fixture's own evidence and for a
-            # nested codex (D3 ruling): in every account, never credited.
-            grading_blocked_reason = fixture_block
-        else:
+        grading_blocked_reason = credit_block(
+            observation, client=client, disposition=record.get("disposition"),
+            witness_failure=(witness_session.failure or "controller witness was never finalized")
+            if witness_session is not None and (witness_session.failure or witness_session.record is None) else None,
+            fixture_block=(lambda: _fixture_credit_block(fixture_session)) if fixture_session is not None else None,
+        )
+        if grading_blocked_reason is None:
+            assert isinstance(observation, dict)  # credit_block passes only an observed dict
             try:
                 if grading_backend is None:
                     raise ValueError("grading_backend is required when grader is given - never the agent's own backend")

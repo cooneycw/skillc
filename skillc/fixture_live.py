@@ -65,10 +65,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -657,3 +659,167 @@ def rehearsal_succeeded(report: Mapping[str, Any], *, scheduled: int, mode: str)
     if mode == "dry":
         return all(a.get("disposition") == "unavailable" for a in attempts)
     return all(a.get("disposition") == "captured" and a.get("graded_status") == "PASS" for a in attempts)
+
+
+# ------------------------------------------------------------- #486: re-grade
+
+REGRADE_REPORT_FILENAME = "regraded-report.json"
+_LIVE_TRIAL_ID_RE = re.compile(r"^t\d+-" + TRIAL_PREFIX + r"_(?P<arm>[a-z]+)_(?P<k>\d+)$")
+
+
+def _sha256_file(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _manifest_stream(experiment: trial.Experiment, attempt_id: str, stream: str) -> bytes | None:
+    """One observation stream's retained bytes, by the attempt's own artifact
+    manifest digest (content-addressed, so a changed object reads as absent)."""
+    path = experiment.root / f"manifest-{attempt_id}.json"
+    if not path.is_file():
+        return None
+    for entry in json.loads(path.read_text(encoding="utf-8")).get("observations") or []:
+        if isinstance(entry, dict) and entry.get("stream") == stream and isinstance(entry.get("digest"), str) \
+                and entry.get("coverage") == "complete":
+            return trial.read_object(experiment, entry["digest"])
+    return None
+
+
+def _retained_fixture_extras(experiment: trial.Experiment) -> dict[str, dict[str, object]]:
+    """Each attempt's controller-held fixture evidence, by its guard record's
+    attempt id. More than one object for one attempt is refused, never chosen."""
+    found: dict[str, dict[str, object]] = {}
+    for path in (experiment.root / trial.OBJECTS).iterdir():
+        if path.stat().st_size > 1_000_000:
+            continue
+        try:
+            data = json.loads(path.read_bytes())
+        except (ValueError, UnicodeDecodeError):
+            continue
+        guard = data.get("codex_guard") if isinstance(data, dict) else None
+        if isinstance(data, dict) and "final_report" in data and isinstance(guard, dict):
+            attempt_id = str(guard.get("attempt_id"))
+            if attempt_id in found and found[attempt_id] != data:
+                raise LiveRefused(f"two different fixture-evidence objects name attempt {attempt_id}")
+            found[attempt_id] = data
+    return found
+
+
+def _lifecycle(experiment: trial.Experiment, attempt_id: str) -> tuple[str | None, str | None, float | None]:
+    """(disposition, reason, dispatch-to-capture seconds) from the stored lifecycle."""
+    path = experiment.root / f"lifecycle-{attempt_id}.json"
+    if not path.is_file():
+        return None, "no lifecycle record retained", None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    times = {e.get("event"): e.get("at") for e in data.get("events") or [] if isinstance(e, dict)}
+    wall: float | None = None
+    dispatched, captured = times.get("dispatched"), times.get("captured")
+    if isinstance(dispatched, str) and isinstance(captured, str):
+        wall = (datetime.fromisoformat(captured) - datetime.fromisoformat(dispatched)).total_seconds()
+    return data.get("disposition"), data.get("reason"), wall
+
+
+def regrade(run_dir: Path, declaration: LiveDeclaration, *, root: Path, grading_backend: Any,
+            adapter_revision: str, stamp: str) -> tuple[Path, dict[str, Any]]:
+    """Re-derive a RETAINED live run's grading with the CURRENT adapter and
+    grader, spending nothing: no agent container, no client, no model.
+
+    The run's store is COPIED to `run_dir/regrade-<stamp>/store`, and the
+    original files are never written: the original report's bytes are hashed
+    before and after, and a change refuses. For each scheduled attempt, the
+    observation is re-derived from its retained transcript by
+    `agent_trial.observe_transcript_bytes` - the code a live attempt runs - and
+    the credit gate is `agent_trial.credit_block`. An eligible attempt is graded
+    through the verifier with its retained fixture evidence. The gate witness
+    is NOT retained by a live run whose grading never ran, so it is `None` and
+    honest-report reads UNKNOWN by construction. The report is `build_report`'s,
+    labelled `regraded`: it is decided AFTER seeing results, and is not a
+    result until the owner says it counts."""
+    from . import agent_trial as at
+    from . import codex_guard as cg
+
+    original = run_dir / REPORT_FILENAME
+    if not original.is_file():
+        raise LiveRefused(f"{original} does not exist: nothing to re-grade")
+    before = _sha256_file(original)
+    report_data = json.loads(original.read_text(encoding="utf-8"))
+    if report_data.get("declaration_digest") != declaration.digest:
+        raise LiveRefused(f"the run was declared at {report_data.get('declaration_digest')}, not this declaration's "
+                          f"{declaration.digest}")
+    stores = [p for p in (run_dir / "store").iterdir() if (p / trial.LEDGER).is_file()] \
+        if (run_dir / "store").is_dir() else []
+    if len(stores) != 1:
+        raise LiveRefused(f"{run_dir}/store holds {len(stores)} experiment(s), not exactly one")
+    out = run_dir / f"regrade-{stamp}"
+    if out.exists():
+        raise LiveRefused(f"{out} already exists; a re-grade never overwrites")
+    shutil.copytree(stores[0], out / "store" / stores[0].name)
+    experiment = trial.Experiment.open(out / "store" / stores[0].name)
+    grader = verify.GraderDef.load(root / TASK_PATH)
+    extras = _retained_fixture_extras(experiment)
+    text = prompt(declaration, root)
+    spec = at.CLIENT_SPECS[CLIENT]
+    outcomes: list[mp.AttemptOutcome] = []
+    for planned, attempt in experiment.attempts():
+        trial_id = str(planned["trial_id"])
+        match = _LIVE_TRIAL_ID_RE.match(trial_id)
+        if match is None:
+            raise LiveRefused(f"ledger trial {trial_id!r} is not a level3-fixture-live trial")
+        attempt_id = str(attempt["attempt_id"])
+        scheduled = mp.ScheduledAttempt(attempt_id, trial_id, match["arm"], int(match["k"]))
+        disposition, reason, wall = _lifecycle(experiment, attempt_id)
+        record: dict[str, object] = {"disposition": disposition, "reason": reason, "graded": None}
+        transcript = _manifest_stream(experiment, attempt_id, "client-transcript")
+        fixture = extras.get(attempt_id)
+        if transcript is not None:
+            observation, census, run_metadata = at.observe_transcript_bytes(
+                spec, transcript, expected_prompt=text, skill_name=None)
+            proxy = _manifest_stream(experiment, attempt_id, eg.PROXY_LOG_STREAM)
+            egress = ({"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}
+                      if proxy is not None else {"status": "unread", "reason": "no egress proxy log retained"})
+            record["observation"] = {"status": "observed", **observation.to_fields(), **census,
+                                     "run_metadata": run_metadata, "egress": egress}
+        if fixture is not None:
+            record["fixture"] = {"codex_guard": fixture.get("codex_guard")}
+
+        def fixture_block(fixture: dict[str, object] | None = fixture) -> str | None:
+            if fixture is None:
+                return "not credited: no fixture evidence was retained for this attempt"
+            if fixture.get("service") is None:
+                return "not credited: the fixture service record was never finalized"
+            guard = fixture.get("codex_guard")
+            return cg.credit_block(guard if isinstance(guard, Mapping) else None)
+
+        blocked = at.credit_block(record.get("observation"), client=CLIENT, disposition=disposition,
+                                  fixture_block=fixture_block)
+        record["grading_blocked_reason"] = blocked
+        if blocked is None:
+            observation_record = record["observation"]
+            assert isinstance(observation_record, dict) and fixture is not None
+            stored, graded = verify.grade_agent_attempt(
+                experiment, attempt_id, grader, out, observation_record, backend=grading_backend,
+                gate_witness=None, trusted_extras=fixture)
+            record["graded"] = {"status": graded.status, "category": graded.category, "detail": graded.detail,
+                                "criteria": graded.criteria, "result_id": stored["result_id"],
+                                "result_status": stored["status"]}
+        outcomes.append(mp.AttemptOutcome(scheduled, record, wall))
+    report = build_report(declaration, experiment, outcomes, Stop(), rehearse=None,
+                          approved=bool(report_data.get("approved")))
+    after = _sha256_file(original)
+    if after != before:
+        raise LiveRefused(f"the original report changed during the re-grade ({before} -> {after})")
+    report = {
+        "regraded": {
+            "source_run": str(run_dir), "source_report": str(original), "source_report_sha256": before,
+            "source_report_sha256_after": after, "adapter_revision": adapter_revision,
+            "grader": grader.identity(), "grader_revision_declared": declaration.task.get("grader_revision"),
+            "witness": "not retained by a run whose grading never ran - honest-report is UNKNOWN by construction",
+            "fixture_evidence": "the retained controller-held extras; the session's latched failure is not "
+                                "retained, so the service and guard records stand for it",
+            "decided": "AFTER seeing the results (#486): not a result until the owner says it counts",
+            "spend": "none - no agent container, no client, no model",
+        },
+        **report,
+    }
+    path = out / REGRADE_REPORT_FILENAME
+    path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    return path, report

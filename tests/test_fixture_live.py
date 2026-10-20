@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import functools
+import hashlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -602,3 +603,67 @@ def test_an_endpoint_pass_with_a_violated_honest_report_is_flagged_first(tmp_pat
     assert report["flagged_honest_report_violated"] == [
         {"attempt_id": first["attempt_id"], "case": first["case"], "endpoint_status": "PASS"}]
     assert report["cases"][first["case"]]["honest_report_violated"] == 1
+
+
+# ------------------------------------------------------- #486: the re-grade
+
+def _dry_run_with_report(tmp_path: Path) -> tuple[fl.LiveDeclaration, Path]:
+    declaration = fl.parse_declaration(_draft())
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    experiment, outcomes, stop = fl.run_live(
+        declaration, root=ROOT, run_dir=run_dir, treatment=_treatment(), image_digest=None,
+        backends=lambda: (None, None), client_argv=["codex", "exec"], credential_explicit_path=None, rehearse="dry")
+    report = fl.build_report(declaration, experiment, outcomes, stop, rehearse="dry", approved=False)
+    (run_dir / fl.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    return declaration, run_dir
+
+
+def _no_grading_backend() -> object:
+    class _Refuse:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"the re-grade used the grading backend ({name}) for an ungraded attempt")
+    return _Refuse()
+
+
+def test_a_regrade_writes_a_labelled_report_and_never_touches_the_original(tmp_path: Path) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    original = (run_dir / fl.REPORT_FILENAME).read_bytes()
+    store_before = {p.relative_to(run_dir): p.read_bytes() for p in (run_dir / "store").rglob("*") if p.is_file()}
+    path, report = fl.regrade(run_dir, declaration, root=ROOT, grading_backend=_no_grading_backend(),
+                              adapter_revision="test-rev", stamp="T1")
+    assert path == run_dir / "regrade-T1" / fl.REGRADE_REPORT_FILENAME and path.is_file()
+    assert (run_dir / fl.REPORT_FILENAME).read_bytes() == original  # byte-identical
+    assert {p.relative_to(run_dir): p.read_bytes() for p in (run_dir / "store").rglob("*") if p.is_file()} \
+        == store_before  # the original store is untouched; the re-grade works on its copy
+    label = report["regraded"]
+    assert label["source_report_sha256"] == label["source_report_sha256_after"] == \
+        "sha256:" + hashlib.sha256(original).hexdigest()
+    assert label["adapter_revision"] == "test-rev" and "AFTER seeing the results" in label["decided"]
+    assert "honest-report is UNKNOWN by construction" in label["witness"] and label["spend"].startswith("none")
+    assert next(iter(report)) == "regraded"
+    # A dry rehearsal's slots were never captured: re-graded, they stay ungraded, with the gate's reason.
+    assert {a["disposition"] for a in report["attempts"]} == {"unavailable"}
+    assert all(a["grading_blocked_reason"] and "not captured" in a["grading_blocked_reason"]
+               for a in report["attempts"])  # type: ignore[operator]
+
+
+def test_a_regrade_never_overwrites_an_earlier_one(tmp_path: Path) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    fl.regrade(run_dir, declaration, root=ROOT, grading_backend=_no_grading_backend(), adapter_revision="r", stamp="T")
+    with pytest.raises(fl.LiveRefused, match="never overwrites"):
+        fl.regrade(run_dir, declaration, root=ROOT, grading_backend=_no_grading_backend(), adapter_revision="r",
+                   stamp="T")
+
+
+def test_a_regrade_refuses_another_declaration_or_a_missing_report(tmp_path: Path) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    other = copy.deepcopy(_draft())
+    other["shared"]["per_attempt_seconds"] = 1801
+    with pytest.raises(fl.LiveRefused, match="was declared at"):
+        fl.regrade(run_dir, fl.parse_declaration(other), root=ROOT, grading_backend=_no_grading_backend(),
+                   adapter_revision="r", stamp="A")
+    (run_dir / fl.REPORT_FILENAME).unlink()
+    with pytest.raises(fl.LiveRefused, match="nothing to re-grade"):
+        fl.regrade(run_dir, declaration, root=ROOT, grading_backend=_no_grading_backend(), adapter_revision="r",
+                   stamp="B")

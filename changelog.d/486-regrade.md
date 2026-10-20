@@ -1,0 +1,4 @@
+- **A retained live run can be re-graded without spending anything** (#486). `skillc level3-live DECLARATION --regrade RUN_DIR` copies the run's store, re-derives every attempt's transcript observation and credit decision with the current adapter, grades the eligible attempts with their retained fixture evidence, and writes `RUN_DIR/regrade-<stamp>/regraded-report.json`. No agent container, client or model is used.
+  - The report is labelled with the adapter revision, the grader, and "decided after seeing results". It records that honest-report is UNKNOWN because the gate witness was not retained.
+  - The original report and store are never written; the original report's sha256 is recorded before and after.
+  - The live teardown's transcript observation and the credit gate are now pure functions (`agent_trial.observe_transcript_bytes`, `agent_trial.credit_block`) that both paths call.
