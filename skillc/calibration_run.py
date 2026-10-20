@@ -876,9 +876,9 @@ def require_precondition(declaration: calibration.DiscriminationDeclaration, rep
     None when the declaration has no precondition (byte-identical behaviour).
     A rehearsal spends nothing: without a report it is told, loudly, that the
     precondition was NOT checked; with one, the check is the real one."""
-    condition = declaration.data.get("precondition")
-    if condition is None:
+    if "precondition" not in declaration.data:
         return None
+    condition = declaration.data["precondition"]  # present but null or malformed is refused, never absent
     if not isinstance(condition, Mapping) or condition.get("required_verdict") != PRECHECK_MET \
             or not isinstance(condition.get("declaration"), str) or not isinstance(condition.get("declaration_digest"), str):
         raise CalibrationRefused("precondition must name a pre-check declaration, its declaration_digest and "

@@ -493,6 +493,17 @@ def test_the_pilot_is_refused_without_a_met_precheck(tmp_path: Path, case: str, 
         cr.require_precondition(pilot, None if case == "absent" else report, ROOT)
 
 
+@pytest.mark.parametrize("value", [None, {}, "MET", {"declaration": "x", "declaration_digest": "y"}])
+def test_a_present_but_malformed_precondition_is_refused(value: object) -> None:
+    """Review pass 3: `"precondition": null` must not read as absent."""
+    data = _stamped_pilot()
+    data["precondition"] = value
+    data["approval"]["declaration_digest"] = calibration.declaration_digest(data)
+    pilot = calibration.parse_discrimination_declaration(data)
+    with pytest.raises(cr.CalibrationRefused, match="precondition must name"):
+        cr.require_precondition(pilot, None, ROOT)
+
+
 def test_a_rehearsal_without_a_report_says_the_precondition_was_not_checked() -> None:
     pilot = calibration.parse_discrimination_declaration(_stamped_pilot())
     result = cr.require_precondition(pilot, None, ROOT, rehearse=True)
