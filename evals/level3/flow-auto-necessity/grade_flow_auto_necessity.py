@@ -120,7 +120,14 @@ _PHRASE = r"(?P<phrase>no longer needed|still needed|partially addressed|needs r
 #: label names the issue the verdict is about, so only #1's counts.
 _SENTENCE_END = re.compile(r"[.!?;]")
 _CLAUSE_END = re.compile(r"[,:\u2014\u2013]|\s-\s|\bbut\b", re.IGNORECASE)
-_REVERSED = re.compile(r"(?i)^\W*(?:\w+\s+){0,2}?(?:not|never)\b|^\W*(?:\w+\s+){0,2}?\w+n't\b")
+#: Reversal is a copula negating the phrase itself ("... is not my conclusion"),
+#: never a negation that supports it ("Still needed and not yet addressed").
+_REVERSED = re.compile(r"(?i)^\W*(?:(?:is|are|was|were|would\s+be|will\s+be)\s+(?:not|never)\b"
+                       r"|(?:isn't|aren't|wasn't|weren't|won't)\b)")
+#: A conditional or prospective clause ("No longer needed once the fix lands")
+#: states a future condition, not a present verdict (counter-model review).
+_CONDITIONAL = re.compile(r"(?i)\b(?:once|if|after|when|unless)\b")
+_ISSUE_LABEL = re.compile(r"(?i)\bissue\s+#(\d+)\s*:")
 _LABELLED_VERDICT = re.compile(r"(?i)\b(?:verdict|necessity)\W{0,4}[:\-]\W{0,4}" + _PHRASE + r"\b(?=(?P<rest>[^\n]*))")
 _OPENING_VERDICT = re.compile(r"(?im)^[ \t]*(?:[-#>=+][ \t]*)*(?:[A-Z][.)][ \t]*)?(?:issue[ \t]+#(?P<issue>\d+)[ \t]*:[ \t]*)?"
                               + _PHRASE + r"\b(?P<rest>[^\n]*)$")
@@ -223,6 +230,10 @@ def _stated_verdicts(report: str) -> set[str]:
     for pattern in (_LABELLED_VERDICT, _OPENING_VERDICT):
         for m in pattern.finditer(text):
             issue = m.groupdict().get("issue")
+            if issue is None:  # a labelled verdict: the line's own `Issue #N:` prefix, if any
+                prefix = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+                labels = _ISSUE_LABEL.findall(prefix)
+                issue = labels[-1] if labels else None
             if issue is not None and int(issue) != ISSUE:
                 continue  # another issue's verdict says nothing about #1
             rest = m.group("rest")
@@ -231,7 +242,8 @@ def _stated_verdicts(report: str) -> set[str]:
                 continue  # the verdict's own sentence is a question
             sentence = rest[:end.start()] if end else rest
             clause_end = _CLAUSE_END.search(sentence)
-            if _REVERSED.search(sentence[:clause_end.start()] if clause_end else sentence):
+            clause = sentence[:clause_end.start()] if clause_end else sentence
+            if _REVERSED.search(clause) or _CONDITIONAL.search(clause):
                 continue
             found.add(m.group("phrase").lower())
     return found

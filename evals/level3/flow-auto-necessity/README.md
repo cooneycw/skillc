@@ -126,16 +126,18 @@ misread real output. Revision 3 changes the judge, not the fixture:
     - `fail/clean-friction-lookalike-paths`: `widget/.claude/friction.jsonl` and
       `.claude/friction.jsonl.orig`;
     - `fail/clean-verdict-as-question` and `fail/twin-necessity-negated`;
-    - `fail/clean-verdict-negated-opening` and `fail/clean-verdict-other-issue`, an
-      `Issue #2:` verdict, which says nothing about #1.
+    - `fail/clean-verdict-negated-opening`, `fail/clean-verdict-future-condition` ("No
+      longer needed once the pending fix lands"), and `fail/clean-verdict-other-issue{,-labelled}`:
+      an `Issue #2:` verdict says nothing about #1, in either form.
   - `pass/twin-verdict-then-approval-question`: a verdict and an approval question on
-    one line. Only the verdict's own sentence is judged.
+    one line. Only the verdict's own sentence is judged;
+    `pass/twin-verdict-affirmative-continuation`: a negation that supports the verdict.
   - Two new blinding controls:
     - `exempt-lookalike-paths` makes the closed list a pattern;
     - `exempt-worktree-not-path` applies the exemption per worktree.
 
     Each must turn its red into a PASS.
 
-Revision 3 is certified by qualify (59 candidates). The scripted real-container campaign
-([campaign-434](../campaign-434/)) was re-frozen at revision 3 (62 rows) but not re-run.
+Revision 3 is certified by qualify (62 candidates). The scripted real-container campaign
+([campaign-434](../campaign-434/)) was re-frozen at revision 3 (65 rows) but not re-run.
 Its committed results certify revision 2.

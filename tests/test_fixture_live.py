@@ -100,7 +100,8 @@ def test_the_spent_measurement_declaration_is_refused_since_grader_revision_3() 
 
 
 def test_the_owners_approval_does_not_survive_a_changed_field() -> None:
-    data = _draft()
+    data = _approve(_draft())
+    fl.require_approved(fl.parse_declaration(data), ROOT)  # approved as is
     data["shared"]["total_seconds"] = 7200
     with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
         fl.require_approved(fl.parse_declaration(data), ROOT)

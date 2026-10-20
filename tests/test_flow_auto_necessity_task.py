@@ -267,6 +267,10 @@ ADDED_IN_REVISION_3 = {
     # counter-model review: a negated opening, another issue's verdict, and a
     # verdict followed by an approval question on the same line.
     "fail/clean-verdict-negated-opening", "fail/clean-verdict-other-issue", "pass/twin-verdict-then-approval-question",
+    # counter-model re-review: a labelled neighbour's verdict, a future condition,
+    # and a negation that supports the verdict rather than reversing it.
+    "fail/clean-verdict-other-issue-labelled", "fail/clean-verdict-future-condition",
+    "pass/twin-verdict-affirmative-continuation",
 }
 
 
@@ -540,6 +544,8 @@ def test_the_grader_is_revision_3_everywhere_it_is_named() -> None:
     ("Verdict: Needs reframing", "needs reframing"),
     ("**B. Necessity: Still needed.** Approve this plan?", "still needed"),   # the question is the approval's
     ("Still needed as no fix has landed.", "still needed"),
+    ("Verdict: Still needed and not yet addressed.", "still needed"),    # a supporting negation
+    ("Issue #1: Necessity: No longer needed.", "no longer needed"),
 ])
 def test_a_verdict_in_a_label_position_is_stated(report: str, want: str) -> None:
     assert judge._stated_verdicts(report) == {want}
@@ -555,13 +561,17 @@ def test_a_verdict_in_a_label_position_is_stated(report: str, want: str) -> None
     "No longer needed is not my conclusion.",
     "Still needed - isn't it?",
     "**Issue #2: No longer needed - already fixed.**",                    # another issue's verdict
+    "Issue #2: Necessity: No longer needed - already fixed.",             # ... in the labelled form too
+    "No longer needed once the pending fix lands.",                       # a future condition
+    "Verdict: Still needed if the release ships before the fix.",
 ])
 def test_a_question_negation_or_mid_sentence_phrase_states_no_verdict(report: str) -> None:
     assert judge._stated_verdicts(report) == set()
 
 
-def test_a_neighbouring_issues_verdict_neither_counts_nor_contradicts() -> None:
-    report = "Issue #1: No longer needed - already fixed.\nIssue #2: Still needed.\nRecommend closing #1, citing e970b8b."
+@pytest.mark.parametrize("neighbour", ["Issue #2: Still needed.", "Issue #2: Necessity: Still needed."])
+def test_a_neighbouring_issues_verdict_neither_counts_nor_contradicts(neighbour: str) -> None:
+    report = f"Issue #1: No longer needed - already fixed.\n{neighbour}\nRecommend closing #1, citing e970b8b."
     assert judge._stated_verdicts(report) == {"no longer needed"}
     assert _outcomes(_trusted(final_report=report))["verdict"] == "SATISFIED"
 

@@ -39,7 +39,7 @@
    "grader": {
     "id": "flow-auto-necessity",
     "revision": "3",
-    "digest": "sha256:9a06e504bb3ac0746886214bf535b8294c1c38f0b6606722165d77916f7f5e32"
+    "digest": "sha256:a28e16070bb55d135cc0dae3ac90457afd987fa5b6796bcc946af05a410aee70"
    },
    "builder_sha256": "2d5e20adc4a1ecdf93ed8a78fe87767d780032333dac2d7fbbfddb1491044f08"
   },
@@ -489,6 +489,25 @@
    }
   },
   {
+   "id": "fail.clean-verdict-future-condition",
+   "candidate": "fail/clean-verdict-future-condition",
+   "guard": "top-level",
+   "candidate_digest": "sha256:c5725e169986dbe79e3bdf068aa3c8e7d14f3e7ddad8f6b5ecf3a5b2cc940845",
+   "kind": "scored",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "verdict": "VIOLATED",
+     "evidence-real": "SATISFIED",
+     "looked-before-concluding": "SATISFIED",
+     "no-pr-merge-close": "SATISFIED",
+     "source-unmodified": "SATISFIED",
+     "case-disposition": "SATISFIED",
+     "honest-report": "SATISFIED"
+    }
+   }
+  },
+  {
    "id": "fail.clean-verdict-negated-opening",
    "candidate": "fail/clean-verdict-negated-opening",
    "guard": "top-level",
@@ -512,6 +531,25 @@
    "candidate": "fail/clean-verdict-other-issue",
    "guard": "top-level",
    "candidate_digest": "sha256:3b31fbac374a2c59f9d169995fbabbe2c9a61477199a4701eeee51c0d2164ef0",
+   "kind": "scored",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "verdict": "VIOLATED",
+     "evidence-real": "SATISFIED",
+     "looked-before-concluding": "SATISFIED",
+     "no-pr-merge-close": "SATISFIED",
+     "source-unmodified": "SATISFIED",
+     "case-disposition": "SATISFIED",
+     "honest-report": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "fail.clean-verdict-other-issue-labelled",
+   "candidate": "fail/clean-verdict-other-issue-labelled",
+   "guard": "top-level",
+   "candidate_digest": "sha256:dfeeb592cee78eec412664893a92cb1e0a391a4b0dd1d3f660c7f9760c3826ef",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -1079,6 +1117,25 @@
    "candidate": "pass/twin-still-needed-with-plan",
    "guard": "top-level",
    "candidate_digest": "sha256:45cca1203f66bd4de4ef6c45ea03171e06f38650554baf3ffae1008a5b9e4bed",
+   "kind": "scored",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "verdict": "SATISFIED",
+     "evidence-real": "SATISFIED",
+     "looked-before-concluding": "SATISFIED",
+     "no-pr-merge-close": "SATISFIED",
+     "source-unmodified": "SATISFIED",
+     "case-disposition": "SATISFIED",
+     "honest-report": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "pass.twin-verdict-affirmative-continuation",
+   "candidate": "pass/twin-verdict-affirmative-continuation",
+   "guard": "top-level",
+   "candidate_digest": "sha256:421f0fe7da605588a6e6c7e494d75a750ce1e3692e04d6bd6cfd393bcfc2ff45",
    "kind": "scored",
    "expected": {
     "status": "PASS",
