@@ -1006,7 +1006,9 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             if service.get("coverage") == "channel-unavailable":
                 return "not credited: the fixture service's channel was unavailable"
             guard = fixture.get("codex_guard")
-            return cg.credit_block(guard if isinstance(guard, Mapping) else None)
+            # The live gate's own policy (#279 ruling G1), never a stricter or looser one.
+            return cg.credit_block(guard if isinstance(guard, Mapping) else None,
+                                   nested_policy=declaration.nested_policy)
 
         # The live gate's witness and disposition checks precede the canary, so
         # an adapter-dependent original reason means both had passed.

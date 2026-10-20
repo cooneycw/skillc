@@ -643,8 +643,8 @@ _CANARY_REASON = ("prompt_delivered=True, canary_satisfied=False - never graded 
                   "the real transcript")
 
 
-def _dry_run_with_report(tmp_path: Path) -> tuple[fl.LiveDeclaration, Path]:
-    declaration = fl.parse_declaration(_draft())
+def _dry_run_with_report(tmp_path: Path, data: dict[str, Any] | None = None) -> tuple[fl.LiveDeclaration, Path]:
+    declaration = fl.parse_declaration(data if data is not None else _draft())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     experiment, outcomes, stop = fl.run_live(
@@ -687,7 +687,8 @@ def _overwrite(path: Path, payload: object) -> None:
 def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position: int = 0,
                     original_reason: str = _CANARY_REASON, guard_decisions: list[dict[str, Any]] | None = None,
                     extras_copies: int = 1, extras_as_artifact: bool = False,
-                    prompt_delivered: bool | None = True) -> str:
+                    prompt_delivered: bool | None = True, guard_policy: str | None = None,
+                    guard_channel_unavailable: bool = False) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -701,7 +702,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
     extras = {"case": trusted["case"], "service": trusted["service"], "git": trusted["git"], "git_unreadable": None,
               "final_report": trusted["final_report"],
               "codex_guard": cg.summarize(attempt_id, guard_decisions if guard_decisions is not None
-                                          else [{"decision": "passed-top-level"}], False)}
+                                          else [{"decision": "passed-top-level"}], guard_channel_unavailable,
+                                          nested_policy=guard_policy)}
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
@@ -1256,3 +1258,27 @@ def test_the_service_clock_is_the_fixtures_not_the_witnesss() -> None:
     service_src = inspect.getsource(fixture_service)
     assert "self._clock_start + timedelta(seconds=self._clock_step * seq)" in service_src
     assert "requested_at=time.time()" in inspect.getsource(gate_witness)
+
+
+_REFUSED_ONE_TURN = [{"decision": "passed-top-level"}, {"decision": "refused-nested"}]
+
+
+@pytest.mark.parametrize(("declare", "channel", "blocked"), [
+    (True, False, False),   # the opt-in: a refused nested launch replays as the live gate credits it
+    (False, False, True),   # no opt-in: blocked, as before
+    (True, True, True),     # the opt-in with an untrusted channel: still blocked
+])
+def test_the_judge_replay_applies_the_declared_nested_policy(tmp_path: Path, declare: bool, channel: bool,
+                                                             blocked: bool) -> None:
+    """Counter-model review pass 2: the replay's credit gate is the live one,
+    policy included."""
+    data = _draft()
+    if declare:
+        data["containment"] = {"nested_codex": "refusal-expected"}
+    declaration, run_dir = _dry_run_with_report(tmp_path, data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN,
+                                 guard_policy="refusal-expected" if declare else None,
+                                 guard_channel_unavailable=channel)
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True
+    assert ("nested codex observed" in str(entry["replay_blocked_reason"])) is blocked, entry["replay_blocked_reason"]

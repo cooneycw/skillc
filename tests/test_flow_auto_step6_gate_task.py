@@ -115,7 +115,7 @@ def test_the_builder_offers_the_api_fixture_campaign_loads() -> None:
     assert fc._builder.__code__.co_consts.count("flow_auto_necessity_builder_campaign") == 1
 
 
-def _pinned_gate(tmp_path: Path, repo: Path) -> list[str]:
+def _pinned_gate(tmp_path: Path, repo: Path) -> tuple[list[str], int]:
     home = tmp_path / "home"
     if not home.exists():
         (home / ".claude" / "scripts").mkdir(parents=True)
@@ -128,7 +128,9 @@ def _pinned_gate(tmp_path: Path, repo: Path) -> list[str]:
     env = {"PATH": f"{Path(uv).parent}:/usr/local/bin:/usr/bin:/bin", "HOME": str(home), "LANG": "C.UTF-8"}
     done = subprocess.run(["bash", str(home / ".claude" / "scripts" / "flow-finish-gate.sh")], cwd=repo, env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600, check=False)
-    return [line for line in done.stdout.splitlines() if _GATE_LINES.match(line)]
+    # The process's own exit code beside the printed marker (counter-model
+    # review): a gate that printed the red tail but exited 0 must not pass.
+    return [line for line in done.stdout.splitlines() if _GATE_LINES.match(line)], done.returncode
 
 
 @pytest.mark.skipif(shutil.which("uv") is None or shutil.which("make") is None,
@@ -144,5 +146,7 @@ def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str)
     if tree == "fixed-green":
         (repo / build.BROKEN_MODULE).write_text(build.REPAIRED_SOURCE)
     want = (TASK / "gate-expectations" / f"{tree}.tail").read_text().splitlines()
-    assert _pinned_gate(tmp_path, repo) == want
-    assert want[-1] == ("FLOW_FINISH_GATE_EXIT=1" if tree == "fixed-red" else "FLOW_FINISH_GATE_EXIT=0")
+    lines, exit_code = _pinned_gate(tmp_path, repo)
+    expected_exit = 1 if tree == "fixed-red" else 0
+    assert lines == want and exit_code == expected_exit
+    assert want[-1] == f"FLOW_FINISH_GATE_EXIT={expected_exit}"
