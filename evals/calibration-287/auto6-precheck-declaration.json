@@ -141,5 +141,16 @@
   "skill-evidence (skillc#268) per attempt, binding it to the skills/paths actually read and executed",
   "case-pairing (skillc#273, merged a2b2861) binding each intact attempt to its reciprocal degraded attempt on this case"
  ],
- "test": "None: the pre-check is a feasibility gate, read only by auto6_precheck.py."
+ "test": "None: the pre-check is a feasibility gate, read only by auto6_precheck.py.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-20",
+  "attempts_per_arm": 1,
+  "source": "the owner's words, 'Approve 287' (2026-10-20), replying to the #287 option-1 approval package (pre-check sha256:e44ae179c8a8214c8fbf0b6e9d20d6174907eed27520b487ae1e2b44531dc60e, pilot sha256:9568c901b4a7e4750a046c64bfa9435ecb30147c2c99b7fa4ad6a8dcc5ba4357) relayed by skillc-400 (orchestrator, owner-delegated), applied by skillc-400 to this pre-check",
+  "scope": "one run of this pre-check: 1 attempt per arm (intact, degraded), 1200 s per attempt and 2400 s in total, as declared, on kyle19 under the operator's codex subscription login with provider-only egress (#442); no re-run",
+  "profile_inventory_digest": "sha256:c264490609ccf6699a9df31faca0a917c8bbfd405fb727ea292a29cf04a4030b",
+  "mutated_digest": "sha256:a4cc27d11eafe5529ba00bbfdb014af38e01a93c818a8d3a900edec4ee8c1973",
+  "task_fixture": "discrimination/fixture",
+  "declaration_digest": "sha256:e44ae179c8a8214c8fbf0b6e9d20d6174907eed27520b487ae1e2b44531dc60e"
+ }
 }

@@ -137,9 +137,23 @@ def test_the_declarations_are_the_approved_design_and_unapproved(path: Path, dig
     assert declaration.arm_order == tuple(calibration.derive_arm_order(20261020, ["intact", "degraded"], n))
     evidence: dict[str, Any] = cr.require_textual_evidence(declaration, ROOT)
     assert evidence["occurrence_scan"]["verdict"] == "NO_TEXTUAL_SURVIVOR"
-    assert "approval" not in declaration.data
-    with pytest.raises(calibration.DeclarationRefused, match="approval"):
+    if path == PRECHECK:
+        # The owner's "Approve 287" (2026-10-20), stamped on the pre-check only.
+        approval = declaration.approval
+        assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_arm"] == 1
+        assert "Approve 287" in str(approval["source"]) and approval["declaration_digest"] == PRECHECK_DIGEST
         calibration.require_approved_discrimination(declaration, ROOT)
+    else:
+        assert "approval" not in declaration.data  # stamped only after a MET pre-check
+        with pytest.raises(calibration.DeclarationRefused, match="approval"):
+            calibration.require_approved_discrimination(declaration, ROOT)
+
+
+def test_the_precheck_approval_does_not_survive_a_changed_field() -> None:
+    data = _json(PRECHECK)
+    data["shared"]["per_attempt_seconds"] = 1201
+    with pytest.raises(calibration.DeclarationRefused):
+        calibration.require_approved_discrimination(calibration.parse_discrimination_declaration(data), ROOT)
 
 
 def test_the_pilot_is_conditional_on_this_precheck() -> None:
@@ -427,7 +441,8 @@ def test_the_pilot_approval_tripwire_can_fail(approval: dict[str, Any]) -> None:
 def test_the_rehearsal_stamp_never_reaches_a_committed_declaration() -> None:
     for path in (PRECHECK, PILOT):
         assert "REHEARSAL" not in path.read_text(encoding="utf-8")
-    assert _json(PRECHECK).get("approval") is None and _json(PILOT).get("approval") is None
+    assert _json(PILOT).get("approval") is None
+    assert "REHEARSAL" not in str(_json(PRECHECK)["approval"])
 
 
 # ------------------------------------------- the dispatch guard (ruling (A))
