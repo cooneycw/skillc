@@ -202,7 +202,28 @@ def _codex_home_files(ctx: _AttemptContext) -> dict[str, bytes]:
 #: call arriving as a new payload type would never pair with its result, and
 #: the canary would read "no tool use" on a genuinely live run (issue #106's
 #: owed "real transcript format drift").
-CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "custom_tool_call_output", "reasoning"})
+#: #486 (2026-10-20): `function_call` / `function_call_output` (the model's
+#: `exec_command` calls) are now normalized too. A type outside this set is
+#: no longer only recorded: it blocks credit (the gate below) and, on the
+#: live fixture path, stops the schedule (`fixture_live.containment_trigger`).
+CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "custom_tool_call_output", "reasoning",
+                                             "function_call", "function_call_output"})
+
+
+def _census_incomplete(observation: Mapping[str, object]) -> str | None:
+    """Why a codex census does not cover its whole transcript, or `None`: no
+    response item inspected, a census error, or a line skipped as unparseable
+    or non-object (a truncated item parses as nothing). #486."""
+    inspected = observation.get("transcript_response_items_inspected")
+    if isinstance(inspected, bool) or not isinstance(inspected, int) or inspected < 1:
+        return f"response items inspected {inspected!r}"
+    if observation.get("transcript_census_error"):
+        return f"census error {observation.get('transcript_census_error')!r}"
+    line_types = observation.get("transcript_line_types")
+    if not isinstance(line_types, Mapping):
+        return "no line-type census"
+    skipped = {k: v for k, v in line_types.items() if k in ("<unparseable>", "<non-object>")}
+    return f"skipped lines {skipped}" if skipped else None
 
 
 def transcript_census(client: str, raw: str) -> dict[str, object]:
@@ -2250,6 +2271,21 @@ def run_one_attempt(
             # controlled environment; the attempt stays in every account, but
             # is never credited.
             grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
+        elif client == "codex" and (incomplete := _census_incomplete(observation)):
+            # Counter-model review, pass 2: the same coverage `fixture_live.
+            # containment_trigger` requires - a stop that fires after grading
+            # does not undo a credit already given, and other callers have no stop.
+            grading_blocked_reason = f"not credited: the transcript census is incomplete ({incomplete})"
+        elif client == "codex" and not isinstance(observation.get("transcript_unrecognized_types"), list):
+            # #486: a census that could not assess the transcript's own item
+            # types is unknown, never clean.
+            grading_blocked_reason = "not credited: the transcript census could not assess its response-item types"
+        elif drift := observation.get("transcript_unrecognized_types"):
+            # #486: format drift FAILS CLOSED. On 2026-10-20 the census listed
+            # function_call/function_call_output on every attempt and nothing
+            # read it; 10 paid attempts went ungraded in silence.
+            grading_blocked_reason = (f"not credited: transcript format drift - unrecognized response-item types "
+                                      f"{sorted(map(str, drift))}; the adapter cannot read these lines")
         elif fixture_session is not None and (fixture_block := _fixture_credit_block(fixture_session)):
             # #434: the same posture for the fixture's own evidence and for a
             # nested codex (D3 ruling): in every account, never credited.

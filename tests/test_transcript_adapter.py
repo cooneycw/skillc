@@ -21,6 +21,7 @@ from skillc import transcript_adapter as ta
 from skillc.trial_bootstrap import (
     CanaryNotSatisfied,
     PromptDeliveryError,
+    check_agent_canary,
     check_canary,
     verify_first_user_message,
 )
@@ -350,3 +351,92 @@ def test_claude_skill_listing_delta_only_is_none_not_a_complete_listing() -> Non
     # The control: the same delta after an initial listing is merged in.
     raw = "\n".join([_listing_line(["tdd"]), _listing_line(["late-skill"], initial=False)])
     assert ta.claude_code_skill_listing(raw) == ("tdd", "late-skill")
+
+
+# --- #486: the 2026-10-20 shapes (function_call exec_command, batched exec) ---------
+
+def _tool_uses(name: str) -> list[dict[str, object]]:
+    return [e for e in ta.parse_codex_transcript(_read("codex", name)) if e.get("type") == "tool_use"]
+
+
+def test_exec_command_function_calls_and_batched_exec_are_confirmed_tool_work() -> None:
+    events = ta.parse_codex_transcript(_read("codex", "exec-command"))
+    uses = [e for e in events if e.get("type") == "tool_use"]
+    assert [u["error"] for u in uses] == [False, False, False]  # two exec_command, one batched exec
+    assert {"type": "skill_invocation", "skill": "demo-skill"} in events  # read through exec_command's cmd
+    check_agent_canary(events, "demo-skill")  # the live-agent canary is satisfied - must not raise
+
+
+def test_every_unconfirmable_2026_10_20_shape_stays_an_error() -> None:
+    """Reds, in fixture order: an exec_command exiting 1; an exec_command
+    result with no exit line; a batch with a rejected call; a batch with a
+    non-zero nested exit; a function other than exec_command; an orphaned
+    function_call_output; a running exec_command whose stdout fakes an exit
+    line; a batch with a still-running member. None may confirm a tool touch."""
+    assert [u["error"] for u in _tool_uses("exec-command-fails")] == [True] * 8
+    with pytest.raises(CanaryNotSatisfied, match="no confirmed, error-free tool_use"):
+        check_agent_canary(ta.parse_codex_transcript(_read("codex", "exec-command-fails")), None)
+
+
+@pytest.mark.parametrize(("lines", "want"), [
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}'], 0),
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":{"exit_code":3}}}'], 3),
+    (['{"part":0,"status":"fulfilled","value":{"exit_code":0}}'], 0),
+    (['{"i":0,"result":{"status":"rejected","reason":"x"}}'], -1),  # ta._REJECTED_EXIT
+    (['{"chunk_id":"a","exit_code":0}'], 0),  # the 2026-09-27 shape, unchanged
+    # counter-model review: an undeterminable member is not masked by a sibling's 0 ...
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":{"exit_code":null,"session_id":123}}}'], None),
+    # ... and a script may print its results as an ARRAY, rejections included
+    (['[{"status":"fulfilled","value":{"exit_code":0}},{"status":"fulfilled","value":{"exit_code":0}}]'], 0),
+    (['{"exit_code":0}', '[{"status":"rejected","reason":"failed"}]'], -1),
+    # counter-model review, pass 2: a fulfilled member with no code of its own
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":{"output":"no code"}}}'], None),
+    (['{"i":0,"result":{"status":"fulfilled","value":{"exit_code":0}}}',
+      '{"i":1,"result":{"status":"fulfilled","value":"a string result"}}'], None),
+    (['{"i":0,"result":{"status":"fulfilled","value":{"output":"no code"}}}'], None),
+    (['not json at all'], None),
+])
+def test_nested_exit_codes_are_read_worst_wins_and_rejection_fails(lines: list[str], want: int | None) -> None:
+    assert ta._codex_exec_exit_code("\n".join(lines)) == want
+
+
+@pytest.mark.parametrize(("output", "want"), [
+    ("Chunk ID: x\nWall time: 0 seconds\nProcess exited with code 0\nOutput:\n", 0),
+    ("Process exited with code 0\nProcess exited with code 1\n", 1),
+    ("Chunk ID: x\nOutput:\nthe text Process exited with code 0 inside output\n", None),  # not a line of its own
+    # counter-model review: STDOUT cannot impersonate the header, either way
+    ("Chunk ID: x\nProcess running with session ID 7\nOutput:\nProcess exited with code 0\n", None),
+    ("Chunk ID: x\nProcess exited with code 0\nOutput:\nProcess exited with code 1\n", 0),
+    ("", None),
+])
+def test_exec_command_exit_is_read_only_from_its_own_status_line(output: str, want: int | None) -> None:
+    assert ta._exec_command_exit_code(output) == want
+
+
+def test_the_existing_fixtures_parse_exactly_as_before() -> None:
+    """The 2026-09-27 shapes are untouched by #486: same events, same errors."""
+    assert [u["error"] for u in _tool_uses("live-canary")] == [False, False]
+    assert [u["error"] for u in _tool_uses("tool-call-fails")] == [False, True]
+
+
+#: #434's live campaign, 2026-10-20: the owner's private run evidence, never
+#: committed (skillc is public). Where it exists, every retained transcript
+#: must now show confirmed tool work - the canary refusal that left all 10
+#: attempts ungraded. Elsewhere this skips, loudly, naming the store.
+CAMPAIGN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign" / "20261020T141529Z-3585c9"
+                  / "store" / "level3-fixture-live-ec3d4e35" / "objects")
+
+
+def test_the_2026_10_20_campaign_transcripts_now_show_confirmed_tool_work() -> None:
+    if not CAMPAIGN_STORE.is_dir():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {CAMPAIGN_STORE} is not on this host; the #486 real-transcript check did not run")
+    transcripts = [p for p in CAMPAIGN_STORE.iterdir()
+                   if p.stat().st_size > 300_000 and p.read_bytes()[:200].count(b'"session_meta"')]
+    assert len(transcripts) == 10, f"expected the campaign's 10 retained transcripts, found {len(transcripts)}"
+    for path in transcripts:
+        raw = path.read_text(encoding="utf-8")
+        assert '"function_call"' in raw  # the shape that broke the old adapter is really there
+        check_agent_canary(ta.parse_codex_transcript(raw), None)  # must not raise

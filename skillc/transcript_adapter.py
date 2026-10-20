@@ -61,6 +61,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 NormalizedEvent = dict[str, object]
 
@@ -296,23 +297,121 @@ def _codex_exec_exit_code(output_text: str) -> int | None:
     `None` only when NO chunk yields a determinable exit code at all -
     never guessed as `0` ("probably succeeded"), matching this codebase's
     "undeterminable is refused/treated as failure, never assumed fine" rule
-    (see `skillc/credential.py`)."""
+    (see `skillc/credential.py`).
+
+    #486 (observed 2026-10-20, codex-cli 0.157.1, gpt-6-astra): `exec` is a
+    SCRIPT runner, and a script that batches calls prints each settled
+    result itself - `{"i":0,"result":{"status":"fulfilled","value":{...,
+    "exit_code":0,...}}}`, or `{"part":N,"status":...}`, in whatever shape the
+    script chose. So every `exit_code` is read wherever it sits inside a
+    parsed line, and a `"status":"rejected"` anywhere is a failure: a call
+    that never settled proves nothing. Worst wins, exactly as before.
+
+    Counter-model review: a member whose exit is UNDETERMINABLE (a running
+    process: `"exit_code": null` beside a `session_id`) leaves the whole
+    output unconfirmed - a sibling's 0 must not certify it - and a script may
+    print its results as a JSON ARRAY, which is read the same way."""
     best: int | None = None
+    rejected = unknown = False
     for raw_line in output_text.splitlines():
         candidate = raw_line.strip()
-        if not candidate.startswith("{"):
+        if not candidate.startswith(("{", "[")):
             continue
         try:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
             continue
-        if isinstance(parsed, dict):
-            exit_code = parsed.get("exit_code")
-            if isinstance(exit_code, int) and not isinstance(exit_code, bool):
-                if exit_code != 0:
-                    return exit_code  # any failure anywhere wins immediately
-                best = 0
+        codes: list[int] = []
+        found = _collect_exit_codes(parsed, codes)
+        rejected = rejected or found.rejected
+        unknown = unknown or found.unknown
+        for exit_code in codes:
+            if exit_code != 0:
+                return exit_code  # any failure anywhere wins immediately
+            best = 0
+    if rejected:
+        return _REJECTED_EXIT  # a rejected call anywhere fails the whole output
+    if unknown:
+        return None  # an unconfirmable member: the output is not confirmed
     return best
+
+
+#: The exit code a REJECTED (never-settled) batched call reads as: non-zero,
+#: so it fails the output, and outside any real process's 0-255 range.
+_REJECTED_EXIT = -1
+
+
+@dataclass
+class _Collected:
+    rejected: bool = False
+    unknown: bool = False
+
+
+def _collect_exit_codes(node: object, codes: list[int], found: _Collected | None = None) -> _Collected:
+    """Every integer `exit_code` inside `node`, at any depth, into `codes`.
+    `rejected`: some object carries `"status": "rejected"`. `unknown`: some
+    process result's exit is undeterminable - an `exit_code` key that is not
+    an integer, or a `session_id` (a still-running process) with no integer
+    `exit_code`."""
+    found = found if found is not None else _Collected()
+    if isinstance(node, dict):
+        if node.get("status") == "rejected":
+            found.rejected = True
+        elif node.get("status") == "fulfilled":
+            # A settled batch member must itself carry an integer exit code:
+            # one without (a string result, an output with no code) is
+            # unconfirmable, and a sibling's 0 must not certify it
+            # (counter-model review, pass 2).
+            own: list[int] = []
+            _collect_exit_codes(node.get("value"), own, _Collected())
+            if not own:
+                found.unknown = True
+        exit_code = node.get("exit_code")
+        has_exit = isinstance(exit_code, int) and not isinstance(exit_code, bool)
+        if has_exit:
+            codes.append(exit_code)  # type: ignore[arg-type]
+        elif "exit_code" in node or "session_id" in node:
+            found.unknown = True
+        for value in node.values():
+            _collect_exit_codes(value, codes, found)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_exit_codes(value, codes, found)
+    return found
+
+
+#: #486: a `function_call` `exec_command` result is a plain string carrying
+#: one `Process exited with code N` line per process (observed 2026-10-20).
+_EXEC_COMMAND_EXIT_RE = re.compile(r"^Process exited with code (-?\d+)\s*$", re.MULTILINE)
+
+
+def _exec_command_exit_code(output_text: str) -> int | None:
+    """The worst `Process exited with code N` in an `exec_command` result's
+    HEADER, or `None` when it carries none - undeterminable, never assumed 0.
+
+    Only the tool-generated header counts: everything after the `Output:`
+    line is the command's own stdout, which can print any text, including a
+    fake exit line (counter-model review). A result with no `Output:` line is
+    read whole, since there is then no stdout to impersonate it."""
+    header, sep, _stdout = output_text.partition("\nOutput:")
+    if not sep and output_text.startswith("Output:"):
+        header = ""
+    codes = [int(c) for c in _EXEC_COMMAND_EXIT_RE.findall(header)]
+    if not codes:
+        return None
+    return next((c for c in codes if c != 0), 0)
+
+
+def _exec_command_cmd(arguments: object) -> str | None:
+    """`exec_command`'s `cmd`, from the call's JSON-encoded `arguments`."""
+    if not isinstance(arguments, str):
+        return None
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return None
+    cmd = parsed.get("cmd") if isinstance(parsed, dict) else None
+    return cmd if isinstance(cmd, str) else None
 
 
 def _codex_skill_name_from_exec_input(input_text: str) -> str | None:
@@ -337,6 +436,7 @@ def parse_codex_transcript(raw_jsonl: str) -> list[NormalizedEvent]:
     unconfirmable result cannot satisfy it either way.
     """
     calls: dict[str, Mapping[str, object]] = {}
+    function_calls: dict[str, Mapping[str, object]] = {}
     events: list[NormalizedEvent] = []
 
     for line in raw_jsonl.splitlines():
@@ -384,6 +484,31 @@ def parse_codex_transcript(raw_jsonl: str) -> list[NormalizedEvent]:
             else:
                 error = True
 
+            events.append({"type": "tool_use", "output": output_text, "error": error})
+
+        # #486 (observed 2026-10-20): the model also runs commands as plain
+        # function calls. Only `exec_command` has an observed success
+        # convention; any other function's result stays unconfirmable.
+        elif payload_type == "function_call":
+            call_id = payload.get("call_id")
+            if isinstance(call_id, str):
+                function_calls[call_id] = payload
+
+        elif payload_type == "function_call_output":
+            call_id = payload.get("call_id")
+            fcall = function_calls.get(call_id) if isinstance(call_id, str) else None
+            raw_output = payload.get("output")
+            output_text = raw_output if isinstance(raw_output, str) else _codex_output_text(raw_output)
+            if fcall is not None and fcall.get("name") == "exec_command":
+                exit_code = _exec_command_exit_code(output_text)
+                error = exit_code is None or exit_code != 0
+                cmd = _exec_command_cmd(fcall.get("arguments"))
+                if cmd is not None:
+                    skill = _codex_skill_name_from_exec_input(cmd)
+                    if skill is not None:
+                        events.append({"type": "skill_invocation", "skill": skill})
+            else:
+                error = True
             events.append({"type": "tool_use", "output": output_text, "error": error})
 
     return events

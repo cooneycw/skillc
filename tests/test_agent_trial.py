@@ -1121,9 +1121,19 @@ def test_census_names_a_drifted_codex_response_item_type() -> None:
     know (the adapter skips it silently, so the canary would read "no tool
     use" on a live run) must be named, not absorbed into a clean census."""
     raw = (_CODEX_FIXTURES / "live-canary.jsonl").read_text() + json.dumps(
-        {"type": "response_item", "payload": {"type": "function_call", "name": "shell", "call_id": "x"}},
+        {"type": "response_item", "payload": {"type": "local_shell_call", "call_id": "x"}},
     ) + "\n"
-    assert at.transcript_census("codex", raw)["transcript_unrecognized_types"] == ["function_call"]
+    assert at.transcript_census("codex", raw)["transcript_unrecognized_types"] == ["local_shell_call"]
+
+
+def test_function_calls_are_known_to_the_census_since_486() -> None:
+    """#486: the adapter now normalizes `function_call`/`function_call_output`,
+    so the census no longer reports them as drift."""
+    raw = (_CODEX_FIXTURES / "exec-command.jsonl").read_text()
+    census = at.transcript_census("codex", raw)
+    assert census["transcript_unrecognized_types"] == []
+    line_types = census["transcript_line_types"]
+    assert isinstance(line_types, dict) and line_types.get("response_item/function_call", 0) >= 1
 
 
 def test_census_reads_version_and_model_and_copies_no_account_ids() -> None:

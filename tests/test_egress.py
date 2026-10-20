@@ -341,6 +341,8 @@ _PLANTS = {
     "remote-plugin-call": {"type": "response_item", "payload": {
         "type": "function_call", "name": "mcp__github__get_file_contents", "arguments": "{}"}},
     "web-search": {"type": "response_item", "payload": {"type": "web_search_call", "action": {"query": "skillc"}}},
+    # #486: an item type the adapter cannot read, and not a known server-side tool.
+    "unknown-item": {"type": "response_item", "payload": {"type": "local_shell_call", "call_id": "call_x"}},
 }
 
 
@@ -349,6 +351,10 @@ def _shim_argv(tmp_path: Path, plant: str, fake: list[str]) -> list[str]:
     shim.write_text(_SHIM.format(pinned=list(eg.CODEX_SERVER_SIDE_OFF)), encoding="utf-8")
     if plant == "none":
         planted = "none"
+    elif plant == "truncated-item":
+        # #486 (counter-model review, pass 2): a valid transcript plus a
+        # response item cut off mid-line - a census with a hole in it.
+        planted = '{"type": "response_item", "payload": {"type": "function_call", "name": "exec_comm'
     elif plant.endswith("+leak"):
         # The plant AND a line the leak check refuses, so the transcript is
         # never retained: the census must still see the plant (counter-model).
@@ -393,6 +399,31 @@ def test_green_control_a_clean_live_attempt_is_graded_and_its_proxy_log_is_captu
     manifest = json.loads(next(Path(str(record["_experiment_root"])).glob("manifest-*.json")).read_text())
     [stream] = [o for o in manifest["observations"] if o["stream"] == eg.PROXY_LOG_STREAM]
     assert stream["origin"] == "observed" and stream["digest"] == egress["digest"]
+
+
+def test_red_control_format_drift_in_the_transcript_is_not_credited_and_stays_accounted(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#486: a response-item type the adapter cannot read FAILS CLOSED. On
+    2026-10-20 the census listed such types on every attempt and nothing read
+    the field; the attempts went ungraded with no reason naming it."""
+    record = _live_attempt(store, base, docker_state, tmp_path, "unknown-item")
+    assert record["disposition"] == "captured" and record["graded"] is None
+    reason = record["grading_blocked_reason"]
+    assert isinstance(reason, str) and reason.startswith("not credited: transcript format drift")
+    assert "local_shell_call" in reason
+
+
+def test_red_control_a_census_with_an_unparseable_line_is_not_credited(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#486, counter-model review pass 2: `unrecognized_types == []` beside an
+    unparseable line is not a complete census, and must not reach grading."""
+    record = _live_attempt(store, base, docker_state, tmp_path, "truncated-item")
+    assert record["disposition"] == "captured" and record["graded"] is None
+    reason = record["grading_blocked_reason"]
+    assert isinstance(reason, str) and reason.startswith("not credited: the transcript census is incomplete")
+    assert "<unparseable>" in reason
 
 
 @pytest.mark.parametrize("plant, named", [
