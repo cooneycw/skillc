@@ -9,6 +9,7 @@ chosen record. The live path itself is rehearsed on a daemon with
 from __future__ import annotations
 
 import copy
+import functools
 import json
 from pathlib import Path
 from typing import Any
@@ -27,8 +28,20 @@ DRAFT = ROOT / "evals" / "level3" / "campaign-434-live" / "measurement-declarati
 INVENTORY = ROOT / "evals" / "subjects" / "cpp-codex-flow-auto-86641e8" / "evidence" / "inventory.json"
 
 
+@functools.lru_cache(maxsize=1)
+def _identity() -> dict[str, Any]:
+    return {k: v for k, v in fl.task_identity(ROOT).items() if k != "path"}
+
+
 def _draft() -> dict[str, Any]:
+    """The committed measurement declaration with its task identities re-derived
+    from THIS tree. The committed file is the owner-approved record of a grader
+    revision-2 run and is never edited; since grader revision 3 (#475) the
+    repository refuses it (test_the_spent_measurement_declaration_is_refused...),
+    so every test that needs a declaration this repository accepts starts here.
+    Its approval, when kept, no longer binds it - exactly as a changed field."""
     data: dict[str, Any] = json.loads(DRAFT.read_text(encoding="utf-8"))
+    data["task"].update(copy.deepcopy(_identity()))
     return data
 
 
@@ -50,8 +63,8 @@ def _with_attempts(data: dict[str, Any], n: int) -> dict[str, Any]:
 
 # ------------------------------------------------------------- the declaration
 
-def test_the_committed_draft_parses_and_its_identities_are_the_repositorys() -> None:
-    declaration = fl.load_declaration(DRAFT)
+def test_a_draft_at_this_trees_identities_parses_and_is_the_repositorys() -> None:
+    declaration = fl.parse_declaration(_draft())
     fl.require_approved(declaration, ROOT, approval_required=False)
     assert declaration.cases == ("clean", "twin") and declaration.attempts_per_case == 1
     assert declaration.shared["model"] == "gpt-6-astra" and declaration.shared["client"]["version"] == "0.157.1"
@@ -68,12 +81,22 @@ def test_the_committed_declaration_is_the_packaged_one() -> None:
 
 def test_the_committed_declaration_carries_the_owners_approval_at_the_packaged_digest() -> None:
     """The stamp changed nothing the owner approved: the content digest is the
-    packaged digest, the approval names it, and the committed file authorizes as is."""
+    packaged digest, and the approval names it."""
     declaration = fl.load_declaration(DRAFT)
     approval = declaration.approval
     assert approval is not None and approval["by"] == "owner (cooneycw)"
     assert declaration.digest == approval["declaration_digest"] == PACKAGED_DIGEST
-    fl.require_approved(declaration, ROOT)
+
+
+def test_the_spent_measurement_declaration_is_refused_since_grader_revision_3() -> None:
+    """The owner approved a run of grader REVISION 2 (#472). Revision 3 (#475)
+    moved the grader, so the approval does not carry over: the committed file
+    no longer authorizes anything, and the refusal names the grader identity.
+    A campaign at revision 3 needs its own declaration and its own approval."""
+    declaration = fl.load_declaration(DRAFT)
+    assert declaration.task["grader_revision"] == "2"
+    with pytest.raises(fl.LiveRefused, match=r"differ from the repository: \['grader_revision', 'grader_digest'\]"):
+        fl.require_approved(declaration, ROOT)
 
 
 def test_the_owners_approval_does_not_survive_a_changed_field() -> None:
@@ -137,7 +160,7 @@ def test_an_approval_that_does_not_name_this_schedule_or_closure_is_refused(muta
 
 
 def test_the_prompt_is_goal_then_the_declared_instruction() -> None:
-    declaration = fl.load_declaration(DRAFT)
+    declaration = fl.parse_declaration(_draft())
     text = fl.prompt(declaration, ROOT)
     assert text.startswith("/flow:auto 1\n\n") and "/work/repo" in text and "flow-auto" in text
 
@@ -219,7 +242,7 @@ def _treatment() -> cr.Treatment:
 
 
 def test_a_dry_rehearsal_accounts_for_every_slot_and_reports_unapproved(tmp_path: Path) -> None:
-    declaration = fl.load_declaration(DRAFT)
+    declaration = fl.parse_declaration(_draft())
     experiment, outcomes, stop = fl.run_live(
         declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(), image_digest=None,
         backends=lambda: (None, None), client_argv=["codex", "exec"], credential_explicit_path=None, rehearse="dry")
@@ -291,7 +314,7 @@ def test_the_rehearsal_actor_keeps_its_arguments_and_carries_the_server_side_off
 
 
 def test_report_tokens_are_unknown_when_the_rollout_has_none(tmp_path: Path) -> None:
-    declaration = fl.load_declaration(DRAFT)
+    declaration = fl.parse_declaration(_draft())
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None)
     record = _clean_record(**{"observation.run_metadata": {}})

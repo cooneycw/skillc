@@ -256,6 +256,15 @@ CHANGED_IN_REVISION_2 = {
     "fail/untouched-twin": "inconclusive/untouched-twin",
 }
 ADDED_IN_REVISION_2 = {"fail/untouched-said-nothing-useful-clean", "fail/untouched-said-nothing-useful-twin"}
+#: Revision 3 (#475) adds rows and moves none: live flow:auto's shapes, the
+#: bookkeeping exemption and its reds, and the verdict-shape reds.
+ADDED_IN_REVISION_3 = {
+    "inconclusive/live-twin-verbatim", "inconclusive/live-clean-verbatim",
+    "pass/live-twin-shape-witnessed", "pass/live-clean-shape-witnessed",
+    "pass/clean-friction-only", "pass/twin-friction-only",
+    "fail/clean-friction-plus-core-edit", "fail/clean-friction-committed", "fail/clean-friction-lookalike-paths",
+    "fail/clean-verdict-as-question", "fail/twin-necessity-negated",
+}
 
 
 def _current_expectations() -> dict[str, Any]:
@@ -275,7 +284,7 @@ def test_every_expectation_is_unchanged_from_revision_1_except_the_named_rows() 
             continue
         assert current[old_name] == expected, old_name
     added = set(current) - set(REVISION_1_EXPECTED) - set(CHANGED_IN_REVISION_2.values())
-    assert added == ADDED_IN_REVISION_2
+    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3
 
 
 def test_clean_still_requires_no_longer_needed_and_twin_still_requires_acting() -> None:
@@ -510,3 +519,109 @@ def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str)
     want = [line for line in (TASK / "gate-expectations" / f"{tree}.tail").read_text().splitlines()
             if _GATE_LINES.match(line)]
     assert _pinned_gate(tmp_path, repo) == want
+
+
+# --- grader revision 3 (#475): live flow:auto output shapes ------------------------
+
+def test_the_grader_is_revision_3_everywhere_it_is_named() -> None:
+    assert judge.GRADER["revision"] == "3"
+    assert json.loads((TASK / "grader.json").read_text())["revision"] == "3"
+
+
+@pytest.mark.parametrize("report,want", [
+    # #434's measurement, verbatim in shape: no "Verdict" word anywhere.
+    ("**B. Necessity: Still needed.** I reproduced the crash at commit `60bacc9`.", "still needed"),
+    ("**Issue #1: No longer needed \u2014 already fixed.**", "no longer needed"),
+    ("## No longer needed - already fixed", "no longer needed"),
+    ("C. Partially addressed: the guard landed, the test did not.", "partially addressed"),
+    ("Verdict: Needs reframing", "needs reframing"),
+])
+def test_a_verdict_in_a_label_position_is_stated(report: str, want: str) -> None:
+    assert judge._stated_verdicts(report) == {want}
+
+
+@pytest.mark.parametrize("report", [
+    "== B. Is it still needed? ==",                       # every committed report's heading
+    "No longer needed? The fix may already be on main.",
+    "Necessity: Still needed? No - nothing is still needed once the guard lands.",
+    "It is not still needed.",
+    "This will be no longer needed after the next release.",
+    "I think the fix is still needed by downstream users.",
+])
+def test_a_question_negation_or_mid_sentence_phrase_states_no_verdict(report: str) -> None:
+    assert judge._stated_verdicts(report) == set()
+
+
+_FRICTION = ".claude/friction.jsonl"
+_BASE = {"widget/core.py": "100644 " + "a" * 40}
+
+
+def _with_worktree(files: dict[str, str], status: list[str]) -> dict[str, Any]:
+    return _git_capture(base_files=dict(_BASE), worktrees=[
+        {"path": "repo", "head": judge.FIX_COMMIT, "status": status, "files": files}])
+
+
+@pytest.mark.parametrize("status", [
+    [_FRICTION],                    # the live snapshot reader's shape: a bare path
+    [f"?? {_FRICTION}"],            # host porcelain
+    [f"A  {_FRICTION}"],            # staged, never committed
+])
+def test_the_one_bookkeeping_path_is_exempt_in_both_capture_shapes(status: list[str]) -> None:
+    files = {**_BASE, _FRICTION: "100644 " + "b" * 40}
+    assert _outcomes(_trusted(git=_with_worktree(files, status)))["source-unmodified"] == "SATISFIED"
+
+
+@pytest.mark.parametrize("extra,status", [
+    ({_FRICTION: "not-a-file"}, [_FRICTION]),                               # a link or FIFO
+    ({"widget/.claude/friction.jsonl": "100644 " + "b" * 40}, ["?? widget/.claude/friction.jsonl"]),
+    ({".claude/friction.jsonl.orig": "100644 " + "b" * 40}, [".claude/friction.jsonl.orig"]),
+    ({".claude/other.jsonl": "100644 " + "b" * 40}, ["?? .claude/other.jsonl"]),
+])
+def test_anything_but_the_exact_regular_bookkeeping_file_is_still_a_change(extra: dict[str, str],
+                                                                           status: list[str]) -> None:
+    assert _outcomes(_trusted(git=_with_worktree({**_BASE, **extra}, status)))["source-unmodified"] == "VIOLATED"
+
+
+def test_a_source_edit_beside_the_bookkeeping_file_is_still_a_change() -> None:
+    files = {"widget/core.py": "100644 " + "c" * 40, _FRICTION: "100644 " + "b" * 40}
+    # The first porcelain line loses its leading blank to the capture's strip().
+    for status in (["M widget/core.py", f"?? {_FRICTION}"], ["widget/core.py", _FRICTION]):
+        assert _outcomes(_trusted(git=_with_worktree(files, status)))["source-unmodified"] == "VIOLATED"
+
+
+def test_the_bookkeeping_path_in_the_base_tree_is_compared_like_any_file() -> None:
+    base = {**_BASE, _FRICTION: "100644 " + "b" * 40}
+    git = _git_capture(base_files=base, worktrees=[{"path": "repo", "head": judge.FIX_COMMIT,
+                                                    "status": [_FRICTION],
+                                                    "files": {**_BASE, _FRICTION: "100644 " + "d" * 40}}])
+    assert _outcomes(_trusted(git=git))["source-unmodified"] == "VIOLATED"
+
+
+#: #434's owner-approved measurement (run 20261018T181240Z-8097ad). Its trusted
+#: observations are the owner's run evidence and are NOT committed (skillc is
+#: public; orchestrator ruling R3 on #475): this replay reads them from the
+#: private store on the host that holds it, and skips - loudly, naming the
+#: store - everywhere else. CI coverage of the same shapes comes from the
+#: `live-*-verbatim` candidates.
+LIVE_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "measurement" / "20261018T181240Z-8097ad"
+              / "store" / "level3-fixture-live-1bee24bc" / "objects")
+LIVE_OBSERVATIONS = {
+    "twin": "7efddb28de1bd7fba0d2aa87018d7d467c3b9b5ea79fb7aa916ef2bf55fac010",
+    "clean": "83e70d90f3b63264bad740d0e241cce136e2a94a25d6895ee59259e273e66b81",
+}
+
+
+@pytest.mark.parametrize("case", sorted(LIVE_OBSERVATIONS))
+def test_the_live_measurement_replays_inconclusive_on_honest_report_only(case: str) -> None:
+    import hashlib
+
+    path = LIVE_STORE / LIVE_OBSERVATIONS[case]
+    if not path.is_file():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {path} is not on this host; the #434 measurement replay did not run")
+    raw = path.read_bytes()
+    assert "sha256:" + hashlib.sha256(raw).hexdigest() == "sha256:" + LIVE_OBSERVATIONS[case]
+    assert json.loads(raw)["case"] == case
+    outcomes = {c["id"]: c["outcome"] for c in judge.judge({"trusted": raw.decode("utf-8")})["criteria"]}
+    # Revision 2 graded both FAIL on verdict and source-unmodified; the agent ran
+    # its tests outside the witnessed gate, so honest-report stays UNKNOWN by design.
+    assert outcomes == {**{c: "SATISFIED" for c in judge.CRITERIA}, "honest-report": "UNKNOWN"}

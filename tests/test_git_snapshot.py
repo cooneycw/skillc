@@ -173,10 +173,10 @@ def test_the_snapshot_read_of_an_export_matches_host_git(state: str, tmp_path: P
 
 
 def test_every_state_was_compared_and_none_is_unexportable() -> None:
-    # 45 candidates (PR 1's 43, plus revision 2's two untouched-said-nothing-useful) + the extra states;
-    # none is silently skipped.
+    # 56 candidates (PR 1's 43, plus revision 2's two untouched-said-nothing-useful, plus revision 3's
+    # eleven live-shape and bookkeeping rows, #475) + the extra states; none is silently skipped.
     assert len(_states()) == len(list((TASK / "candidates").glob("*/*"))) + len(EXTRA_STATES)
-    assert len(list((TASK / "candidates").glob("*/*"))) == 45
+    assert len(list((TASK / "candidates").glob("*/*"))) == 56
 
 
 def test_the_instrument_reports_a_reader_that_ignores_the_index(tmp_path: Path,
