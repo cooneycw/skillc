@@ -926,7 +926,7 @@ def test_the_revision_4_campaign_differs_from_the_approved_one_only_where_allowe
     differences = _differences(approved, draft)
     assert differences <= _REV4_MAY_DIFFER, sorted(differences - _REV4_MAY_DIFFER)
     # Each allowed difference is real, not a field quietly dropped.
-    assert ("approval",) in differences and "approval" not in draft
+    assert ("approval",) in differences and draft["approval"]["declaration_digest"] == CAMPAIGN_REV4_DIGEST
     assert draft["task"]["grader_revision"] == "4" and draft["run_store"] != approved["run_store"]
 
 
@@ -941,16 +941,27 @@ def test_the_allow_list_catches_any_other_difference() -> None:
         assert path in _differences(json.loads(CAMPAIGN.read_text()), tampered) - _REV4_MAY_DIFFER, path
 
 
-def test_the_revision_4_campaign_is_this_trees_unapproved_and_pinned() -> None:
+def test_the_revision_4_campaign_carries_the_owners_approval_and_is_pinned() -> None:
+    """The owner approved the revision-4 campaign on 2026-10-20 ("Approve 434",
+    relayed by skillc-400). The stamp changed nothing the owner approved: the
+    content digest is the packaged one, and the file authorizes as committed."""
     declaration = fl.load_declaration(CAMPAIGN_REV4)
-    fl.require_approved(declaration, ROOT, approval_required=False)
-    with pytest.raises(fl.LiveRefused, match="carries no approval record"):
-        fl.require_approved(declaration, ROOT)
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
+    assert "Approve 434" in approval["source"] and approval["declaration_digest"] == CAMPAIGN_REV4_DIGEST
+    fl.require_approved(declaration, ROOT)
     assert declaration.task["grader_revision"] == "4" and declaration.attempts_per_case == 5
     assert declaration.order == tuple(calibration.derive_arm_order(20261020, ["clean", "twin"], 5))
     assert declaration.order == fl.load_declaration(CAMPAIGN).order   # the same order, kept on purpose
     assert declaration.endpoint == ENDPOINT and declaration.tolerance == 1
     assert declaration.digest == CAMPAIGN_REV4_DIGEST
+
+
+def test_the_revision_4_approval_does_not_survive_a_changed_field() -> None:
+    data = json.loads(CAMPAIGN_REV4.read_text())
+    data["shared"]["per_attempt_seconds"] = 901
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+        fl.require_approved(fl.parse_declaration(data), ROOT)
 
 
 #: The owner-approved revision-3 campaign run (20261020T141529Z-3585c9). Its
