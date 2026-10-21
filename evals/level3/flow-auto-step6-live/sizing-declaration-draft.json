@@ -97,5 +97,14 @@
  },
  "containment": {
   "nested_codex": "refusal-expected"
+ },
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-21",
+  "source": "the owner's words, '279 - approve sizing' (2026-10-21), approving the #279 Step-6 sizing declaration draft (digest sha256:093eefaf530ea47fe614956f6458e3ed41361b7dc249cd81e40a3cd6641b1268) packaged and relayed by skillc-400 (orchestrator, owner-delegated); the campaign draft (sha256:ce7a6c25a34c4628b610d2811e966d8799b311ed30e863e3054749e183251260) is NOT approved",
+  "scope": "one sizing run of 2 attempts (twin-gate) as declared, at 1800 s per attempt and 4500 s in total, model gpt-6-astra at effort high, on kyle19 with provider-only egress, run store ~/skillc-evidence/step6-live/sizing-1; no re-run and no extra attempts; it measures wall time and tokens to set the campaign's caps and is not a measurement of behaviour",
+  "attempts_per_case": 2,
+  "profile_inventory_digest": "sha256:545e81be366ae0b81f257caf55c527ab27e0171448219c1f5d19c09edd2124f8",
+  "declaration_digest": "sha256:093eefaf530ea47fe614956f6458e3ed41361b7dc249cd81e40a3cd6641b1268"
  }
 }

@@ -8,7 +8,7 @@ The draft's declaration digest is `sha256:ce7a6c25a34c4628b610d2811e966d8799b311
 
 ## The sizing draft
 
-`sizing-declaration-draft.json` is also a draft: no approval record. It sizes the campaign: two attempts of the same task, with the same controller turns, containment and C1-C5 bindings. It measures a Step-6 attempt's wall time and tokens, which set the campaign's caps.
+`sizing-declaration-draft.json` is **APPROVED** by the owner on 2026-10-21 ("279 - approve sizing", relayed by skillc-400) at digest `sha256:093eefaf…`: one run of 2 attempts as declared, no re-run. The approval covers this file only; the campaign draft above stays unapproved. The file keeps its name and its `purpose` text, because both are inside the approved digest. It sizes the campaign: two attempts of the same task, with the same controller turns, containment and C1-C5 bindings. It measures a Step-6 attempt's wall time and tokens, which set the campaign's caps.
 
 **Why a sizing run.** The campaign draft's caps and token figure are #434 rev5's, measured on runs that stop at Step 3. A Step-6 attempt goes on to implement, gate and ship.
 
@@ -17,7 +17,7 @@ The draft's declaration digest is `sha256:ce7a6c25a34c4628b610d2811e966d8799b311
 - Model `gpt-6-astra` with effort `high`, the orchestrator's recommendation to the owner. Another choice means a regenerated draft.
 - Run store `~/skillc-evidence/step6-live/sizing-1`.
 
-**Its digest** is `sha256:093eefaf530ea47fe614956f6458e3ed41361b7dc249cd81e40a3cd6641b1268`. `require_approved` refuses it until the owner's approval of that digest is added.
+**Its digest** is `sha256:093eefaf530ea47fe614956f6458e3ed41361b7dc249cd81e40a3cd6641b1268`, and the approval block is outside it. `require_approved` accepts the file as committed and refuses any changed field, more attempts, or the same approval copied onto the campaign draft.
 
 ## Bindings
 
