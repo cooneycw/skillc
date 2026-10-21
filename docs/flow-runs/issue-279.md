@@ -130,3 +130,44 @@ PR-2a merged #496 (d5903e5): order on service events, witness runs (order_reques
 16. `changelog.d/279-grader.md` - one bullet
 
 Scope: large. Risks: a stamp on the hot service path (turns-only, additive, existing tests unmodified); the judge must reproduce the digest algorithm stdlib-only; pre-approval pushes unorderable (residual, nit store).
+
+<!-- flow-run n=5 id=21cdf81893d247059a643ad1c80f62a5 -->
+## Run 5
+
+- Run-id:            21cdf81893d247059a643ad1c80f62a5
+- Run-start:         ffa966844d267f651518b676d8f1fc17945cf96e
+- Issue:             #279
+- Base SHA:          ffa966844d267f651518b676d8f1fc17945cf96e
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE GO-WITH-CONDITIONS #279 PR-3 (C1-C5), 2026-10-21
+- Recorded at:       2026-10-21T10:00:00Z
+
+### Section B evidence
+- `REHEARSAL_BY_TASK[step6]` is `{}`; `TURN_ACTOR_SOURCE`'s resume turn only runs `codex --version`.
+- S4 is identity-based (`FIX_BLOBS`), not prose-based. The orchestrator accepted this pushback.
+- `run_live` already forwards `home_modes` (#505) and fixture attempts carry the guard (#500); neither is ENFORCED at dispatch.
+- verify's probe runs in the grading container only when a backend is given; on the host otherwise (qualify).
+
+### Section C - the approved plan (PR-3)
+1. A turn-aware `STEP6_ACTOR_SOURCE`, separate from `fc.ACTOR_SOURCE` (pinned by digest, with a one-byte red).
+   - `REHEARSAL_BY_TASK[step6]` gains `twin-gate`.
+   - Rehearsal records are marked in the store and excluded from campaign tallies (C4 red).
+   - A live rehearsal test under lock 1: the credited path, and ship-past-red.
+2. The S4 behavioural oracle. The step6 capture extracts `widget/core.py` bytes (worktrees, plus remote main after a merge) without executing them.
+   - C1: the controller runs held-out cases in a throwaway trial-image container (network none, no mounts, non-root, read-only rootfs plus tmpfs, memory/pid/time limits, cases over stdin).
+   - The trusted capture carries outputs only; the judge (revision 2) compares them with its expected values.
+   - C2: a merge result takes precedence.
+   - C3: cases are held out from the agent's tree but public in skillc.
+   - Qualify uses committed container-computed outcomes (regenerable under docker), so no host execution.
+   - Reds: comment-only, a reworded correct fix, a broken other case, an infinite loop, merge-fail with worktree-pass, side effects, and the host backend refused.
+3. Dispatch enforcement in `fixture_live` for a step6 (turns) declaration:
+   - `containment.nested_codex` is required;
+   - every executable helper, derived from the SOURCE git mode, must have its mode delivered (C5 reds).
+4. A DRAFT declaration under `evals/level3/flow-auto-step6-live/`: digest computed, C1-C5 bindings from rev5's identities, model and effort UNKNOWN, no approval.
+5. Tests append-only; docs; changelog.
+
+Scope: large. Risks:
+- `fixture_attempt`/`fixture_live` are hot paths; changes are additive;
+- the oracle container is new controller infrastructure;
+- the #434 pinned identities must not move (pinned).

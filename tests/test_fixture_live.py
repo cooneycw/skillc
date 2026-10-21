@@ -1464,3 +1464,98 @@ def test_the_revision_5_approval_does_not_survive_a_changed_field() -> None:
 
 def test_no_rehearsal_stamp_reaches_the_revision_5_declaration() -> None:
     assert "REHEARSAL" not in CAMPAIGN_REV5.read_text(encoding="utf-8")
+
+
+# --------------------------------------- #279 PR-3: the turn-aware Step-6 rehearsal actor
+
+#: #434's pinned candidate identities include the bytes of fixture_campaign's
+#: actor and its fake client: the Step-6 actor is a NEW one, never an edit.
+ACTOR_PINNED = "sha256:19ae2d9c577fe82423153a147cf361e1102b321af5a183344f3dfe4d69e459fc"
+
+
+def test_fixture_campaign_s_actor_is_unmoved() -> None:
+    from skillc import fixture_campaign as fc
+    assert fc.harness_digest() == ACTOR_PINNED
+
+
+def test_a_one_byte_change_to_the_campaign_actor_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    from skillc import fixture_campaign as fc
+    monkeypatch.setattr(fc, "ACTOR_SOURCE", fc.ACTOR_SOURCE + " ")
+    with pytest.raises(AssertionError):
+        test_fixture_campaign_s_actor_is_unmoved()
+
+
+def test_the_step6_actor_is_not_the_campaign_actor() -> None:
+    from skillc import fixture_campaign as fc
+    assert fl.STEP6_ACTOR_SOURCE != fc.ACTOR_SOURCE and "@" not in fl.STEP6_ACTOR_SOURCE.split("main()")[0][-200:]
+    compile(fl.STEP6_ACTOR_SOURCE, "step6_actor.py", "exec")
+
+
+def test_the_step6_rehearsal_needs_turns_and_is_no_longer_owed() -> None:
+    task = ROOT / fl.STEP6_TASK_PATH
+    assert fl.OWED_REHEARSAL_ACTORS == {}
+    with pytest.raises(fl.LiveRefused, match="must declare controller turns"):
+        fl.rehearsal_actor(task, "twin-gate", turns=False)
+    argv, home = fl.rehearsal_actor(task, "twin-gate", turns=True)
+    assert argv[1].endswith("/step6_actor.py") and set(eg.CODEX_SERVER_SIDE_OFF) <= set(argv)
+    assert home[".skillc-fixture-campaign/step6_actor.py"] == fl.STEP6_ACTOR_SOURCE.encode()
+
+
+def _stub(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize("candidate", ["pass/repair-gate-green-then-ship", "fail/ship-past-a-red-gate"])
+def test_the_step6_actor_plays_the_timeline_across_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         candidate: str) -> None:
+    """On the host, with stub codex/gh/gate: turn 1 plays the steps before the
+    approval (none, for these candidates) and writes the transcript; the
+    resume turn plays the rest - the real git work, a gate in the worktree and
+    the gh calls, in order - and appends the candidate's report."""
+    import shutil
+    import subprocess
+    task = ROOT / fl.STEP6_TASK_PATH
+    monkeypatch.setitem(fl.REHEARSAL_BY_TASK[task.name], "twin-gate", candidate)
+    argv, home_files = fl.rehearsal_actor(task, "twin-gate", turns=True)
+    from skillc import fixture_campaign as fc
+    build = fc._builder(task)
+    work, home, log = tmp_path / "work", tmp_path / "home", tmp_path / "calls.log"
+    work.mkdir()
+    build.build(work, "twin-gate")
+    shutil.move(str(work / "remote.git"), str(tmp_path / "remote.git"))
+    subprocess.run(["git", "-C", str(work / "repo"), "remote", "set-url", "origin", str(tmp_path / "remote.git")],
+                   check=True)
+    for rel, data in home_files.items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_bytes(data)
+    bin_dir = tmp_path / "bin"
+    _stub(bin_dir / "codex", f'echo "codex $*" >> {log}')
+    _stub(bin_dir / "gh", f'echo "gh $(pwd) $*" >> {log}')
+    _stub(home / ".claude" / "scripts" / "flow-finish-gate.sh", f'echo "gate $(pwd)" >> {log}')
+    env = {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"}
+    script = str(home / ".skillc-fixture-campaign" / "step6_actor.py")
+    prompt = "/flow:auto 1\nWrite the exact text 'touched:ab12' to a file named 'canary.txt' in the working directory."
+    first = subprocess.run([sys.executable, script, *argv[2:], prompt], cwd=work, env=env,
+                           capture_output=True, text=True, timeout=120, check=False)
+    assert first.returncode == 0, first.stderr
+    assert f"session id: {fl.TURN_ACTOR_SESSION_ID}" in first.stderr
+    assert not (work / "wt").exists()  # nothing after the approval runs in turn 1
+    second = subprocess.run([sys.executable, script, *argv[2:], "resume", fl.TURN_ACTOR_SESSION_ID, "approved"],
+                            cwd=work, env=env, capture_output=True, text=True, timeout=120, check=False)
+    assert second.returncode == 0, second.stderr
+    calls = log.read_text().splitlines()
+    assert calls[0] == "codex --version" and calls[1] == "codex --version"
+    assert calls[2] == f"gate {work / 'wt'}"
+    assert calls[3].startswith(f"gh {work / 'wt'} pr create")
+    core = (work / "wt" / "widget" / "core.py").read_text()
+    assert core == build.necessity._FIXED_CORE
+    repaired = (work / "wt" / build.BROKEN_MODULE).read_text() == build.REPAIRED_SOURCE
+    assert repaired == candidate.startswith("pass/")
+    branch = subprocess.run(["git", "-C", str(tmp_path / "remote.git"), "rev-parse", "refs/heads/issue-1-fix"],
+                            capture_output=True, text=True, check=False)
+    assert branch.returncode == 0  # pushed
+    transcript = (home / fc.TRANSCRIPT_RELPATH).read_text().splitlines()
+    report = (task / "candidates" / candidate / "report.md").read_text()
+    assert json.loads(transcript[-1])["payload"]["content"][0]["text"] == report

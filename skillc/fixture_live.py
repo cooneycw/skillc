@@ -108,16 +108,16 @@ INFERENCE_STATEMENT = "description, not inference: a handful of attempts per cas
 #: expectation is PASS, so a rehearsal exercises the credited path end to end.
 REHEARSAL_CANDIDATES = {"clean": "pass/clean-cites-commit-only", "twin": "pass/twin-still-needed-with-plan"}
 #: Per task (by its directory name); the Step-6 task's candidates are #279 PR-2b's.
-REHEARSAL_BY_TASK: dict[str, dict[str, str]] = {Path(TASK_PATH).name: REHEARSAL_CANDIDATES,
-                                                Path(STEP6_TASK_PATH).name: {}}
+REHEARSAL_BY_TASK: dict[str, dict[str, str]] = {
+    Path(TASK_PATH).name: REHEARSAL_CANDIDATES,
+    # #279 PR-3: the credited Step-6 path, played by `STEP6_ACTOR_SOURCE`.
+    Path(STEP6_TASK_PATH).name: {"twin-gate": "pass/repair-gate-green-then-ship"}}
 #: #279 PR-2b (orchestrator ruling): a task whose rehearsal is OWED, and what it
 #: needs. The Step-6 task's credited path acts IN the approval turn (fix,
 #: repair, gate green, then ship), which `fixture_campaign.ACTOR_SOURCE` cannot
 #: play - it acts in turn 1 only, and editing it would move #434's pinned
 #: candidate identities. Owed with the first Step-6 live declaration.
-OWED_REHEARSAL_ACTORS: dict[str, str] = {
-    Path(STEP6_TASK_PATH).name: "a turn-aware step6 timeline actor is owed (#279), separate from "
-                                "fixture_campaign.ACTOR_SOURCE so #434's pinned candidate identities do not move"}
+OWED_REHEARSAL_ACTORS: dict[str, str] = {}
 
 #: The declaration's identities: every one must be a real, recorded value.
 REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
@@ -516,6 +516,127 @@ os.execv(sys.executable, [sys.executable, actor, *sys.argv[1:]])
 """.replace("@SESSION@", TURN_ACTOR_SESSION_ID)
 
 
+#: #279 PR-3: the turn-aware Step-6 actor. It plays a step6 qualify candidate's
+#: TIMELINE (`actions.json`'s `steps`) across controller turns: the steps before
+#: its `{"approval": true}` in turn 1, the rest in the resume turn. It is a NEW
+#: actor, never `fixture_campaign.ACTOR_SOURCE`: that one's bytes are part of
+#: #434's pinned candidate identities (a test pins them). Its vocabulary is
+#: qualify's; `gate` runs the BARE `flow-finish-gate.sh` (the real witness shim:
+#: in a container the gate's verdict is REAL, not the candidate's script) and
+#: `gh` the real gh shim. Turn 1 prints the pinned client's header, as
+#: `TURN_ACTOR_SOURCE` does; the resume turn makes one bare `codex --version`
+#: (the real client's resume is one top-level launch) and appends the
+#: candidate's report to the session's transcript.
+STEP6_ACTOR_SOURCE = """\
+import json, os, subprocess, sys, tempfile
+
+IDENTITY = ["-c", "user.name=Widget Maintainer", "-c", "user.email=maintainer@fixture.invalid",
+            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
+DATE = "2026-10-17T12:30:00+0000"
+
+
+def git(cwd, *args):
+    with tempfile.TemporaryDirectory(prefix="step6-actor-git-") as home:
+        env = {"PATH": os.defpath, "LC_ALL": "C", "HOME": home, "GIT_CONFIG_GLOBAL": "/dev/null",
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "file",
+               "GIT_AUTHOR_DATE": DATE, "GIT_COMMITTER_DATE": DATE}
+        done = subprocess.run(["git", *IDENTITY, *args], cwd=cwd, env=env, capture_output=True, timeout=60)
+    if done.returncode != 0:
+        raise RuntimeError("git %s failed: %s" % (" ".join(args), done.stderr.decode(errors="replace")))
+
+
+def write(path, text, append=False):
+    with open(path, "a" if append else "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def step(work, home, contents, item):
+    where = os.path.join(work, item.get("where", (item.get("git") or {}).get("where", "repo")))
+    if "git" in item:
+        op = item["git"]
+        kind = op["op"]
+        if kind == "worktree":
+            git(os.path.join(work, "repo"), "worktree", "add", "-q", "-b", op["branch"],
+                os.path.join(work, op["name"]), "origin/main")
+        elif kind == "branch":
+            git(where, "checkout", "-q", "-b", op["branch"])
+        elif kind in ("fix", "repair"):
+            write(os.path.join(where, contents[kind]["path"]), contents[kind]["text"])
+        elif kind == "tamper":
+            write(os.path.join(where, op.get("path", "Makefile")), "# skip lint\\n", append=True)
+        elif kind == "restore":
+            write(os.path.join(where, op.get("path", "Makefile")), contents["files"][op.get("path", "Makefile")])
+        elif kind == "touch":
+            write(os.path.join(where, op["path"]), op.get("text", "note\\n"))
+        elif kind == "add-all":
+            git(where, "add", "--all")
+        elif kind == "commit":
+            git(where, "commit", "-q", "-am", op["message"])
+        elif kind == "push":
+            git(where, "push", "-q", "origin", "HEAD:refs/heads/%s" % op["branch"])
+        else:
+            raise SystemExit("unknown git op %r" % kind)
+    elif "gh" in item:
+        subprocess.run(["gh", *item["gh"]], cwd=where)
+    elif "gate" in item:
+        subprocess.run([os.path.join(home, ".claude", "scripts", "flow-finish-gate.sh")], cwd=where)
+    else:
+        raise SystemExit("unknown step %r" % (item,))
+
+
+def main():
+    home = os.environ["HOME"]
+    here = os.path.join(home, "@HOME_DIR@")
+    work = os.getcwd()
+    with open(os.path.join(here, "actions.json"), encoding="utf-8") as handle:
+        steps = json.load(handle)["steps"]
+    with open(os.path.join(here, "contents.json"), encoding="utf-8") as handle:
+        contents = json.load(handle)
+    cut = next((i for i, s in enumerate(steps) if s.get("approval") is True), len(steps))
+    resume = len(sys.argv) >= 4 and sys.argv[-3] == "resume"
+    transcript = os.path.join(home, "@TRANSCRIPT@")
+    if not resume:
+        sys.stderr.write("OpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
+        sys.stderr.flush()
+        subprocess.run(["codex", "--version"])
+        for item in steps[:cut]:
+            step(work, home, contents, item)
+        subprocess.run([sys.executable, os.path.join(here, "fake_agent_client.py"), "--format", "codex-fake",
+                        "--home", home, "--transcript-relpath", "@TRANSCRIPT@", sys.argv[-1]], check=True)
+        return
+    subprocess.run(["codex", "--version"])
+    for item in steps[cut + 1:]:
+        step(work, home, contents, item)
+    with open(os.path.join(here, "report.md"), encoding="utf-8") as handle:
+        report = handle.read()
+    line = {"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                                                  "content": [{"type": "output_text", "text": report}]}}
+    write(transcript, json.dumps(line) + "\\n", append=True)
+
+
+if __name__ == "__main__":
+    main()
+""".replace("@HOME_DIR@", fc.HOME_DIR).replace("@TRANSCRIPT@", fc.TRANSCRIPT_RELPATH).replace(
+    "@SESSION@", TURN_ACTOR_SESSION_ID)
+
+
+def step6_actor(task_root: Path, case: str) -> tuple[list[str], dict[str, bytes]]:
+    """#279 PR-3: the Step-6 actor's base argv and home files for `case`."""
+    candidate = REHEARSAL_BY_TASK[task_root.name][case]
+    files = fc.candidate_files(task_root, fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", "", None,
+                                                 {}, None))
+    build = fc._builder(task_root)
+    contents = {"fix": {"path": "widget/core.py", "text": build.necessity._FIXED_CORE},
+                "repair": {"path": build.BROKEN_MODULE, "text": build.REPAIRED_SOURCE},
+                "files": {path: text for path, text in build.FILES.items() if path == "Makefile"}}
+    actor = f"{fc.HOME_DIR}/step6_actor.py"
+    home = {actor: STEP6_ACTOR_SOURCE.encode("utf-8"),
+            f"{fc.HOME_DIR}/fake_agent_client.py": fc.lc.FAKE_CLIENT.read_bytes(),
+            f"{fc.HOME_DIR}/actions.json": files["actions.json"], f"{fc.HOME_DIR}/report.md": files["report.md"],
+            f"{fc.HOME_DIR}/contents.json": json.dumps(contents, sort_keys=True).encode("utf-8")}
+    return ["/usr/bin/python3", f"{fc.CONTAINER_HOME}/{actor}", *eg.CODEX_SERVER_SIDE_OFF], home
+
+
 def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple[list[str], dict[str, bytes]]:
     """The actor's base argv and home files for `case`: fixture_campaign's own,
     playing `REHEARSAL_CANDIDATES[case]`. The server-side-off flags ride after
@@ -524,6 +645,10 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple
     With `turns` (#279: the case declares controller turns) the argv runs
     `TURN_ACTOR_SOURCE` in front of the actor; without, it is exactly as before."""
     candidate = REHEARSAL_BY_TASK.get(task_root.name, {}).get(case)
+    if candidate is not None and task_root.name == Path(STEP6_TASK_PATH).name:
+        if not turns:
+            raise LiveRefused("the Step-6 actor plays a turn timeline; its case must declare controller turns")
+        return step6_actor(task_root, case)
     if candidate is None:
         owed = OWED_REHEARSAL_ACTORS.get(task_root.name)
         raise LiveRefused(f"no rehearsal candidate is declared for {task_root.name}/{case}"

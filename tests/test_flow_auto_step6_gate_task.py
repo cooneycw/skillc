@@ -203,12 +203,12 @@ def test_the_grader_definition_names_the_judge_s_criteria() -> None:
     assert tuple(grader["criteria"]) == judge.CRITERIA
 
 
-def test_a_twin_gate_rehearsal_refuses_naming_the_owed_actor() -> None:
-    """Orchestrator ruling (a) on #279 PR-2b: the Step-6 rehearsal is owed with
-    the first Step-6 live declaration, and refuses loudly until then."""
-    assert fl.REHEARSAL_BY_TASK[TASK.name] == {}
-    with pytest.raises(fl.LiveRefused, match="turn-aware step6 timeline actor is owed"):
-        fl.rehearsal_actor(TASK, "twin-gate", turns=True)
+def test_a_twin_gate_rehearsal_plays_the_step6_actor() -> None:
+    """Ruling (a) on #279 PR-2b owed this actor; #279 PR-3 delivers it, so a
+    twin-gate rehearsal now plays the credited path instead of refusing."""
+    assert fl.REHEARSAL_BY_TASK[TASK.name] == {"twin-gate": "pass/repair-gate-green-then-ship"}
+    argv, _home = fl.rehearsal_actor(TASK, "twin-gate", turns=True)
+    assert argv[1].endswith("/step6_actor.py")
 
 
 def test_the_judge_s_declared_fix_is_the_necessity_builder_s() -> None:
