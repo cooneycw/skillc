@@ -785,11 +785,30 @@ def endpoint_status(record: Mapping[str, Any], endpoint: Sequence[str]) -> str:
     return "PASS" if all(o == "SATISFIED" for o in outcomes) else "INCONCLUSIVE"
 
 
+_LEDGER_MODE_RE = re.compile(rf"^{re.escape(EXPERIMENT_LABEL)}(?:-rehearsal-({'|'.join(REHEARSALS)}))?-[0-9a-f]+$")
+
+
+def ledger_mode(experiment: trial.Experiment) -> str:
+    """The run's mode as the LEDGER recorded it at plan time (`plan_live`
+    names the experiment by it): `live`, a rehearsal, or `unknown`."""
+    match = _LEDGER_MODE_RE.match(experiment.id)
+    if match is None:
+        return "unknown"
+    return match.group(1) or "live"
+
+
 def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
                  outcomes: Sequence[mp.AttemptOutcome], stop: Stop, *, rehearse: str | None,
                  approved: bool) -> dict[str, Any]:
     """One entry per scheduled attempt, in schedule order, and per-case counts.
     Tokens come from each attempt's own rollout; an unread one is UNKNOWN."""
+    # #279 PR-3 (orchestrator C4): the ledger records each trial's mode at plan
+    # time, before any attempt runs. A tally never mixes them: rehearsal
+    # records are never counted as live attempts, nor the reverse.
+    want, mode = rehearse or "live", ledger_mode(experiment)
+    if mode != want:
+        raise LiveRefused(f"the store's ledger records mode {mode!r}, not {want!r}: a rehearsal is never "
+                          "tallied as a live run, nor a live run as a rehearsal")
     model, effort = str(declaration.shared["model"]), str(declaration.shared["reasoning_effort"])
     allowlist = str(declaration.shared["agent_network"]["allowlist_digest"])
     entries: list[dict[str, object]] = []
@@ -1195,7 +1214,9 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
     stopped = source.get("containment_stop") or {}
     report = build_report(declaration, experiment, outcomes,
                           Stop(trigger=stopped.get("trigger"), at_attempt=stopped.get("at_attempt")),
-                          rehearse=None, approved=bool(source.get("approved")))
+                          # The ORIGINAL run's mode (C4): a replay of a rehearsal store
+                          # is never re-tallied as a live run.
+                          rehearse=cast(str | None, source.get("rehearsal")), approved=bool(source.get("approved")))
     report_after, store_after = _sha256_file(original), _tree_digest(stores[0])
     if (report_after, store_after) != (report_before, store_before):
         raise LiveRefused("the original report or store changed during the judge replay")

@@ -1559,3 +1559,31 @@ def test_the_step6_actor_plays_the_timeline_across_turns(tmp_path: Path, monkeyp
     transcript = (home / fc.TRANSCRIPT_RELPATH).read_text().splitlines()
     report = (task / "candidates" / candidate / "report.md").read_text()
     assert json.loads(transcript[-1])["payload"]["content"][0]["text"] == report
+
+
+@pytest.mark.parametrize(("planned", "tallied"), [("actor", None), ("dry", None), ("live", "actor")])
+def test_a_tally_never_mixes_rehearsal_and_live_records(tmp_path: Path, planned: str, tallied: str | None) -> None:
+    """Orchestrator C4: the mode bound into the ledger at plan time decides; a
+    tally over a store of rehearsal records refuses to read them as live."""
+    declaration = fl.parse_declaration(_draft())
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None,
+                                        mode=planned, approved=False)
+    outcomes = [mp.AttemptOutcome(s, _clean_record(), 10.0) for s in schedule]
+    with pytest.raises(fl.LiveRefused, match="never tallied"):
+        fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=tallied, approved=False)
+    fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None if planned == "live" else planned,
+                    approved=False)  # the matching tally reads it
+
+
+def test_a_replay_never_re_tallies_a_rehearsal_store_as_live(tmp_path: Path) -> None:
+    """C4 found a real instance: the judge replay re-tallied with rehearse=None
+    whatever the original was. A report whose recorded mode is tampered to
+    live, over a rehearsal store, is refused."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    source = json.loads((run_dir / fl.REPORT_FILENAME).read_text())
+    assert source["rehearsal"] == "dry" and fl.ledger_mode(_experiment(run_dir)) == "dry"
+    source["rehearsal"] = None
+    (run_dir / fl.REPORT_FILENAME).write_text(json.dumps(source))
+    with pytest.raises(fl.LiveRefused, match="never tallied"):
+        fl.judge_replay(run_dir, declaration, root=ROOT, adapter_revision="test-rev", stamp="t1")
