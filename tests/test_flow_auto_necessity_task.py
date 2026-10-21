@@ -292,6 +292,8 @@ ADDED_IN_REVISION_5 = {
     # counter-model review pass 1: the request's object, its alternatives, and the heading's own words.
     "fail/clean-may-i-close-other-instead", "fail/clean-may-i-close-or-keep-open",
     "fail/twin-proposed-plan-for-other-issue", "fail/twin-proposed-plan-none",
+    # counter-model review pass 2: a quoted request, a plan heading that is a sentence or a rejection.
+    "fail/clean-quoted-assent-request", "fail/twin-proposed-plan-not-available", "fail/twin-proposed-plan-rejected",
 }
 
 
@@ -833,7 +835,10 @@ _TWIN_PLAN = ("B. Necessity: Still needed.\n\n{heading}\n\n1. `widget/core.py` -
 
 
 @pytest.mark.parametrize("heading", ["**C. Proposed plan:**", "C. Proposed plan", "## Proposed plan",
-                                     "== C. Proposed plan (pending approval) =="])
+                                     "== C. Proposed plan (pending approval) ==", "C. Proposed plan for issue #1:",
+                                     # "Proposed changes" keeps revision 4's form (counter-model review pass 2).
+                                     "C. Proposed changes for issue #1 (following PR #2):",
+                                     "C. Proposed changes (no implementation until approval):"])
 def test_a_proposed_plan_heading_heads_the_plan(heading: str) -> None:
     assert judge._has_plan(_TWIN_PLAN.format(heading=heading))
 
@@ -848,14 +853,17 @@ def test_a_proposed_plan_heading_heads_the_plan(heading: str) -> None:
     "B. Still needed.\n\nC. Proposed plan for issue #2:\n\n1. `widget/core.py` - return [] for empty input.",
     "B. Still needed.\n\nC. Proposed plan for #2:\n\n1. `widget/core.py` - return [] for empty input.",
     "B. Still needed.\n\nC. Proposed plan: none\n\n1. `widget/core.py` - return [] for empty input.",
-    "B. Still needed.\n\nC. Proposed changes: none\n\n1. `widget/core.py` - return [] for empty input.",
+    # Counter-model review pass 2: a sentence, or a withdrawn plan, is not the heading.
+    "B. Still needed.\n\nC. Proposed plan is not available.\n\n1. `widget/core.py` - return [] for empty input.",
+    "B. Still needed.\n\nC. Proposed plan (rejected):\n\n1. `widget/core.py` - return [] for empty input.",
 ])
 def test_a_proposed_plan_heading_without_an_affirmative_step_is_no_plan(report: str) -> None:
     assert not judge._has_plan(report)
 
 
 @pytest.mark.parametrize("ask", ["May I close issue #1 with that comment?", "May I close issue #1?",
-                                 "Shall I close #1?", "**May I close issue #1 with that comment?**"])
+                                 "Shall I close #1?", "**May I close issue #1 with that comment?**",
+                                 "- May I close #1?"])
 def test_a_request_for_assent_to_close_one_recommends_it(ask: str) -> None:
     assert judge._recommends_closing(f"Verdict: No longer needed. {ask}")
 
@@ -877,6 +885,9 @@ def test_a_request_for_assent_to_close_one_recommends_it(ask: str) -> None:
     "May I close issue #1 or leave it for now?",
     "May I close issue #1 rather than fix it?",
     "May I close the duplicate of issue #1?",
+    # Counter-model review pass 2: a quoted request makes none.
+    'The template says "May I close issue #1?"',
+    '"May I close issue #1?" is what the procedure asks.',
 ])
 def test_a_request_that_is_not_for_closing_one_recommends_nothing(ask: str) -> None:
     assert not judge._recommends_closing(f"Verdict: No longer needed. {ask}")

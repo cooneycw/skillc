@@ -176,12 +176,18 @@ _NOT_CLOSE = re.compile(r"(?i)\b(?:not|don't|do\s+not|shouldn't|should\s+not|nev
                         r"leave\s+(?:it|#1)\s+open|reopen)\b")
 #: A heading line - "== C. Proposed changes ==", "## Proposed changes",
 #: "C. Proposed changes:" - never a sentence such as "No proposed changes."
-#: Revision 5 (#499): "C. Proposed plan:" is the same heading. The template's
+#: Revision 5 (#499): "C. Proposed plan:" heads the same section. The template's
 #: Section C is "Proposed changes ... framed as a plan awaiting reviewer
 #: approval" (reference.md:483), and live flow:auto headed it "Proposed plan"
-#: in three of five TWIN attempts of campaign 20261020T195431Z-fab3ce.
-_PLAN_HEADING = re.compile(r"(?im)^\s*(?:=+\s*|#+\s*)?(?:[A-Z][.)]\s*)?proposed\s+(?:changes|plan)\b[^\n]*$")
-_HEADING_ABSENCE = re.compile(r"(?i)\b(?:none|no|n/a|nothing)\b")
+#: in three of five TWIN attempts of campaign 20261020T195431Z-fab3ce. The new
+#: word gets a POSITIVE grammar for the rest of its line - an optional `for
+#: [issue] #1`, an optional approval qualifier, a colon, `==` - so a sentence
+#: ("Proposed plan is not available."), a withdrawn or rejected plan, another
+#: issue's plan and "Proposed plan: none" are not headings (counter-model
+#: review, two passes). "Proposed changes" keeps revision 4's form unchanged.
+_PLAN_HEADING = re.compile(r"(?im)^\s*(?:=+\s*|#+\s*)?(?:[A-Z][.)]\s*)?(?:proposed\s+changes\b[^\n]*"
+                           r"|proposed\s+plan(?:\s+for\s+(?:issue\s+)?#1(?!\d))?"
+                           r"(?:\s*\((?:pending|awaiting|for)\s+(?:reviewer\s+)?approval\))?\s*:?\s*=*\s*)$")
 _STEP_NEGATION = re.compile(r"(?i)\b(?:do\s+not|don't|not|no|never|without|avoid|skip)\b")
 _PLAN_END = re.compile(r"(?im)^\s*(?:==|approval\s*:|step\s+\d+/\d+)")
 _PLAN_STEP = re.compile(r"(?im)^\s*\d+[.)]\s+.*?[\w./-]+\.(?:py|md|toml|txt|cfg)\b.*?\b(?:add|change|modify|update|return|"
@@ -527,8 +533,10 @@ _CLOSE_CUE = re.compile(r"(?i)\b(?:recommend\w*|suggest\w*|propos\w*|should|can|
 #: the recommendation either way" (reference.md:491). It is a positive grammar:
 #: #1 must be the direct object of `close`, and the WHOLE sentence - not one
 #: clause - may offer no alternative ("..., or keep it open?"), name no other
-#: issue, and carry no negation or historical close (counter-model review).
-_ASSENT_REQUEST = re.compile(r"(?i)\b(?:may|shall)\s+I\s+close\s+(?:issue\s+)?#1(?!\d)")
+#: issue, and carry no negation or historical close (counter-model review). It
+#: must OPEN its sentence (after list or emphasis markers, never a quote mark):
+#: 'The template says "May I close issue #1?"' quotes a request, it makes none.
+_ASSENT_REQUEST = re.compile(r"(?i)^[ \t>*_-]*(?:may|shall)\s+I\s+close\s+(?:issue\s+)?#1(?!\d)")
 _ALTERNATIVE = re.compile(r"(?i)\bor\b|\binstead\b|\brather\b")
 _HISTORICAL_CLOSE = re.compile(r"(?i)\b(?:was|were|has\s+been|had\s+been|got|already)\s+closed\b")
 
@@ -556,12 +564,6 @@ def _has_plan(report: str) -> bool:
     text = _plain(report)
     heading = _PLAN_HEADING.search(text)
     if heading is None:
-        return False
-    # The heading's own words may not scope the plan to another issue or say
-    # there is none ("Proposed plan for issue #2:", "Proposed plan: none") -
-    # counter-model review on revision 5.
-    tail = re.split(r"(?i)proposed\s+(?:changes|plan)\b", heading.group(), maxsplit=1)[-1]
-    if _OTHER_ISSUE.search(tail) or re.search(r"#(?!1\b)\d+", tail) or _HEADING_ABSENCE.search(tail):
         return False
     section = text[heading.end():]
     end = _PLAN_END.search(section)

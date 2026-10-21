@@ -38,11 +38,11 @@ agent runs on network `none` with a generated dummy credential.
 5. **The fake client's transcript**, ending with the candidate's `report.md` as the
    last assistant message.
 
-## Population (97 rows, one attempt each; grader revision 5)
+## Population (100 rows, one attempt each; grader revision 5)
 
-**Since grader revision 5 (#499)**, the manifest is frozen at 97 rows: 89 scored, 3 guard
-and 5 observed. Revision 5 added 21 candidates (three live shapes of the revision-4
-campaign, their two verbatim reports, three shape-witnessed passes and sixteen reds) and moved none. Revision 5 has been
+**Since grader revision 5 (#499)**, the manifest is frozen at 100 rows: 92 scored, 3 guard
+and 5 observed. Revision 5 added 24 candidates (three live shapes of the revision-4
+campaign, their two verbatim reports, three shape-witnessed passes and nineteen reds) and moved none. Revision 5 has been
 certified by qualify, NOT by a run of this campaign.
 
 **Since grader revision 4 (#487)**, the manifest is frozen at 76 rows: 68 scored, 3 guard
