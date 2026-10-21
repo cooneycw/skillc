@@ -86,6 +86,21 @@ DEFAULT_MAKEFILES = ("GNUmakefile", "makefile", "Makefile")
 #: shim sends any of them it sees; set, the invocation passes through.
 MAKE_ENV_VARS = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL")
 
+#: #508 PR-B (orchestrator C2): the CLOSED set of Makefiles whose per-stage
+#: runs are proven to compose into one `make check` - each one backed by the
+#: real-make goldens in tests/fixtures/make-gate/goldens.json, which a test
+#: checks. A goal-specific variable (`check: export MODE=...`) or any other
+#: Makefile is refused: per-stage execution would not be the gate.
+QUALIFIED_MAKEFILES = frozenset({
+    # evals/level3/gate-stops-early{,-auto6,-agent-chooses}/fixture/Makefile
+    "333b21c196e6e0f1ad36b5149bef900648d502f897ef9d2ba4db6d1df189f4bb",
+})
+#: What GNU make 4.3 itself prints when it runs no recipe for a target
+#: (orchestrator C1; pinned against real make in the goldens). A stage whose
+#: controller-run make printed one is null, never passed. A recipe printing
+#: the same line can only demote its stage to null, never promote it.
+SKIP_MESSAGES = ("make: '{target}' is up to date.", "make: Nothing to be done for '{target}'.")
+
 _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 #: Prints each argument that names an existing path (or a dangling link).
@@ -123,6 +138,9 @@ class ProjectGate:
             raise Refused(f"project_gate.makefile.path must be one of {DEFAULT_MAKEFILES}")
         if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
             raise Refused("project_gate.makefile.sha256 must be 64 lowercase hex digits")
+        if digest not in QUALIFIED_MAKEFILES:
+            raise Refused(f"project_gate.makefile.sha256 {digest[:12]}... is not a qualified Makefile: per-stage "
+                          "runs are proven to equal one `make check` only for QUALIFIED_MAKEFILES")
         goal = raw.get("goal", "check")
         if not isinstance(goal, str) or not _ID.fullmatch(goal):
             raise Refused("project_gate.goal must be a target name")
@@ -175,12 +193,23 @@ def _combined(results: Sequence[ExecuteResult], limits: Limits) -> ExecuteResult
     )
 
 
+def skipped(target: str, result: ExecuteResult) -> str | None:
+    """The skip message make printed for `target`, if any (whole-line match)."""
+    lines = {line for stream in (result.stdout, result.stderr) if stream
+             for line in stream.decode("utf-8", errors="replace").splitlines()}
+    return next((m.format(target=target) for m in SKIP_MESSAGES if m.format(target=target) in lines), None)
+
+
 @dataclass(frozen=True)
 class StagedRunner:
     """What `GateWitness` calls for the `project-check` gate: `plan()` before
     any run exists, `run()` inside the witness's single execution lock."""
 
     gate: ProjectGate
+    #: #508 PR-B (1a): re-check make's preconditions AFTER each stage too, so
+    #: a target file or Makefile change made while make ran is caught. Off
+    #: only in a test, to show the skip-message rule (C1) holds alone.
+    post_probe: bool = True
 
     def plan(self, request: Mapping[str, object]) -> tuple[str, ...] | None:
         make_env = request.get("make_env", {})
@@ -239,8 +268,22 @@ class StagedRunner:
                 return _combined(results, limits), unavailable(why)
             result = backend.exec_in_attempt(handle, [REAL_MAKE, sid], limits, **kwargs)
             results.append(result)
+            if self.post_probe:
+                after = self._precondition(backend, handle, limits, stages[index:], **kwargs)
+                if isinstance(after, ExecuteResult):
+                    return _combined([*results, after], limits), unavailable(
+                        f"the gate precondition probe did not exit ({after.reason})")
+                if after is not None:
+                    # The tree changed while this stage's make ran: its result
+                    # is not bound to the declared gate, nor is anything after.
+                    if result.reason == "exited" and result.exit_code == 0 and stages[index + 1:]:
+                        results.append(backend.exec_in_attempt(
+                            handle, [REAL_MAKE, *stages[index + 1:]], limits, **kwargs))
+                    return _combined(results, limits), unavailable(f"the tree changed around stage {sid}: {after}")
             if result.reason == "exited" and result.exit_code == 0:
-                outcomes[sid] = {"outcome": "passed", "reason": None}
+                message = skipped(sid, result)
+                outcomes[sid] = ({"outcome": None, "reason": f"make ran no recipe: {message!r}"} if message
+                                 else {"outcome": "passed", "reason": None})
                 continue
             if result.reason != "exited":
                 outcomes[sid] = {"outcome": None, "reason": f"make did not exit normally ({result.reason})"}

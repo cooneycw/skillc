@@ -99,11 +99,22 @@ def _real_make(tmp: Path, args: list[str], codes: Mapping[str, Code]) -> dict[st
             "exit": proc.returncode}
 
 
-def _derive(root: Path) -> dict[str, dict[str, dict[str, object]]]:
+def _skip(tmp: Path, args: list[str], existing: Sequence[str]) -> dict[str, object]:
+    """#508 PR-B (C1): real make where target files already exist."""
+    tmp.mkdir(parents=True, exist_ok=True)
+    for name in existing:
+        (tmp / name).write_text("")
+    return _real_make(tmp, args, {sid: 0 for sid in SCRIPTS})
+
+
+def _derive(root: Path) -> dict[str, Any]:
     composite = {name: _real_make(root / name, args, codes) for name, (args, codes) in CELLS.items()}
     single = {f"{sid}={code}": _real_make(root / f"single-{sid}-{code}", [sid], {sid: code})
               for sid, code in sorted(_singles(), key=str)}
-    return {"composite": composite, "single": single}
+    skips = {"test-up-to-date": _skip(root / "skip-test", ["test"], ["test"]),
+             "check-nothing-to-do": _skip(root / "skip-check", ["check"], ["check", *SCRIPTS])}
+    return {"makefile_sha256": hashlib.sha256(MAKEFILE).hexdigest(), "composite": composite, "single": single,
+            "skips": skips}
 
 
 def write_goldens() -> None:
@@ -450,3 +461,119 @@ def test_an_aggregate_over_the_reply_cap_is_marked_never_sliced() -> None:
         Chatty({}), None, limits, ("lint", "test", "typecheck"), cwd=None, env=None, confine_root=None,
         make_args=["check"])
     assert result.stdout_truncated is True  # each exec was complete; the whole is not
+
+
+# --- #508 PR-B: C1 (make's skip messages), C2 (closed qualified set), (1a) re-probe ----
+
+def test_the_skip_messages_are_what_real_make_prints() -> None:
+    skips = _goldens()["skips"]
+    assert skips["test-up-to-date"]["stdout"] == pg.SKIP_MESSAGES[0].format(target="test") + "\n"
+    assert skips["check-nothing-to-do"]["stdout"] == pg.SKIP_MESSAGES[1].format(target="check") + "\n"
+
+
+class _Racing(_StageBackend):
+    """A non-phony `test` file the PROBES never see, but make does: make
+    answers with its real-make up-to-date golden. `visible_after` makes it
+    visible to the post-stage probe too."""
+
+    def __init__(self, visible_after: bool) -> None:
+        super().__init__({"lint": 0, "test": 0, "typecheck": 0})
+        self.visible_after = visible_after
+
+    def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                        stdin: bytes | None = None, cwd: str | None = None,
+                        env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+        if argv == [pg.REAL_MAKE, "test"]:
+            self.calls.append(list(argv))
+            if self.visible_after:
+                self.present.append("test")
+            skip = _goldens()["skips"]["test-up-to-date"]
+            return ExecuteResult(reason="exited", exit_code=0, stdout=skip["stdout"].encode(), stderr=b"")
+        return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+
+@pytest.mark.parametrize("post_probe", [False, True])
+def test_a_stage_make_skipped_is_never_passed(post_probe: bool) -> None:
+    """C1's red, with and without the re-probe: the file is there while make
+    runs but gone by the time the post-stage probe looks (the create-delete
+    race), so only make's own skip message can say the recipe never ran."""
+    backend = _Racing(visible_after=False)
+    _result, capture = pg.StagedRunner(declaration(), post_probe=post_probe).run(
+        backend, None, Limits(timeout=5), ("lint", "test", "typecheck"), cwd=None, env=None, confine_root=None,
+        make_args=["check"])
+    stages = capture["stages"]
+    assert isinstance(stages, dict)
+    assert stages["test"] == {"outcome": None, "reason": "make ran no recipe: \"make: 'test' is up to date.\""}
+    assert stages["lint"]["outcome"] == "passed" and stages["typecheck"]["outcome"] == "passed"
+
+
+def test_the_post_stage_probe_catches_a_target_that_appeared_during_make() -> None:
+    backend = _Racing(visible_after=True)
+    _result, capture = pg.StagedRunner(declaration()).run(
+        backend, None, Limits(timeout=5), ("lint", "test", "typecheck"), cwd=None, env=None, confine_root=None,
+        make_args=["check"])
+    assert capture["status"] == "unavailable" and "the tree changed around stage test" in str(capture["reason"])
+    assert backend.calls[-1] == [pg.REAL_MAKE, "typecheck"]  # the rest, by the real make
+    # Without the re-probe the same timeline is still null, by C1 alone.
+    _r, blind = pg.StagedRunner(declaration(), post_probe=False).run(
+        _Racing(visible_after=True), None, Limits(timeout=5), ("lint", "test", "typecheck"), cwd=None, env=None,
+        confine_root=None, make_args=["check"])
+    assert isinstance(blind["stages"], dict) and blind["stages"]["test"]["outcome"] is None
+
+
+def test_the_post_stage_probe_catches_a_makefile_rewritten_during_a_stage() -> None:
+    class Rewrites(_StageBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            result = super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+            if argv == [pg.REAL_MAKE, "lint"]:
+                self.makefile = MAKEFILE.replace(b"ci/check.py", b"ci/lint.py")
+            return result
+
+    _result, capture = pg.StagedRunner(declaration()).run(
+        Rewrites({"lint": 0, "test": 0, "typecheck": 0}), None, Limits(timeout=5), ("lint", "test", "typecheck"),
+        cwd=None, env=None, confine_root=None, make_args=["check"])
+    assert capture["status"] == "unavailable" and "changed from its declared digest" in str(capture["reason"])
+
+
+def _qualification_gaps(qualified: frozenset[str]) -> set[str]:
+    return set(qualified) - {_goldens()["makefile_sha256"]}
+
+
+def test_every_qualified_makefile_has_goldens() -> None:
+    assert _qualification_gaps(pg.QUALIFIED_MAKEFILES) == set()
+
+
+def test_a_digest_added_without_goldens_fails_the_qualification_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """C2's red: the check above must FAIL when the set grows past its proof."""
+    monkeypatch.setattr(pg, "QUALIFIED_MAKEFILES", pg.QUALIFIED_MAKEFILES | {"f" * 64})
+    with pytest.raises(AssertionError):
+        test_every_qualified_makefile_has_goldens()
+
+
+#: A Makefile whose goal changes the recipe environment: one `make check`
+#: and the per-stage runs disagree, so it must never be qualified.
+GOAL_VARIABLE_MAKEFILE = (b"check: export MODE = composite\ncheck: lint test\n\nlint:\n\tpython3 ci/lint.py\n\n"
+                          b"test:\n\tpython3 -c 'import os,sys; sys.exit(os.environ.get(\"MODE\") == \"composite\")'\n")
+
+
+def test_a_goal_variable_makefile_is_refused() -> None:
+    with pytest.raises(pg.Refused, match="not a qualified Makefile"):
+        pg.ProjectGate.from_declaration({
+            "makefile": {"path": "Makefile", "sha256": hashlib.sha256(GOAL_VARIABLE_MAKEFILE).hexdigest()},
+            "goal": "check", "stages": ["lint", "test"]})
+
+
+def test_the_goal_variable_makefile_really_diverges_under_real_make(tmp_path: Path) -> None:
+    """Why C2 exists: shown with the real make wherever it is available."""
+    if shutil.which("make") is None:
+        pytest.skip("GOAL-VARIABLE DIVERGENCE NOT SHOWN: no `make` on PATH (skillc CI has no make)")
+    (tmp_path / "ci").mkdir()
+    (tmp_path / "ci" / "lint.py").write_text("")
+    (tmp_path / "Makefile").write_bytes(GOAL_VARIABLE_MAKEFILE)
+
+    def make(*args: str) -> int:
+        return subprocess.run(["make", *args], cwd=tmp_path, capture_output=True, check=False).returncode
+
+    assert (make("check"), make("lint"), make("test")) == (2, 0, 0)
