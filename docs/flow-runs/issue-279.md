@@ -171,3 +171,31 @@ Scope: large. Risks:
 - `fixture_attempt`/`fixture_live` are hot paths; changes are additive;
 - the oracle container is new controller infrastructure;
 - the #434 pinned identities must not move (pinned).
+
+<!-- flow-run n=6 id=10efc6fffda24f128c63d00a6fa1f749 -->
+## Run 6
+
+- Run-id:            10efc6fffda24f128c63d00a6fa1f749
+- Run-start:         f4060c7e483020406d58e2baad662b48fdd2e9e2
+- Issue:             #279
+- Base SHA:          f4060c7e483020406d58e2baad662b48fdd2e9e2
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), small assignment (mailbox rev 10), 2026-10-21
+- Recorded at:       2026-10-21T11:40:00Z
+
+### Section B evidence
+PR-3 (#511) delivered the unapproved Step-6 campaign draft. The orchestrator wants an exact sizing digest to show the owner. Its token figure (0.45-0.53M per attempt) was measured at Step 3 only.
+
+### Section C - the approved plan (PR-4, declarations only, no spend)
+1. `evals/level3/flow-auto-step6-live/sizing-declaration-draft.json` (NEW): the campaign draft's task, turns, containment and C1-C5, with these changes:
+   - attempts_per_case 2;
+   - per_attempt_seconds 1800, total_seconds 3600;
+   - model gpt-6-astra, effort high (the orchestrator's pending recommendation);
+   - run_store step6-live/sizing-1;
+   - a derived case_order;
+   - sizing purpose and caps comments;
+   - no approval.
+2. `declaration-draft.json`: _comment_caps corrected (Step-3-only figure; the caps are set from the sizing run).
+3. README: both digests.
+4. A test that each draft parses and that require_approved refuses it (sizing: no approval; campaign: placeholders), plus its pass control.
