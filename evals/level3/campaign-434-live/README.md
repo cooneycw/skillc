@@ -160,6 +160,33 @@ attempts as declared, no re-run.
   the trigger. The same transcript with one unknown response item appended STOPS, which is the
   control. Where the owner's store is absent, the test skips loudly.
 
+## The revision-5 campaign (after #499)
+
+The revision-4 campaign ran once (`20261020T195431Z-fab3ce`): CLEAN 3/5 and TWIN 2/5 on the
+endpoint, with every FAIL a grader shape miss. Grader revision 5 (#499) reads those shapes.
+It was **decided after seeing those results** (owner option 3). The repository now refuses
+`campaign-declaration-rev4.json` as spent, and that file stays unchanged as the record.
+`campaign-declaration-rev5.json` is the DRAFT for a fresh campaign. It is **UNAPPROVED**:
+spending needs the owner's approval of its exact digest.
+
+- **The terms are the approved revision-4 campaign's, unchanged**, the seed and order
+  included.
+- **Only these differ:**
+  - the grader's revision and digest. The goal, builder and base trees are revision 4's
+    exactly;
+  - the run store, `~/skillc-evidence/campaign-434-live/campaign-rev5`;
+  - the comment;
+  - the approval, which is absent.
+
+  A test compares it with the approved revision-4 file against an allow-list of exactly these
+  fields. Its control tampers six terms, including the builder and goal digests that revision
+  4 was allowed to move, and asserts each is REJECTED.
+- **No-false-stop check:** a private test rebuilds each of the revision-4 run's 10 containment
+  records from retained evidence, under this declaration. Every one passes the trigger. The
+  same transcript with one unknown response item appended STOPS, which is the control.
+- **If revision 5 misses new wordings again, that is reported, and the grader is NOT patched
+  further without the owner.**
+
 ## Running it
 
 Every command below is shown for the measurement. The campaign is the same with

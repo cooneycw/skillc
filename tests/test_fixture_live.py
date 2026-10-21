@@ -1342,3 +1342,106 @@ def test_an_unregistered_task_path_is_refused(tmp_path: Path) -> None:
 def test_raw_extras_with_ordered_turns_keep_their_provenance() -> None:
     assert fl._RAW_EXTRAS_KEYS | {"controller_turns"} in fl._RAW_EXTRAS_KEY_SETS
     assert fl._RAW_EXTRAS_KEYS | {"anything"} not in fl._RAW_EXTRAS_KEY_SETS
+
+
+# ------------------------------- the revision-5 campaign (#434, after #499)
+
+CAMPAIGN_REV5 = ROOT / "evals" / "level3" / "campaign-434-live" / "campaign-declaration-rev5.json"
+#: The draft's content digest, as it goes into the owner's approval package. A
+#: changed field must change this line on purpose.
+CAMPAIGN_REV5_DIGEST = "sha256:15343e09690b7d290b9bc9740daf1536b76d277752eb03997fa5b4c9335326b0"
+#: The ONLY fields the revision-5 draft may differ in from the owner-approved
+#: revision-4 campaign (90accda5): its identities moved with the grader (#499),
+#: its store and comment are its own, and it carries no approval. Orchestrator
+#: condition, as for revision 4: an allow-list, so ANY other difference fails.
+_REV5_MAY_DIFFER = {("_comment",), ("run_store",), ("approval",), ("task", "grader_revision"),
+                    ("task", "grader_digest")}
+
+
+def _rev5_differences(a: Any, b: Any, path: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    if isinstance(a, dict) and isinstance(b, dict) and path not in _REV5_MAY_DIFFER:
+        return {d for k in set(a) | set(b) for d in _rev5_differences(a.get(k, _ABSENT), b.get(k, _ABSENT), (*path, k))}
+    return set() if a == b else {path}
+
+
+def test_the_revision_5_campaign_differs_from_the_approved_revision_4_only_where_allowed() -> None:
+    approved, draft = json.loads(CAMPAIGN_REV4.read_text()), json.loads(CAMPAIGN_REV5.read_text())
+    differences = _rev5_differences(approved, draft)
+    assert differences <= _REV5_MAY_DIFFER, sorted(differences - _REV5_MAY_DIFFER)
+    # Each allowed difference is real, not a field quietly dropped.
+    assert ("approval",) in differences and "approval" not in draft
+    assert draft["task"]["grader_revision"] == "5" and draft["run_store"] != approved["run_store"]
+    # Only the grader moved: the goal, builder and base trees are revision 4's exactly.
+    for key in ("goal_sha256", "builder_sha256", "base_trees"):
+        assert draft["task"][key] == approved["task"][key], key
+
+
+def test_the_revision_5_allow_list_catches_any_other_difference() -> None:
+    """The instrument's own red: a changed term outside the allow-list is
+    REJECTED, not merely named - including the identities revision 4 was
+    allowed to move but revision 5 is not."""
+    draft = json.loads(CAMPAIGN_REV5.read_text())
+    approved = json.loads(CAMPAIGN_REV4.read_text())
+    for path, value in ((("shared", "per_attempt_seconds"), 901), (("case_order", "seed"), 1),
+                        (("tolerance", "non_evaluable_per_case"), 2), (("task", "instruction"), "x"),
+                        (("task", "builder_sha256"), "0" * 64), (("task", "goal_sha256"), "0" * 64)):
+        tampered = copy.deepcopy(draft)
+        tampered[path[0]][path[1]] = value
+        assert path in _rev5_differences(approved, tampered) - _REV5_MAY_DIFFER, path
+
+
+def test_the_revision_5_campaign_is_this_tree_s_unapproved_and_pinned() -> None:
+    declaration = fl.load_declaration(CAMPAIGN_REV5)
+    assert declaration.digest == CAMPAIGN_REV5_DIGEST
+    assert declaration.approval is None
+    with pytest.raises(fl.LiveRefused, match="no approval record"):
+        fl.require_approved(declaration, ROOT)
+    fl.require_approved(declaration, ROOT, approval_required=False)  # this tree's identities, exactly
+    assert declaration.task["grader_revision"] == "5" and declaration.attempts_per_case == 5
+    assert declaration.order == fl.load_declaration(CAMPAIGN_REV4).order   # the same order, kept on purpose
+    assert declaration.endpoint == ENDPOINT and declaration.tolerance == 1
+
+
+#: The owner-approved revision-4 campaign run (20261020T195431Z-fab3ce): the
+#: revision-5 campaign's no-false-stop check reads its retained evidence the
+#: same way as the revision-3 run's above - plain files by manifest digest,
+#: never committed, skipping loudly only where the store is absent.
+REV4_RUN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign-rev4" / "20261020T195431Z-fab3ce"
+                  / "store" / "level3-fixture-live-1895ef73")
+REV4_RUN_ATTEMPTS = ("a-2f11075c6f7e", "a-4bfc6b07d64c", "a-6e9b5c523500", "a-911dd78a056f", "a-9b1435266f4b",
+                     "a-b50b7e7890e5", "a-c9c21147fd2b", "a-eecda7b2282c", "a-f538f3cabf2c", "a-fbdd03ea5fbc")
+
+
+def _rev4_run_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict[str, Any]:
+    """`_retained_record`'s rebuild, over the revision-4 run, prompted as the
+    revision-5 declaration prompts (the same instruction, by the allow-list)."""
+    manifest = json.loads((REV4_RUN_STORE / f"manifest-{attempt_id}.json").read_text())
+    transcript = (_retained_object(REV4_RUN_STORE, _complete_stream(manifest, "client-transcript"))
+                  + transcript_suffix)
+    observation, census, metadata = at.observe_transcript_bytes(
+        at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV5), ROOT),
+        skill_name=None)
+    proxy = _retained_object(REV4_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id)},
+            "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
+
+
+@pytest.mark.parametrize("attempt_id", REV4_RUN_ATTEMPTS)
+def test_the_revision_5_campaign_does_not_false_stop_on_the_revision_4_run(attempt_id: str) -> None:
+    """The no-false-stop check for the revision-5 package: every attempt of the
+    owner-approved revision-4 run passes this tree's containment trigger under
+    the revision-5 declaration's allowlist and policy; the same transcript with
+    one unknown response item appended STOPS (the control)."""
+    if not REV4_RUN_STORE.is_dir():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {REV4_RUN_STORE} is not on this host; "
+                    "the revision-5 no-false-stop check did not run")
+    missing = [a for a in REV4_RUN_ATTEMPTS if not (REV4_RUN_STORE / f"manifest-{a}.json").is_file()]
+    assert not missing, f"the retained revision-4 store is incomplete: {missing}"
+    declaration = fl.load_declaration(CAMPAIGN_REV5)
+    allowlist = str(declaration.shared["agent_network"]["allowlist_digest"])
+    assert fl.containment_trigger(_rev4_run_record(attempt_id), allowlist_digest=allowlist,
+                                  nested_policy=declaration.nested_policy) is None
+    stopped = fl.containment_trigger(_rev4_run_record(attempt_id, transcript_suffix=_UNKNOWN_ITEM),
+                                     allowlist_digest=allowlist, nested_policy=declaration.nested_policy)
+    assert stopped is not None and "future_item_type" in stopped
