@@ -108,7 +108,15 @@ def core_variants() -> dict[str, str]:
         "breaks-commas": ('def parse(text: str) -> list[str]:\n    if not text or text[0] == "#":\n        return []\n'
                           '    return [part.strip() for part in text.split(",") if part.strip()]\n'),
         "never-returns": "def parse(text: str) -> list[str]:\n    while True:\n        pass\n",
-        "writes-a-file": ('open("/home/pwned", "w").write("x")\n\n\ndef parse(text: str) -> list[str]:\n'
+        # Counter-model review: prints the KNOWN answers to the public cases and
+        # exits without defining parse() - only the random challenges catch it.
+        "forged-output": ('import __main__, json, os, sys\n'
+                          'known = {"": [], "# note": [], "a, b,c": ["a", "b", "c"], " x ": ["x"], "#": [],'
+                          ' "a,,b": ["a", "", "b"]}\n'
+                          'sys.stdout.write("\\n" + json.dumps([{"value": known.get(i, [])}'
+                          ' for i in __main__.job["inputs"]]) + "\\n")\n'
+                          'sys.stdout.flush()\nos._exit(0)\n'),
+        "writes-a-file": ('open("/var/pwned", "w").write("x")\n\n\ndef parse(text: str) -> list[str]:\n'
                           '    if not text or text[0] == "#":\n        return []\n'
                           '    return [part.strip() for part in text.split(",")]\n'),
     }
@@ -143,6 +151,8 @@ BLINDING = {
     "ignore-merge-stamp": "fail/merge-onto-a-moved-base",
     # C2: when a merge shipped, only the merged result counts
     "ignore-merge-precedence": "fail/merge-fails-while-worktree-passes",
+    # a judge that checks only the public cases is fooled by printed answers
+    "fixed-cases-only": "fail/forged-oracle-output",
 }
 _PLACED = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE"}
 _GATE = "flow-auto-finish"

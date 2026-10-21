@@ -1328,7 +1328,7 @@ def test_a_step6_declaration_takes_its_own_cases() -> None:
     assert ("task", "base_trees", "twin-gate") in fl.required_identities(fl.STEP6_TASK_PATH)
     # #279 PR-2b built the grader: the task now has real identities.
     identity = fl.task_identity(ROOT, fl.STEP6_TASK_PATH)
-    assert (identity["grader_id"], identity["grader_revision"]) == ("gate-stops-early-step6", "1")
+    assert (identity["grader_id"], identity["grader_revision"]) == ("gate-stops-early-step6", "2")  # #279 PR-3
     trees = identity["base_trees"]
     assert isinstance(trees, dict) and set(trees) == {"twin-gate"}
 

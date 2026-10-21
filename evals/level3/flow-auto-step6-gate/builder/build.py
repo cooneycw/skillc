@@ -109,16 +109,17 @@ def capture_snapshot(export_root: Path, facts: dict[str, Any], **kwargs: Any) ->
     return git
 
 
-def post_capture(git: dict[str, Any], backend: Any) -> dict[str, Any]:
-    """Run the behavioural oracle over the captured sources, in a throwaway
-    container of the attempt's own trial image, and keep only its OUTCOMES.
+def post_capture(git: dict[str, Any], backend: Any, handle: object = None) -> dict[str, Any]:
+    """Run the behavioural oracle over the captured sources, each in a
+    throwaway container of the attempt's MEASURED image (its ID, never a tag),
+    and keep only its OUTCOMES.
     A backend that cannot run it (C1: never the host) records that, and S4
     reads UNKNOWN."""
     from skillc import step6_oracle as so
 
     sources = git.pop("fix_sources", {}) or {}
     try:
-        git["fix_outcomes"] = so.outcomes(sources, so.runner_for(backend))
+        git["fix_outcomes"] = so.outcomes(sources, so.runner_for(backend, handle))
     except so.Refused as exc:
         git["fix_outcomes"] = {name: {"status": "oracle-refused", "reason": str(exc)} for name in sources}
     return git
