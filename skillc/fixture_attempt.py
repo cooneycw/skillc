@@ -234,7 +234,7 @@ class _UnreadableRemote:
         raise gs.Unreadable(self.reason)
 
 
-def _ship_stamp(backend: Any, handle: object, remote_relpath: str, commit: str) -> dict[str, str]:
+def _ship_stamp(backend: Any, handle: object, remote_relpath: str, commit: str) -> dict[str, object]:
     """#279 PR-2b: the source and gate-definition digests of `commit`, read AT a
     ship request from a fresh controller-owned export of the attempt's remote -
     the same no-git-process reader `remote_ref_sources` uses after the stop."""

@@ -909,3 +909,47 @@ def test_a_refused_ship_request_names_no_shipped_head(tmp_path: Path) -> None:
     build, root, facts = _step6_world(tmp_path)  # no branch pushed: the create is refused
     event = _create(_stamping_service(build, root, facts, lambda c: pytest.fail("nothing shipped")), root)
     assert event["decision"] != "applied" and event["ship_stamp"] == {"status": "no-head"}
+
+
+def test_a_merge_also_stamps_the_commit_it_put_on_main(tmp_path: Path) -> None:
+    """Counter-model review: a squash merges the head with the CURRENT base, so a
+    base-side change made after the gate ships in the merge result. The merge's
+    stamp therefore carries the merge commit's own digests and entries."""
+    from skillc import git_snapshot as gs
+    from skillc import source_digest as sd
+
+    build, root, facts = _step6_world(tmp_path)
+    head = _ship_branch(build, root)
+    reader = lambda: gs.GitDir(gs.SafeTree(root), "remote.git")
+    service = _stamping_service(build, root, facts, lambda c: sd.ship_stamp(reader(), c))
+    ctx = {"origin_url": str(root / "remote.git"), "branch": "issue-1-fix"}
+    service.decide({"op": "gh", "argv": ["pr", "create", "--title", "t", "--body", "b", "--head", "issue-1-fix"],
+                    "cwd": "/work/repo", "context": ctx})
+    service.decide({"op": "gh", "argv": ["pr", "merge", "--squash"], "cwd": "/work/repo", "context": ctx})
+    [event] = [e for e in service.finalize("a-1").to_json()["events"] if e["op"] == "pr.merge"]
+    assert event["decision"] == "applied"
+    merged = event["ship_stamp"]["merge"]
+    assert event["ship_stamp"]["commit"] == head and merged["commit"] == event["effect"]["merge_commit"] != head
+    assert merged["status"] == "stamped" and merged["source_digest"] == sd.digest_commit(reader(), merged["commit"])
+    assert merged["entries"]["widget/core.py"] == event["ship_stamp"]["entries"]["widget/core.py"]
+
+
+def test_an_unreadable_merge_result_makes_the_whole_stamp_unreadable(tmp_path: Path) -> None:
+    from skillc import git_snapshot as gs
+    from skillc import source_digest as sd
+
+    build, root, facts = _step6_world(tmp_path)
+    head = _ship_branch(build, root)
+
+    def head_only(commit: str) -> dict[str, object]:
+        if commit != head:
+            raise OSError("merge result unreadable")
+        return sd.ship_stamp(gs.GitDir(gs.SafeTree(root), "remote.git"), commit)
+
+    service = _stamping_service(build, root, facts, head_only)
+    ctx = {"origin_url": str(root / "remote.git"), "branch": "issue-1-fix"}
+    service.decide({"op": "gh", "argv": ["pr", "create", "--title", "t", "--body", "b", "--head", "issue-1-fix"],
+                    "cwd": "/work/repo", "context": ctx})
+    service.decide({"op": "gh", "argv": ["pr", "merge", "--squash"], "cwd": "/work/repo", "context": ctx})
+    [event] = [e for e in service.finalize("a-1").to_json()["events"] if e["op"] == "pr.merge"]
+    assert event["ship_stamp"]["status"] == "unreadable" and event["ship_stamp"]["merge"]["status"] == "unreadable"

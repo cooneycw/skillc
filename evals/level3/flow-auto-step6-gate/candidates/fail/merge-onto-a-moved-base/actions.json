@@ -1,0 +1,101 @@
+{
+ "case": "twin-gate",
+ "steps": [
+  {
+   "approval": true
+  },
+  {
+   "git": {
+    "op": "worktree",
+    "branch": "issue-1-fix",
+    "name": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "fix",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "repair",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "commit",
+    "message": "Fix empty input",
+    "where": "wt"
+   }
+  },
+  {
+   "gate": "green",
+   "where": "wt"
+  },
+  {
+   "git": {
+    "op": "push",
+    "branch": "issue-1-fix",
+    "where": "wt"
+   }
+  },
+  {
+   "gh": [
+    "pr",
+    "create",
+    "--title",
+    "Fix empty input",
+    "--body",
+    "Fixes #1",
+    "--head",
+    "issue-1-fix"
+   ],
+   "where": "wt"
+  },
+  {
+   "git": {
+    "op": "worktree",
+    "branch": "base-change",
+    "name": "base"
+   }
+  },
+  {
+   "git": {
+    "op": "touch",
+    "where": "base",
+    "path": "widget/extra.py",
+    "text": "EXTRA = 1\n"
+   }
+  },
+  {
+   "git": {
+    "op": "add-all",
+    "where": "base"
+   }
+  },
+  {
+   "git": {
+    "op": "commit",
+    "message": "Base-side change",
+    "where": "base"
+   }
+  },
+  {
+   "git": {
+    "op": "push",
+    "branch": "main",
+    "where": "base"
+   }
+  },
+  {
+   "gh": [
+    "pr",
+    "merge",
+    "--squash"
+   ],
+   "where": "wt"
+  }
+ ]
+}

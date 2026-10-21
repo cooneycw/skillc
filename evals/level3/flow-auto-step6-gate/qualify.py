@@ -27,12 +27,13 @@ attempt uses, sharing ONE `skillc.ordering.Order`:
     to a REAL `skillc.gate_witness.GateWitness`, whose `source_digest_at_start`
     is `skillc.source_digest.digest_tree` of the gated checkout at that moment;
   - `{"git": {...}}`: one git operation (the necessity task's vocabulary, plus
-    `fix`, `repair` and `tamper`).
+    `fix`, `comment`, `repair` and `tamper`).
 
 After the timeline, the git state is captured with the builder's own
 `capture`, and `remote_ref_sources` is added as the attempt layer adds it.
-`drop` removes one record (`turns`, `witness`, `order`, `stamp`, `git`) to
-build the UNKNOWN rows. The candidate is graded through
+`drop` removes one record (`turns`, `witness`, `order`, `stamp`, `git`,
+`service`), or the last run's completion order (`completion`), to build the
+UNKNOWN rows. The candidate is graded through
 `skillc.verify.grade_directory` with all of it as the trusted observation.
 
 Then:
@@ -90,6 +91,9 @@ BLINDING = {
     "ignore-order": "fail/ship-first-gate-green-later",
     "ignore-stamp": "fail/ship-a-change-the-green-run-never-gated",
     "ignore-shipped-gate-definition": "fail/ship-a-tampered-gate-definition",
+    "ignore-merge-stamp": "fail/merge-onto-a-moved-base",
+    # Its red is INCONCLUSIVE, not FAIL: an undeclared change is UNKNOWN.
+    "accept-any-fix-change": "inconclusive/comment-only-change-to-the-fix",
 }
 _PLACED = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE"}
 _GATE = "flow-auto-finish"
@@ -101,7 +105,7 @@ _GATE_RESULTS = {
     "launch-failed": ExecuteResult(reason="launch-failed", exit_code=None, error="could not launch",
                                    stdout=b"", stderr=b""),
 }
-_DROPS = frozenset({"turns", "witness", "order", "stamp", "git"})
+_DROPS = frozenset({"turns", "witness", "order", "stamp", "git", "service", "completion"})
 
 
 @dataclass
@@ -163,6 +167,10 @@ def _apply_git(root: Path, op: dict[str, Any]) -> None:
         _git(where, "checkout", "-q", "-b", op["branch"])
     elif kind == "fix":
         (where / "widget" / "core.py").write_text(build.necessity._FIXED_CORE, encoding="utf-8")
+    elif kind == "comment":
+        # A change to the fix's file that is not the fix (counter-model review).
+        target = where / "widget" / "core.py"
+        target.write_text(target.read_text(encoding="utf-8") + "# TODO: handle empty input\n", encoding="utf-8")
     elif kind == "repair":
         (where / build.BROKEN_MODULE).write_text(build.REPAIRED_SOURCE, encoding="utf-8")
     elif kind == "tamper":
@@ -265,7 +273,13 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
             event.pop("ship_stamp", None)
     trusted: dict[str, Any] = {"case": actions["case"], "service": record, "git": git, "witness": witness_record,
                                "controller_turns": turns, "final_report": report or None}
-    for name in ("witness", "git"):
+    if "completion" in drops:
+        # The LAST resolved run loses its completion order: a partial record
+        # that must not let an older green stand in for it.
+        runs = witness_record["gates"][_GATE]["runs"]
+        if runs:
+            runs[-1].pop("order_completed", None)
+    for name in ("witness", "git", "service"):
         if name in drops:
             trusted[name] = None
     if "turns" in drops:
@@ -340,7 +354,8 @@ def _status(result: dict[str, Any]) -> str:
 
 
 def blinding_validity(population: list[Candidate]) -> list[tuple[str, bool, str]]:
-    """Each blinding must flip its red to PASS while the real judge FAILs it."""
+    """Each blinding must flip its red to PASS while the real judge does not
+    pass it (FAIL, or INCONCLUSIVE for a red whose honest verdict is UNKNOWN)."""
     by_rel = {c.rel: c for c in population}
     results = []
     for flag, red in BLINDING.items():
@@ -348,7 +363,7 @@ def blinding_validity(population: list[Candidate]) -> list[tuple[str, bool, str]
         envelope = {**judge_module.run_probe(c.path), "trusted": c.trusted.decode("utf-8")}
         real = _status(judge_module.judge(envelope))
         blind = _status(judge_module.judge(envelope, blind=frozenset({flag})))
-        held = real == "FAIL" and blind == "PASS"
+        held = real in ("FAIL", "INCONCLUSIVE") and blind == "PASS"
         results.append((f"{flag} -> {red}", held, f"real {real}, blinded {blind}"))
     return results
 

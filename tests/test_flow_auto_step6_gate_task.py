@@ -209,3 +209,14 @@ def test_a_twin_gate_rehearsal_refuses_naming_the_owed_actor() -> None:
     assert fl.REHEARSAL_BY_TASK[TASK.name] == {}
     with pytest.raises(fl.LiveRefused, match="turn-aware step6 timeline actor is owed"):
         fl.rehearsal_actor(TASK, "twin-gate", turns=True)
+
+
+def test_the_judge_s_declared_fix_is_the_necessity_builder_s() -> None:
+    """S4 accepts only a declared fix identity: it must be the blob of the
+    necessity builder's `_FIXED_CORE`, and the unfixed source must not be one."""
+    def blob(text: str) -> str:
+        return subprocess.run(["git", "hash-object", "--stdin"], input=text, capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    assert judge.FIX_BLOBS == {blob(build.necessity._FIXED_CORE)}
+    assert blob(build.necessity._BUGGY_CORE) not in judge.FIX_BLOBS

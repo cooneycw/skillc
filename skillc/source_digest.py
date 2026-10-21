@@ -214,16 +214,26 @@ def gate_definition_digest(entries: Mapping[str, str]) -> str:
     return digest_entries({path: value for path, value in entries.items() if is_gate_definition(path)})
 
 
-def ship_stamp(gitdir: object, commit: str) -> dict[str, str]:
+#: A shipped tree's entries are recorded in its stamp only up to this many
+#: (counter-model review, #279 PR-2b): enough for a fixture repository, never
+#: an unbounded record. Above it the stamp carries no entries, and anything
+#: read from them is UNKNOWN.
+MAX_STAMPED_ENTRIES = 2000
+
+
+def ship_stamp(gitdir: object, commit: str) -> dict[str, object]:
     """What a ship request ships, stamped AT the request (#279 PR-2b, Delta 2/3):
     the commit, its SOURCE digest (`digest_commit`'s population, every blob
-    read and checked) and its gate-definition digest. Raises `SourceUnreadable`
-    when the commit cannot be read faithfully - the caller records that as
-    an unreadable stamp, never as a digest."""
+    read and checked), its gate-definition digest and - up to
+    `MAX_STAMPED_ENTRIES` - its `{path: "MODE BLOB"}` entries. Raises
+    `SourceUnreadable` when the commit cannot be read faithfully - the caller
+    records that as an unreadable stamp, never as a digest."""
     try:
         files = gitdir.tree_files(gitdir.tree_of(commit))  # type: ignore[attr-defined]
     except Exception as exc:
         raise SourceUnreadable(f"commit {commit[:10]} cannot be read ({type(exc).__name__})") from exc
-    return {"commit": commit, "source_digest": digest_commit(gitdir, commit),
-            "gate_definition_digest": gate_definition_digest(files)}
-
+    stamp: dict[str, object] = {"commit": commit, "source_digest": digest_commit(gitdir, commit),
+                                "gate_definition_digest": gate_definition_digest(files)}
+    if len(files) <= MAX_STAMPED_ENTRIES:
+        stamp["entries"] = {path: str(value) for path, value in files.items() if path not in EXEMPT}
+    return stamp

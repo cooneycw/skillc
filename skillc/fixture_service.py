@@ -691,7 +691,7 @@ class FixtureService:
 
     def __init__(self, declaration: Mapping[str, Any], remote: GitRemote, attempt_id: str, *,
                  jq_path: str | None = None, order: Order | None = None,
-                 ship_stamper: Callable[[str], Mapping[str, str]] | None = None) -> None:
+                 ship_stamper: Callable[[str], Mapping[str, object]] | None = None) -> None:
         self._declaration = copy.deepcopy(dict(declaration))
         #: #279 PR-2a: the attempt's controller-owned ordering counter, or None.
         #: Supplied only for a multi-turn attempt; then every event (a malformed
@@ -894,20 +894,31 @@ class FixtureService:
             self._events.append(event)
             return dict(reply)
 
-    def _stamp(self, effect: object) -> dict[str, str]:
+    def _stamp(self, effect: object) -> dict[str, object]:
         """The shipped commit's source and gate-definition digests (#279 PR-2b).
         A request the service did not apply names no shipped head; a head the
         stamper cannot read is recorded as unreadable - both read UNKNOWN in
-        the grader, never as a digest."""
+        the grader, never as a digest. A MERGE also stamps the commit it put on
+        the base branch: a squash merges the head with the CURRENT base, so a
+        base-side change made after the gate would otherwise ship unstamped
+        (counter-model review)."""
         head = effect.get("head_oid") if isinstance(effect, Mapping) else None
         if not isinstance(head, str) or not head:
             return {"status": "no-head"}
+        stamp: dict[str, object] = {"status": "stamped", **self._read_stamp(head)}
+        merged = effect.get("merge_commit") if isinstance(effect, Mapping) else None
+        if isinstance(merged, str) and merged:
+            stamp["merge"] = {"status": "stamped", **self._read_stamp(merged)}
+        if any(isinstance(v, Mapping) and v.get("status") == "unreadable" for v in (stamp, stamp.get("merge"))):
+            stamp["status"] = "unreadable"
+        return stamp
+
+    def _read_stamp(self, commit: str) -> dict[str, object]:
         assert self._ship_stamper is not None
         try:
-            stamp = dict(self._ship_stamper(head))
+            return dict(self._ship_stamper(commit))
         except Exception as exc:  # noqa: BLE001 - an unreadable stamp is recorded, never a digest
-            return {"status": "unreadable", "commit": head, "reason": f"{type(exc).__name__}: {exc}"}
-        return {"status": "stamped", **stamp}
+            return {"status": "unreadable", "commit": commit, "reason": f"{type(exc).__name__}: {exc}"}
 
     @staticmethod
     def _schema_problem(request: Mapping[str, object]) -> str | None:
