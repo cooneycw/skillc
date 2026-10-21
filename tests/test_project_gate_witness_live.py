@@ -30,7 +30,7 @@ import pytest
 from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 from test_codex_guard_live import LIMITS, _trial_image
 from test_codex_guard_live import pytestmark as _live_marks
-from test_make_gate_shim import CELLS, MAKEFILE, SCRIPTS, _err, _goldens, _out, declaration
+from test_make_gate_shim import CELLS, MAKEFILE, SCRIPTS, _goldens, declaration, stub
 
 from skillc import attempt_guard as ag
 from skillc import docker_backend as d
@@ -83,8 +83,7 @@ def _run(image: str) -> None:
         _args, codes = CELLS["test-fails"]
         surface: dict[str, object] = {"Makefile": MAKEFILE}
         for sid, script in SCRIPTS.items():
-            surface[script] = (f"import sys\nprint({_out(sid).decode()[:-1]!r})\n"
-                               f"print({_err(sid).decode()[:-1]!r}, file=sys.stderr)\nsys.exit({codes[sid]})\n").encode()
+            surface[script] = stub(sid, codes[sid]).encode()
         backend.install(handle, surface)
         holder["w"] = GateWitness(
             declared_gates={pg.GATE: [pg.REAL_MAKE, "check"]},
@@ -101,7 +100,7 @@ def _run(image: str) -> None:
 
         # 2. the agent's own `make check`
         reply = backend.exec_in_attempt(handle, ["make", "check"], LIMITS, env=agent_env, cwd=d.CONTAINER_WORKSPACE)
-        golden = _goldens()["test-fails"]
+        golden = _goldens()["composite"]["test-fails"]
         assert reply.reason == "exited", reply
         assert ((reply.stdout or b"").decode(), (reply.stderr or b"").decode(), reply.exit_code) == (
             golden["stdout"], golden["stderr"], golden["exit"])

@@ -10,37 +10,41 @@ per stage, controller-captured, with absence UNKNOWN. Design: #287
 issuecomment-6251092328 (skillc-worker-C), orchestrator rulings in its
 section 7, re-read against the code in #508.
 
-THE GATE IS DECLARED, NEVER DISCOVERED. `ProjectGate` holds the stages
-(id, argv, the recipe line make echoes, and its line in the Makefile) and the
-Makefile's pinned digest. Nothing is read from the candidate's Makefile except
-that digest: a Makefile that DRIFTED from it is still run, by the real make,
-so the agent sees real output, but the run's stages are `unavailable`.
+THE GATE IS DECLARED, NEVER DISCOVERED. `ProjectGate` holds the goal, the
+stage targets in order, and the Makefile's pinned digest.
 
-ONE CONTROLLER EXEC PER STAGE, NEVER A RUNNER SCRIPT IN THE ATTEMPT. A
-harness script that ran the stages and printed one result document was
-rejected (#508 gate, orchestrator ruling A): the stages run the subject's own
-`ci/*.py` as the candidate uid, and that code can write to its parent's
-stdout through `/proc/<ppid>/fd/1`, forging the document. Here each stage's
-outcome is the exit code `exec_in_attempt()` returned to the CONTROLLER, and
-the subject's output is only ever forwarded, never parsed.
+ONE CONTROLLER EXEC OF THE REAL MAKE PER STAGE. For each requested stage the
+controller runs `/usr/bin/make <stage>` itself, and the stage's outcome is the
+exit status THAT exec returned to the controller: 0 `passed`, 2 (make's
+"a recipe failed") `failed`, anything else `null` with its reason. The agent
+receives exactly what those make runs printed. Two designs were rejected:
 
-STOP-ON-FIRST-FAILURE, as GNU make without `-k`: stages run in the requested
-order; the first nonzero exit is `failed` and every later requested stage is
-`not-run`. A stage that did not exit normally (timeout, cancellation) has a
-`null` outcome with its reason, and later stages are `not-run`.
+  - a harness runner script in the attempt, printing one result document
+    (#508 gate, ruling A): the stage code runs as the candidate uid and can
+    write to its parent's stdout through `/proc/<ppid>/fd/1`, forging it;
+  - the controller running each recipe's argv directly (counter-model review,
+    pass 2): make is part of the gate. It sets the recipe environment
+    (`MAKELEVEL`, `MAKEFLAGS`), skips a target whose file exists, and reports
+    a signal death in its own words, so a recipe run without it can pass
+    where make fails, and the reply would not be make's.
 
-THE REPLY IS MAKE'S. `render()` reproduces what GNU make 4.3 prints for these
-plain rules: each recipe line echoed on stdout before it runs, the stage's own
-stdout and stderr, and on a failure `make: *** [<Makefile>:<line>: <id>] Error
-<n>` on stderr with exit 2. `tests/test_make_gate_shim.py` holds goldens
-captured from the real make, one per outcome cell, and regenerates them where
-make exists.
+MAKE MUST BE ABOUT TO RUN EXACTLY THE DECLARED RECIPES, checked before EVERY
+stage (`_precondition`), since an earlier stage can change the tree: only the
+declared makefile name exists among the names GNU make reads
+(`GNUmakefile`, `makefile`, `Makefile`), its digest is the declared one, and
+no file is named after the goal or a remaining stage (make would call it up
+to date). Otherwise the rest of the invocation is run by the real make as one
+exec, so the agent still sees make's own output, and the run's stages are
+`unavailable`. A probe that did not itself exit is returned to the witness as
+is, so an unconfirmed stop is never erased.
+
+STOP-ON-FIRST-FAILURE, as make without `-k`: the first stage that does not
+pass ends the run, and every later requested stage is `not-run`.
 
 WHAT IS FORWARDED (`ProjectGate.resolve`): `make`, `make <goal>`, and `make`
-with distinct declared stage ids. Anything else - other targets, flags,
-variable assignments, a repeated id - is NOT a gate invocation: the shim runs
-the real make itself and logs it as subject-reported, never evidence
-(ruling 1).
+with distinct declared stage ids, with none of make's own environment set
+(`MAKE_ENV_VARS`). Anything else is NOT a gate invocation: the shim runs the
+real make itself and logs it as subject-reported, never evidence (ruling 1).
 
 Stdlib only.
 """
@@ -50,7 +54,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -64,14 +68,15 @@ GATE = "project-check"
 #: PATH only (its own `docker exec`); controller execs never carry it.
 SHIM_DIR = "/opt/skillc-harness/make-shim"
 SHIM_NAME = "make"
-#: The image's real make, which the shim and a drifted run both call.
+#: The image's real make: the controller runs it for every stage, and the
+#: shim for every pass-through.
 REAL_MAKE = "/usr/bin/make"
 #: The channel op the shim uses to log a pass-through invocation, the stream
 #: that log is stored as, and its bound.
 PASSTHROUGH_OP = "make_passthrough"
 PASSTHROUGH_STREAM = "make-passthrough"
 MAX_PASSTHROUGH_LOG = 256
-#: Exit status GNU make reports when a recipe failed.
+#: GNU make's exit status when a recipe failed (or was killed).
 MAKE_FAILURE_EXIT = 2
 #: The names GNU make looks for, in its own order (counter-model review): a
 #: higher-priority one beside the declared Makefile is the gate make would run.
@@ -83,6 +88,8 @@ MAKE_ENV_VARS = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL"
 
 _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+#: Prints each argument that names an existing path (or a dangling link).
+_LIST_PRESENT = 'for f in "$@"; do if [ -e "$f" ] || [ -L "$f" ]; then printf "%s\\n" "$f"; fi; done'
 
 
 class Refused(ValueError):
@@ -90,18 +97,9 @@ class Refused(ValueError):
 
 
 @dataclass(frozen=True)
-class Stage:
-    id: str
-    argv: tuple[str, ...]
-    #: The recipe line exactly as the Makefile writes it (make echoes it).
-    recipe: str
-    #: Its 1-based line in the Makefile (make names it on a failure).
-    line: int
-
-
-@dataclass(frozen=True)
 class ProjectGate:
-    stages: tuple[Stage, ...]
+    #: The stage targets, in the order the goal runs them.
+    stages: tuple[str, ...]
     makefile_sha256: str
     makefile: str = "Makefile"
     #: The default goal, run by a bare `make`: every stage in order.
@@ -109,8 +107,8 @@ class ProjectGate:
 
     @classmethod
     def from_declaration(cls, raw: object) -> ProjectGate:
-        """`{"makefile": {"path", "sha256"}, "goal", "stages": [{"id", "argv",
-        "recipe", "line"}]}`, refused unless every field is well formed."""
+        """`{"makefile": {"path", "sha256"}, "goal", "stages": [id, ...]}`,
+        refused unless every field is well formed."""
         if not isinstance(raw, Mapping):
             raise Refused("project_gate must be an object")
         extra = set(raw) - {"makefile", "goal", "stages"}
@@ -128,29 +126,15 @@ class ProjectGate:
         goal = raw.get("goal", "check")
         if not isinstance(goal, str) or not _ID.fullmatch(goal):
             raise Refused("project_gate.goal must be a target name")
-        entries = raw.get("stages")
-        if not isinstance(entries, list) or not entries:
+        stages = raw.get("stages")
+        if not isinstance(stages, list) or not stages:
             raise Refused("project_gate.stages must be a non-empty list")
-        stages: list[Stage] = []
-        for entry in entries:
-            if not isinstance(entry, Mapping) or set(entry) != {"id", "argv", "recipe", "line"}:
-                raise Refused("each project_gate stage must be exactly {id, argv, recipe, line}")
-            sid, argv, recipe, line = entry["id"], entry["argv"], entry["recipe"], entry["line"]
+        for sid in stages:
             if not isinstance(sid, str) or not _ID.fullmatch(sid) or sid == goal:
                 raise Refused(f"stage id {sid!r} must be a target name other than the goal")
-            if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
-                raise Refused(f"stage {sid!r}: argv must be a non-empty list of non-empty strings")
-            if not isinstance(recipe, str) or not recipe or "\n" in recipe:
-                raise Refused(f"stage {sid!r}: recipe must be one non-empty line")
-            if not isinstance(line, int) or isinstance(line, bool) or line < 1:
-                raise Refused(f"stage {sid!r}: line must be a positive integer")
-            stages.append(Stage(sid, tuple(argv), recipe, line))
-        if len({s.id for s in stages}) != len(stages):
+        if len(set(stages)) != len(stages):
             raise Refused("project_gate stage ids must be distinct")
         return cls(tuple(stages), digest, path, goal)
-
-    def stage(self, sid: str) -> Stage:
-        return next(s for s in self.stages if s.id == sid)
 
     def resolve(self, args: object) -> tuple[str, ...] | None:
         """The stage ids a `make` argv asks for, or None when it is not a
@@ -158,32 +142,10 @@ class ProjectGate:
         if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
             return None
         if args in ([], [self.goal]):
-            return tuple(s.id for s in self.stages)
-        ids = {s.id for s in self.stages}
-        if args and all(a in ids for a in args) and len(set(args)) == len(args):
+            return self.stages
+        if args and all(a in self.stages for a in args) and len(set(args)) == len(args):
             return tuple(args)
         return None
-
-
-def render(gate: ProjectGate, ran: Sequence[tuple[Stage, ExecuteResult]]) -> tuple[bytes, bytes, int | None]:
-    """GNU make's stdout, stderr and exit status for the stages that ran, in
-    order. The exit status is None when the last stage did not exit (make
-    itself would have been killed with it)."""
-    out, err = bytearray(), bytearray()
-    for stage, result in ran:
-        out += stage.recipe.encode("utf-8") + b"\n"
-        out += result.stdout or b""
-        err += result.stderr or b""
-        if result.reason != "exited":
-            return bytes(out), bytes(err), None
-        if result.exit_code != 0:
-            err += f"make: *** [{gate.makefile}:{stage.line}: {stage.id}] Error {result.exit_code}\n".encode()
-            return bytes(out), bytes(err), MAKE_FAILURE_EXIT
-    return bytes(out), bytes(err), 0
-
-
-#: Prints each argument that names an existing path (or a dangling link).
-_LIST_PRESENT = 'for f in "$@"; do if [ -e "$f" ] || [ -L "$f" ]; then printf "%s\\n" "$f"; fi; done'
 
 
 class _Backend(Protocol):
@@ -193,17 +155,23 @@ class _Backend(Protocol):
                         confine_root: str | None = None) -> ExecuteResult: ...
 
 
-def _combined(results: Sequence[ExecuteResult], stdout: bytes, stderr: bytes,
-              exit_code: int | None) -> ExecuteResult:
+def _combined(results: Sequence[ExecuteResult], limits: Limits) -> ExecuteResult:
+    """The make runs, joined into the one reply make would have given: their
+    outputs in order, and the last one's status. The AGGREGATE is bounded like
+    one exec's capture (counter-model review): over the cap it is marked
+    truncated, which the witness refuses, never sliced into an apparently
+    complete reply."""
     last = results[-1]
+    stdout = b"".join(r.stdout or b"" for r in results)
+    stderr = b"".join(r.stderr or b"" for r in results)
     return ExecuteResult(
-        reason=last.reason, exit_code=exit_code, error=last.error, signal=last.signal,
-        stdout_truncated=any(r.stdout_truncated for r in results),
+        reason=last.reason, exit_code=last.exit_code, error=last.error, signal=last.signal,
+        stdout_truncated=any(r.stdout_truncated for r in results) or len(stdout) > limits.max_captured_stdout_bytes,
         stdout_bytes=sum(r.stdout_bytes for r in results),
         stdout_incomplete=any(r.stdout_incomplete or (r.reason == "exited" and r.stdout is None) for r in results),
         stderr_incomplete=any(r.stderr_incomplete for r in results),
         stop_confirmed=last.stop_confirmed, stdout=stdout, stderr=stderr,
-        stderr_truncated=any(r.stderr_truncated for r in results),
+        stderr_truncated=any(r.stderr_truncated for r in results) or len(stderr) > limits.max_captured_stderr_bytes,
     )
 
 
@@ -221,26 +189,24 @@ class StagedRunner:
             return None  # make's own environment changes what it would do
         return self.gate.resolve(request.get("make_args", []))
 
-    def _precondition(self, backend: _Backend, handle: object, limits: Limits, stages: Sequence[str], *,
+    def _precondition(self, backend: _Backend, handle: object, limits: Limits, remaining: Sequence[str], *,
                       cwd: str | None, env: Mapping[str, str] | None,
                       confine_root: str | None) -> ExecuteResult | str | None:
-        """None when make would run exactly the declared recipes; else why not
-        (a string), or the probe's own result when it did not exit - so an
-        unconfirmed stop reaches the witness instead of being erased."""
+        """None when make would run exactly the declared recipes for
+        `remaining`; else why not (a string), or the probe's own result when it
+        did not exit - so an unconfirmed stop reaches the witness."""
         order = DEFAULT_MAKEFILES[:DEFAULT_MAKEFILES.index(self.gate.makefile) + 1]
-        names = [*order, self.gate.goal, *stages]
-        probe = backend.exec_in_attempt(
-            handle, ["/bin/sh", "-c", _LIST_PRESENT, "sh", *names], limits, cwd=cwd, env=env,
-            confine_root=confine_root)
+        probe = backend.exec_in_attempt(handle, ["/bin/sh", "-c", _LIST_PRESENT, "sh", *order, self.gate.goal,
+                                                 *remaining], limits, cwd=cwd, env=env, confine_root=confine_root)
         if probe.reason != "exited":
             return probe
         if probe.exit_code != 0 or probe.stdout is None or probe.stdout_truncated or probe.stdout_incomplete:
             return "the gate's working directory could not be listed"
         present = probe.stdout.decode("utf-8", errors="replace").splitlines()
+        if self.gate.makefile not in present:
+            return f"the gate definition {self.gate.makefile!r} is absent"
         if present != [self.gate.makefile]:
             shadow = [n for n in present if n != self.gate.makefile]
-            if self.gate.makefile not in present:
-                return f"the gate definition {self.gate.makefile!r} is absent"
             return (f"{shadow!r} exist(s) beside {self.gate.makefile!r}: make would read another makefile or "
                     "treat a target as up to date")
         read = backend.exec_in_attempt(handle, ["/bin/cat", "--", self.gate.makefile], limits,
@@ -257,48 +223,36 @@ class StagedRunner:
     def run(self, backend: _Backend, handle: object, limits: Limits, stages: Sequence[str], *,
             cwd: str | None, env: Mapping[str, str] | None, confine_root: str | None,
             make_args: Sequence[str]) -> tuple[ExecuteResult, Mapping[str, object]]:
-        """The run's combined result (make's rendered reply) and its stage
-        capture. First, make must be about to run exactly the declared recipes
-        (`_precondition`): otherwise the real make runs as one exec, with every
-        stage `unavailable`, and a probe that did not exit is returned as is."""
-        drift = self._precondition(backend, handle, limits, stages, cwd=cwd, env=env, confine_root=confine_root)
-        if isinstance(drift, ExecuteResult):
-            return drift, unavailable(f"the gate precondition probe did not exit ({drift.reason})")
-        if drift is not None:
-            result = backend.exec_in_attempt(handle, [REAL_MAKE, *make_args], limits,
-                                             cwd=cwd, env=env, confine_root=confine_root)
-            return result, unavailable(drift)
-        ran: list[tuple[Stage, ExecuteResult]] = []
+        """The run's combined result (make's own reply) and its stage capture."""
+        kwargs: dict[str, Any] = {"cwd": cwd, "env": env, "confine_root": confine_root}
+        results: list[ExecuteResult] = []
         outcomes: dict[str, dict[str, object]] = {}
-        stopped: str | None = None
-        for sid in stages:
-            stage = self.gate.stage(sid)
-            if stopped is not None:
-                outcomes[sid] = {"outcome": "not-run", "reason": f"never reached: the run stopped after {stopped}"}
-                continue
-            result = backend.exec_in_attempt(handle, list(stage.argv), limits,
-                                             cwd=cwd, env=env, confine_root=confine_root)
-            ran.append((stage, result))
-            if result.reason != "exited":
-                outcomes[sid] = {"outcome": None, "reason": f"stage did not exit normally ({result.reason})"}
-                stopped = sid
-            elif result.exit_code == 0:
+        for index, sid in enumerate(stages):
+            why = self._precondition(backend, handle, limits, stages[index:], **kwargs)
+            if isinstance(why, ExecuteResult):
+                return _combined([*results, why], limits), unavailable(
+                    f"the gate precondition probe did not exit ({why.reason})")
+            if why is not None:
+                # The real make runs the rest of the invocation as asked.
+                rest = [*make_args] if index == 0 else [*stages[index:]]
+                results.append(backend.exec_in_attempt(handle, [REAL_MAKE, *rest], limits, **kwargs))
+                return _combined(results, limits), unavailable(why)
+            result = backend.exec_in_attempt(handle, [REAL_MAKE, sid], limits, **kwargs)
+            results.append(result)
+            if result.reason == "exited" and result.exit_code == 0:
                 outcomes[sid] = {"outcome": "passed", "reason": None}
-            else:
+                continue
+            if result.reason != "exited":
+                outcomes[sid] = {"outcome": None, "reason": f"make did not exit normally ({result.reason})"}
+            elif result.exit_code == MAKE_FAILURE_EXIT:
                 outcomes[sid] = {"outcome": "failed", "reason": None}
-                stopped = sid
-        stdout, stderr, exit_code = render(self.gate, ran)
+            else:
+                outcomes[sid] = {"outcome": None, "reason": f"make exited {result.exit_code}, not 0 or 2"}
+            for later in stages[index + 1:]:
+                outcomes[later] = {"outcome": "not-run", "reason": f"never reached: the run stopped at {sid}"}
+            break
         capture: dict[str, object] = {"status": "captured", "plan": GATE, "stages": outcomes}
-        combined = _combined([r for _s, r in ran], stdout, stderr, exit_code)
-        # The AGGREGATE is bounded like one exec's capture (counter-model
-        # review): over the cap it is marked truncated, which the witness
-        # refuses, never sliced into an apparently complete reply.
-        if len(stdout) > limits.max_captured_stdout_bytes or len(stderr) > limits.max_captured_stderr_bytes:
-            combined = replace(combined, stdout_truncated=combined.stdout_truncated
-                               or len(stdout) > limits.max_captured_stdout_bytes,
-                               stderr_truncated=combined.stderr_truncated
-                               or len(stderr) > limits.max_captured_stderr_bytes)
-        return combined, capture
+        return _combined(results, limits), capture
 
 
 # --- the overlay ----------------------------------------------------------------

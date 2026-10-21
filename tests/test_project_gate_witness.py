@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_make_gate_shim import SCRIPTS, SHIM, _StageBackend, declaration
+from test_make_gate_shim import SHIM, _StageBackend, declaration
 
-from skillc import agent_trial, trial
+from skillc import agent_trial, verify
 from skillc import fixture_overlay as fo
 from skillc import project_gate as pg
 from skillc.backend import ExecuteResult, Limits
@@ -61,7 +61,7 @@ def test_a_witnessed_make_check_records_the_controllers_stage_outcomes() -> None
     assert run["stages"]["status"] == "captured" and run["stages"]["cwd"] == "/work"
     assert {k: v["outcome"] for k, v in run["stages"]["stages"].items()} == {
         "lint": "passed", "test": "failed", "typecheck": "not-run"}
-    assert ["python3", SCRIPTS["typecheck"]] not in backend.calls  # stopped at the first failure
+    assert [pg.REAL_MAKE, "typecheck"] not in backend.calls  # stopped at the first failure
 
 
 def test_a_non_gate_invocation_creates_no_run_and_is_never_refused() -> None:
@@ -104,28 +104,28 @@ def _session() -> agent_trial._WitnessSession:
 
 
 def test_the_pass_through_log_never_reaches_what_grading_reads() -> None:
-    """The red the gate asked for: what grading receives is the gate-witness
-    record (verify builds its trusted envelope from it alone); the shim's
-    subject-reported log must not be in it."""
+    """The red the gate asked for, through verify's OWN envelope builder: what
+    grading receives must not hold the shim's subject-reported log. The
+    control below shows the same scan finds the marker once it is in."""
     session = _session()
     assert session.decide({"op": pg.PASSTHROUGH_OP, "argv": [MARKER], "cwd": "/work", "exit_code": 0,
                            "why": "not-a-gate-invocation"}) == {"logged": True}
     assert session.passthrough_log[0]["argv"] == [MARKER] and session.passthrough_log[0]["subject_reported"]
     assert session.witness is not None
     record = session.witness.finalize("a-1")
-    envelope = trial.canonical({"witness": json.loads(record.to_json_bytes()), "graded_tree_digest": "x"})
-    assert MARKER.encode() not in record.to_json_bytes()
-    assert MARKER.encode() not in envelope
-    # The scan can find it: the same canonical form, with the log in it.
-    assert MARKER.encode() in trial.canonical({"log": session.passthrough_log})
+    files = [("src/a.py", b"x", False)]
+    assert MARKER.encode() not in verify.witness_envelope(record, None, files)
+    # The negative control: an envelope that DID carry the log is caught.
+    leaked = verify.witness_envelope(record, {"make_passthrough": session.passthrough_log}, files)
+    assert MARKER.encode() in leaked
 
 
-def test_the_envelope_is_built_from_the_witness_record_alone() -> None:
-    """Guards the premise above: if verify ever widened the envelope beyond
-    the witness record and the extras, this would need a new red."""
-    source = (ROOT / "skillc" / "verify.py").read_text()
-    assert '"witness": json.loads(gate_witness.to_json_bytes()),' in source
-    assert "passthrough" not in source
+def test_grading_builds_its_envelope_with_witness_envelope() -> None:
+    """Guards the premise of the red above: the witnessed grading path calls
+    `witness_envelope`, so testing that function tests what grading reads."""
+    tree = ast.parse((ROOT / "skillc" / "verify.py").read_text())
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "witness_envelope"]
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("request_", [
@@ -337,14 +337,14 @@ def test_a_staged_reply_carries_make_s_bytes_exactly() -> None:
         def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
                             stdin: bytes | None = None, cwd: str | None = None,
                             env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
-            if argv[-1] == SCRIPTS["lint"]:
+            if argv == [pg.REAL_MAKE, "lint"]:
                 return ExecuteResult(reason="exited", exit_code=0, stdout=b"\xff\xfe raw\n", stderr=b"")
             return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
 
     witness, _backend = _witness({"lint": 0, "test": 0, "typecheck": 0})
     witness._backend = Binary({"lint": 0, "test": 0, "typecheck": 0})  # type: ignore[assignment]
     reply = witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": "/work", "make_args": ["lint"]})
-    assert base64.b64decode(str(reply["stdout_b64"])) == b"python3 ci/lint.py\n\xff\xfe raw\n"
+    assert base64.b64decode(str(reply["stdout_b64"])) == b"\xff\xfe raw\n"
 
 
 def test_an_oversized_aggregate_is_refused_by_the_witness_never_sliced() -> None:
@@ -352,7 +352,7 @@ def test_an_oversized_aggregate_is_refused_by_the_witness_never_sliced() -> None
         def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
                             stdin: bytes | None = None, cwd: str | None = None,
                             env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
-            if argv[-1] in SCRIPTS.values():
+            if argv[0] == pg.REAL_MAKE:
                 return ExecuteResult(reason="exited", exit_code=0, stdout=b"x" * 200, stderr=b"")
             return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
 
