@@ -646,7 +646,10 @@ def guard_entry(record: Mapping[str, object], obs: Mapping[str, object], declare
     models = [str(r["model"]) if r.get("model") is not None else UNKNOWN for r in rows]
     totals = [_session_tokens(r.get("token_usage")) for r in rows]
     nested: dict[str, object] = dict(guard) if isinstance(guard, Mapping) else {}
-    bypassed = bool(nested.get("bypass"))
+    # A bypass, or any guard record that stops (suspected, unknown, ancestry
+    # unknown), leaves room for a session no transcript holds: the total is
+    # then UNKNOWN, and what was measured is reported beside it.
+    bypassed = bool(nested.get("bypass")) or bool(nested.get("stop"))
     others = {m for m in models if m != declared}
     if others:
         prior = nested.get("other_models")
@@ -655,6 +658,7 @@ def guard_entry(record: Mapping[str, object], obs: Mapping[str, object], declare
         "models_all_sessions": models,
         "tokens_all_sessions": UNKNOWN if bypassed or any(t is None for t in totals)
         else sum(t for t in totals if t is not None),
+        "tokens_measured_sessions": sum(t for t in totals if t is not None),
     }
     if nested:
         out["nested_codex"] = nested
@@ -1495,7 +1499,9 @@ def build_report(
             **guard_entry(record, obs, declared_model),
         })
         nested_entry = entries[-1].get("nested_codex")
-        if isinstance(nested_entry, Mapping) and nested_entry.get("other_models"):
+        if isinstance(nested_entry, Mapping) and any(nested_entry.get(k) for k in ("other_models", "stop", "block")):
+            # #500 (counter-model review): an attempt whose containment is not
+            # clean is never eligible, whichever model a nested launch named.
             entries[-1]["model_eligible"] = False
     report: dict[str, object] = {
         "version": 2 if endpoint is not None else 1,

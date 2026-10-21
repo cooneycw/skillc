@@ -120,9 +120,10 @@ class AttemptGuard:
         nested = self.record()["nested"]
         invocations = (observation.get("transcript_codex_invocations")
                        if isinstance(observation, Mapping) else None)
+        files = observation.get("transcript_files_found") if isinstance(observation, Mapping) else None
         return {"nested": nested, "failure": self.failure, "transcript_invocations": invocations,
                 **assess(nested, invocations, declared_model, failure=self.failure,
-                         nested_policy=self.nested_policy)}
+                         nested_policy=self.nested_policy, sessions=files if isinstance(files, int) else None)}
 
 
 def credit_block(report: Mapping[str, Any] | None) -> str | None:
@@ -148,7 +149,8 @@ def containment_trigger(record: Mapping[str, Any]) -> str | None:
 # ------------------------------------------------------------------ assessment
 
 def assess(nested: Mapping[str, Any] | None, invocations: object, declared_model: str | None, *,
-           failure: str | None = None, nested_policy: str | None = CALIBRATION_POLICY) -> dict[str, Any]:
+           failure: str | None = None, nested_policy: str | None = CALIBRATION_POLICY,
+           sessions: int | None = None) -> dict[str, Any]:
     """The guard record and the transcript backstop, read together.
 
     - `block`: why the attempt is not credited (`codex_guard.credit_block`
@@ -166,6 +168,10 @@ def assess(nested: Mapping[str, Any] | None, invocations: object, declared_model
     """
     hits = [h for h in invocations if isinstance(h, Mapping)] if isinstance(invocations, list) else None
     bypass: list[str] = []
+    if sessions is not None and sessions > 1:
+        # A calibration attempt is one top-level session: another one is a
+        # client the harness did not start (counter-model review, pass 1).
+        bypass.append(f"{sessions} transcript sessions in one attempt")
     other_models: list[str] = []
     if hits is None:
         bypass.append("the transcript's codex invocations were not scanned")
@@ -174,7 +180,9 @@ def assess(nested: Mapping[str, Any] | None, invocations: object, declared_model
         if isinstance(nested, Mapping):
             refused = int(nested.get("confirmed") or 0) + int(nested.get("ancestry_unknown") or 0)
         bare = [h for h in hits if h.get("guarded") is True]
-        bypass += [f"codex by path, past the guard: {h.get('program')}" for h in hits if h.get("guarded") is not True]
+        bypass += ["a tool call ran a command the scan could not read" if h.get("unreadable")
+                   else f"codex by path, past the guard: {h.get('program')}"
+                   for h in hits if h.get("guarded") is not True]
         if len(bare) > refused:
             bypass.append(f"{len(bare)} bare codex invocation(s) in the transcript, {refused} refused by the guard")
         if declared_model is not None:
@@ -204,15 +212,95 @@ GUARDED_PATHS = frozenset({fo.CODEX_GUARD_PATH})
 
 #: A command position: the start of a command, or after a separator, a
 #: subshell or substitution opener, a `-c` string, or a wrapper that runs its
-#: argument as a command.
+#: argument as a command; then any `NAME=value` assignment prefixes.
 _POSITION = (r"(?:^|[;&|(\n`{]|\$\(|(?<!\S)-\w*c\s+['\"]|\bxargs\s+|"
-             r"\b(?:exec|nohup|sudo|time|command)\s+|\btimeout\s+\S+\s+|\benv\s+(?:\S+=\S*\s+)*)")
+             r"\b(?:exec|nohup|sudo|time|command)\s+|\btimeout\s+\S+\s+|\benv\s+(?:\S+=\S*\s+)*)"
+             r"\s*(?:[A-Za-z_]\w*=\S*\s+)*")
+#: `rest` stops at a separator AND at a substitution or backtick, so a launch
+#: nested inside an outer command's arguments is found at its own position
+#: (counter-model review, pass 1).
 _PROGRAM = re.compile(
-    _POSITION + r"\s*['\"]?(?P<program>(?:node(?:js)?\s+(?:-\S+\s+)*)?(?:\S*/)?codex(?:\.js|\.mjs)?)"
-    r"(?=['\"]?(?:\s|$|;|&|\|))(?P<rest>[^\n;&|]*)")
+    _POSITION + r"['\"]?(?P<program>(?:node(?:js)?\s+(?:-\S+\s+)*)?(?:\S*/)?codex(?:\.js|\.mjs)?)"
+    r"(?=['\"]?(?:\s|$|;|&|\||\)|`))(?P<rest>(?:(?!\$\()[^\n;&|`)])*)")
 _PROBE = re.compile(r"\b(?:command\s+-v|which|type|hash)\s+codex\b")
-_MODEL = re.compile(r"(?:--model|(?<!\S)-m)(?:\s+|=)['\"]?(?P<m>[^\s'\"]+)|-c\s+['\"]?model=['\"]?(?P<c>[^\s'\"]+)")
-_JS_CMD = re.compile(r"\b(?:cmd|command)\s*:\s*(?P<q>[\"'`])(?P<s>(?:\\.|(?!(?P=q)).)*)(?P=q)", re.DOTALL)
+_MODEL_FLAG = re.compile(r"(?:--model|(?<!\S)-m)(?:\s+|=)|(?<!\S)-c\s+")
+_MODEL_VALUE = re.compile(r"['\"]?(?P<m>[^\s'\"]+)")
+_CONFIG_MODEL = re.compile(r"['\"]?model\s*=\s*['\"]?(?P<m>[^\s'\"]+)")
+#: A command key, bare or quoted (`cmd:`, `"cmd":`), with its string literal.
+_JS_CMD = re.compile(r"(?:\b|(?<=[\"']))(?:cmd|command)[\"']?\s*:\s*(?P<q>[\"'`])(?P<s>(?:\\.|(?!(?P=q)).)*)(?P=q)",
+                     re.DOTALL)
+#: A tool-call input that runs a command at all.
+_RUNS_COMMAND = re.compile(r"\b(?:exec_command|shell|spawn|execFile|exec)\s*\(")
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
+_EXEC_CONTEXT = re.compile(r"(?<!\S)-\w*c\s*$")
+
+
+def _substitutions(text: str, lo: int, hi: int) -> list[tuple[int, int]]:
+    """`$( ... )` (nesting counted) and backtick spans inside [lo, hi)."""
+    spans: list[tuple[int, int]] = []
+    i = lo
+    while i < hi:
+        if text.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < hi and depth:
+                depth += {"(": 1, ")": -1}.get(text[j], 0)
+                j += 1
+            spans.append((i, j))
+            i = j
+        elif text[i] == "`":
+            j = text.find("`", i + 1, hi)
+            j = hi if j < 0 else j + 1
+            spans.append((i, j))
+            i = j
+        else:
+            i += 1
+    return spans
+
+
+def executable_view(command: str) -> str:
+    """`command` with LITERAL text blanked to spaces, same length: a quoted
+    string, unless it is a `-c` script, keeps only its command substitutions,
+    and so does a heredoc body (a quoted delimiter keeps nothing). So
+    `echo 'codex exec x'` launches nothing, while `sh -c 'codex exec x'` and
+    `"$(codex exec x)"` do (counter-model review, pass 1)."""
+    n = len(command)
+    blank = [False] * n
+
+    def mask(lo: int, hi: int, keep_substitutions: bool) -> None:
+        keep = {k for a, b in (_substitutions(command, lo, hi) if keep_substitutions else []) for k in range(a, b)}
+        for k in range(lo, hi):
+            if k not in keep:
+                blank[k] = True
+
+    for m in _HEREDOC.finditer(command):
+        body = command.find("\n", m.end())
+        if body < 0:
+            continue
+        end = body + 1
+        while end < n:
+            line_end = command.find("\n", end)
+            line_end = n if line_end < 0 else line_end
+            if command[end:line_end].strip() == m.group(2):
+                break
+            end = line_end + 1
+        mask(body + 1, min(end, n), keep_substitutions=not m.group(1))
+    i = 0
+    while i < n:
+        c = command[i]
+        if blank[i]:
+            i += 1
+        elif c == "\\":
+            i += 2
+        elif c in "'\"":
+            j = i + 1
+            while j < n and command[j] != c:
+                j += 2 if c == '"' and command[j] == "\\" else 1
+            if not _EXEC_CONTEXT.search(command[:i]):
+                mask(i + 1, min(j, n), keep_substitutions=c == '"')
+            i = j + 1
+        else:
+            i += 1
+    return "".join(" " if blank[k] and command[k] != "\n" else command[k] for k in range(n))
 
 
 def _js_string(body: str, quote: str) -> str:
@@ -227,10 +315,13 @@ def _js_string(body: str, quote: str) -> str:
     return value if isinstance(value, str) else body
 
 
-def _commands(payload: Mapping[str, Any]) -> list[str]:
-    """Every shell command one tool-call item carries, as text."""
+def _commands(payload: Mapping[str, Any]) -> tuple[list[str], bool]:
+    """Every shell command one tool-call item carries, as text, and whether
+    the item runs a command that could NOT be read - which is never "no
+    launch" (counter-model review, pass 1)."""
     out: list[str] = []
     kind = payload.get("type")
+    unreadable = False
     if kind in ("function_call", "local_shell_call"):
         raw = payload.get("arguments") if kind == "function_call" else payload.get("action")
         args: object = raw
@@ -248,32 +339,50 @@ def _commands(payload: Mapping[str, Any]) -> list[str]:
                     out.append(" ".join(map(str, value)))
         elif isinstance(args, str):
             out.append(args)
+        unreadable = not out
     elif kind == "custom_tool_call":
         source = payload.get("input")
         if isinstance(source, str):
             out.extend(_js_string(m.group("s"), m.group("q")) for m in _JS_CMD.finditer(source))
-    return out
+            unreadable = not out and bool(_RUNS_COMMAND.search(source))
+        else:
+            unreadable = True
+    return out, unreadable
+
+
+def _model(original: str, view: str, lo: int, hi: int) -> str | None:
+    """The model a launch names, located on the executable view (a flag inside
+    literal text is no flag) and read from the original (its value may be quoted)."""
+    for flag in _MODEL_FLAG.finditer(view, lo, hi):
+        if flag.group().lstrip().startswith("-c"):
+            value = _CONFIG_MODEL.match(original, flag.end())
+        else:
+            value = _MODEL_VALUE.match(original, flag.end())
+        if value is not None:
+            return value.group("m")
+    return None
 
 
 def scan_command(command: str) -> list[dict[str, Any]]:
     """Codex invocations at a command position in one command string."""
+    view = executable_view(command)
     hits: list[dict[str, Any]] = []
-    for m in _PROGRAM.finditer(command):
+    for m in _PROGRAM.finditer(view):
         program = m.group("program").strip()
         start = m.start("program")
-        if _PROBE.search(command[max(0, start - 16):m.end("program")]):
+        if _PROBE.search(view[max(0, start - 16):m.end("program")]):
             continue  # `command -v codex`: a lookup, not a launch
         path = program.split()[-1]
         guarded = not program.startswith("node") and ("/" not in path or path in GUARDED_PATHS)
-        model_match = _MODEL.search(m.group("rest"))
-        model = (model_match.group("m") or model_match.group("c")) if model_match else None
-        hits.append({"program": program, "guarded": guarded, "model": model,
-                     "argv_head": (program + m.group("rest"))[:200]})
+        hits.append({"program": program, "guarded": guarded,
+                     "model": _model(command, view, m.start("rest"), m.end("rest")),
+                     "argv_head": command[m.start("program"):m.end("rest")][:200]})
     return hits
 
 
 def scan_codex_invocations(lines: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Every codex invocation the transcript's tool-call commands show."""
+    """Every codex invocation the transcript's tool-call commands show, and an
+    `unreadable` hit for each tool call that ran a command the scan could not read."""
     hits: list[dict[str, Any]] = []
     for line in lines:
         if line.get("type") != "response_item":
@@ -281,7 +390,11 @@ def scan_codex_invocations(lines: Sequence[Mapping[str, Any]]) -> list[dict[str,
         payload = line.get("payload")
         if not isinstance(payload, Mapping):
             continue
-        for command in _commands(payload):
+        commands, unreadable = _commands(payload)
+        if unreadable:
+            hits.append({"program": None, "guarded": False, "model": None, "unreadable": True,
+                         "argv_head": json.dumps(payload)[:200]})
+        for command in commands:
             hits.extend(scan_command(command))
     return hits
 

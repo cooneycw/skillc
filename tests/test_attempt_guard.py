@@ -391,3 +391,95 @@ def test_the_pilot_shape_would_have_stopped_the_schedule() -> None:
     hits = ag.scan_codex_invocations([line])
     verdict = ag.assess({**ZERO}, hits, "gpt-6-astra")
     assert verdict["stop"] and verdict["block"] and verdict["other_models"] == ["gpt-6-sol"]
+
+
+# --------------------------------------------- counter-model review, pass 1
+
+def test_red_a_quoted_command_key_is_read() -> None:
+    line = {"type": "response_item", "payload": {"type": "custom_tool_call", "input":
+            'await tools.exec_command({"cmd": "/usr/local/bin/codex exec --ephemeral --model other hi"})'}}
+    [hit] = ag.scan_codex_invocations([line])
+    assert hit["program"] == "/usr/local/bin/codex" and hit["guarded"] is False and hit["model"] == "other"
+
+
+def test_red_a_command_the_scan_cannot_read_fails_closed() -> None:
+    line = {"type": "response_item", "payload": {"type": "custom_tool_call", "input": "await tools.exec_command(cmd)"}}
+    hits = ag.scan_codex_invocations([line])
+    assert [h.get("unreadable") for h in hits] == [True]
+    verdict = ag.assess(ZERO, hits, "gpt-6-astra")
+    assert "could not read" in str(verdict["stop"]) and verdict["block"]
+
+
+def test_a_tool_call_that_runs_no_command_is_not_unreadable() -> None:
+    line = {"type": "response_item", "payload": {"type": "custom_tool_call", "input": "text('hello')"}}
+    assert ag.scan_codex_invocations([line]) == []
+
+
+@pytest.mark.parametrize("command,programs", [
+    ("FOO=1 /usr/local/bin/codex exec --ephemeral --model other hi", ["/usr/local/bin/codex"]),
+    ("A=1 B=2 codex exec hi", ["codex"]),
+    # The outer, guarded launch must not swallow the inner one by path.
+    ('codex exec "Review $(/usr/local/bin/codex exec --ephemeral hi)"', ["codex", "/usr/local/bin/codex"]),
+    ("cat <<EOF\nx $(codex exec hi)\nEOF", ["codex"]),
+    ("sh -c 'codex exec hi'", ["codex"]),
+])
+def test_red_shell_syntax_does_not_hide_a_launch(command: str, programs: list[str]) -> None:
+    assert [h["program"] for h in ag.scan_command(command)] == programs
+
+
+@pytest.mark.parametrize("command", [
+    "echo 'example; codex exec --model other hi'",
+    "cat <<'EOF'\ncodex exec --model other hi\nEOF",
+    "git commit -m 'codex exec run'",
+    'printf "%s\\n" "codex exec --model other"',
+])
+def test_red_quoted_literal_text_is_not_a_launch(command: str) -> None:
+    assert ag.scan_command(command) == []
+
+
+def test_a_model_flag_inside_the_prompt_is_not_the_launch_s_model() -> None:
+    [hit] = ag.scan_command("codex exec --ephemeral --model 'gpt-6-sol' 'Review --model fake'")
+    assert hit["model"] == "gpt-6-sol"
+
+
+def test_red_an_extra_transcript_session_stops_the_schedule() -> None:
+    verdict = ag.assess(ZERO, [], "gpt-6-astra", sessions=2)
+    assert "2 transcript sessions" in str(verdict["stop"]) and verdict["block"]
+    assert ag.assess(ZERO, [], "gpt-6-astra", sessions=1)["stop"] is None
+
+
+def test_red_a_same_model_bypass_is_ineligible_and_its_tokens_unknown() -> None:
+    record = {"codex_guard": {"nested": ZERO, "bypass": ["codex by path"], "other_models": [],
+                              "stop": "nested codex past the guard", "block": "not credited"}}
+    obs = {"run_metadata": {"model": "gpt-6-astra", "token_usage": {"total_tokens": 100}}}
+    out = cr.guard_entry(record, obs, "gpt-6-astra")
+    assert out["tokens_all_sessions"] == cr.UNKNOWN and out["tokens_measured_sessions"] == 100
+
+
+def test_red_a_suspected_launch_leaves_the_token_total_unknown() -> None:
+    suspected = {**ZERO, "status": "observed", "top_level": 2, "suspected": 1}
+    verdict = ag.assess(suspected, [], "gpt-6-astra")
+    record = {"codex_guard": {"nested": suspected, **verdict}}
+    obs = {"run_metadata": {"model": "gpt-6-astra", "token_usage": {"total_tokens": 100}}}
+    assert cr.guard_entry(record, obs, "gpt-6-astra")["tokens_all_sessions"] == cr.UNKNOWN
+
+
+def test_red_a_stopped_attempt_is_never_model_eligible(tmp_path: Path) -> None:
+    """The report revokes eligibility on any unclean containment, not only on
+    another model's name (counter-model review, pass 1)."""
+    import test_calibration_outcome_endpoint as ep
+
+    experiment, schedule = ep._planned(tmp_path)
+    outcomes = ep._outcomes(schedule)
+    for outcome in outcomes:
+        outcome.record["observation"] = {"run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high",
+                                                          "token_usage": {"total_tokens": 10}}}
+    outcomes[0].record["codex_guard"] = {"nested": ZERO, "bypass": ["codex by path"], "other_models": [],
+                                         "stop": "nested codex past the guard", "block": "not credited"}
+    outcomes[1].record["codex_guard"] = {"nested": REFUSED_ONE, "bypass": [], "other_models": [],
+                                         "stop": None, "block": None}
+    report = ep._report(experiment, outcomes)
+    rows = {row["attempt_id"]: row for row in report["attempts"]}
+    assert rows[outcomes[0].scheduled.attempt_id]["model_eligible"] is False
+    assert rows[outcomes[1].scheduled.attempt_id]["model_eligible"] is True
+    assert report["containment_stop"]["at_attempt"] == outcomes[0].scheduled.attempt_id
