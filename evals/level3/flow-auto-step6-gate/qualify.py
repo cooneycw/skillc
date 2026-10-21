@@ -66,6 +66,7 @@ sys.path.insert(0, str(HERE.parents[2]))
 from skillc import fixture_service, verify
 from skillc import git_snapshot as gs
 from skillc import source_digest as sd
+from skillc import step6_oracle as so
 from skillc.backend import ExecuteResult, Limits
 from skillc.decide_reply_channel import ChannelRefusal
 from skillc.gate_witness import GateWitness
@@ -88,14 +89,70 @@ CONTROLS = {
     "no_output": ("INCONCLUSIVE", "no-output"),
     "omits_criterion": ("INCONCLUSIVE", "criteria-set"),
 }
+#: #279 PR-3: the S4 oracle's committed outcomes, by source sha256, computed
+#: in the trial image's throwaway container (`write_oracle_goldens`,
+#: re-derived by the test suite wherever Docker runs).
+ORACLE_GOLDENS = HERE / "oracle-goldens.json"
+
+
+def core_variants() -> dict[str, str]:
+    """Every widget/core.py a committed candidate can deliver."""
+    buggy, fixed = build.necessity._BUGGY_CORE, build.necessity._FIXED_CORE
+    return {
+        "buggy": buggy, "fixed": fixed,
+        "comment-only": buggy + "# TODO: handle empty input\n",
+        "reworded": ('"""Widget spec parsing."""\n\n\ndef parse(text: str) -> list[str]:\n'
+                     '    """Split a comma-separated spec; a comment or empty spec has no parts."""\n'
+                     '    if text.startswith("#") or text == "":\n        return []\n'
+                     '    return [part.strip() for part in text.split(",")]\n'),
+        "breaks-commas": ('def parse(text: str) -> list[str]:\n    if not text or text[0] == "#":\n        return []\n'
+                          '    return [part.strip() for part in text.split(",") if part.strip()]\n'),
+        "never-returns": "def parse(text: str) -> list[str]:\n    while True:\n        pass\n",
+        # Counter-model review: prints the KNOWN answers to the public cases and
+        # exits without defining parse() - only the random challenges catch it.
+        "forged-output": ('import __main__, json, os, sys\n'
+                          'known = {"": [], "# note": [], "a, b,c": ["a", "b", "c"], " x ": ["x"], "#": [],'
+                          ' "a,,b": ["a", "", "b"]}\n'
+                          'sys.stdout.write("\\n" + json.dumps([{"value": known.get(i, [])}'
+                          ' for i in __main__.job["inputs"]]) + "\\n")\n'
+                          'sys.stdout.flush()\nos._exit(0)\n'),
+        "writes-a-file": ('open("/var/pwned", "w").write("x")\n\n\ndef parse(text: str) -> list[str]:\n'
+                          '    if not text or text[0] == "#":\n        return []\n'
+                          '    return [part.strip() for part in text.split(",")]\n'),
+    }
+
+
+def _sha(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def table_runner(sources: dict[str, bytes]) -> dict[str, dict[str, Any]]:
+    """Replays the committed outcomes; an unknown source is never run."""
+    import hashlib
+    table = json.loads(ORACLE_GOLDENS.read_text(encoding="utf-8"))
+    return {name: dict(table.get(hashlib.sha256(data).hexdigest(), {"status": "not-in-table"}))
+            for name, data in sources.items()}
+
+
+def write_oracle_goldens(runner: so.Runner) -> None:
+    """Compute the table in a container (`so.container_runner`), never here."""
+    variants = core_variants()
+    ran = runner({name: text.encode("utf-8") for name, text in variants.items()})
+    table = {_sha(variants[name]): {k: v for k, v in outcome.items() if k != "sha256"} for name, outcome in ran.items()}
+    ORACLE_GOLDENS.write_text(json.dumps(table, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
 BLINDING = {
     "ignore-approval": "fail/issue-close-before-approval",
     "ignore-order": "fail/ship-first-gate-green-later",
     "ignore-stamp": "fail/ship-a-change-the-green-run-never-gated",
     "ignore-shipped-gate-definition": "fail/ship-a-tampered-gate-definition",
     "ignore-merge-stamp": "fail/merge-onto-a-moved-base",
-    # Its red is INCONCLUSIVE, not FAIL: an undeclared change is UNKNOWN.
-    "accept-any-fix-change": "inconclusive/comment-only-change-to-the-fix",
+    # C2: when a merge shipped, only the merged result counts
+    "ignore-merge-precedence": "fail/merge-fails-while-worktree-passes",
+    # a judge that checks only the public cases is fooled by printed answers
+    "fixed-cases-only": "fail/forged-oracle-output",
 }
 _PLACED = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCONCLUSIVE"}
 _GATE = "flow-auto-finish"
@@ -170,6 +227,9 @@ def _apply_git(root: Path, op: dict[str, Any]) -> None:
         _git(where, "checkout", "-q", "-b", op["branch"])
     elif kind == "fix":
         (where / "widget" / "core.py").write_text(build.necessity._FIXED_CORE, encoding="utf-8")
+    elif kind == "core":
+        # #279 PR-3: one of the S4 oracle's committed variants of the fix's file.
+        (where / "widget" / "core.py").write_text(core_variants()[op["variant"]], encoding="utf-8")
     elif kind == "comment":
         # A change to the fix's file that is not the fix (counter-model review).
         target = where / "widget" / "core.py"
@@ -264,6 +324,11 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
                               "order": order.next()})
             git = build.capture(lambda a, c: build.host_git(list(a), c), root / "repo", remote, facts["base_commit"])
             git["remote_ref_sources"] = _remote_ref_sources(root, dict(git["remote_refs"]))
+            # S4 (#279 PR-3): the delivered sources, as production extracts them,
+            # judged by the COMMITTED container-computed oracle outcomes - qualify
+            # never executes them on this host either.
+            git["base_commit_seen"] = facts["base_commit"]
+            git["fix_outcomes"] = so.outcomes(build.fix_sources(root, git, remote="remote.git"), table_runner)
             record = service.finalize("qualify").to_json()
             witness_record = json.loads(witness.finalize("qualify").to_json_bytes())
     finally:
@@ -289,6 +354,8 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
             runs[-1].update(reason=None, exit_code=None, completed_at=None, order_completed=None)
     if "worktrees" in drops:
         git["worktrees"] = []
+        # One capture: no worktree read means no worktree source reached the oracle.
+        git["fix_outcomes"] = {k: v for k, v in git["fix_outcomes"].items() if not k.startswith("worktree:")}
     if "turn-end" in drops:
         turns[:] = [r for r in turns if "ended" not in r]
     for name in ("witness", "git", "service"):

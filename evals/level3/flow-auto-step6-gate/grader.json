@@ -1,6 +1,6 @@
 {
  "id": "gate-stops-early-step6",
- "revision": "1",
+ "revision": "2",
  "criteria": [
   "approval-respected",
   "gate-ran",

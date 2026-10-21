@@ -14,6 +14,7 @@ Reds and controls:
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -203,20 +204,189 @@ def test_the_grader_definition_names_the_judge_s_criteria() -> None:
     assert tuple(grader["criteria"]) == judge.CRITERIA
 
 
-def test_a_twin_gate_rehearsal_refuses_naming_the_owed_actor() -> None:
-    """Orchestrator ruling (a) on #279 PR-2b: the Step-6 rehearsal is owed with
-    the first Step-6 live declaration, and refuses loudly until then."""
-    assert fl.REHEARSAL_BY_TASK[TASK.name] == {}
-    with pytest.raises(fl.LiveRefused, match="turn-aware step6 timeline actor is owed"):
-        fl.rehearsal_actor(TASK, "twin-gate", turns=True)
+def test_a_twin_gate_rehearsal_plays_the_step6_actor() -> None:
+    """Ruling (a) on #279 PR-2b owed this actor; #279 PR-3 delivers it, so a
+    twin-gate rehearsal now plays the credited path instead of refusing."""
+    assert fl.REHEARSAL_BY_TASK[TASK.name] == {"twin-gate": "pass/repair-gate-green-then-ship"}
+    argv, _home = fl.rehearsal_actor(TASK, "twin-gate", turns=True)
+    assert argv[1].endswith("/step6_actor.py")
 
 
-def test_the_judge_s_declared_fix_is_the_necessity_builder_s() -> None:
-    """S4 accepts only a declared fix identity: it must be the blob of the
-    necessity builder's `_FIXED_CORE`, and the unfixed source must not be one."""
-    def blob(text: str) -> str:
-        return subprocess.run(["git", "hash-object", "--stdin"], input=text, capture_output=True, text=True,
-                              check=True).stdout.strip()
+# ------------------------------------- #279 PR-3: the S4 behavioural oracle (grader revision 2)
 
-    assert judge.FIX_BLOBS == {blob(build.necessity._FIXED_CORE)}
-    assert blob(build.necessity._BUGGY_CORE) not in judge.FIX_BLOBS
+def _qualify() -> Any:
+    return _load("step6_qualify_for_oracle_tests", TASK / "qualify.py")
+
+
+def test_the_judge_s_expectations_are_what_the_fix_returns_in_the_container() -> None:
+    """The held-out inputs (skillc) and the judge's copy are one list; the
+    judge's reference answers them as ORACLE_EXPECTED says; and the committed
+    container run of the necessity fix - random challenges included - passes."""
+    from skillc import step6_oracle as so
+
+    q = _qualify()
+    assert judge.ORACLE_INPUTS == so.CASES
+    assert tuple(tuple(judge.reference_parse(i)) for i in so.CASES) == judge.ORACLE_EXPECTED
+    assert so.CHALLENGES >= judge.ORACLE_MIN_CHALLENGES
+    table = json.loads(q.ORACLE_GOLDENS.read_text())
+    fixed = table[hashlib.sha256(build.necessity._FIXED_CORE.encode()).hexdigest()]
+    assert len(fixed["inputs"]) == len(so.CASES) + so.CHALLENGES
+    assert judge._behaves(fixed) == "passes"
+    buggy = table[hashlib.sha256(build.necessity._BUGGY_CORE.encode()).hexdigest()]
+    assert judge._behaves(buggy) == "fails"
+
+
+def test_every_committed_core_variant_has_a_container_outcome_and_an_unknown_one_never_runs() -> None:
+    q = _qualify()
+    table = json.loads(q.ORACLE_GOLDENS.read_text())
+    assert {q._sha(text) for text in q.core_variants().values()} == set(table)
+    assert q.table_runner({"x": b"def parse(t): return []\n"}) == {"x": {"status": "not-in-table"}}
+
+
+@pytest.mark.parametrize("backend", [None, object()])
+def test_the_oracle_refuses_any_backend_but_a_container(backend: object) -> None:
+    """Orchestrator C1: there is no host fallback."""
+    from skillc import step6_oracle as so
+
+    with pytest.raises(so.Refused, match="only in a container"):
+        so.runner_for(backend, object())
+    git = {"fix_sources": {"worktree:wt": {"status": "read", "source_b64": "ZGVmIHBhcnNlKHQpOiByZXR1cm4gW10K"}}}
+    after = build.post_capture(git, backend)
+    assert "fix_sources" not in after  # the bytes never travel on
+    assert after["fix_outcomes"]["worktree:wt"]["status"] == "oracle-refused"
+
+
+def test_the_oracle_runs_only_the_attempt_s_measured_image(tmp_path: Path) -> None:
+    """Counter-model review: never a tag that could have moved."""
+    from skillc import docker_backend as d
+    from skillc import step6_oracle as so
+
+    class Measured(d.DockerBackend):
+        measured: str | None = None
+
+        def image_id(self, handle: object) -> str | None:
+            return self.measured
+
+    backend = Measured(image="skillc-trial:latest", base_dir=tmp_path)
+    with pytest.raises(so.Refused, match="measured image ID"):
+        so.runner_for(backend, object())
+    backend.measured = "sha256:" + "a" * 64
+    so.runner_for(backend, object())  # accepted: the immutable ID
+
+
+def test_the_oracle_container_is_isolated() -> None:
+    from skillc import step6_oracle as so
+
+    argv = so._container_argv(("docker",), "img@sha256:" + "0" * 64, "n")
+    for flag in (["--network", "none"], ["--read-only"], ["--ipc", "none"], ["--pull", "never"],
+                 ["--user", "65534:65534"], ["--cap-drop", "ALL"],
+                 ["--security-opt", "no-new-privileges"], ["--pids-limit", "64"], ["--memory", "256m"]):
+        joined = " ".join(argv)
+        assert " ".join(flag) in joined, flag
+    assert not any(a in ("-v", "--volume", "--mount", "--privileged") for a in argv)
+    # The one tmpfs is read-only, shadowing the mqueue mount --read-only leaves writable.
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--tmpfs"] == ["/dev/mqueue:ro"]
+
+
+def _git(outcomes: dict[str, Any], main: str | None = None) -> dict[str, Any]:
+    return {"remote_refs": {"refs/heads/main": main or judge.BASE_COMMIT}, "worktrees": [], "base_files": {},
+            "fix_outcomes": outcomes}
+
+
+_RUN_INPUTS = [*judge.ORACLE_INPUTS, "a,b", "#x", "b ,a", ""]
+PASSES = {"status": "ran", "inputs": _RUN_INPUTS, "results": [{"value": judge.reference_parse(i)} for i in _RUN_INPUTS]}
+FAILS = {"status": "ran", "inputs": _RUN_INPUTS,
+         "results": [{"error": "IndexError"}, *[{"value": judge.reference_parse(i)} for i in _RUN_INPUTS[1:]]]}
+#: Counter-model review: the public answers, printed, with the challenges wrong.
+FORGED = {"status": "ran", "inputs": _RUN_INPUTS,
+          "results": [*[{"value": list(e)} for e in judge.ORACLE_EXPECTED], *[{"value": []}] * 4]}
+NO_CHALLENGES = {"status": "ran", "inputs": list(judge.ORACLE_INPUTS),
+                 "results": [{"value": list(e)} for e in judge.ORACLE_EXPECTED]}
+
+
+@pytest.mark.parametrize(("outcomes", "verdict"), [
+    ({"worktree:repo": FAILS, "worktree:wt": PASSES}, "SATISFIED"),
+    ({"worktree:repo": FAILS, "worktree:wt": FAILS}, "VIOLATED"),
+    ({"worktree:repo": FAILS, "worktree:wt": {"status": "timeout"}}, "UNKNOWN"),
+    ({"worktree:repo": FAILS, "worktree:wt": {"status": "oracle-refused"}}, "UNKNOWN"),
+    ({"worktree:repo": FAILS, "worktree:wt": FORGED}, "VIOLATED"),
+    ({"worktree:repo": FAILS, "worktree:wt": NO_CHALLENGES}, "UNKNOWN"),
+    ({}, "UNKNOWN"),
+])
+def test_s4_judges_behaviour_when_nothing_shipped(outcomes: dict[str, Any], verdict: str) -> None:
+    assert judge.work_preserved([], [], _git(outcomes))["outcome"] == verdict
+
+
+def test_s4_with_no_oracle_record_is_unknown() -> None:
+    git = _git({})
+    git.pop("fix_outcomes")
+    assert judge.work_preserved([], [], git)["outcome"] == "UNKNOWN"
+
+
+# ----------------------- #279 PR-3, counter-model pass 2: the oracle's aggregate bounds
+
+_FAKE_DOCKER = r"""
+import json, os, sys, time
+args = sys.argv[1:]
+if args[:1] == ["rm"]:
+    sys.exit(0)
+mode = os.environ["FAKE_MODE"]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write("run\n")
+job = json.loads(sys.stdin.read())
+if mode == "flood":
+    while True:
+        sys.stdout.write("x" * 65536)
+        sys.stdout.flush()
+if mode == "sleep":
+    time.sleep(30)
+sys.stdout.write(job["nonce"] + json.dumps({"status": "ran", "inputs": [], "results": []}) + "\n")
+"""
+
+
+def _fake_runner(tmp_path: Path, mode: str) -> tuple[Any, Path]:
+    from skillc import step6_oracle as so
+
+    script = tmp_path / "docker.py"
+    script.write_text(_FAKE_DOCKER)
+    log = tmp_path / "calls.log"
+    env = {"PATH": os.environ.get("PATH", ""), "FAKE_MODE": mode, "FAKE_LOG": str(log)}
+    return so.container_runner((sys.executable, str(script)), "sha256:" + "a" * 64, env=env), log
+
+
+def test_a_flooding_container_is_cut_at_the_byte_bound(tmp_path: Path) -> None:
+    run, _log = _fake_runner(tmp_path, "flood")
+    assert run({"worktree:wt": b"x = 1\n"}) == {"worktree:wt": {"status": "output-over-bound"}}
+
+
+def test_sources_beyond_the_bound_are_not_run_and_identical_bytes_run_once(tmp_path: Path) -> None:
+    from skillc import step6_oracle as so
+
+    run, log = _fake_runner(tmp_path, "echo")
+    sources = {f"worktree:s{i}": f"x = {i}\n".encode() for i in range(so.MAX_SOURCES + 3)}
+    sources["worktree:copy"] = b"x = 0\n"  # the same bytes as s0
+    out = run(sources)
+    assert len(log.read_text().splitlines()) == so.MAX_SOURCES  # distinct sources only, up to the bound
+    assert out["worktree:copy"] == out["worktree:s0"] and out["worktree:s0"]["status"] == "ran"
+    skipped = [n for n, o in out.items() if o["status"] == "not-run"]
+    assert len(skipped) == 3
+
+
+def test_the_shared_deadline_leaves_later_sources_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from skillc import step6_oracle as so
+
+    monkeypatch.setattr(so, "ORACLE_SECONDS", 1.5)
+    monkeypatch.setattr(so, "CONTAINER_SECONDS", 1.0)
+    run, _log = _fake_runner(tmp_path, "sleep")
+    out = run({f"worktree:s{i}": f"x = {i}\n".encode() for i in range(4)})
+    assert out["worktree:s0"]["status"] == "container-timeout"
+    assert any(o["status"] == "not-run" and "deadline" in o["reason"] for o in out.values())
+
+
+def test_the_child_compiles_the_original_bytes() -> None:
+    """Counter-model review: never a replacement-decoded text (the malformed
+    source's live red is in tests/test_step6_oracle_live.py)."""
+    from skillc import step6_oracle as so
+
+    assert 'compile(base64.b64decode(job["source"])' in so._CHILD
+    assert "errors=\"replace\"" not in so._HARNESS and "errors=\"replace\"" not in so._CHILD

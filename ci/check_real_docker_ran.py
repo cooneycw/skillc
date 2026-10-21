@@ -68,6 +68,8 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_cicd_deploy_verify_live",
     "tests.test_level3_cicd_pipeline_live",
     "tests.test_codex_guard_live",
+    # #279 PR-3: the Step-6 S4 oracle's containment and its outcome table.
+    "tests.test_step6_oracle_live",
 )
 
 ERROR = "ERROR"
