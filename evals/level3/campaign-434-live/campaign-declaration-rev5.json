@@ -96,5 +96,14 @@
  "containment_stop": {
   "_comment": "native (skillc/fixture_live.py containment_trigger): after each dispatched attempt, a server-side tool use or an unavailable census, an unread egress log / wrong allowlist digest / allowed connection outside #442's allowlist, or a nested-codex launch / unknown count finalizes every later attempt not-run."
  },
- "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout"
+ "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-21",
+  "source": "the owner's words, 'Yes' (2026-10-21), replying to the #434 revision-5 campaign approval package (digest sha256:15343e09690b7d290b9bc9740daf1536b76d277752eb03997fa5b4c9335326b0) relayed by skillc-400 (orchestrator, owner-delegated)",
+  "scope": "one run of 10 attempts (5 CLEAN, 5 TWIN) as declared, at 900 s per attempt and 9000 s in total, scored on the declared primary endpoint (option a), on kyle19 with provider-only egress; no re-run and no extra attempts; if grader revision 5 misreads a new wording, that is reported and the grader is not patched without the owner",
+  "attempts_per_case": 5,
+  "profile_inventory_digest": "sha256:545e81be366ae0b81f257caf55c527ab27e0171448219c1f5d19c09edd2124f8",
+  "declaration_digest": "sha256:15343e09690b7d290b9bc9740daf1536b76d277752eb03997fa5b4c9335326b0"
+ }
 }

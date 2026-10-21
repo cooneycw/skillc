@@ -166,8 +166,9 @@ The revision-4 campaign ran once (`20261020T195431Z-fab3ce`): CLEAN 3/5 and TWIN
 endpoint, with every FAIL a grader shape miss. Grader revision 5 (#499) reads those shapes.
 It was **decided after seeing those results** (owner option 3). The repository now refuses
 `campaign-declaration-rev4.json` as spent, and that file stays unchanged as the record.
-`campaign-declaration-rev5.json` is the DRAFT for a fresh campaign. It is **UNAPPROVED**:
-spending needs the owner's approval of its exact digest.
+`campaign-declaration-rev5.json` is the fresh campaign, **APPROVED** by the owner on
+2026-10-21 ("Yes", replying to the package relayed by skillc-400) at digest
+`sha256:15343e09…`: one run of 10 attempts as declared, no re-run.
 
 - **The terms are the approved revision-4 campaign's, unchanged**, the seed and order
   included.
@@ -176,7 +177,7 @@ spending needs the owner's approval of its exact digest.
     exactly;
   - the run store, `~/skillc-evidence/campaign-434-live/campaign-rev5`;
   - the comment;
-  - the approval, which is absent.
+  - the approval: the owner's, for this file's own digest.
 
   A test compares it with the approved revision-4 file against an allow-list of exactly these
   fields. Its control tampers six terms, including the builder and goal digests that revision
