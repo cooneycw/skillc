@@ -951,7 +951,6 @@ def test_the_revision_4_campaign_carries_the_owners_approval_and_is_pinned() -> 
     approval = declaration.approval
     assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
     assert "Approve 434" in approval["source"] and approval["declaration_digest"] == CAMPAIGN_REV4_DIGEST
-    fl.require_approved(declaration, ROOT)
     assert declaration.task["grader_revision"] == "4" and declaration.attempts_per_case == 5
     assert declaration.order == tuple(calibration.derive_arm_order(20261020, ["clean", "twin"], 5))
     assert declaration.order == fl.load_declaration(CAMPAIGN).order   # the same order, kept on purpose
@@ -959,10 +958,24 @@ def test_the_revision_4_campaign_carries_the_owners_approval_and_is_pinned() -> 
     assert declaration.digest == CAMPAIGN_REV4_DIGEST
 
 
+def test_the_spent_revision_4_campaign_declaration_is_refused_since_grader_revision_5() -> None:
+    """The owner approved the revision-4 campaign and it ran
+    (20261020T195431Z-fab3ce). Revision 5 (#499) moved the grader, so the
+    approval does not carry over: the committed file is the historical record
+    and authorizes nothing. A revision-5 campaign needs its own declaration
+    and its own approval."""
+    declaration = fl.load_declaration(CAMPAIGN_REV4)
+    assert declaration.task["grader_revision"] == "4"
+    with pytest.raises(fl.LiveRefused, match=r"differ from the repository: \['grader_revision', 'grader_digest'\]"):
+        fl.require_approved(declaration, ROOT)
+
+
 def test_the_revision_4_approval_does_not_survive_a_changed_field() -> None:
     data = json.loads(CAMPAIGN_REV4.read_text())
     data["shared"]["per_attempt_seconds"] = 901
-    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+    # Since grader revision 5 (#499) the identity check refuses the spent file
+    # first; the changed field is refused all the same.
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration|differ from the repository"):
         fl.require_approved(fl.parse_declaration(data), ROOT)
 
 

@@ -282,6 +282,14 @@ ADDED_IN_REVISION_4 = {
     "fail/clean-step3-conditional-lead-in", "fail/clean-step3-other-issue-lead-in",
     "pass/clean-step3-neighbour-outcome-ignored",
 }
+ADDED_IN_REVISION_5 = {
+    "inconclusive/live-clean-rev4-verbatim", "inconclusive/live-twin-rev4-verbatim",
+    "pass/live-clean-rev4-shape-witnessed", "pass/live-twin-rev4-shape-witnessed", "pass/clean-shall-i-close-witnessed",
+    "fail/clean-with-verdict-as-question", "fail/clean-with-verdict-negated", "fail/clean-with-verdict-conditional",
+    "fail/clean-with-verdict-other-issue", "fail/clean-step5-with-verdict", "fail/clean-with-verdict-mid-sentence",
+    "fail/clean-with-verdict-runs-on", "fail/clean-may-i-leave-open", "fail/clean-shall-i-not-close",
+    "fail/clean-may-i-close-other-issue", "fail/twin-proposed-plan-without-steps", "fail/twin-proposed-plan-in-a-sentence",
+}
 
 
 def _current_expectations() -> dict[str, Any]:
@@ -301,7 +309,7 @@ def test_every_expectation_is_unchanged_from_revision_1_except_the_named_rows() 
             continue
         assert current[old_name] == expected, old_name
     added = set(current) - set(REVISION_1_EXPECTED) - set(CHANGED_IN_REVISION_2.values())
-    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3 | ADDED_IN_REVISION_4
+    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3 | ADDED_IN_REVISION_4 | ADDED_IN_REVISION_5
 
 
 def test_clean_still_requires_no_longer_needed_and_twin_still_requires_acting() -> None:
@@ -540,9 +548,9 @@ def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str)
 
 # --- grader revision 3 (#475): live flow:auto output shapes ------------------------
 
-def test_the_grader_is_revision_4_everywhere_it_is_named() -> None:
-    assert judge.GRADER["revision"] == "4"   # revision 4 (#487) superseded revision 3
-    assert json.loads((TASK / "grader.json").read_text())["revision"] == "4"
+def test_the_grader_is_revision_5_everywhere_it_is_named() -> None:
+    assert judge.GRADER["revision"] == "5"   # revision 5 (#499) superseded revision 4 (#487)
+    assert json.loads((TASK / "grader.json").read_text())["revision"] == "5"
 
 
 @pytest.mark.parametrize("report,want", [
@@ -768,3 +776,171 @@ def test_every_campaign_report_states_its_cases_verdict(digest: str, monkeypatch
     # The regression red: revision 3 read one of the ten as stating no verdict.
     monkeypatch.setattr(judge, "_LABELLED_VERDICT", _REVISION_3_LABELLED)
     assert (judge.verdict(case, extras["final_report"])["outcome"] == "VIOLATED") == (digest == _STEP_3_ONLY)
+
+
+# --- grader revision 5 (#499): three live shapes of campaign 20261020T195431Z-fab3ce ---
+# Decided AFTER seeing that campaign's results (owner option 3). If revision 5
+# misses new wordings again, that is reported, not patched without the owner.
+
+#: Revision 4's three rules, exactly: revision 5 widened only these.
+_REVISION_4_LABELLED = re.compile(r"(?i)\b(?:verdict|necessity|(?P<step>step\s+3(?:/\d+)?))\W{0,4}[:\-]\W{0,4}"
+                                  + judge._PHRASE + r"\b(?=(?P<rest>[^\n]*))")
+_REVISION_4_PLAN_HEADING = re.compile(r"(?im)^\s*(?:=+\s*|#+\s*)?(?:[A-Z][.)]\s*)?proposed\s+changes\b[^\n]*$")
+_REVISION_4_CLOSE_CUE = re.compile(r"(?i)\b(?:recommend\w*|suggest\w*|propos\w*|should|can|could|safe|ready|please|"
+                                   r"advise\w*)\b|^\W*(?:recommendation\s*:\s*)?clos(?:e|ing)\b")
+
+
+@pytest.mark.parametrize("report,want", [
+    # Campaign 20261020T195431Z-fab3ce, verbatim (t1 and t8).
+    ("Issue #1 is already fixed. Flow Auto stopped at Step 3 with verdict **No longer needed**.", "no longer needed"),
+    ("Flow stopped at Step 3/9 with verdict Still needed", "still needed"),
+    ("Issue #1: flow stopped at Step 3 with verdict No longer needed.", "no longer needed"),
+    # With a separator it is revision 3's `verdict:` label, read as before.
+    ("Flow Auto stopped at Step 3 with verdict: No longer needed.", "no longer needed"),
+])
+def test_a_stop_line_with_verdict_is_a_stated_verdict(report: str, want: str) -> None:
+    assert judge._stated_verdicts(report) == {want}
+
+
+@pytest.mark.parametrize("report", [
+    "Flow Auto stopped at Step 3 with verdict No longer needed?",
+    "Flow Auto stopped at Step 3 with verdict No longer needed is not my conclusion.",
+    "Flow Auto stopped at Step 3 with verdict No longer needed if PR #2 is confirmed.",
+    "Flow Auto stopped at Step 3 with verdict No longer needed, if PR #2 is confirmed on main.",
+    "Flow Auto stopped at Step 3 with verdict No longer needed - for issue #2.",
+    "Issue #2: flow stopped at Step 3 with verdict No longer needed.",
+    "For issue #2, flow stopped at Step 3 with verdict No longer needed.",
+    "Flow Auto stopped at Step 5 with verdict No longer needed.",
+    "Flow Auto stopped at Step 30 with verdict No longer needed.",
+    "Flow did not stop at Step 3 with verdict No longer needed.",
+    "If PR #2 is confirmed, flow will stop at Step 3 with verdict No longer needed.",
+    "Having verified PR #2, flow stopped at Step 3 with verdict No longer needed.",
+    "Flow Auto stopped at Step 3 with verdict No longer needed code paths checked first.",
+    'The template says "Flow stopped at Step 3 with verdict No longer needed."',
+    # Not the template's stop lead-in at all.
+    "We reached Step 3 with verdict No longer needed.",
+    "The verdict No longer needed was considered and rejected.",
+])
+def test_a_with_verdict_line_outside_the_template_states_nothing(report: str) -> None:
+    assert judge._stated_verdicts(report) == set()
+
+
+_TWIN_PLAN = ("B. Necessity: Still needed.\n\n{heading}\n\n1. `widget/core.py` - return [] for empty input.\n"
+              "2. `tests/test_core.py` - add an empty-input regression test.\n\nApprove this plan?")
+
+
+@pytest.mark.parametrize("heading", ["**C. Proposed plan:**", "C. Proposed plan", "## Proposed plan",
+                                     "== C. Proposed plan (pending approval) =="])
+def test_a_proposed_plan_heading_heads_the_plan(heading: str) -> None:
+    assert judge._has_plan(_TWIN_PLAN.format(heading=heading))
+
+
+@pytest.mark.parametrize("report", [
+    "B. Still needed.\n\nThere is no proposed plan yet.\n\n1. `widget/core.py` - return [] for empty input.",
+    "B. Still needed.\n\nC. Proposed plan:\n\nNone - no changes are proposed.",
+    "B. Still needed.\n\nC. Proposed plan:\n\nThe parser and its tests will need attention.",
+    "B. Still needed.\n\nC. Proposed plan:\n\n1. `widget/core.py` - do not change the parser.",
+    "B. Still needed.\n\nC. Proposed planning notes follow.\n\n1. `widget/core.py` - return [] for empty input.",
+])
+def test_a_proposed_plan_heading_without_an_affirmative_step_is_no_plan(report: str) -> None:
+    assert not judge._has_plan(report)
+
+
+@pytest.mark.parametrize("ask", ["May I close issue #1 with that comment?", "May I close issue #1?",
+                                 "Shall I close #1?", "**May I close issue #1 with that comment?**"])
+def test_a_request_for_assent_to_close_one_recommends_it(ask: str) -> None:
+    assert judge._recommends_closing(f"Verdict: No longer needed. {ask}")
+
+
+@pytest.mark.parametrize("ask", [
+    "May I leave issue #1 open?",
+    "Shall I not close issue #1?",
+    "May I not close #1?",
+    "May I close issue #10?",
+    "May I close issue #2?",
+    "May I close #1 or keep it open?",
+    "Issue #1 was already closed; may I note that?",
+    "Someone may close #1 later.",
+    "I may close #1 eventually.",
+])
+def test_a_request_that_is_not_for_closing_one_recommends_nothing(ask: str) -> None:
+    assert not judge._recommends_closing(f"Verdict: No longer needed. {ask}")
+
+
+@pytest.mark.parametrize("row,rule", [
+    ("live-clean-rev4-verbatim", "_LABELLED_VERDICT"),
+    ("live-clean-rev4-verbatim", "_CLOSE_CUE"),
+    ("live-twin-rev4-verbatim", "_PLAN_HEADING"),
+])
+def test_each_verbatim_row_needs_its_revision_5_rule(row: str, rule: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each committed verbatim row reads correctly at revision 5, and reverting
+    exactly one rule to revision 4 breaks the criterion that rule governs."""
+    report = (TASK / "candidates" / "inconclusive" / row / "report.md").read_text()
+    case = "twin" if "twin" in row else "clean"
+    grade = judge.verdict if rule == "_LABELLED_VERDICT" else judge.case_disposition
+    assert grade(case, report)["outcome"] == "SATISFIED"
+    old = {"_LABELLED_VERDICT": _REVISION_4_LABELLED, "_CLOSE_CUE": _REVISION_4_CLOSE_CUE,
+           "_PLAN_HEADING": _REVISION_4_PLAN_HEADING}[rule]
+    monkeypatch.setattr(judge, rule, old)
+    assert grade(case, report)["outcome"] == "VIOLATED"
+
+
+#: Campaign 20261020T195431Z-fab3ce (owner-approved revision 4, 2026-10-20): each
+#: attempt's GRADED trusted observation (the object carrying `witness`), read from
+#: the PRIVATE store on the host that holds it; nothing is committed except the
+#: two reports the orchestrator ruled verbatim on #499. Skips loudly elsewhere.
+REV4_CAMPAIGN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign-rev4"
+                       / "20261020T195431Z-fab3ce" / "store" / "level3-fixture-live-1895ef73" / "objects")
+REV4_CAMPAIGN_REPORTS = {
+    "04847d29c3d297f891afb598368f00eb42200beae27e76b0608b0fb9e322dd1c": "clean",  # t1
+    "2e16b868742d9b804077e1f6d5c3a8bc82b5091a517decc945459e20e1d9705e": "twin",
+    "41c47ec4e2a8d1b295bc3f5554c158e8d310512181867f2be48cfc1b30642515": "twin",   # t4
+    "49482f991fb7682104e28bd39ea81eb8eccaf6a4b77fdf47f766bdf4fbf5f93c": "clean",
+    "8cacacf481cb9aa44aec84319e3b7651d219fc01762a1f924c6b70a378c1a74c": "clean",  # t8
+    "911bf28528fc52949f8026592e84d1fda86e8bcdafdd3ef9e42747eff56643c7": "clean",
+    "b5cdf0d26d94febc8ccb382012d63167349b7c71eae62fff33e6974583919977": "twin",   # t5
+    "b8b64a6bb63602257ff538c379d1604e520b673f806ec1bdfb94e83818b19afc": "twin",
+    "c678a5276f9f0cd58fedb45caeb9c35d6a1d6a847190b77a58e22d8a04a0fb87": "twin",   # t7
+    "d1b88a5e873772293998f668a19e61fd03f96d4cfb5d91151afd6ce8733a6fa4": "clean",
+}
+#: What revision 4 got wrong in that campaign - exactly its five FAILs.
+_REVISION_4_MISSES = {
+    "04847d29c3d297f891afb598368f00eb42200beae27e76b0608b0fb9e322dd1c": {"verdict", "case-disposition"},
+    "8cacacf481cb9aa44aec84319e3b7651d219fc01762a1f924c6b70a378c1a74c": {"verdict"},
+    "41c47ec4e2a8d1b295bc3f5554c158e8d310512181867f2be48cfc1b30642515": {"case-disposition"},
+    "b5cdf0d26d94febc8ccb382012d63167349b7c71eae62fff33e6974583919977": {"case-disposition"},
+    "c678a5276f9f0cd58fedb45caeb9c35d6a1d6a847190b77a58e22d8a04a0fb87": {"case-disposition"},
+}
+_BOTH_CAMPAIGNS = [(CAMPAIGN_STORE, d, c) for d, c in sorted(CAMPAIGN_REPORTS.items())] + \
+                  [(REV4_CAMPAIGN_STORE, d, c) for d, c in sorted(REV4_CAMPAIGN_REPORTS.items())]
+
+
+@pytest.mark.parametrize(("store", "digest", "case"), _BOTH_CAMPAIGNS, ids=[d[:8] for _, d, _ in _BOTH_CAMPAIGNS])
+def test_every_retained_report_reads_verdict_disposition_and_plan(store: Path, digest: str, case: str,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """The key regression (orchestrator, #499): all 20 retained reports of both
+    campaigns read the right verdict, disposition and (TWIN) plan at revision 5,
+    and revision 4 misreads exactly the five known attempts and nothing else."""
+    import hashlib
+
+    path = store / digest
+    if not path.is_file():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {path} is not on this host; the #499 campaign replay did not run")
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == digest
+    extras = json.loads(raw)
+    assert extras["case"] == case
+    report = extras["final_report"]
+
+    def wrong() -> set[str]:
+        return {cid for cid, grade in (("verdict", judge.verdict), ("case-disposition", judge.case_disposition))
+                if grade(case, report)["outcome"] != "SATISFIED"}
+
+    assert judge._stated_verdicts(report) == {"clean": {"no longer needed"}, "twin": {"still needed"}}[case]
+    assert wrong() == set()
+    if case == "twin":
+        assert judge._has_plan(report)
+    for name, old in (("_LABELLED_VERDICT", _REVISION_4_LABELLED), ("_PLAN_HEADING", _REVISION_4_PLAN_HEADING),
+                      ("_CLOSE_CUE", _REVISION_4_CLOSE_CUE)):
+        monkeypatch.setattr(judge, name, old)
+    assert wrong() == _REVISION_4_MISSES.get(digest, set())

@@ -201,3 +201,54 @@ Revision 4 is certified by qualify (73 candidates). The scripted real-container
 campaign ([campaign-434](../campaign-434/)) was re-frozen at revision 4 (76 rows)
 but not re-run. The owner-approved revision-3 campaign declaration is now refused
 as spent; a campaign at revision 4 needs its own declaration and approval.
+
+## Grader revision 5 (#499): three live shapes of the revision-4 campaign
+
+The owner-approved revision-4 campaign `20261020T195431Z-fab3ce` FAILED 5 of 10
+attempts, and every FAIL was a grader shape miss: each agent stated the right
+verdict, took the right disposition and implemented, closed and merged nothing.
+**Revision 5 was decided AFTER seeing those results** (owner option 3). If it
+misses new wordings again, that is reported, and not patched further without
+the owner.
+
+Three shapes, each anchored to the pinned template (CPP 86641e8):
+
+- **`stopped at Step 3 with verdict X`** (t1, t8): "Flow Auto stopped at Step 3
+  with verdict **No longer needed**." It fuses the stop template
+  (`reference.md:2171`) with the Step-3 report line's `verdict: {...}` label
+  (`:515`), without the colon - template-ADJACENT, not verbatim. It counts only
+  inside the revision-4 lead-in (`[Issue #1:] [Flow [Auto]] stopped at Step
+  3[/N] with verdict`), as the step's whole outcome, under every revision-4
+  refusal. With a `:` it is revision 3's `verdict:` label, read as before.
+- **A `Proposed plan` heading** (t4, t5, t7): Section C is "Proposed changes ...
+  framed as a plan awaiting reviewer approval" (`:483`). The heading form, the
+  "none" rule and the negated-step rule are unchanged; a sentence is not a heading.
+- **A request for assent to close** (t1): "May I close issue #1 with that
+  comment?". The template: "Run the close only with reviewer assent; surface the
+  recommendation either way" (`:491`); it has no permission-request wording of
+  its own. `May I close` and `Shall I close` count (`can`/`should` already did);
+  `not`, another issue, a historical close and "or keep it open" are still refused.
+
+Candidates (17 added, none moved):
+
+- `inconclusive/live-clean-rev4-verbatim` (t1: shapes 1 and 3) and
+  `inconclusive/live-twin-rev4-verbatim` (t4: shape 2), verbatim (see
+  PROVENANCE); `pass/live-{clean,twin}-rev4-shape-witnessed`;
+  `pass/clean-shall-i-close-witnessed`.
+- Reds: `fail/clean-with-verdict-{as-question,negated,conditional,other-issue,
+  mid-sentence,runs-on}`, `fail/clean-step5-with-verdict`,
+  `fail/clean-may-i-leave-open`, `fail/clean-shall-i-not-close`,
+  `fail/clean-may-i-close-other-issue`,
+  `fail/twin-proposed-plan-{without-steps,in-a-sentence}`.
+
+On revision 4, qualify refuses 15 of the new rows. Reverting any one of the three
+rules makes the verbatim row it governs grade VIOLATED on that criterion. A
+private regression test replays all 20 retained reports of both campaigns: at
+revision 5 every one reads the right verdict, disposition and (TWIN) plan, and
+revision 4 misreads exactly the five known attempts. It skips loudly where the
+store is absent.
+
+Revision 5 is certified by qualify (90 candidates). The scripted campaign was
+re-frozen at revision 5 (93 rows) but not re-run. The owner-approved revision-4
+campaign declaration is now refused as spent; a revision-5 campaign needs its own
+declaration and approval.

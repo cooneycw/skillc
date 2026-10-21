@@ -76,10 +76,13 @@ def test_the_case_is_434s_twin_plus_one_untouched_broken_module(tmp_path: Path) 
 
 
 def test_the_necessity_builder_is_reused_not_edited() -> None:
-    """#434's approved revision-4 campaign still binds its task: the import
-    changed nothing the declaration's builder digest covers."""
+    """#434's approved revision-4 campaign still matches its task's builder,
+    goal and base trees: the import changed nothing those digests cover. Only
+    the grader moved since (revision 5, #499), which spends that approval."""
     declaration = fl.load_declaration(ROOT / "evals" / "level3" / "campaign-434-live" / "campaign-declaration-rev4.json")
-    fl.require_approved(declaration, ROOT)
+    on_disk = fl.task_identity(ROOT)
+    differing = sorted(k for k in on_disk if k != "path" and declaration.task.get(k) != on_disk[k])
+    assert differing == ["grader_digest", "grader_revision"]
     assert build.necessity.CASES == ("clean", "twin")
 
 
