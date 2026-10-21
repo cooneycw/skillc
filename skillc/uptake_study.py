@@ -504,6 +504,8 @@ def run_study(
             verify_home_files=treatments[arm].verify_home_files,
             preflight_tools=treatments[arm].preflight_tools,
             gate_entrypoint=treatments[arm].gate_entrypoint,
+            # #505 (counter-model review): each installed file's source mode.
+            extra_home_modes=dict(treatments[arm].home_modes) if treatments[arm].home_modes else None,
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:

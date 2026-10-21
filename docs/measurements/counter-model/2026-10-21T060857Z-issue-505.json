@@ -1,0 +1,27 @@
+{
+  "branch": "issue-505-installed-subject-helpers-are-not-executable-in-li",
+  "counts": {
+    "accepted": 2,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "829288277d9593c8b90f021ebc06910bbec6c892",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "505",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-21T06:08:57Z",
+  "red_cases": {
+    "already_covered": 12,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/21/rollout-2026-10-21T02-01-32-01a15d0c-f2c1-7260-91d4-e5b79db86d00.jsonl",
+    "thread_id": "01a15d0c-f2c1-7260-91d4-e5b79db86d00"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

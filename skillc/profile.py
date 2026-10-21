@@ -1839,6 +1839,20 @@ def installed_home_files(inventory: dict[str, Any], tree: Tree) -> dict[str, byt
     return files
 
 
+def installed_home_modes(inventory: dict[str, Any], tree: Tree) -> dict[str, str]:
+    """Each installed destination's SOURCE git mode (`100644` or `100755`),
+    from the same digest- and mode-verified records as `installed_home_files`
+    (#505). `install()` honours the mode on a host; an in-container delivery
+    needs it too, or every helper arrives non-executable."""
+    modes: dict[str, str] = {}
+    for record, _data in _verified_file_records(inventory, tree):
+        destination = record["destination"]
+        if destination in modes:
+            raise Refused(f"duplicate destination in one inventory: {destination}")
+        modes[destination] = str(record["mode"])
+    return modes
+
+
 def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]:
     """Install a validated closure, preserving bytes and executable modes.
 

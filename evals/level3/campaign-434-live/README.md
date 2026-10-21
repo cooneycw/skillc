@@ -188,6 +188,30 @@ It was **decided after seeing those results** (owner option 3). The repository n
 - **If revision 5 misses new wordings again, that is reported, and the grader is NOT patched
   further without the owner.**
 
+## Harness: installed file modes (#505)
+
+Before #505, every file a live trial installed into the agent's home arrived at mode 0600,
+whatever its source mode. So the subject's helper scripts (`~/.claude/scripts/flow-*.sh`)
+were not executable. Since #505, each installed file arrives at the owner-only bits of its
+source mode: 100755 becomes 0700, 100644 becomes 0600. The preflight reads each verified
+file's executable bit back from the container.
+
+Every run below predates the fix. The count is attempts whose transcript shows a
+`Permission denied` on an installed helper, measured from each retained store:
+
+| Run | Attempts with a denial |
+|---|---|
+| measurement `20261018T181240Z-8097ad` | 2 of 2 |
+| revision-3 campaign `20261020T141529Z-3585c9` | 5 of 10 |
+| revision-4 campaign `20261020T195431Z-fab3ce` | 8 of 10 |
+| revision-5 campaign `20261021T050644Z-25a382` | 9 of 10 |
+
+Most attempts worked around the denial by running the helper through `bash` or `python3`.
+In the revision-5 campaign, **TWIN `t4` (`a-466914b6110e`) FAILED because of it**. It ran
+`flow-start-resolve.sh` directly, got exit 126, and stopped at Step 1 as flow:auto's template
+requires, so it stated no verdict. That FAIL is attributed to #505, not to the agent or the
+grader. A run after #505 measures a different install from these.
+
 ## Running it
 
 Every command below is shown for the measurement. The campaign is the same with

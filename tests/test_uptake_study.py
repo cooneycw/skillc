@@ -658,3 +658,19 @@ def test_red_an_arm_with_no_skill_digests_is_refused_not_planned_unpinned(tmp_pa
     with pytest.raises(us.StudyRefused, match="no skill_digests to pin"):
         us.plan_study(declaration, store, root=ROOT, image_digest=_IMAGE_DIGEST,
                       digests={"published": "sha256:" + "a" * 64, "rewritten": "sha256:" + "b" * 64})
+
+
+def test_every_uptake_attempt_receives_its_arm_s_source_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#505 (counter-model review): the study builds its treatments with
+    `home_modes`, and every attempt is delivered with them, so an installed
+    helper keeps its source executable bit."""
+    _experiment, _outcomes, seen = _run(tmp_path, monkeypatch, select_in=())
+    assert seen
+    for call in seen:
+        modes = call.get("extra_home_modes")
+        assert isinstance(modes, dict) and modes, call["attempt_id"]
+        delivered = call["extra_home_files"]
+        assert isinstance(delivered, dict) and set(modes) <= set(delivered)
+        assert {str(v) for v in modes.values()} <= {"100644", "100755"}
