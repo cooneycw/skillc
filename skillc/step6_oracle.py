@@ -133,7 +133,9 @@ def _container_argv(docker_bin: Sequence[str], image: str, name: str) -> list[st
             # written anywhere, /tmp included) fails, so it can never pass.
             # `--ipc none` removes /dev/shm and /dev/mqueue, the writable
             # mounts `--read-only` leaves (counter-model review).
-            "--network", "none", "--read-only", "--ipc", "none", "--pull", "never",
+            # `/dev/mqueue` survives both (measured live), so it is shadowed by
+            # a read-only tmpfs; a live probe asserts nothing is writable.
+            "--network", "none", "--read-only", "--ipc", "none", "--tmpfs", "/dev/mqueue:ro", "--pull", "never",
             "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--memory", "256m", "--memory-swap", "256m", "--pids-limit", "64", "--cpus", "1",
             "--label", f"{OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}", "--label", "skillc.purpose=step6-oracle",

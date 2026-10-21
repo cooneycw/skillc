@@ -88,7 +88,11 @@ def test_side_effects_fail_in_the_child_never_pass_and_never_reach_the_host(imag
                for k, v in writes.items()}
     sources["connects"] = ("import socket\nsocket.create_connection(('1.1.1.1', 80), timeout=2)\n\n\n"
                            f"{_FIXED}").encode()
-    sources["control"] = _FIXED.encode()
+    # The positive control also proves no location is writable at all.
+    sources["control"] = ("import os\n"
+                          "writable = [d for d in ('/', '/tmp', '/var/tmp', '/run', '/dev', '/dev/shm', '/dev/mqueue',"
+                          " os.path.expanduser('~')) if os.path.isdir(d) and os.access(d, os.W_OK)]\n"
+                          "assert not writable, writable\n\n\n" + _FIXED).encode()
     ran = so.container_runner(("docker",), image_id)(sources)
     assert set(ran) == set(sources)
     assert ran["control"].get("status") == "ran" and judge._behaves(ran["control"]) == "passes", ran["control"]

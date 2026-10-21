@@ -283,7 +283,9 @@ def test_the_oracle_container_is_isolated() -> None:
                  ["--security-opt", "no-new-privileges"], ["--pids-limit", "64"], ["--memory", "256m"]):
         joined = " ".join(argv)
         assert " ".join(flag) in joined, flag
-    assert not any(a in ("-v", "--volume", "--mount", "--privileged", "--tmpfs") for a in argv)
+    assert not any(a in ("-v", "--volume", "--mount", "--privileged") for a in argv)
+    # The one tmpfs is read-only, shadowing the mqueue mount --read-only leaves writable.
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--tmpfs"] == ["/dev/mqueue:ro"]
 
 
 def _git(outcomes: dict[str, Any], main: str | None = None) -> dict[str, Any]:
