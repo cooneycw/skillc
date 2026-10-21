@@ -17,7 +17,7 @@ The draft's declaration digest is `sha256:ce7a6c25a34c4628b610d2811e966d8799b311
 - Model `gpt-6-astra` with effort `high`, the orchestrator's recommendation to the owner. Another choice means a regenerated draft.
 - Run store `~/skillc-evidence/step6-live/sizing-1`.
 
-**Its digest** is `sha256:a783f55fb8ca3fc38e9a394739df8adb9f7098fbfef6739c649bf6ab8c2e2455`. `require_approved` refuses it until the owner's approval of that digest is added.
+**Its digest** is `sha256:308b615fb8d24aa4c03cb8e7ae8f1594f7ccffced8c481bc909263baf4bac615`. `require_approved` refuses it until the owner's approval of that digest is added.
 
 ## Bindings
 

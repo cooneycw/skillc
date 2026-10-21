@@ -38,7 +38,7 @@
    ],
    "verification": "level3-live refuses before any container unless these equal the code's; each attempt's egress-proxy-log must record this allowlist digest, and the native containment stop halts the schedule on any allowed connection outside it"
   },
-  "_comment_caps": "Sizing, to set the campaign's caps: 1800 s per attempt is generous on purpose (a Step-6 attempt's wall is unmeasured); 3600 s = 2 x 1800, so the total cap never truncates what the per-attempt caps allow. No token cap exists in the stack; each attempt's tokens are recorded from its own rollout - that record is what this run is for."
+  "_comment_caps": "Sizing, to set the campaign's caps: 1800 s per attempt is generous on purpose (a Step-6 attempt's wall is unmeasured); 3600 s = 2 x 1800. The total cap is measured against ALL elapsed time (container setup and grading included, matched_pilot.run_schedule), so that overhead can shorten the second attempt's budget below 1800 s: read a truncated second attempt with that in mind. No token cap exists in the stack; each attempt's tokens are recorded from its own rollout - that record is what this run is for."
  },
  "tolerance": {
   "non_evaluable_per_case": 1
