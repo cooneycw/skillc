@@ -1,0 +1,25 @@
+{
+  "branch": "issue-279-certify-interrupted-delivery-idempotent-resume-and",
+  "counts": {
+    "accepted": 11,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "ca6e4c62dc21ec8a4cd21baf44d592a62d62688a",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "279",
+  "passes": 2,
+  "recorded_at": "2026-10-21T10:45:43Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/21/rollout-2026-10-21T06-33-12-01a15e05-ae16-78c2-b660-a61bad51b249.jsonl",
+    "thread_id": "01a15e05-ae16-78c2-b660-a61bad51b249"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
