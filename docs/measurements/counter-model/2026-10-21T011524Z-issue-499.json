@@ -1,0 +1,27 @@
+{
+  "branch": "issue-499-flow-auto-necessity-grader-revision-5-with-verdict",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "dec89f791926c5714b2f4d30ddc065caf6a708ca",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "499",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-21T01:15:24Z",
+  "red_cases": {
+    "already_covered": 13,
+    "proposed": 15
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T21-07-39-01a15bff-e6f4-72f2-a930-d578496f7b84.jsonl",
+    "thread_id": "01a15bff-e6f4-72f2-a930-d578496f7b84"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

@@ -155,3 +155,31 @@ The attempt's transcript, records and every other object stay private. Its
 actions.json is shape-faithful to the attempt's witnessed service requests
 (four single-field `issue view` calls, then the issue view, merged-PR list and
 issue search) and its Step-1 worktree with the friction file.
+
+
+## Revision 5 (#499): the verbatim revision-4 campaign reports
+
+`candidates/inconclusive/live-clean-rev4-verbatim/report.md` and
+`candidates/inconclusive/live-twin-rev4-verbatim/report.md` (and the reports of
+`pass/live-{clean,twin}-rev4-shape-witnessed`) are the final reports of attempts
+t1 (CLEAN) and t4 (TWIN) of the owner-approved revision-4 campaign
+`20261020T195431Z-fab3ce`, byte for byte. They are retained privately as the
+graded fixture-evidence objects `04847d29…` and `41c47ec4…`. Every other
+revision-5 row changes one line of one of them.
+
+They are committed verbatim by orchestrator ruling on #499 (GO-WITH-CONDITIONS,
+Q1), consistent with #475 and #487. They are the agent's text about the
+synthetic fixture.
+
+- Both were scanned for UUIDs, email addresses, long hex strings, account,
+  session and user-id words, `sk-`/`ghp_`/JWT tokens, IP addresses and
+  non-container home paths. None was found. The scan's own control (a planted
+  UUID and an email) matched.
+- `make leak-check` reports 0 leaks.
+- Their only paths are container paths: `/work/.skillc-canary-result` and
+  `/home/candidate/.codex/skills/flow-auto/{SKILL,reference}.md`.
+
+Their actions.json files are the earlier live rows' (`live-clean-step3-*` for
+CLEAN, `live-twin-*` for TWIN) - shape-faithful to those campaign attempts, not to t1 and t4,
+whose transcripts, records and every other object stay private.
+
