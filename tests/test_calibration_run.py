@@ -18,6 +18,7 @@ import sys
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import stamp_approval
@@ -1021,3 +1022,80 @@ def test_a_do_nothing_attempt_lowers_the_pass_rate_never_leaves_the_denominator(
     passing: list[dict[str, object]] = [{"arm": "treated", "primary_endpoint": {"status": "PASS"}} for _ in range(3)]
     do_nothing: dict[str, object] = {"arm": "treated", "primary_endpoint": {"status": "INCONCLUSIVE"}}
     assert rate([*passing, do_nothing]) < rate(passing)
+
+
+# ---------------------------------------- #505: installed files keep their source mode
+
+def _acquired_with_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> cc.AcquiredCollection:
+    """A real acquisition of a one-skill collection that bundles an executable
+    helper script beside its SKILL.md."""
+    collection = tmp_path / "subject-collection"
+    skill = collection / "skills" / "tdd"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: tdd\ndescription: A test skill.\n---\nBody.\n", encoding="utf-8")
+    helper = skill / "scripts" / "run.sh"
+    helper.parent.mkdir()
+    helper.write_text("#!/bin/sh\necho ran\n", encoding="utf-8")
+    helper.chmod(0o755)
+    subject = materialize.Subject.from_dict({
+        "subject_schema": 1, "locator": "test/test", "revision": "v1", "surface": "codex-skills",
+        "skills_root": "skills", "select": ["tdd"], "client": {"name": "codex", "version": "0.157.1"},
+    })
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    base = tmp_path / "acquire"
+    base.mkdir()
+    return cc.acquire_collection("whatever", base, checkout=collection)
+
+
+def test_the_treatment_carries_each_installed_file_s_source_mode(tmp_path: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    treatment = cr.build_treatment(_acquired_with_script(tmp_path, monkeypatch))
+    assert set(treatment.home_modes) == set(treatment.home_files)
+    assert treatment.home_modes[".codex/skills/tdd/scripts/run.sh"] == "100755"
+    assert treatment.home_modes[".codex/skills/tdd/SKILL.md"] == "100644"
+
+
+def test_only_a_treated_arm_is_delivered_with_its_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import test_calibration_outcome_endpoint as ep
+
+    data = ep._data()
+    ep._approve(data)
+    seen: list[dict[str, Any]] = []
+
+    def attempt(**kwargs: Any) -> dict[str, object]:
+        seen.append(kwargs)
+        return {"disposition": "inconclusive"}
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", attempt)
+    monkeypatch.setattr(cr, "guard_kwargs", lambda client_name, model: {})
+    run = tmp_path / "run"
+    run.mkdir()
+    modes = {"skill": "100755"}
+    cr.run_calibration(
+        calibration.parse_declaration(data), run_dir=run, root=ep.ROOT,
+        treatment=cr.Treatment({"skill": b"body"}, "sha256:" + "ab" * 32, None, skill_digests=ep._TEST_PINS,
+                               home_modes=modes),
+        image_digest="sha256:" + "cd" * 32, backends=lambda: (object(), object()), argv_for=lambda _s: [])
+    treated = [c for c in seen if c["extra_home_files"]]
+    baseline = [c for c in seen if not c["extra_home_files"]]
+    assert treated and baseline
+    assert all(c["extra_home_modes"] == modes for c in treated)
+    assert all(c["extra_home_modes"] is None for c in baseline)
+
+
+def test_red_a_closure_that_disagrees_on_a_file_s_mode_is_refused(tmp_path: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """The profile closure and the skill surface name the same file; if one
+    calls it executable and the other not, that is drift, never a choice."""
+    acquired = _acquired_with_script(tmp_path, monkeypatch)
+    files = cc._collection_home_files(acquired.source, acquired.files)
+    path = ".codex/skills/tdd/scripts/run.sh"
+    for flipped, refused in (("100644", True), ("100755", False)):
+        closure = cr._ClosureResult(home_files={path: files[path]}, tools=(), gate_entrypoint=None,
+                                    home_modes={path: flipped})
+        monkeypatch.setattr(cr, "_closure_home_files", lambda *_a, closure=closure, **_k: closure)
+        if refused:
+            with pytest.raises(cr.CalibrationRefused, match="disagrees with the skill surface on file mode"):
+                cr.build_treatment(acquired, subject_profile="p", root=tmp_path)
+        else:
+            assert cr.build_treatment(acquired, subject_profile="p", root=tmp_path).home_modes[path] == "100755"

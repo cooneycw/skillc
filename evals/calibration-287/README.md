@@ -408,3 +408,14 @@ these declarations measures the subject WITH that refusal, so it is not directly
 comparable to the pilot's 9/9: an attempt whose report depended on the nested review
 is now measured without it. Live calibration runs were frozen until #500 merged
 (skillc-400 ruling), and every later run needs its own owner approval.
+
+## Harness: installed file modes (#505)
+
+The option-1 pre-check (`20261020T234617Z-a9535e`) and pilot (`20261021T003158Z-600e90`) ran
+before #505. Their installed files were delivered at mode 0600, like every live trial's.
+No attempt shows a `Permission denied` on an installed helper (0 of 2 and 0 of 18). The
+measured gate runs through the harness's own root-installed, executable gate shim, and no
+agent ran another installed helper directly. **The delivery was affected, but no behaviour
+was observed to be.** Since #505, installed files arrive at the owner-only bits of their
+source mode.
+

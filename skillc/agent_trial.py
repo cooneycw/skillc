@@ -462,6 +462,23 @@ _TOOLS_MARKER = "---skillc-334-tools---"
 #: is given - an explicit, caller-supplied fact (ultimately the SUBJECT's
 #: own profile declaration, threaded through `calibration_run.Treatment`),
 #: never inferred from whether some file happens to be present in
+#: #505: the in-container executable-bit read-back's line prefix.
+_XMODE_PREFIX = "SKILLC-XMODE:"
+#: #505: a source git mode -> the OWNER-ONLY delivery mode. Never broader than
+#: the source (0755 -> 0700); a file with no recorded mode stays 0600.
+_DELIVERY_MODES = {"100755": 0o700, "100644": 0o600}
+
+
+def delivery_mode(relpath: str, modes: Mapping[str, str] | None) -> int:
+    """The mode one installed file is delivered at (#505)."""
+    if modes is None or relpath not in modes:
+        return 0o600
+    mode = modes[relpath]
+    if mode not in _DELIVERY_MODES:
+        raise HomeFileVerificationRefused(f"{relpath}: unsupported source mode {mode!r}")
+    return _DELIVERY_MODES[mode]
+
+
 #: `verify_home_files`. The orchestrator's own correction: inferring
 #: witnessing from dict membership means a closure regression that drops
 #: the gate script would silently skip witnessing instead of refusing -
@@ -666,6 +683,7 @@ def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str
 def _preflight_in_container(
     backend: DockerBackend, handle: object, limits: Limits,
     verify_home_files: Mapping[str, str], tools: Sequence[Mapping[str, Any]],
+    verify_home_modes: Mapping[str, str] | None = None,
 ) -> None:
     """skillc#334 (orchestrator ruling, probe
     design): read back every closure file's digest FROM
@@ -713,6 +731,15 @@ def _preflight_in_container(
 
     container_paths = {relpath: f"{CONTAINER_HOME}/{relpath}" for relpath in verify_home_files}
     script_lines = [f"sha256sum {shlex.quote(path)}" for path in container_paths.values()]
+    # #505: each verified file's executable bit, read back from the container
+    # in the same exec; only when modes are given, so the script is otherwise
+    # byte-identical to before.
+    mode_checked = {relpath: mode for relpath, mode in (verify_home_modes or {}).items()
+                    if relpath in container_paths}
+    for relpath in mode_checked:
+        path = shlex.quote(container_paths[relpath])
+        script_lines.append(f'if test -x {path}; then echo "{_XMODE_PREFIX}1 "{path}; '
+                            f'else echo "{_XMODE_PREFIX}0 "{path}; fi')
     script_lines.append(f"echo {shlex.quote(_TOOLS_MARKER)}")
 
     probe_entries: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = [
@@ -827,7 +854,12 @@ def _preflight_in_container(
     digest_section, _, tools_section = output.partition(_TOOLS_MARKER)
 
     actual_by_path = {}
+    executable_by_path: dict[str, bool] = {}
     for line in digest_section.splitlines():
+        if line.startswith(_XMODE_PREFIX):
+            flag, _, path = line[len(_XMODE_PREFIX):].partition(" ")
+            executable_by_path[path] = flag == "1"
+            continue
         parts = line.split(None, 1)
         if len(parts) == 2:
             actual_by_path[parts[1]] = parts[0]
@@ -840,6 +872,15 @@ def _preflight_in_container(
             raise HomeFileVerificationRefused(
                 f"{relpath} verified in-container digest sha256:{actual_hex} disagrees with the "
                 f"expected {expected_digest!r} - what was delivered does not match what arrived"
+            )
+    for relpath, mode in mode_checked.items():
+        executable = executable_by_path.get(container_paths[relpath])
+        if executable is None:
+            raise HomeFileVerificationRefused(f"{relpath}: its executable bit was not read back from the container")
+        if executable != (mode == "100755"):
+            raise HomeFileVerificationRefused(
+                f"{relpath} is {'' if executable else 'not '}executable in the container, but its source mode is "
+                f"{mode} - the subject would run a different install than its source (#505)"
             )
 
     probe_output: dict[int, str] = {}
@@ -892,6 +933,7 @@ def _make_before_execute(
     gate_entrypoint: str | None = None,
     runtime_ready: Callable[[DockerBackend, object], None] | None = None,
     gate_shim_source: Path = _FLOW_CHECK_GATE_SHIM_SOURCE,
+    extra_home_modes: Mapping[str, str] | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -959,14 +1001,15 @@ def _make_before_execute(
         # `compose_home_files` never writes under `.codex/skills/`) is
         # decided by the caller's own intent, not by dict ordering luck.
         for relpath, data in extra_home_files.items():
-            backend.deliver_home_file(handle, relpath, data)
+            backend.deliver_home_file(handle, relpath, data, mode=delivery_mode(relpath, extra_home_modes))
 
         if runtime_ready is not None:
             runtime_ready(backend, handle)
 
         if resolved_verify_home_files or resolved_preflight_tools:
             assert limits is not None  # checked above, before any delivery happened
-            _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
+            _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools,
+                                    verify_home_modes=extra_home_modes)
 
         # skillc#334 step 4 (#332's own
         # follow-up #342 landed the two-root `install()`/`export()`/
@@ -2081,6 +2124,7 @@ def run_one_attempt(
     nested_codex_policy: str | None = None,
     codex_guard: bool = False,
     declared_model: str | None = None,
+    extra_home_modes: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2174,6 +2218,14 @@ def run_one_attempt(
     default) changes nothing for any other caller."""
     if nested_codex_policy is not None and nested_codex_policy not in cg.NESTED_POLICIES:
         raise ValueError(f"nested_codex_policy must be one of {cg.NESTED_POLICIES}, not {nested_codex_policy!r}")
+    if extra_home_modes is not None:
+        # #505: each installed file's SOURCE git mode, checked before any
+        # container exists: only a delivered file has one, and only a git mode.
+        unknown = sorted(set(extra_home_modes) - set(extra_home_files or {}))
+        if unknown:
+            raise HomeFileVerificationRefused(f"extra_home_modes names files that are not delivered: {unknown}")
+        for relpath in extra_home_modes:
+            delivery_mode(relpath, extra_home_modes)
     #: #279 PR-2a: one controller-owned ordering per MULTI-TURN attempt only
     #: (orchestrator ruling R3); every other attempt's records are unchanged.
     attempt_order = Order() if turns is not None and turns.texts else None
@@ -2332,6 +2384,7 @@ def run_one_attempt(
         gate_entrypoint=gate_entrypoint,
         runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
         gate_shim_source=gate_shim_source,
+        extra_home_modes=extra_home_modes,
     )
     if witness_session is not None:
         install_and_verify = before_execute

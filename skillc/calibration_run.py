@@ -125,6 +125,10 @@ class Treatment:
     #: bytes this treatment INSTALLS. Empty only for a hand-built treatment; the
     #: planners refuse a treated arm that carries none.
     skill_digests: tuple[dict[str, str], ...] = ()
+    #: #505: each `home_files` destination's SOURCE git mode (`100644` or
+    #: `100755`), so an installed helper arrives executable when its source is.
+    #: Empty only for a hand-built treatment, which keeps the 0600 delivery.
+    home_modes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,8 @@ class _ClosureResult:
     #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
     #: cross-checked against the pins derived from the installed bytes.
     skill_pins: tuple[dict[str, str], ...] = ()
+    #: #505: `profile.installed_home_modes` of the same verified records.
+    home_modes: dict[str, str] = field(default_factory=dict)
 
 
 def _installed_skill_pins(
@@ -230,7 +236,8 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
     gate_witness = inventory.get("gate_witness")
     assert gate_witness is None or isinstance(gate_witness, str)
     return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
-                          gate_witness=gate_witness, skill_pins=skill_pins)
+                          gate_witness=gate_witness, skill_pins=skill_pins,
+                          home_modes=profile.installed_home_modes(inventory, tree))
 
 
 def build_treatment(
@@ -257,6 +264,7 @@ def build_treatment(
     if (subject_profile is None) != (root is None):
         raise CalibrationRefused("subject_profile and root must be given together, or not at all")
     home_files: dict[str, bytes] = dict(cc._collection_home_files(acquired.source, acquired.files))
+    home_modes: dict[str, str] = dict(cc._collection_home_modes(acquired.source, acquired.files))
     skill_digests = _installed_skill_pins(acquired, home_files)
     if not skill_digests:
         raise CalibrationRefused(f"subject {acquired.subject.locator!r} installs no SKILL.md to pin")
@@ -283,7 +291,17 @@ def build_treatment(
             raise CalibrationRefused(
                 f"profile {subject_profile!r}'s closure disagrees with the skill surface at: {disagreeing}"
             )
+        # #505: the two derivations must agree on the MODE too - one source
+        # calling a file executable and the other not is drift, never a choice.
+        mode_disagreeing = sorted(k for k in set(closure.home_modes) & set(home_modes)
+                                  if closure.home_modes[k] != home_modes[k])
+        if mode_disagreeing:
+            raise CalibrationRefused(
+                f"profile {subject_profile!r}'s closure disagrees with the skill surface on file mode at: "
+                f"{mode_disagreeing}"
+            )
         home_files.update(closure_files)
+        home_modes.update(closure.home_modes)
         # Every closure file, not a curated subset (orchestrator ruling:
         # "read back the digest of every closure
         # file") - host-side bytes were already digest-verified against
@@ -317,6 +335,7 @@ def build_treatment(
             )
     return Treatment(
         home_files=home_files,
+        home_modes=home_modes,
         digest=acquired.source.digest,
         skill_digests=skill_digests,
         gate_entrypoint=gate_entrypoint,
@@ -588,6 +607,8 @@ def run_calibration(
             preflight_tools=treatment.preflight_tools if treated else None,
             gate_entrypoint=treatment.gate_entrypoint if treated else None,
             gate_witness=treatment.gate_witness if treated else None,
+            # #505: the installed files' source modes, for a treated arm only.
+            extra_home_modes=dict(treatment.home_modes) if treated and treatment.home_modes else None,
             **guarded,  # type: ignore[arg-type]
         )
 
@@ -840,7 +861,7 @@ def degraded_treatment(intact: Treatment, declaration: calibration.Discriminatio
     return Treatment(home_files=home_files, digest=tree, receipt_context=context,
                      verify_home_files=verify_home_files, preflight_tools=intact.preflight_tools,
                      gate_entrypoint=intact.gate_entrypoint, gate_witness=intact.gate_witness,
-                     skill_digests=intact.skill_digests)
+                     skill_digests=intact.skill_digests, home_modes=intact.home_modes)
 
 
 def require_textual_evidence(declaration: calibration.DiscriminationDeclaration, root: Path) -> dict[str, object]:
@@ -1156,6 +1177,7 @@ def run_discrimination(
             credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
             verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
             gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,
+            extra_home_modes=dict(chosen.home_modes) if chosen.home_modes else None,
             **guarded,  # type: ignore[arg-type]
         )
 

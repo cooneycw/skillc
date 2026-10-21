@@ -586,6 +586,11 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
             credential_explicit_path=cast(Path, credential_explicit_path), timeout=budget, treatment=treatment,
             fixture=fixture)
         kwargs["prompt"] = text
+        modes = {k: v for k, v in treatment.home_modes.items() if k not in home_extra}
+        if modes:
+            # #505: the subject's files arrive with their source modes; a
+            # rehearsal actor's own home files are not subject files (0600).
+            kwargs["extra_home_modes"] = modes
         if case_turns is not None:
             kwargs["turns"] = case_turns  # #279: the seam agreed with cpp-final-fix
         if declaration.nested_policy is not None:

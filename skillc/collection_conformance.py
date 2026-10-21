@@ -538,6 +538,15 @@ def _collection_home_files(source: materialize.Source, files: list[demo.SubjectF
     return {f.container_relpath: (source.surface_dir / f.directory / f.rel).read_bytes() for f in files}
 
 
+def _collection_home_modes(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, str]:
+    """Each delivered skill file's SOURCE git mode (#505), from the staging
+    copy's owner-executable bit - the bit `materialize.tree_digest` already pins
+    into the source digest, so no new trust is added."""
+    import stat
+    return {f.container_relpath: "100755" if (source.surface_dir / f.directory / f.rel).stat().st_mode & stat.S_IXUSR
+            else "100644" for f in files}
+
+
 #: The grader's ground truth is never part of the public task surface.
 _FIXTURE_ANSWER_KEY = "expected.json"
 
@@ -690,6 +699,7 @@ def run_level1_agent_attempt(
     codex_guard: bool = False,
     nested_codex_policy: str | None = None,
     declared_model: str | None = None,
+    extra_home_modes: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -720,6 +730,10 @@ def run_level1_agent_attempt(
     guard_kwargs: dict[str, object] = (
         {"codex_guard": True, "nested_codex_policy": nested_codex_policy, "declared_model": declared_model}
         if codex_guard else {})
+    if extra_home_modes is not None:
+        # #505: each installed file's source mode, forwarded only when known,
+        # so every other caller's call is unchanged.
+        guard_kwargs["extra_home_modes"] = extra_home_modes
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
@@ -811,9 +825,13 @@ def run_collection_agent_attempt(
             cache=discovery_cache if discovery_cache is not None else {},
         ) if acquired.files else None
     )
+    delivered = _collection_home_files(acquired.source, acquired.files)
     record = run_level1_agent_attempt(
         experiment=experiment, attempt_id=attempt_id, backend=backend, grading_backend=grading_backend,
-        base=base, base_argv=base_argv, extra_home_files=_collection_home_files(acquired.source, acquired.files),
+        base=base, base_argv=base_argv, extra_home_files=delivered,
+        # #505: a mode only for a file actually delivered.
+        extra_home_modes={k: v for k, v in _collection_home_modes(acquired.source, acquired.files).items()
+                          if k in delivered},
         client=acquired.subject.client, cli_version=acquired.subject.client_version, prompt=prompt, surface=surface,
         task_root=task_root, timeout=timeout,
         credential_explicit_path=credential_explicit_path, minimum_credential_seconds=minimum_credential_seconds,
