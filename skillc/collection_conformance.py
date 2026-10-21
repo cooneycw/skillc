@@ -539,11 +539,13 @@ def _collection_home_files(source: materialize.Source, files: list[demo.SubjectF
 
 
 def _collection_home_modes(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, str]:
-    """Each delivered skill file's SOURCE git mode (#505), from the staging
-    copy's owner-executable bit - the bit `materialize.tree_digest` already pins
-    into the source digest, so no new trust is added."""
-    import stat
-    return {f.container_relpath: "100755" if (source.surface_dir / f.directory / f.rel).stat().st_mode & stat.S_IXUSR
+    """Each delivered skill file's SOURCE git mode (#505), read with EXACTLY
+    the predicate `materialize.tree_digest` pins into the source digest
+    (`os.access(path, os.X_OK)`), so one pinned source identity can never yield
+    two delivery modes (counter-model review, pass 2: an owner-bit read
+    disagreed with the digest for a 0655 file under a root controller)."""
+    import os
+    return {f.container_relpath: "100755" if os.access(source.surface_dir / f.directory / f.rel, os.X_OK)
             else "100644" for f in files}
 
 

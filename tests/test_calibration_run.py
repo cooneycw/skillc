@@ -1099,3 +1099,28 @@ def test_red_a_closure_that_disagrees_on_a_file_s_mode_is_refused(tmp_path: Path
                 cr.build_treatment(acquired, subject_profile="p", root=tmp_path)
         else:
             assert cr.build_treatment(acquired, subject_profile="p", root=tmp_path).home_modes[path] == "100755"
+
+
+@pytest.mark.parametrize("as_root", [False, True])
+def test_red_the_delivered_mode_is_the_one_the_source_digest_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_root: bool,
+) -> None:
+    """Counter-model review, pass 2: `materialize.tree_digest` pins
+    `os.access(path, os.X_OK)`. The delivery mode must use the same predicate,
+    or one pinned source identity yields two delivery modes - e.g. a 0655 file
+    under a ROOT controller (any x bit is executable to root, the owner bit is
+    not set). Root is emulated by an `os.access` that honours any x bit."""
+    import os
+    import stat as st
+
+    acquired = _acquired_with_script(tmp_path, monkeypatch)
+    helper = acquired.source.surface_dir / "tdd" / "scripts" / "run.sh"
+    helper.chmod(0o655)  # group/other x, no owner x
+    if as_root:
+        real = os.access
+        monkeypatch.setattr(os, "access", lambda path, mode, **kw: bool(Path(path).stat().st_mode & 0o111)
+                            if mode == os.X_OK else real(path, mode, **kw))
+    pinned_executable = os.access(helper, os.X_OK)  # what tree_digest hashes
+    modes = cc._collection_home_modes(acquired.source, acquired.files)
+    assert (modes[".codex/skills/tdd/scripts/run.sh"] == "100755") is pinned_executable
+    assert pinned_executable is as_root and not helper.stat().st_mode & st.S_IXUSR
