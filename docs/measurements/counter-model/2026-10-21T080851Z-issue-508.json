@@ -1,0 +1,25 @@
+{
+  "branch": "issue-508-project-gate-witness-for-agent-chooses-refs-287",
+  "counts": {
+    "accepted": 9,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "44c3327b7a4d4874a567c5e6e51ba2389c5f3636",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "508",
+  "passes": 2,
+  "recorded_at": "2026-10-21T08:08:51Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 12
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/21/rollout-2026-10-21T03-59-57-01a15d79-5fe8-7832-8549-ca8a50f3a375.jsonl",
+    "thread_id": "01a15d79-5fe8-7832-8549-ca8a50f3a375"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
