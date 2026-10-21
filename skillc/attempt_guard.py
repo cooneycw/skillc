@@ -213,9 +213,13 @@ GUARDED_PATHS = frozenset({fo.CODEX_GUARD_PATH})
 #: A command position: the start of a command, or after a separator, a
 #: subshell or substitution opener, a `-c` string, or a wrapper that runs its
 #: argument as a command; then any `NAME=value` assignment prefixes.
-_POSITION = (r"(?:^|[;&|(\n`{]|\$\(|(?<!\S)-\w*c\s+['\"]|\bxargs\s+|"
-             r"\b(?:exec|nohup|sudo|time|command)\s+|\btimeout\s+\S+\s+|\benv\s+(?:\S+=\S*\s+)*)"
-             r"\s*(?:[A-Za-z_]\w*=\S*\s+)*")
+_POSITION_START = (r"(?:^|[;&|(\n`{]|\$\(|(?<!\S)-\w*c\s+['\"]|\bxargs\s+|"
+                   r"\b(?:exec|nohup|sudo|time|command|then|do|else|elif|if|while|until)\s+|!\s+|"
+                   r"\btimeout\s+\S+\s+|\benv\s+(?:\S+=\S*\s+)*)")
+_POSITION = _POSITION_START + r"\s*(?:[A-Za-z_]\w*=\S*\s+)*"
+#: The text before a quote ends at a command position: the quoted word is the
+#: program itself, never literal text (counter-model review, pass 2).
+_AT_POSITION = re.compile("(?:" + _POSITION + r")$")
 #: `rest` stops at a separator AND at a substitution or backtick, so a launch
 #: nested inside an outer command's arguments is found at its own position
 #: (counter-model review, pass 1).
@@ -229,8 +233,19 @@ _CONFIG_MODEL = re.compile(r"['\"]?model\s*=\s*['\"]?(?P<m>[^\s'\"]+)")
 #: A command key, bare or quoted (`cmd:`, `"cmd":`), with its string literal.
 _JS_CMD = re.compile(r"(?:\b|(?<=[\"']))(?:cmd|command)[\"']?\s*:\s*(?P<q>[\"'`])(?P<s>(?:\\.|(?!(?P=q)).)*)(?P=q)",
                      re.DOTALL)
-#: A tool-call input that runs a command at all.
-_RUNS_COMMAND = re.compile(r"\b(?:exec_command|shell|spawn|execFile|exec)\s*\(")
+#: A command-running call in a tool-call input, each judged on its own: its
+#: argument must open with a literal `{cmd: "..."}` or it is unreadable
+#: (counter-model review, pass 2 - one readable sibling masked the rest).
+_RUNS_COMMAND = re.compile(r"\b(?:exec_command|shell|spawn|execFile|execSync|spawnSync)\s*\(")
+_LITERAL_CMD_ARG = re.compile(r"\s*\{\s*[\"']?(?:cmd|command)[\"']?\s*:\s*(?P<q>[\"'`])")
+#: `write_stdin` sends text to a running shell: that text is a command.
+_JS_STDIN = re.compile(r"\bwrite_stdin\s*\(\s*\{[^}]*?[\"']?chars[\"']?\s*:\s*(?P<q>[\"'`])(?P<s>(?:\\.|(?!(?P=q)).)*)(?P=q)",
+                       re.DOTALL)
+#: Function-call tools that run no command (counter-model review, pass 2: an
+#: ordinary `update_plan` read as an unreadable command and stopped the run).
+#: Any other tool is scanned for `cmd`/`command`, and is unreadable without one.
+NON_EXECUTING_TOOLS = frozenset({"update_plan", "view_image", "apply_patch", "list_mcp_resources",
+                                 "list_mcp_resource_templates", "read_mcp_resource", "request_user_input"})
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 _EXEC_CONTEXT = re.compile(r"(?<!\S)-\w*c\s*$")
 
@@ -295,7 +310,7 @@ def executable_view(command: str) -> str:
             j = i + 1
             while j < n and command[j] != c:
                 j += 2 if c == '"' and command[j] == "\\" else 1
-            if not _EXEC_CONTEXT.search(command[:i]):
+            if not _EXEC_CONTEXT.search(command[:i]) and not _AT_POSITION.search(command[:i]):
                 mask(i + 1, min(j, n), keep_substitutions=c == '"')
             i = j + 1
         else:
@@ -318,7 +333,7 @@ def _js_string(body: str, quote: str) -> str:
 def _commands(payload: Mapping[str, Any]) -> tuple[list[str], bool]:
     """Every shell command one tool-call item carries, as text, and whether
     the item runs a command that could NOT be read - which is never "no
-    launch" (counter-model review, pass 1)."""
+    launch" (counter-model review, passes 1 and 2)."""
     out: list[str] = []
     kind = payload.get("type")
     unreadable = False
@@ -330,6 +345,12 @@ def _commands(payload: Mapping[str, Any]) -> tuple[list[str], bool]:
                 args = json.loads(raw)
             except ValueError:
                 args = raw
+        name = payload.get("name") if kind == "function_call" else "local_shell"
+        if name in NON_EXECUTING_TOOLS:
+            return out, False
+        if name == "write_stdin":
+            chars = args.get("chars") if isinstance(args, Mapping) else None
+            return ([chars] if isinstance(chars, str) and chars else []), not isinstance(args, Mapping)
         if isinstance(args, Mapping):
             for key in ("cmd", "command"):
                 value = args.get(key)
@@ -342,11 +363,19 @@ def _commands(payload: Mapping[str, Any]) -> tuple[list[str], bool]:
         unreadable = not out
     elif kind == "custom_tool_call":
         source = payload.get("input")
-        if isinstance(source, str):
-            out.extend(_js_string(m.group("s"), m.group("q")) for m in _JS_CMD.finditer(source))
-            unreadable = not out and bool(_RUNS_COMMAND.search(source))
-        else:
-            unreadable = True
+        if not isinstance(source, str):
+            return out, True
+        out.extend(_js_string(m.group("s"), m.group("q")) for m in _JS_CMD.finditer(source))
+        out.extend(_js_string(m.group("s"), m.group("q")) for m in _JS_STDIN.finditer(source))
+        for call in _RUNS_COMMAND.finditer(source):
+            literal = _LITERAL_CMD_ARG.match(source, call.end())
+            if literal is None:
+                unreadable = True
+            elif literal.group("q") == "`":
+                # A template literal can splice in any text: unreadable unless plain.
+                close = source.find("`", literal.end())
+                if close < 0 or "${" in source[literal.end():close]:
+                    unreadable = True
     return out, unreadable
 
 
@@ -399,13 +428,22 @@ def scan_codex_invocations(lines: Sequence[Mapping[str, Any]]) -> list[dict[str,
     return hits
 
 
-def scan_transcript_text(text: str) -> list[dict[str, Any]]:
+def scan_transcript_text(text: str) -> list[dict[str, Any]] | None:
+    """The scan over one raw transcript, or None when the transcript could
+    not be read whole: empty, or a non-empty line that is not a JSON object.
+    None is "not scanned", which `assess` stops on - never a clean zero
+    (counter-model review, pass 2)."""
     lines: list[Mapping[str, Any]] = []
     for raw in text.splitlines():
+        if not raw.strip():
+            continue
         try:
             obj = json.loads(raw)
         except ValueError:
-            continue
-        if isinstance(obj, Mapping):
-            lines.append(obj)
+            return None
+        if not isinstance(obj, Mapping):
+            return None
+        lines.append(obj)
+    if not lines:
+        return None
     return scan_codex_invocations(lines)

@@ -1489,9 +1489,12 @@ def _make_observe_before_teardown(
                 extra["multiple_transcripts"] = True
                 extra["transcript_sessions"] = summary
                 if scan_codex:
-                    extra["transcript_codex_invocations"] = [
-                        hit for _path, raw_session in sorted(matches.items())
-                        for hit in ag.scan_transcript_text(raw_session.decode("utf-8", errors="replace"))]
+                    scans = [ag.scan_transcript_text(raw_session.decode("utf-8", errors="replace"))
+                             for _path, raw_session in sorted(matches.items())]
+                    # One session the scan could not read leaves the whole scan unknown.
+                    extra["transcript_codex_invocations"] = (
+                        None if any(scan is None for scan in scans)
+                        else [hit for scan in scans if scan is not None for hit in scan])
         else:
             (matched_path, raw), = matches.items()
             # Account identifiers and encrypted reasoning are redacted before

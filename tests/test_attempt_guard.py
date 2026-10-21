@@ -483,3 +483,69 @@ def test_red_a_stopped_attempt_is_never_model_eligible(tmp_path: Path) -> None:
     assert rows[outcomes[0].scheduled.attempt_id]["model_eligible"] is False
     assert rows[outcomes[1].scheduled.attempt_id]["model_eligible"] is True
     assert report["containment_stop"]["at_attempt"] == outcomes[0].scheduled.attempt_id
+
+
+# --------------------------------------------- counter-model review, pass 2
+
+def _custom(source: str) -> list[dict[str, Any]]:
+    return ag.scan_codex_invocations([{"type": "response_item", "payload": {"type": "custom_tool_call", "input": source}}])
+
+
+def _function(name: str, args: dict[str, Any]) -> list[dict[str, Any]]:
+    return ag.scan_codex_invocations([{"type": "response_item", "payload": {
+        "type": "function_call", "name": name, "arguments": json.dumps(args)}}])
+
+
+@pytest.mark.parametrize("command,program", [
+    ('"/usr/local/bin/codex" exec --ephemeral --model other hi', "/usr/local/bin/codex"),
+    ("if true; then /usr/local/bin/codex exec hi; fi", "/usr/local/bin/codex"),
+    ("for x in a; do codex exec hi; done", "codex"),
+    ("! codex exec hi", "codex"),
+])
+def test_red_a_quoted_program_or_a_control_flow_position_is_a_launch(command: str, program: str) -> None:
+    assert [h["program"] for h in ag.scan_command(command)] == [program]
+
+
+def test_red_an_unreadable_call_beside_a_readable_one_still_fails_closed() -> None:
+    hits = _custom('await tools.exec_command({cmd:"ls"}); const c = "/usr/local/bin/codex exec hi"; '
+                   "await tools.exec_command({cmd:c});")
+    assert any(h.get("unreadable") for h in hits)
+    assert ag.assess(ZERO, hits, "gpt-6-astra")["stop"] is not None
+
+
+def test_red_a_spliced_template_literal_is_unreadable() -> None:
+    assert [h.get("unreadable") for h in _custom("await tools.exec_command({cmd:`ls ${x}`})")] == [True]
+
+
+def test_red_text_sent_to_a_running_shell_is_scanned() -> None:
+    [hit] = _custom('await tools.write_stdin({session_id:1, chars:"/usr/local/bin/codex exec hi\\n"})')
+    assert hit["program"] == "/usr/local/bin/codex" and hit["guarded"] is False
+    assert _custom('await tools.write_stdin({session_id:1, chars:""})') == []  # a poll sends nothing
+
+
+@pytest.mark.parametrize("name,args", [
+    ("update_plan", {"plan": [{"step": "x", "status": "pending"}]}),
+    ("view_image", {"path": "/work/x.png"}),
+    ("write_stdin", {"session_id": 1, "chars": ""}),
+    ("apply_patch", {"input": "*** Begin Patch"}),
+])
+def test_red_an_ordinary_tool_call_does_not_stop_the_run(name: str, args: dict[str, Any]) -> None:
+    hits = _function(name, args)
+    assert hits == [] and ag.assess(ZERO, hits, "gpt-6-astra")["stop"] is None
+
+
+def test_an_unknown_tool_with_no_command_is_unreadable_not_clean() -> None:
+    assert [h.get("unreadable") for h in _function("mystery_tool", {"x": 1})] == [True]
+    [hit] = _function("exec_command", {"cmd": "codex exec hi"})
+    assert hit["program"] == "codex"
+
+
+@pytest.mark.parametrize("text", ["", "\n\n", '{"type":"response_item"}\n{"trunc', "[1, 2]\n"])
+def test_red_a_transcript_that_cannot_be_read_whole_is_not_scanned(text: str) -> None:
+    assert ag.scan_transcript_text(text) is None
+    assert ag.assess(ZERO, ag.scan_transcript_text(text), "gpt-6-astra")["stop"] is not None
+
+
+def test_a_readable_transcript_with_no_launch_is_a_clean_zero() -> None:
+    text = json.dumps({"type": "response_item", "payload": {"type": "message", "role": "assistant"}}) + "\n"
+    assert ag.scan_transcript_text(text) == []
