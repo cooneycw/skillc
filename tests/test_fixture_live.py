@@ -1587,3 +1587,44 @@ def test_a_replay_never_re_tallies_a_rehearsal_store_as_live(tmp_path: Path) -> 
     (run_dir / fl.REPORT_FILENAME).write_text(json.dumps(source))
     with pytest.raises(fl.LiveRefused, match="never tallied"):
         fl.judge_replay(run_dir, declaration, root=ROOT, adapter_revision="test-rev", stamp="t1")
+
+
+# --------------------------------- #279 PR-3 (C5): turn-declaration preconditions enforced
+
+def _turn_declaration(*, containment: bool = True) -> fl.LiveDeclaration:
+    data = _with_turns(_draft())
+    if containment:
+        data["containment"] = {"nested_codex": "refusal-expected"}
+    return fl.parse_declaration(data)
+
+
+def _with_files(home_files: dict[str, bytes], home_modes: dict[str, str]) -> cr.Treatment:
+    import dataclasses
+    return dataclasses.replace(_treatment(), home_files=home_files, home_modes=home_modes)
+
+
+def test_a_turn_declaration_without_containment_is_refused_at_dispatch(tmp_path: Path) -> None:
+    with pytest.raises(fl.LiveRefused, match="containment.nested_codex"):
+        fl.require_turn_dispatch(_turn_declaration(containment=False), _treatment())
+    with pytest.raises(fl.LiveRefused, match="containment.nested_codex"):
+        fl.run_live(_turn_declaration(containment=False), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
+                    image_digest=None, backends=lambda: (None, None), client_argv=["codex", "exec"],
+                    credential_explicit_path=None, rehearse="dry")
+    fl.require_turn_dispatch(_turn_declaration(), _treatment())
+    fl.require_turn_dispatch(fl.parse_declaration(_draft()), _treatment())  # no turns: unchanged
+
+
+def test_a_delivered_file_with_no_source_mode_is_refused() -> None:
+    helper = ".claude/scripts/flow-finish-gate.sh"
+    with pytest.raises(fl.LiveRefused, match="no source mode"):
+        fl.require_turn_dispatch(_turn_declaration(), _with_files({helper: b"#!/bin/sh\n"}, {}))
+    fl.require_turn_dispatch(_turn_declaration(), _with_files({helper: b"#!/bin/sh\n"}, {helper: "100755"}))
+
+
+def test_executable_comes_from_the_source_mode_and_cannot_be_shadowed() -> None:
+    """A rehearsal home file at a source-EXECUTABLE helper's path is refused;
+    the same path at a 100644 source mode is not an executable helper."""
+    path = ".claude/scripts/helper.sh"
+    with pytest.raises(fl.LiveRefused, match="shadows a source-executable"):
+        fl.require_turn_dispatch(_turn_declaration(), _with_files({path: b"x"}, {path: "100755"}), {path: b"y"})
+    fl.require_turn_dispatch(_turn_declaration(), _with_files({path: b"x"}, {path: "100644"}), {path: b"y"})

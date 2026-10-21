@@ -665,6 +665,32 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple
             {**home, wrapper: TURN_ACTOR_SOURCE.encode("utf-8")})
 
 
+def require_turn_dispatch(declaration: LiveDeclaration, treatment: cr.Treatment,
+                          home_extra: Mapping[str, bytes] | None = None) -> None:
+    """#279 PR-3 (orchestrator C5): a declaration with controller turns (the
+    Step-6 path) dispatches only with its preconditions ENFORCED, not merely
+    forwarded:
+
+    - #500: `containment.nested_codex` is declared, so the nested-codex guard's
+      policy is part of the approved declaration;
+    - #505: every delivered subject file carries its SOURCE git mode
+      (`treatment.home_modes`, from `profile.installed_home_modes`), and no
+      source-executable helper (`100755`) is shadowed by a rehearsal actor's
+      own home file. "Executable" comes from the source mode, never from a list
+      the declaration supplies."""
+    if declaration.turns is None:
+        return
+    if declaration.nested_policy is None:
+        raise LiveRefused("a declaration with controller turns must declare containment.nested_codex (#500)")
+    unmoded = sorted(set(treatment.home_files) - set(treatment.home_modes))
+    if unmoded:
+        raise LiveRefused(f"delivered subject files with no source mode (#505): {unmoded}")
+    executable = {path for path, mode in treatment.home_modes.items() if mode == "100755"}
+    shadowed = sorted(executable & set(home_extra or {}))
+    if shadowed:
+        raise LiveRefused(f"a rehearsal home file shadows a source-executable subject helper: {shadowed}")
+
+
 def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatment: cr.Treatment,
              image_digest: str | None, backends: Callable[[], tuple[Any, Any]], client_argv: Sequence[str],
              credential_explicit_path: Path | None, rehearse: str | None = None,
@@ -678,6 +704,7 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     if rehearse is not None and rehearse not in REHEARSALS:
         raise LiveRefused(f"rehearse must be one of {REHEARSALS}")
     require_approved(declaration, root, approval_required=rehearse is None)
+    require_turn_dispatch(declaration, treatment)
     approved = True
     if rehearse is not None:
         try:
@@ -721,6 +748,7 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
             credential_explicit_path=cast(Path, credential_explicit_path), timeout=budget, treatment=treatment,
             fixture=fixture)
         kwargs["prompt"] = text
+        require_turn_dispatch(declaration, treatment, home_extra)
         modes = {k: v for k, v in treatment.home_modes.items() if k not in home_extra}
         if modes:
             # #505: the subject's files arrive with their source modes; a
