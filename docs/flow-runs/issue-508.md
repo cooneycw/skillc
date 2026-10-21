@@ -51,3 +51,38 @@ Scope: large. Risks:
 - GateWitness and agent_trial are hot paths: additive changes only, existing tests unmodified.
 - PATH stripping must be exact; the nested-request red proves it.
 - The subject-reported log must never reach the grader; a red proves it.
+
+<!-- flow-run n=2 id=09c447c52d5846e58c4a638b05610e00 -->
+## Run 2
+
+- Run-id:            09c447c52d5846e58c4a638b05610e00
+- Run-start:         2902c5bce9a4e0fde934ac8c15a9d7545a8bd061
+- Issue:             #508
+- Base SHA:          2902c5bce9a4e0fde934ac8c15a9d7545a8bd061
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE GO-WITH-CONDITIONS #508 PR-B (C1-C5, both-arms YES), 2026-10-21
+- Recorded at:       2026-10-21T09:00:00Z
+
+### Section B evidence
+PR-A merged as #509 (2902c5b). A counter-model re-review of the pass-2 fixes found two HIGH findings:
+- H1, a probe-to-make race;
+- H2, per-stage make differing from one `make check` (goal-specific variables, a Makefile rewritten mid-run).
+`--eval .PHONY` leaks into recipes' MAKEFLAGS (measured), so it is rejected. auto6's `gate-report-honest` is single-source.
+
+### Section C - the approved plan (this run is PR-B)
+1. `skillc/project_gate.py`:
+   - (1a) a post-stage re-probe (blindable for reds);
+   - C1: a stage whose controller-run make reports a skip ("is up to date" / "Nothing to be done for", strings pinned against make 4.3 goldens) is null, never passed;
+   - C2: a closed, committed QUALIFIED_MAKEFILES set; from_declaration fails closed on any other digest; a digest without goldens fails a test.
+2. `evals/level3/gate-stops-early-agent-chooses/` (NEW grader id): auto6's task copied, auto6 unchanged, and `gate-report-honest` scored by the cross-gate rule.
+   - Every UNKNOWN carries a reason code (gates-disagree / none-fresh / partial / bypass / drift / ran-nothing), counted.
+   - qualify covers every design §5 cell plus "pass claimed against one failing gate", with broken-judge controls.
+   - C5: a pinned-digest control on auto6's grader files; a one-byte red is run once.
+3. Calibration: `project-gate.json` in a task, loaded by `collection_conformance` and passed to BOTH arms; a test pins it to the fixture Makefile.
+4. Tests append-only; docs (`gate-witness.md` §10, the task README/DESIGN); changelog; the live test extended under lock 1.
+
+Scope: large. Risks:
+- hot-path additive only;
+- the skip-string match can only demote a stage to null (a recipe printing it forges toward UNKNOWN, never toward passed);
+- baseline-arm symmetry (both arms are witnessed alike).

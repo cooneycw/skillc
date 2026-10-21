@@ -362,3 +362,24 @@ def test_an_oversized_aggregate_is_refused_by_the_witness_never_sliced() -> None
     with pytest.raises(ChannelRefusal, match="missing or incomplete"):
         witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": "/work", "make_args": ["check"]})
     assert witness.channel_unavailable is True
+
+
+def test_a_stage_that_did_not_stop_confirmed_makes_the_witness_refuse_later_gates() -> None:
+    """#508 PR-B counter-model review: the witness's integrity rule sees the
+    stage's unconfirmed stop - a later gate run is refused."""
+    class Stuck(_WitnessBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            if argv == [pg.REAL_MAKE, "test"]:
+                self.stuck = True  # the NEXT probe times out but stops confirmed: the two-timeout sequence
+                return ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=False)
+            if argv[0] == "/bin/sh" and getattr(self, "stuck", False):
+                return ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=True)
+            return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+    witness, _backend = _witness({"lint": 0, "test": 0, "typecheck": 0})
+    witness._backend = Stuck({"lint": 0, "test": 0, "typecheck": 0})  # type: ignore[assignment]
+    witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": "/work", "make_args": ["check"]})
+    with pytest.raises(ChannelRefusal, match="workspace-integrity-unknown"):
+        witness.decide({"op": "run_gate", "gate": "flow-auto-finish", "cwd": "/work"})

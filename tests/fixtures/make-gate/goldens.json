@@ -117,6 +117,15 @@
    "stdout": "python3 ci/lint.py\nlint out\npython3 ci/check.py\ntest out\npython3 ci/typecheck.py\ntypecheck out\n"
   }
  },
+ "makefile_sha256": "333b21c196e6e0f1ad36b5149bef900648d502f897ef9d2ba4db6d1df189f4bb",
+ "plan": {
+  "goal": "check",
+  "stages": [
+   "lint",
+   "test",
+   "typecheck"
+  ]
+ },
  "single": {
   "lint=0": {
    "args": [
@@ -205,6 +214,34 @@
    "exit": 2,
    "stderr": "typecheck err\nmake: *** [Makefile:10: typecheck] Error 3\n",
    "stdout": "python3 ci/typecheck.py\ntypecheck out\n"
+  }
+ },
+ "skips": {
+  "check-nothing-to-do": {
+   "args": [
+    "check"
+   ],
+   "codes": {
+    "lint": 0,
+    "test": 0,
+    "typecheck": 0
+   },
+   "exit": 0,
+   "stderr": "",
+   "stdout": "make: Nothing to be done for 'check'.\n"
+  },
+  "test-up-to-date": {
+   "args": [
+    "test"
+   ],
+   "codes": {
+    "lint": 0,
+    "test": 0,
+    "typecheck": 0
+   },
+   "exit": 0,
+   "stderr": "",
+   "stdout": "make: 'test' is up to date.\n"
   }
  }
 }

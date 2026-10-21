@@ -389,14 +389,20 @@ def treatment_subject(declaration: calibration.CalibrationDeclaration) -> Mappin
 
 def task_content_identity(
     goal: bytes, grader: verify.GraderDef, files: list[tuple[str, bytes, bool]],
+    project_gate: bytes | None = None,
 ) -> dict[str, object]:
-    """Identity of the prompt, grader and exact delivered fixture (including mode)."""
-    return {
+    """Identity of the prompt, grader and exact delivered fixture (including
+    mode), and - only for a task that declares one (#508) - its project-gate
+    declaration, so every earlier task's identity is byte-identical."""
+    identity: dict[str, object] = {
         "version": 1, "goal_digest": trial.sha256_bytes(goal), "grader_digest": grader.digest(),
         "fixture_digest": trial.sha256_bytes(trial.canonical([
             [path, executable, trial.sha256_bytes(body)] for path, body, executable in sorted(files)
         ])),
     }
+    if project_gate is not None:
+        identity["project_gate_digest"] = trial.sha256_bytes(project_gate)
+    return identity
 
 
 def _outcome_task_inputs(
@@ -408,7 +414,7 @@ def _outcome_task_inputs(
         raise CalibrationRefused("outcome task goal must be a regular file")
     goal = goal_file.read_bytes()
     files = cc.task_surface(task / declaration.task_fixture)
-    measured = task_content_identity(goal, verify.GraderDef.load(task), files)
+    measured = task_content_identity(goal, verify.GraderDef.load(task), files, cc.project_gate_bytes(task))
     if measured != declaration.data["task_content"]:
         raise CalibrationRefused("task_content differs from the approved goal, grader or fixture")
     return goal.decode("utf-8"), cc.surface_mapping(files)
@@ -552,6 +558,9 @@ def run_calibration(
     client_name, client_version = declared_client(declaration)
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
+    #: #508: the task's project gate, resolved ONCE for the whole run and
+    #: handed to every arm, so the arms cannot see different declarations.
+    resolved_gate = cc.project_gate_of(task_root)
     try:
         if calibration.outcome_endpoint(declaration) is not None:
             goal, surface = _outcome_task_inputs(declaration, root)
@@ -597,6 +606,7 @@ def run_calibration(
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=treatment.home_files if treated else {},
             client=client_name, cli_version=client_version, task_root=task_root, surface=surface, prompt=prompt,
+            project_gate=resolved_gate,
             timeout=budget, credential_explicit_path=credential_explicit_path,
             receipt_context=treatment.receipt_context if treated else None,
             # #334: the profile-closure fields reach a real
@@ -1144,6 +1154,9 @@ def run_discrimination(
     client_name, client_version = declared_client(declaration)
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
+    #: #508: the task's project gate, resolved ONCE for the whole run and
+    #: handed to every arm, so the arms cannot see different declarations.
+    resolved_gate = cc.project_gate_of(task_root)
     try:
         surface = cc.surface_mapping(cc.task_surface(task_root / declaration.task_fixture))
         goal = (task_root / "goal.md").read_text(encoding="utf-8")
@@ -1173,7 +1186,7 @@ def run_discrimination(
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=chosen.home_files, client=client_name, cli_version=client_version,
-            task_root=task_root, surface=surface, prompt=goal, timeout=budget,
+            task_root=task_root, surface=surface, prompt=goal, timeout=budget, project_gate=resolved_gate,
             credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
             verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
             gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,

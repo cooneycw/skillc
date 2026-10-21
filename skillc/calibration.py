@@ -189,12 +189,17 @@ def _outcome_endpoint(data: Mapping[str, object]) -> OutcomeEndpoint | None:
             or not all(isinstance(c, str) and c.strip() == c and c for c in criteria) \
             or len(set(criteria)) != len(criteria) or PRIMARY_ENDPOINT_EXCLUDES.intersection(criteria):
         raise _refuse("outcome_endpoint.criteria must be distinct nonempty task criterion names")
+    bound = ("goal_digest", "grader_digest", "fixture_digest")
+    # #508: a task that declares a project gate binds its declaration too;
+    # every other task's task_content is exactly as before.
+    gated = isinstance(content, dict) and "project_gate_digest" in content
     if not isinstance(content, dict) \
-            or set(content) != {"version", "goal_digest", "grader_digest", "fixture_digest"} \
+            or set(content) != {"version", *bound, *(("project_gate_digest",) if gated else ())} \
             or type(content.get("version")) is not int or content["version"] != 1 \
             or not all(isinstance(content[k], str) and _SHA256_DIGEST_RE.fullmatch(content[k])
-                       for k in ("goal_digest", "grader_digest", "fixture_digest")):
-        raise _refuse("task_content must bind goal, grader and fixture digests under version 1")
+                       for k in (*bound, *(("project_gate_digest",) if gated else ()))):
+        raise _refuse("task_content must bind goal, grader and fixture digests (and a declared project gate's) "
+                      "under version 1")
     arms = data.get("arms")
     if data.get("kind") != "calibration-declaration" or data.get("lane", DEFAULT_LANE) != DEFAULT_LANE \
             or not isinstance(arms, list) or len(arms) != 2 \
