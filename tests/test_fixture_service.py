@@ -806,3 +806,150 @@ def test_every_event_carries_the_controllers_order_only_when_given_one(world: Wo
     plain = world.service()
     ask(plain, "issue", "view", "1")
     assert all("order" not in e for e in plain.finalize("attempt-1").to_json()["events"])  # byte-identical control
+
+
+# ------------------------------- #279 PR-2b: what a ship request ships, stamped at the request
+
+def _step6_world(tmp_path: Path) -> tuple[Any, Path, dict[str, Any]]:
+    import importlib.util
+
+    task = Path(__file__).resolve().parent.parent / "evals" / "level3" / "flow-auto-step6-gate"
+    spec = importlib.util.spec_from_file_location("step6_builder_for_stamp_tests", task / "builder" / "build.py")
+    assert spec is not None and spec.loader is not None
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    root = tmp_path / "w"
+    root.mkdir()
+    facts = build.build(root, "twin-gate")
+    return build, root, facts
+
+
+def _ship_branch(build: Any, root: Path, text: str = "fixed\n") -> str:
+    repo = root / "repo"
+    build.host_git(["checkout", "-q", "-b", "issue-1-fix"], repo)
+    (repo / "widget" / "core.py").write_text(text, encoding="utf-8")
+    build.host_git(["commit", "-q", "-am", "fix"], repo, date="2026-10-17T12:30:00+0000")
+    build.host_git(["push", "-q", "origin", "HEAD:refs/heads/issue-1-fix"], repo)
+    return str(build.host_git(["rev-parse", "HEAD"], repo))
+
+
+def _stamping_service(build: Any, root: Path, facts: dict[str, Any], stamper: Any, *, ordered: bool = True) -> Any:
+    from skillc.ordering import Order
+    remote = root / "remote.git"
+    return fs.FixtureService(build.declaration("twin-gate", str(remote), facts), fs.LocalGitRemote(remote), "a-1",
+                             order=Order() if ordered else None, ship_stamper=stamper)
+
+
+def _create(service: Any, root: Path) -> dict[str, Any]:
+    service.decide({"op": "gh", "argv": ["pr", "create", "--title", "t", "--body", "b", "--head", "issue-1-fix"],
+                    "cwd": "/work/repo", "context": {"origin_url": str(root / "remote.git"), "branch": "issue-1-fix"}})
+    [event] = [e for e in service.finalize("a-1").to_json()["events"] if e["op"] == "pr.create"]
+    return dict(event)
+
+
+def test_a_ship_request_is_stamped_with_the_source_of_the_commit_it_ships(tmp_path: Path) -> None:
+    from skillc import git_snapshot as gs
+    from skillc import source_digest as sd
+
+    build, root, facts = _step6_world(tmp_path)
+    head = _ship_branch(build, root)
+    reader = lambda: gs.GitDir(gs.SafeTree(root), "remote.git")
+    event = _create(_stamping_service(build, root, facts, lambda c: sd.ship_stamp(reader(), c)), root)
+    stamp = event["ship_stamp"]
+    assert stamp["status"] == "stamped" and stamp["commit"] == head
+    assert stamp["source_digest"] == sd.digest_commit(reader(), head)
+    files = reader().tree_files(reader().tree_of(head))
+    assert stamp["gate_definition_digest"] == sd.gate_definition_digest(files)
+
+
+def test_a_re_push_after_the_ship_keeps_the_request_s_own_stamp(tmp_path: Path) -> None:
+    """The stamp is taken AT the request: a later push to the shipped branch
+    moves the ref, never the record of what the request shipped."""
+    from skillc import git_snapshot as gs
+    from skillc import source_digest as sd
+
+    build, root, facts = _step6_world(tmp_path)
+    head = _ship_branch(build, root)
+    service = _stamping_service(build, root, facts,
+                                lambda c: sd.ship_stamp(gs.GitDir(gs.SafeTree(root), "remote.git"), c))
+    service.decide({"op": "gh", "argv": ["pr", "create", "--title", "t", "--body", "b", "--head", "issue-1-fix"],
+                    "cwd": "/work/repo", "context": {"origin_url": str(root / "remote.git"), "branch": "issue-1-fix"}})
+    first = sd.ship_stamp(gs.GitDir(gs.SafeTree(root), "remote.git"), head)
+    (root / "repo" / "NOTES.md").write_text("later\n", encoding="utf-8")
+    build.host_git(["add", "--all"], root / "repo")
+    build.host_git(["commit", "-q", "-m", "later"], root / "repo", date="2026-10-17T12:40:00+0000")
+    build.host_git(["push", "-q", "origin", "HEAD:refs/heads/issue-1-fix"], root / "repo")
+    [event] = [e for e in service.finalize("a-1").to_json()["events"] if e["op"] == "pr.create"]
+    assert event["ship_stamp"]["commit"] == head and event["ship_stamp"]["source_digest"] == first["source_digest"]
+    moved = build.host_git(["rev-parse", "refs/heads/issue-1-fix"], root / "remote.git")
+    assert moved != head  # the ref moved; the record of the ship did not
+
+
+def test_an_unreadable_shipped_commit_is_recorded_unreadable_never_a_digest(tmp_path: Path) -> None:
+    build, root, facts = _step6_world(tmp_path)
+    _ship_branch(build, root)
+
+    def broken(commit: str) -> dict[str, str]:
+        raise OSError("object store unreadable")
+
+    stamp = _create(_stamping_service(build, root, facts, broken), root)["ship_stamp"]
+    assert stamp["status"] == "unreadable" and "source_digest" not in stamp and "OSError" in stamp["reason"]
+
+
+def test_an_unordered_attempt_carries_no_stamp(tmp_path: Path) -> None:
+    """Only a multi-turn (ordered) attempt is stamped; every other record is
+    byte-identical to before #279 PR-2b."""
+    build, root, facts = _step6_world(tmp_path)
+    _ship_branch(build, root)
+    event = _create(_stamping_service(build, root, facts, lambda c: {"source_digest": "x"}, ordered=False), root)
+    assert "ship_stamp" not in event and "order" not in event
+
+
+def test_a_refused_ship_request_names_no_shipped_head(tmp_path: Path) -> None:
+    build, root, facts = _step6_world(tmp_path)  # no branch pushed: the create is refused
+    event = _create(_stamping_service(build, root, facts, lambda c: pytest.fail("nothing shipped")), root)
+    assert event["decision"] != "applied" and event["ship_stamp"] == {"status": "no-head"}
+
+
+def test_a_merge_also_stamps_the_commit_it_put_on_main(tmp_path: Path) -> None:
+    """Counter-model review: a squash merges the head with the CURRENT base, so a
+    base-side change made after the gate ships in the merge result. The merge's
+    stamp therefore carries the merge commit's own digests and entries."""
+    from skillc import git_snapshot as gs
+    from skillc import source_digest as sd
+
+    build, root, facts = _step6_world(tmp_path)
+    head = _ship_branch(build, root)
+    reader = lambda: gs.GitDir(gs.SafeTree(root), "remote.git")
+    service = _stamping_service(build, root, facts, lambda c: sd.ship_stamp(reader(), c))
+    ctx = {"origin_url": str(root / "remote.git"), "branch": "issue-1-fix"}
+    service.decide({"op": "gh", "argv": ["pr", "create", "--title", "t", "--body", "b", "--head", "issue-1-fix"],
+                    "cwd": "/work/repo", "context": ctx})
+    service.decide({"op": "gh", "argv": ["pr", "merge", "--squash"], "cwd": "/work/repo", "context": ctx})
+    [event] = [e for e in service.finalize("a-1").to_json()["events"] if e["op"] == "pr.merge"]
+    assert event["decision"] == "applied"
+    merged = event["ship_stamp"]["merge"]
+    assert event["ship_stamp"]["commit"] == head and merged["commit"] == event["effect"]["merge_commit"] != head
+    assert merged["status"] == "stamped" and merged["source_digest"] == sd.digest_commit(reader(), merged["commit"])
+    assert merged["entries"]["widget/core.py"] == event["ship_stamp"]["entries"]["widget/core.py"]
+
+
+def test_an_unreadable_merge_result_makes_the_whole_stamp_unreadable(tmp_path: Path) -> None:
+    from skillc import git_snapshot as gs
+    from skillc import source_digest as sd
+
+    build, root, facts = _step6_world(tmp_path)
+    head = _ship_branch(build, root)
+
+    def head_only(commit: str) -> dict[str, object]:
+        if commit != head:
+            raise OSError("merge result unreadable")
+        return sd.ship_stamp(gs.GitDir(gs.SafeTree(root), "remote.git"), commit)
+
+    service = _stamping_service(build, root, facts, head_only)
+    ctx = {"origin_url": str(root / "remote.git"), "branch": "issue-1-fix"}
+    service.decide({"op": "gh", "argv": ["pr", "create", "--title", "t", "--body", "b", "--head", "issue-1-fix"],
+                    "cwd": "/work/repo", "context": ctx})
+    service.decide({"op": "gh", "argv": ["pr", "merge", "--squash"], "cwd": "/work/repo", "context": ctx})
+    [event] = [e for e in service.finalize("a-1").to_json()["events"] if e["op"] == "pr.merge"]
+    assert event["ship_stamp"]["status"] == "unreadable" and event["ship_stamp"]["merge"]["status"] == "unreadable"

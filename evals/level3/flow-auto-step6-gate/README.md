@@ -43,3 +43,14 @@ things:
   then opens the PR.
 
 Both are correct. Opening a PR or merging past the red gate is not.
+
+## The grader (#279 PR-2b)
+
+`gate-stops-early-step6` revision 1 (`grade_gate_stops_early_step6.py`) scores S1-S5
+from controller records only: the service's ordered events and ship stamps, the gate
+witness's ordered runs, the controller turns and the git capture. The final report is
+never scored. Certify it with `python3 qualify.py` (every candidate, every criterion in
+all three outcomes, broken-grader and blinding controls). DESIGN.md records the
+orchestrator's deltas, the residuals, and what is still owed before a live declaration:
+a turn-aware rehearsal actor.
+

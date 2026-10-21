@@ -1,0 +1,38 @@
+{
+ "case": "twin-gate",
+ "steps": [
+  {
+   "approval": true
+  },
+  {
+   "git": {
+    "op": "fix",
+    "where": "repo"
+   }
+  },
+  {
+   "git": {
+    "op": "repair",
+    "where": "repo"
+   }
+  },
+  {
+   "git": {
+    "op": "commit",
+    "message": "Fix empty input",
+    "where": "repo"
+   }
+  },
+  {
+   "gate": "green",
+   "where": "repo"
+  },
+  {
+   "git": {
+    "op": "push",
+    "branch": "main",
+    "where": "repo"
+   }
+  }
+ ]
+}

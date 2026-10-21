@@ -95,3 +95,38 @@ Scope: medium. Risks: G1 containment semantics; receipt-writer stall before the 
 13. `changelog.d/279-recording-layer.md` - one bullet
 
 Scope: large. Risks: shared hot-path stamping (turns-only, byte-identical controls, existing tests unmodified); population rule (mismatch reads UNKNOWN in PR-2b, never SATISFIED).
+
+<!-- flow-run n=4 id=3c1c966a03234f1db488c9e042c7e011 -->
+## Run 4
+
+- Run-id:            3c1c966a03234f1db488c9e042c7e011
+- Run-start:         a282164b5a64e6036efec849187d1f6c70d03f41
+- Issue:             #279
+- Base SHA:          a282164b5a64e6036efec849187d1f6c70d03f41
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          wave skillc-400 orchestrator (authority-model orchestrator-only), GATE GO-WITH-CONDITIONS #279 PR-2b (Deltas 1-3), 2026-10-21
+- Recorded at:       2026-10-21T07:00:00Z
+
+### Section B evidence
+PR-2a merged #496 (d5903e5): order on service events, witness runs (order_requested/completed, source_digest_at_start), controller-turn records; remote_ref_sources of FINAL heads only, captured post-stop. Applied pr.create/pr.merge effects record head_oid. git pushes never pass the service. Duplicates: none.
+
+### Section C - the approved plan (this run is PR-2b, the grader)
+1. `skillc/fixture_service.py` - on ship requests (pr.create/pr.merge) in attempts with an ordering counter, an injected stamper records `ship_stamp`: the source digest and gate-definition digest of head_oid, computed at the request; absent or unreadable stays visible
+2. `skillc/source_digest.py` - the gate-definition file set and its digest over the same population
+3. `skillc/fixture_attempt.py` - the stamper wired from the exported remote (no git process)
+4. `evals/level3/flow-auto-step6-gate/grade_gate_stops_early_step6.py` - NEW stdlib judge, S1-S5 per Deltas 1-3; prose recorded, never scored
+5. `evals/level3/flow-auto-step6-gate/grader.json` - NEW
+6. `evals/level3/flow-auto-step6-gate/probe.py` - NEW
+7. `evals/level3/flow-auto-step6-gate/inputs.json` - NEW
+8. `evals/level3/flow-auto-step6-gate/qualify.py` - NEW: scripted-timeline harness on the real FixtureService, GateWitness and Order; broken-grader and blinding controls
+9. `evals/level3/flow-auto-step6-gate/candidates/` - NEW: SATISFIED/VIOLATED/UNKNOWN per criterion, the S3 ordering reds
+10. `evals/level3/flow-auto-step6-gate/grader-controls/` - NEW: always_pass, always_fail, crash, no_output, omits_criterion
+11. `skillc/fixture_live.py` - REHEARSAL_BY_TASK twin-gate entries
+12. `tests/test_flow_auto_step6_gate_task.py` - append-only
+13. `tests/test_fixture_service.py` - append-only stamp reds
+14. `evals/level3/flow-auto-step6-gate/DESIGN.md` - Deltas 1-3, residuals, the #505 executable-helpers note
+15. `evals/level3/flow-auto-step6-gate/README.md` - the grader
+16. `changelog.d/279-grader.md` - one bullet
+
+Scope: large. Risks: a stamp on the hot service path (turns-only, additive, existing tests unmodified); the judge must reproduce the digest algorithm stdlib-only; pre-approval pushes unorderable (residual, nit store).

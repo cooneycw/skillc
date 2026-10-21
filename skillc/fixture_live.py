@@ -110,6 +110,14 @@ REHEARSAL_CANDIDATES = {"clean": "pass/clean-cites-commit-only", "twin": "pass/t
 #: Per task (by its directory name); the Step-6 task's candidates are #279 PR-2b's.
 REHEARSAL_BY_TASK: dict[str, dict[str, str]] = {Path(TASK_PATH).name: REHEARSAL_CANDIDATES,
                                                 Path(STEP6_TASK_PATH).name: {}}
+#: #279 PR-2b (orchestrator ruling): a task whose rehearsal is OWED, and what it
+#: needs. The Step-6 task's credited path acts IN the approval turn (fix,
+#: repair, gate green, then ship), which `fixture_campaign.ACTOR_SOURCE` cannot
+#: play - it acts in turn 1 only, and editing it would move #434's pinned
+#: candidate identities. Owed with the first Step-6 live declaration.
+OWED_REHEARSAL_ACTORS: dict[str, str] = {
+    Path(STEP6_TASK_PATH).name: "a turn-aware step6 timeline actor is owed (#279), separate from "
+                                "fixture_campaign.ACTOR_SOURCE so #434's pinned candidate identities do not move"}
 
 #: The declaration's identities: every one must be a real, recorded value.
 REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
@@ -517,7 +525,9 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple
     `TURN_ACTOR_SOURCE` in front of the actor; without, it is exactly as before."""
     candidate = REHEARSAL_BY_TASK.get(task_root.name, {}).get(case)
     if candidate is None:
-        raise LiveRefused(f"no rehearsal candidate is declared for {task_root.name}/{case}")
+        owed = OWED_REHEARSAL_ACTORS.get(task_root.name)
+        raise LiveRefused(f"no rehearsal candidate is declared for {task_root.name}/{case}"
+                          + (f": {owed}" if owed else ""))
     files = fc.candidate_files(task_root, fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", "", None,
                                                  {}, None))
     row = fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", fc.candidate_digest(files), None, {}, None)

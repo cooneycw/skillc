@@ -1,0 +1,35 @@
+{
+ "case": "twin-gate",
+ "steps": [
+  {
+   "approval": "never"
+  },
+  {
+   "git": {
+    "op": "worktree",
+    "branch": "issue-1-fix",
+    "name": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "fix",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "commit",
+    "message": "Fix empty input",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "push",
+    "branch": "issue-1-fix",
+    "where": "wt"
+   }
+  }
+ ]
+}

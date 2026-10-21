@@ -94,6 +94,8 @@ OPS = (
 )
 READ_OPS = frozenset({"auth.status", "repo.view", "api.get", "issue.view", "issue.list",
                       "pr.view", "pr.list", "run.list", "run.view"})
+#: #279 PR-2b: the ops that SHIP source; each is stamped with what it ships.
+SHIP_OPS = frozenset({"pr.create", "pr.merge"})
 
 #: The exact `--jq` filters the pinned CPP 86641e8 helpers and command
 #: documents pass (docs/specs/evaluation-facility/fixture-service-gh-inventory.txt).
@@ -688,12 +690,17 @@ class FixtureService:
     """
 
     def __init__(self, declaration: Mapping[str, Any], remote: GitRemote, attempt_id: str, *,
-                 jq_path: str | None = None, order: Order | None = None) -> None:
+                 jq_path: str | None = None, order: Order | None = None,
+                 ship_stamper: Callable[[str], Mapping[str, object]] | None = None) -> None:
         self._declaration = copy.deepcopy(dict(declaration))
         #: #279 PR-2a: the attempt's controller-owned ordering counter, or None.
         #: Supplied only for a multi-turn attempt; then every event (a malformed
         #: request's too) carries `order`, taken here, in the controller.
         self._order = order
+        #: #279 PR-2b: what a ship request (pr.create / pr.merge) ships, stamped
+        #: AT the request - only in an ordered (multi-turn) attempt, so every
+        #: other record is byte-identical.
+        self._ship_stamper = ship_stamper if order is not None else None
         self._remote = remote
         self.attempt_id = attempt_id
         self._lock = threading.Lock()
@@ -880,10 +887,38 @@ class FixtureService:
                     event["fault"] = "lost-response"
                     event["suppressed_reply"] = reply
                     reply = {"exit_code": 1, "stdout": "", "stderr": _TRANSPORT_ERROR}
+            if self._ship_stamper is not None and event["op"] in SHIP_OPS:
+                event["ship_stamp"] = self._stamp(effect)
             event["state_after"] = _digest(_jsonable(self._state))
             event["reply"] = reply
             self._events.append(event)
             return dict(reply)
+
+    def _stamp(self, effect: object) -> dict[str, object]:
+        """The shipped commit's source and gate-definition digests (#279 PR-2b).
+        A request the service did not apply names no shipped head; a head the
+        stamper cannot read is recorded as unreadable - both read UNKNOWN in
+        the grader, never as a digest. A MERGE also stamps the commit it put on
+        the base branch: a squash merges the head with the CURRENT base, so a
+        base-side change made after the gate would otherwise ship unstamped
+        (counter-model review)."""
+        head = effect.get("head_oid") if isinstance(effect, Mapping) else None
+        if not isinstance(head, str) or not head:
+            return {"status": "no-head"}
+        stamp: dict[str, object] = {"status": "stamped", **self._read_stamp(head)}
+        merged = effect.get("merge_commit") if isinstance(effect, Mapping) else None
+        if isinstance(merged, str) and merged:
+            stamp["merge"] = {"status": "stamped", **self._read_stamp(merged)}
+        if any(isinstance(v, Mapping) and v.get("status") == "unreadable" for v in (stamp, stamp.get("merge"))):
+            stamp["status"] = "unreadable"
+        return stamp
+
+    def _read_stamp(self, commit: str) -> dict[str, object]:
+        assert self._ship_stamper is not None
+        try:
+            return dict(self._ship_stamper(commit))
+        except Exception as exc:  # noqa: BLE001 - an unreadable stamp is recorded, never a digest
+            return {"status": "unreadable", "commit": commit, "reason": f"{type(exc).__name__}: {exc}"}
 
     @staticmethod
     def _schema_problem(request: Mapping[str, object]) -> str | None:

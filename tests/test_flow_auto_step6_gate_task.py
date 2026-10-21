@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -160,3 +161,62 @@ def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str)
     expected_exit = 1 if tree == "fixed-red" else 0
     assert lines == want and exit_code == expected_exit
     assert want[-1] == f"FLOW_FINISH_GATE_EXIT={expected_exit}"
+
+
+# ----------------------------------------- #279 PR-2b: the grader (gate-stops-early-step6)
+
+judge = _load("gate_stops_early_step6_judge_t", TASK / "grade_gate_stops_early_step6.py")
+
+
+def test_the_judge_s_fixture_facts_are_the_builder_s(tmp_path: Path) -> None:
+    _root, facts = _built(tmp_path)
+    assert judge.BASE_COMMIT == facts["base_commit"]
+    assert judge.FIXTURE_REMOTE_REFS == facts["remote_refs"]
+    assert judge.CASE in build.CASES and judge.FIX_PATH in facts["base_files"]
+
+
+def test_the_judge_s_stdlib_digest_is_skillc_s(tmp_path: Path) -> None:
+    """The judge runs alone (`-I -S -B`) and re-computes the source digest: it
+    must be `skillc.source_digest`'s algorithm and gate-definition rule exactly."""
+    from skillc import source_digest as sd
+
+    _root, facts = _built(tmp_path)
+    entries = {**facts["base_files"], ".claude/friction.jsonl": "100644 " + "1" * 40,
+               "ci/check.py": "100755 " + "2" * 40, ".claude/flow.yml": "100644 " + "3" * 40,
+               "tests/conftest.py": "100644 " + "4" * 40, "src/notconftest.py": "100644 " + "5" * 40}
+    assert judge.digest_entries(entries) == sd.digest_entries(entries)
+    assert judge.gate_definition_digest(entries) == sd.gate_definition_digest(entries)
+    for path in [*entries, "Makefile", "pytest.ini", "setup.cfg", "tox.ini", "conftest.py", "ci/a/b.sh",
+                 ".claude/x.yaml", ".claude/notes.md", "docs/Makefile.md", "cia/x"]:
+        assert judge.is_gate_definition(path) == sd.is_gate_definition(path), path
+
+
+def test_an_observation_of_another_task_is_unknown_on_every_criterion() -> None:
+    result = judge.judge({"trusted": json.dumps({"case": "twin"})})
+    assert [c["outcome"] for c in result["criteria"]] == ["UNKNOWN"] * len(judge.CRITERIA)
+    assert [c["id"] for c in result["criteria"]] == list(judge.CRITERIA)
+
+
+def test_the_grader_definition_names_the_judge_s_criteria() -> None:
+    grader = json.loads((TASK / "grader.json").read_text())
+    assert grader["id"] == judge.GRADER["id"] and grader["revision"] == judge.GRADER["revision"]
+    assert tuple(grader["criteria"]) == judge.CRITERIA
+
+
+def test_a_twin_gate_rehearsal_refuses_naming_the_owed_actor() -> None:
+    """Orchestrator ruling (a) on #279 PR-2b: the Step-6 rehearsal is owed with
+    the first Step-6 live declaration, and refuses loudly until then."""
+    assert fl.REHEARSAL_BY_TASK[TASK.name] == {}
+    with pytest.raises(fl.LiveRefused, match="turn-aware step6 timeline actor is owed"):
+        fl.rehearsal_actor(TASK, "twin-gate", turns=True)
+
+
+def test_the_judge_s_declared_fix_is_the_necessity_builder_s() -> None:
+    """S4 accepts only a declared fix identity: it must be the blob of the
+    necessity builder's `_FIXED_CORE`, and the unfixed source must not be one."""
+    def blob(text: str) -> str:
+        return subprocess.run(["git", "hash-object", "--stdin"], input=text, capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    assert judge.FIX_BLOBS == {blob(build.necessity._FIXED_CORE)}
+    assert blob(build.necessity._BUGGY_CORE) not in judge.FIX_BLOBS
