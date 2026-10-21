@@ -363,11 +363,11 @@ def test_sources_beyond_the_bound_are_not_run_and_identical_bytes_run_once(tmp_p
     from skillc import step6_oracle as so
 
     run, log = _fake_runner(tmp_path, "echo")
-    sources = {f"worktree:w{i}": f"x = {i}\n".encode() for i in range(so.MAX_SOURCES + 3)}
-    sources["worktree:copy"] = b"x = 0\n"  # the same bytes as w0
+    sources = {f"worktree:s{i}": f"x = {i}\n".encode() for i in range(so.MAX_SOURCES + 3)}
+    sources["worktree:copy"] = b"x = 0\n"  # the same bytes as s0
     out = run(sources)
     assert len(log.read_text().splitlines()) == so.MAX_SOURCES  # distinct sources only, up to the bound
-    assert out["worktree:copy"] == out["worktree:w0"] and out["worktree:w0"]["status"] == "ran"
+    assert out["worktree:copy"] == out["worktree:s0"] and out["worktree:s0"]["status"] == "ran"
     skipped = [n for n, o in out.items() if o["status"] == "not-run"]
     assert len(skipped) == 3
 
@@ -378,8 +378,8 @@ def test_the_shared_deadline_leaves_later_sources_unknown(tmp_path: Path, monkey
     monkeypatch.setattr(so, "ORACLE_SECONDS", 1.5)
     monkeypatch.setattr(so, "CONTAINER_SECONDS", 1.0)
     run, _log = _fake_runner(tmp_path, "sleep")
-    out = run({f"worktree:w{i}": f"x = {i}\n".encode() for i in range(4)})
-    assert out["worktree:w0"]["status"] == "container-timeout"
+    out = run({f"worktree:s{i}": f"x = {i}\n".encode() for i in range(4)})
+    assert out["worktree:s0"]["status"] == "container-timeout"
     assert any(o["status"] == "not-run" and "deadline" in o["reason"] for o in out.values())
 
 
