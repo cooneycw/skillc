@@ -203,7 +203,8 @@ def task_identity(task_root: Path) -> dict[str, object]:
     """The task content identity the calibration path binds: goal, grader, fixture."""
     goal = (task_root / "goal.md").read_bytes()
     grader = verify.GraderDef.load(task_root)
-    identity = cr.task_content_identity(goal, grader, cc.task_surface(task_root / "fixture"))
+    identity = cr.task_content_identity(goal, grader, cc.task_surface(task_root / "fixture"),
+                                        cc.project_gate_bytes(task_root))
     return {**identity, "grader_id": grader.id, "grader_revision": grader.revision}
 
 

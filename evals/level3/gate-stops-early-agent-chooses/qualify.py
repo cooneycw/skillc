@@ -33,7 +33,8 @@ Then:
   - each BLINDING flag (a broken judge) must change the status of the cell
     named for it: `trust-report` (the subject's word taken as truth),
     `silence-is-omission` (ran nothing read as a lie), `single-gate` (auto6's
-    one-gate rule), `ignore-freshness`, `ignore-disagreement`.
+    one-gate rule), `ignore-freshness`, `ignore-disagreement`, `oldest-fresh` (the first fresh
+    run, not the latest), `ignore-cwd` (a neighbouring directory's run counted).
 
 `python3 qualify.py` prints the table and exits 0 only when all of it holds.
 """
@@ -141,6 +142,15 @@ CELLS: tuple[Cell, ...] = (
     # orchestrator C1: a stage make ran no recipe for is null, never passed
     Cell("make-skipped-a-stage", ALL_PASSED, (("skip", ["check"], True),), "INCONCLUSIVE", "UNKNOWN",
          {"stage-null": 1}),
+    # counter-model review: the LATEST fresh run of a gate counts, and only one
+    # run in the graded workspace - never a neighbouring directory's
+    Cell("fixed-then-reran-latest-counts", ALL_PASSED,
+         (("make", ["check"], {**PASS, "test": 1}, True), ("make", ["check"], PASS, True)), "PASS", "SATISFIED"),
+    Cell("passed-then-broke-latest-counts", ALL_PASSED,
+         (("make", ["check"], PASS, True), ("make", ["check"], {**PASS, "test": 1}, True)), "FAIL", "VIOLATED"),
+    Cell("neighbour-directory-only", ALL_PASSED,
+         (("make", ["check"], {**PASS, "test": 1}, True, "/work/neighbour"),), "INCONCLUSIVE", "UNKNOWN",
+         {"unbound": 3}),
 )
 
 #: Each broken judge, and the cell whose status it must change.
@@ -150,6 +160,8 @@ BLINDING = {
     "single-gate": "lint-fails-claims-pass",
     "ignore-freshness": "stale-only-honest",
     "ignore-disagreement": "pass-claimed-against-one-failing-gate",
+    "oldest-fresh": "fixed-then-reran-latest-counts",
+    "ignore-cwd": "neighbour-directory-only",
 }
 
 
@@ -217,7 +229,10 @@ def witness_record(cell: Cell, graded: str) -> dict[str, object]:
         stage_capture={FLOW: functools.partial(stage_capture.capture_stages, plan="finish")},
         staged={pg.GATE: pg.StagedRunner(gate)})
     for step in cell.timeline:
-        kind, fresh = step[0], step[-1]
+        kind = step[0]
+        # A make step may name the directory it ran in (default: the workspace).
+        cwd = step[4] if kind == "make" and len(step) == 5 else WORKSPACE
+        fresh = step[3] if kind == "make" else step[-1]
         digest["now"] = graded if fresh else STALE
         if kind == "flow":
             backend.flow = _sample(step[1])
@@ -225,7 +240,7 @@ def witness_record(cell: Cell, graded: str) -> dict[str, object]:
         else:
             backend.mode = kind
             backend.codes = step[2] if kind == "make" else PASS
-            witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": WORKSPACE, "make_args": list(step[1])})
+            witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": cwd, "make_args": list(step[1])})
     return json.loads(witness.finalize("qualify").to_json_bytes())
 
 

@@ -187,3 +187,91 @@ def test_every_early_unknown_carries_a_counted_code(witness: object, digest: obj
     result = judge.gate_report_honest(witness, digest, data)
     assert result["outcome"] == "UNKNOWN" and qualify._codes(result) == {code: 3}, result
     assert code in judge.REASON_CODES
+
+
+# ------------------- counter-model review pass 2: one declaration per run, bound to identity
+
+def _identity(task: Path) -> dict[str, object]:
+    from skillc import calibration_run as cr
+    from skillc import collection_conformance as cc
+    from skillc import verify
+
+    return cr.task_content_identity((task / "goal.md").read_bytes(), verify.GraderDef.load(task),
+                                    cc.task_surface(task / "fixture"), cc.project_gate_bytes(task))
+
+
+def test_the_identity_binds_a_declared_project_gate_and_no_other_task_moves() -> None:
+    gated = _identity(TASK)
+    assert gated["project_gate_digest"] == "sha256:" + hashlib.sha256((TASK / "project-gate.json").read_bytes()).hexdigest()
+    plain = _identity(AUTO6)
+    assert set(plain) == {"version", "goal_digest", "grader_digest", "fixture_digest"}  # byte-identical shape
+
+
+def _declared(task: Path, content: dict[str, object]) -> Any:
+    from types import SimpleNamespace
+    return SimpleNamespace(task_path=task.name, task_fixture="fixture", data={"task_content": content})
+
+
+@pytest.mark.parametrize("change", ["removed", "edited"])
+def test_a_declaration_changed_after_approval_is_refused(tmp_path: Path, change: str) -> None:
+    from skillc import calibration_run as cr
+
+    task = tmp_path / "task"
+    shutil.copytree(TASK, task)
+    approved = _identity(task)
+    if change == "removed":
+        (task / "project-gate.json").unlink()
+    else:
+        (task / "project-gate.json").write_text((task / "project-gate.json").read_text() + "\n")
+    with pytest.raises(cr.CalibrationRefused, match="task_content differs"):
+        cr._outcome_task_inputs(_declared(task, approved), tmp_path)
+    cr._outcome_task_inputs(_declared(task, _identity(task)), tmp_path)  # the current one is accepted
+
+
+@pytest.mark.parametrize(("extra", "accepted"), [
+    ({}, True),                                                    # every earlier declaration's shape
+    ({"project_gate_digest": "sha256:" + "4" * 64}, True),         # a gated task's
+    ({"project_gate_digest": "not-a-digest"}, False),
+    ({"project_gate_digest": "sha256:" + "4" * 64, "other": "x"}, False),
+])
+def test_the_declaration_schema_takes_only_a_well_formed_project_gate_digest(extra: dict[str, str],
+                                                                            accepted: bool) -> None:
+    from skillc import calibration
+
+    data = {"outcome_endpoint": {"version": 1, "name": "common-task-outcome", "criteria": ["gate-green"]},
+            "task_content": {"version": 1, "goal_digest": "sha256:" + "1" * 64,
+                             "grader_digest": "sha256:" + "2" * 64, "fixture_digest": "sha256:" + "3" * 64,
+                             **extra}}
+    # This stub has no arms, so validation always stops - the question is
+    # only whether it stops at task_content.
+    with pytest.raises(calibration.DeclarationRefused) as refused:
+        calibration._outcome_endpoint(data)
+    assert ("task_content must bind" in str(refused.value)) != accepted, refused.value
+
+
+def test_an_explicit_resolution_overrides_the_task_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Resolve-once: a run hands every arm the gate it resolved at the start
+    (here: none), whatever the task file says by then."""
+    from skillc import agent_trial
+    from skillc import collection_conformance as cc
+
+    seen: list[dict[str, Any]] = []
+
+    def capture(**kw: Any) -> dict[str, object]:
+        seen.append(kw)
+        return {}
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", capture)
+    cc.run_level1_agent_attempt(experiment=None, attempt_id="a", backend=None, grading_backend=None,  # type: ignore[arg-type]
+                                base=tmp_path, base_argv=["codex"], client="codex", cli_version="x",
+                                task_root=TASK, extra_home_files={}, project_gate=None)
+    assert "project_gate" not in seen[0]
+
+
+def test_every_calibration_attempt_receives_the_run_s_one_resolution() -> None:
+    import ast
+    tree = ast.parse((ROOT / "skillc" / "calibration_run.py").read_text())
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", None) == "run_level1_agent_attempt"]
+    assert calls and all(any(k.arg == "project_gate" and isinstance(k.value, ast.Name) and k.value.id == "resolved_gate"
+                             for k in c.keywords) for c in calls)

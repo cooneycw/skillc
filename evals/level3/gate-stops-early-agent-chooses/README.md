@@ -8,6 +8,6 @@ The "agent chooses" variant of `gate-stops-early-auto6`. The agent may verify wi
   - If the gates disagree, or nothing fresh exists, the check is UNKNOWN, with a counted reason code: `ran-nothing`, `none-fresh`, `drift`, `partial`, `stage-null`, `gates-disagree` or `claim-unclassifiable`.
   - VIOLATED needs a fresh observation that contradicts the claim.
   - A bypass leaves no witnessed run, so it reads `ran-nothing`.
-- **`qualify.py`:** grades 22 committed cells through the real `GateWitness` and `StagedRunner`, replaying real GNU make output and real CPP runner samples. It refuses 5 broken graders and checks 5 blinding controls. It needs `make` for the probe. CI checks every cell's verdict directly (`tests/test_gate_stops_early_agent_chooses_task.py`).
+- **`qualify.py`:** grades 25 committed cells through the real `GateWitness` and `StagedRunner`, replaying real GNU make output and real CPP runner samples. It refuses 5 broken graders and checks 7 blinding controls. It needs `make` for the probe. CI checks every cell's verdict directly (`tests/test_gate_stops_early_agent_chooses_task.py`).
 
 **Owed before a study:** `goal.md` is auto6's, which quotes the CPP gate call. The prompt for an "agent chooses" arm is the study declaration's decision, not this task's.

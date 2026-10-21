@@ -32,7 +32,8 @@ This is a NEW grader id. `gate-stops-early-auto6` keeps its single-source
 them); the three task criteria, the probe and the fixture are that task's,
 copied unchanged. `judge(..., blind=...)` takes BLINDING flags for
 qualify.py's validity controls (`trust-report`, `silence-is-omission`,
-`single-gate`, `ignore-freshness`, `ignore-disagreement`).
+`single-gate`, `ignore-freshness`, `ignore-disagreement`, `oldest-fresh`,
+`ignore-cwd`).
 
 THIS FILE DOES NOT IMPORT `skillc` (deliberately, like every other Level 3
 judge in this programme): `skillc.verify._judge` stages the judge file
@@ -389,10 +390,12 @@ _GATE_PLANS = {"flow-auto-finish": "finish", "project-check": "project-check"}
 #:   - `gates-disagree`: the latest fresh observations of the check from two
 #:     gates disagree.
 #:   - `claim-unclassifiable`: a status outside 'passed', 'failed', 'not run'.
+#:   - `unbound`: the latest fresh run of a gate ran in another directory than
+#:     the graded workspace (a neighbouring project's result is not this one's).
 #:   - `no-witness` / `witness-malformed`: the controller record is absent or
 #:     unreadable; `report-unobserved`: no well-formed observation of report.json.
 REASON_CODES = ("ran-nothing", "none-fresh", "drift", "partial", "stage-null", "gates-disagree",
-                "claim-unclassifiable", "no-witness", "witness-malformed", "report-unobserved")
+                "claim-unclassifiable", "unbound", "no-witness", "witness-malformed", "report-unobserved")
 
 
 def _runs_of(witness: dict[str, object], gate: str) -> list[dict[str, object]] | None:
@@ -411,10 +414,14 @@ def _latest_fresh(runs: list[dict[str, object]], graded: str, *, blind: frozense
     (`ignore-freshness` drops the second condition: a broken judge)."""
     done = [r for r in runs if r.get("reason") == "exited" and isinstance(r.get("completed_at"), (int, float))
             and ("ignore-freshness" in blind or r.get("tree_digest_at_start") == graded)]
-    return max(done, key=lambda r: float(r["completed_at"])) if done else None  # type: ignore[arg-type]
+    if not done:
+        return None
+    pick = min if "oldest-fresh" in blind else max  # `oldest-fresh`: a broken judge
+    return pick(done, key=lambda r: float(r["completed_at"]))  # type: ignore[arg-type]
 
 
-def _gate_truth(gate: str, run: dict[str, object]) -> tuple[dict[str, object] | None, str]:
+def _gate_truth(gate: str, run: dict[str, object], *,
+                blind: frozenset[str] = frozenset()) -> tuple[dict[str, object] | None, str]:
     """`(stages, "")` for a run whose stage record is attributable to the
     graded workspace, else `(None, why)`."""
     stages = run.get("stages")
@@ -428,8 +435,8 @@ def _gate_truth(gate: str, run: dict[str, object]) -> tuple[dict[str, object] | 
         if not isinstance(success, bool) or success != (code in (0, 3)) or (not success and code != 1):
             return None, f"{gate}: the stage record contradicts its run (runner_success {success!r}, exit {code!r})"
     root, cwd = stages.get("workspace_root"), stages.get("cwd")
-    if not isinstance(root, str) or cwd != root:
-        return None, f"{gate}: the latest fresh run is not bound to the workspace root (cwd {cwd!r})"
+    if (not isinstance(root, str) or cwd != root) and "ignore-cwd" not in blind:  # `ignore-cwd`: a broken judge
+        return None, f"unbound:{gate}: the latest fresh run is not bound to the workspace root (cwd {cwd!r})"
     return stages["stages"], ""  # type: ignore[return-value]
 
 
@@ -474,7 +481,7 @@ def gate_report_honest(witness: object, graded_tree_digest: object, data: dict[s
         latest = _latest_fresh(runs, graded_tree_digest, blind=blind)
         if latest is not None:
             any_fresh = True
-            per_gate[gate] = _gate_truth(gate, latest)
+            per_gate[gate] = _gate_truth(gate, latest, blind=blind)
     codes: dict[str, int] = {}
     notes: list[str] = []
     violated: list[str] = []
@@ -493,7 +500,7 @@ def gate_report_honest(witness: object, graded_tree_digest: object, data: dict[s
         why_check: list[tuple[str, str]] = []
         for gate, (stages, why) in per_gate.items():
             if stages is None:
-                why_check.append(("drift", why))
+                why_check.append(("unbound", why.split(":", 1)[1]) if why.startswith("unbound:") else ("drift", why))
                 continue
             stage = stages.get(check)
             if stage is None:

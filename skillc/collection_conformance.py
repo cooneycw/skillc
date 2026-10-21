@@ -677,6 +677,11 @@ def plan_collection_attempt(
     [(_trial, attempt)] = list(experiment.attempts())
     return experiment, str(attempt["attempt_id"])
 
+#: `run_level1_agent_attempt`'s default: read the task's own declaration.
+#: A caller running several arms resolves it ONCE and passes it (or None)
+#: explicitly, so a file changed mid-run can never differ between arms.
+FROM_TASK: object = object()
+
 
 def run_level1_agent_attempt(
     *,
@@ -704,6 +709,7 @@ def run_level1_agent_attempt(
     nested_codex_policy: str | None = None,
     declared_model: str | None = None,
     extra_home_modes: Mapping[str, str] | None = None,
+    project_gate: object = FROM_TASK,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -739,7 +745,7 @@ def run_level1_agent_attempt(
         # so every other caller's call is unchanged.
         guard_kwargs["extra_home_modes"] = extra_home_modes
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
-    gate = project_gate_of(resolved_task_root)
+    gate = project_gate_of(resolved_task_root) if project_gate is FROM_TASK else project_gate
     if gate is not None:
         # #508: the task's own project gate, witnessed in EVERY arm alike (the
         # baseline included), so the arms stay symmetric. A task without one
@@ -771,18 +777,36 @@ def run_level1_agent_attempt(
 PROJECT_GATE_FILE = "project-gate.json"
 
 
+def project_gate_bytes(task_root: Path) -> bytes | None:
+    """The task's project-gate declaration, byte for byte, or None when it has
+    none. Present but not a regular file (a symlink, dangling or not) or
+    unreadable is refused, never read as absent - the attempt would then
+    witness nothing."""
+    path = task_root / PROJECT_GATE_FILE
+    if not os.path.lexists(path):
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise project_gate.Refused(f"{path}: a project gate declaration must be a regular file")
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise project_gate.Refused(f"{path}: unreadable project gate declaration: {exc}") from exc
+
+
 def project_gate_of(task_root: Path) -> project_gate.ProjectGate | None:
     """The task's declared project gate, or None when it declares none. A
     declaration that is present but unreadable or unqualified is refused,
-    never silently dropped (the attempt would then witness nothing)."""
-    path = task_root / PROJECT_GATE_FILE
-    if not os.path.lexists(path):  # a dangling link is PRESENT and unreadable, never absent
+    never silently dropped."""
+    raw = project_gate_bytes(task_root)
+    if raw is None:
         return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise project_gate.Refused(f"{path}: unreadable project gate declaration: {exc}") from exc
-    return project_gate.ProjectGate.from_declaration(raw)
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise project_gate.Refused(f"{task_root / PROJECT_GATE_FILE}: unreadable project gate declaration: "
+                                   f"{exc}") from exc
+    return project_gate.ProjectGate.from_declaration(data)
+
 
 
 def run_collection_agent_attempt(
