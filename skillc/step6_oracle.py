@@ -65,15 +65,23 @@ MAX_SOURCE_BYTES = 64 * 1024
 #: verdict (counter-model review).
 CHILD_SECONDS = 5
 CONTAINER_SECONDS = 30
+#: Aggregate bounds (counter-model review): at most this many DISTINCT sources
+#: run per attempt, within one shared deadline, and a container's whole output
+#: is read only up to this many bytes - past it the container is killed. Any
+#: source not run within them is UNKNOWN, never passed.
+MAX_SOURCES = 16
+ORACLE_SECONDS = 180
+MAX_OUTPUT_BYTES = 256 * 1024
 
 #: Runs one source: exec its module code, call `parse` on each input, print one
 #: JSON line of results. A value that is not a list of strings is reported by
 #: its type name, never trusted further.
 _CHILD = r"""
-import json, sys
+import base64, json, sys
 job = json.loads(sys.stdin.read())
 namespace = {"__name__": "widget.core"}
-exec(compile(job["source"], "widget/core.py", "exec"), namespace)
+# The ORIGINAL bytes are compiled (PEP 263 decoding), never a repaired text.
+exec(compile(base64.b64decode(job["source"]), "widget/core.py", "exec"), namespace)
 parse = namespace["parse"]
 results = []
 for arg in job["inputs"]:
@@ -98,10 +106,9 @@ rng = random.SystemRandom()
 alphabet = "ab#, x"
 inputs = list(job["cases"]) + ["".join(rng.choice(alphabet) for _ in range(rng.randint(0, 9)))
                                 for _ in range(job["challenges"])]
-source = base64.b64decode(job["source"]).decode("utf-8", errors="replace")
 try:
     done = subprocess.run([sys.executable, "-I", "-S", "-B", "-c", job["child"]],
-                          input=json.dumps({"source": source, "inputs": inputs}),
+                          input=json.dumps({"source": job["source"], "inputs": inputs}),
                           capture_output=True, text=True, timeout=job["child_seconds"])
 except subprocess.TimeoutExpired:
     out = {"status": "timeout"}
@@ -142,37 +149,94 @@ def _container_argv(docker_bin: Sequence[str], image: str, name: str) -> list[st
             "--entrypoint", "/usr/bin/python3", "--workdir", "/", image, "-I", "-S", "-B", "-c", _HARNESS]
 
 
+def _bounded(argv: Sequence[str], data: str, *, timeout: float, limit: int,
+             env: Mapping[str, str] | None) -> tuple[int | None, bytes, str | None]:
+    """Run `argv`, feeding `data`; read at most `limit` bytes of its stdout.
+    `(returncode, stdout, problem)`: a problem (over the limit, the timeout)
+    kills the process; the caller removes the container."""
+    import threading
+    import time
+    proc = subprocess.Popen(list(argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            env=dict(env) if env is not None else None)
+    chunks: list[bytes] = []
+    total = [0]
+    over = threading.Event()
+
+    def drain() -> None:
+        assert proc.stdout is not None
+        while chunk := proc.stdout.read(65536):
+            total[0] += len(chunk)
+            if total[0] > limit:
+                over.set()
+                return
+            chunks.append(chunk)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        assert proc.stdin is not None
+        proc.stdin.write(data.encode("utf-8"))
+        proc.stdin.close()
+    except OSError:
+        pass
+    deadline = time.monotonic() + timeout
+    while proc.poll() is None and not over.is_set() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    problem = "output-over-bound" if over.is_set() else ("timeout" if proc.poll() is None else None)
+    if problem is not None:
+        proc.kill()
+    proc.wait()
+    reader.join(timeout=5)
+    return proc.returncode, b"".join(chunks), problem
+
+
 def container_runner(docker_bin: Sequence[str], image: str, *,
                      env: Mapping[str, str] | None = None) -> Runner:
-    """A runner that executes each delivered source only in its OWN throwaway
-    container of `image` - the attempt's measured, immutable image ID."""
-    docker_env = dict(env) if env is not None else None
+    """A runner that executes each DISTINCT delivered source only in its OWN
+    throwaway container of `image` - the attempt's measured, immutable image
+    ID - within the aggregate bounds above."""
+    import time
 
-    def one(data: bytes) -> dict[str, Any]:
+    def one(data: bytes, budget: float) -> dict[str, Any]:
         nonce = secrets.token_hex(16)
         name = f"skillc-step6-oracle-{nonce[:12]}"
         job = json.dumps({"source": base64.b64encode(data).decode("ascii"), "cases": list(CASES),
                           "challenges": CHALLENGES, "child": _CHILD, "child_seconds": CHILD_SECONDS,
                           "nonce": nonce})
-        try:
-            done = subprocess.run(_container_argv(docker_bin, image, name), input=job, capture_output=True,
-                                  text=True, timeout=CONTAINER_SECONDS, env=docker_env, check=False)
-        except subprocess.TimeoutExpired:
+        code, out, problem = _bounded(_container_argv(docker_bin, image, name), job,
+                                      timeout=min(CONTAINER_SECONDS, budget), limit=MAX_OUTPUT_BYTES, env=env)
+        if problem is not None:
             subprocess.run([*docker_bin, "rm", "-f", name], capture_output=True, timeout=30, check=False,
-                           env=docker_env)
-            return {"status": "container-timeout"}
-        line = next((ln for ln in reversed(done.stdout.splitlines()) if ln.startswith(nonce)), None)
+                           env=dict(env) if env is not None else None)
+            return {"status": "container-timeout" if problem == "timeout" else problem}
+        text = out.decode("utf-8", errors="replace")
+        line = next((ln for ln in reversed(text.splitlines()) if ln.startswith(nonce)), None)
         try:
             parsed = json.loads(line[len(nonce):]) if line is not None else None
         except ValueError:
             parsed = None
-        if done.returncode != 0 or not isinstance(parsed, dict):
-            return {"status": "container-failed", "exit": done.returncode}
+        if code != 0 or not isinstance(parsed, dict):
+            return {"status": "container-failed", "exit": code}
         return dict(parsed)
 
     def run(sources: Mapping[str, bytes]) -> dict[str, dict[str, Any]]:
-        return {name: ({"status": "over-bound"} if len(data) > MAX_SOURCE_BYTES else one(data))
-                for name, data in sources.items()}
+        started = time.monotonic()
+        by_digest: dict[str, dict[str, Any]] = {}
+        out: dict[str, dict[str, Any]] = {}
+        for name, data in sources.items():
+            digest = hashlib.sha256(data).hexdigest()
+            if len(data) > MAX_SOURCE_BYTES:
+                out[name] = {"status": "over-bound"}
+            elif digest in by_digest:
+                out[name] = dict(by_digest[digest])  # the same bytes are judged once
+            elif len(by_digest) >= MAX_SOURCES:
+                out[name] = {"status": "not-run", "reason": f"more than {MAX_SOURCES} distinct sources"}
+            elif (left := ORACLE_SECONDS - (time.monotonic() - started)) <= 0:
+                out[name] = {"status": "not-run", "reason": f"the {ORACLE_SECONDS} s oracle deadline passed"}
+            else:
+                by_digest[digest] = one(data, left)
+                out[name] = dict(by_digest[digest])
+        return out
     return run
 
 

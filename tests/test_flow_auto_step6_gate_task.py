@@ -321,3 +321,72 @@ def test_s4_with_no_oracle_record_is_unknown() -> None:
     git = _git({})
     git.pop("fix_outcomes")
     assert judge.work_preserved([], [], git)["outcome"] == "UNKNOWN"
+
+
+# ----------------------- #279 PR-3, counter-model pass 2: the oracle's aggregate bounds
+
+_FAKE_DOCKER = r"""
+import json, os, sys, time
+args = sys.argv[1:]
+if args[:1] == ["rm"]:
+    sys.exit(0)
+mode = os.environ["FAKE_MODE"]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write("run\n")
+job = json.loads(sys.stdin.read())
+if mode == "flood":
+    while True:
+        sys.stdout.write("x" * 65536)
+        sys.stdout.flush()
+if mode == "sleep":
+    time.sleep(30)
+sys.stdout.write(job["nonce"] + json.dumps({"status": "ran", "inputs": [], "results": []}) + "\n")
+"""
+
+
+def _fake_runner(tmp_path: Path, mode: str) -> tuple[Any, Path]:
+    from skillc import step6_oracle as so
+
+    script = tmp_path / "docker.py"
+    script.write_text(_FAKE_DOCKER)
+    log = tmp_path / "calls.log"
+    env = {"PATH": os.environ.get("PATH", ""), "FAKE_MODE": mode, "FAKE_LOG": str(log)}
+    return so.container_runner((sys.executable, str(script)), "sha256:" + "a" * 64, env=env), log
+
+
+def test_a_flooding_container_is_cut_at_the_byte_bound(tmp_path: Path) -> None:
+    run, _log = _fake_runner(tmp_path, "flood")
+    assert run({"worktree:wt": b"x = 1\n"}) == {"worktree:wt": {"status": "output-over-bound"}}
+
+
+def test_sources_beyond_the_bound_are_not_run_and_identical_bytes_run_once(tmp_path: Path) -> None:
+    from skillc import step6_oracle as so
+
+    run, log = _fake_runner(tmp_path, "echo")
+    sources = {f"worktree:w{i}": f"x = {i}\n".encode() for i in range(so.MAX_SOURCES + 3)}
+    sources["worktree:copy"] = b"x = 0\n"  # the same bytes as w0
+    out = run(sources)
+    assert len(log.read_text().splitlines()) == so.MAX_SOURCES  # distinct sources only, up to the bound
+    assert out["worktree:copy"] == out["worktree:w0"] and out["worktree:w0"]["status"] == "ran"
+    skipped = [n for n, o in out.items() if o["status"] == "not-run"]
+    assert len(skipped) == 3
+
+
+def test_the_shared_deadline_leaves_later_sources_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from skillc import step6_oracle as so
+
+    monkeypatch.setattr(so, "ORACLE_SECONDS", 1.5)
+    monkeypatch.setattr(so, "CONTAINER_SECONDS", 1.0)
+    run, _log = _fake_runner(tmp_path, "sleep")
+    out = run({f"worktree:w{i}": f"x = {i}\n".encode() for i in range(4)})
+    assert out["worktree:w0"]["status"] == "container-timeout"
+    assert any(o["status"] == "not-run" and "deadline" in o["reason"] for o in out.values())
+
+
+def test_the_child_compiles_the_original_bytes() -> None:
+    """Counter-model review: never a replacement-decoded text (the malformed
+    source's live red is in tests/test_step6_oracle_live.py)."""
+    from skillc import step6_oracle as so
+
+    assert 'compile(base64.b64decode(job["source"])' in so._CHILD
+    assert "errors=\"replace\"" not in so._HARNESS and "errors=\"replace\"" not in so._CHILD

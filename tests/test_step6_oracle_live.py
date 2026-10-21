@@ -9,7 +9,8 @@ runs it by its IMAGE ID, as production does.
    the same S4 verdict as a container run now (its random challenges differ
    per run, so verdicts are compared, not bytes) - the control that
    qualify's table is real.
-2. Orchestrator C1's red: delivered code that writes a file - to /tmp,
+2. Orchestrator C1's red: delivered code that is not valid source (a stray
+   0xff byte), or that writes a file - to /tmp,
    /dev/shm, /dev/mqueue or its home - or opens a socket, fails INSIDE the
    child (`status: error`), never passes, and the write never reaches the
    controller host (the /tmp target is a fresh HOST path: were the code run
@@ -86,6 +87,9 @@ def test_side_effects_fail_in_the_child_never_pass_and_never_reach_the_host(imag
               "home": "~/skillc-pwned"}
     sources = {f"writes-{k}": (f"import os\nopen(os.path.expanduser({v!r}), 'w').write('x')\n\n\n{_FIXED}").encode()
                for k, v in writes.items()}
+    # Counter-model review: bytes that are not valid source must not be
+    # "repaired" by decoding - a stray 0xff before a correct parser fails.
+    sources["malformed"] = b'label = "\xff"\n' + _FIXED.encode()
     sources["connects"] = ("import socket\nsocket.create_connection(('1.1.1.1', 80), timeout=2)\n\n\n"
                            f"{_FIXED}").encode()
     # The positive control also proves no location is writable at all.
