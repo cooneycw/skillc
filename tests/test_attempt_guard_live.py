@@ -28,13 +28,16 @@ from pathlib import Path
 import pytest
 from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 from test_codex_guard_live import LIMITS, SANDBOX, _trial_image
+from test_codex_guard_live import pytestmark as _live_marks
 
 from skillc import attempt_guard as ag
 from skillc import codex_guard as cg
 from skillc import docker_backend as d
 from skillc.fixture_service import dispatch
 
-pytestmark = pytest.mark.real_docker
+#: The same marks as the guard's own live test: real_docker, and skipped only
+#: where no Docker daemon is reachable (the PR CI runner has none).
+pytestmark = _live_marks
 NESTED = "codex exec --skip-git-repo-check --ephemeral --sandbox read-only --model gpt-6-sol 'Review the one-line change.'"
 #: The same launch by the REAL binary's absolute path, past the guard.
 BY_PATH = f"/usr/local/bin/{NESTED}"
