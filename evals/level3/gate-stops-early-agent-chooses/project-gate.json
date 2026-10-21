@@ -1,0 +1,12 @@
+{
+ "makefile": {
+  "path": "Makefile",
+  "sha256": "333b21c196e6e0f1ad36b5149bef900648d502f897ef9d2ba4db6d1df189f4bb"
+ },
+ "goal": "check",
+ "stages": [
+  "lint",
+  "test",
+  "typecheck"
+ ]
+}

@@ -123,6 +123,20 @@ def _run(image: str) -> None:
         backend.exec_in_attempt(handle, plan, LIMITS, env=agent_env, cwd=d.CONTAINER_WORKSPACE)
         after_shim = len(json.loads(holder["w"].finalize("peek").to_json_bytes())["gates"][pg.GATE]["runs"])
         assert (after_controller - before, after_shim - after_controller) == (0, 1)
+
+        # 5. #508 PR-B C1: the IMAGE's make prints the pinned skip string, and a
+        #    non-phony `test` file hands the agent's `make check` to the real make
+        backend.install(handle, {"test": b""})
+        skip = backend.exec_in_attempt(handle, [pg.REAL_MAKE, "test"], LIMITS, env=dict(env),
+                                       cwd=d.CONTAINER_WORKSPACE)
+        assert skip.reason == "exited" and skip.exit_code == 0, skip
+        assert pg.skipped("test", skip) == pg.SKIP_MESSAGES[0].format(target="test"), skip.stdout
+        handed = backend.exec_in_attempt(handle, ["make", "check"], LIMITS, env=agent_env, cwd=d.CONTAINER_WORKSPACE)
+        # make names a skip only for a goal it was GIVEN; as `check`'s
+        # prerequisite, `test` is skipped silently - the real make's own reply.
+        assert b"python3 ci/check.py" not in (handed.stdout or b""), handed.stdout
+        runs = json.loads(holder["w"].finalize("peek").to_json_bytes())["gates"][pg.GATE]["runs"]
+        assert runs[-1]["stages"]["status"] == "unavailable", runs[-1]["stages"]
     finally:
         guard.finish(backend, handle)
         backend.destroy(handle)

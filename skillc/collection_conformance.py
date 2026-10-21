@@ -78,6 +78,7 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -93,6 +94,7 @@ from . import (
     demo,
     materialize,
     outcome_report,
+    project_gate,
     reap,
     trial,
     verify,
@@ -737,6 +739,12 @@ def run_level1_agent_attempt(
         # so every other caller's call is unchanged.
         guard_kwargs["extra_home_modes"] = extra_home_modes
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
+    gate = project_gate_of(resolved_task_root)
+    if gate is not None:
+        # #508: the task's own project gate, witnessed in EVERY arm alike (the
+        # baseline included), so the arms stay symmetric. A task without one
+        # is unchanged.
+        guard_kwargs["project_gate"] = gate
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
     grader = verify.GraderDef.load(resolved_task_root)
@@ -756,6 +764,25 @@ def run_level1_agent_attempt(
         gate_witness=gate_witness,
         **guard_kwargs,  # type: ignore[arg-type]
     )
+
+
+#: #508: a task that declares its project gate carries it here, beside its
+#: grader (`skillc.project_gate.ProjectGate.from_declaration`'s shape).
+PROJECT_GATE_FILE = "project-gate.json"
+
+
+def project_gate_of(task_root: Path) -> project_gate.ProjectGate | None:
+    """The task's declared project gate, or None when it declares none. A
+    declaration that is present but unreadable or unqualified is refused,
+    never silently dropped (the attempt would then witness nothing)."""
+    path = task_root / PROJECT_GATE_FILE
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise project_gate.Refused(f"{path}: unreadable project gate declaration: {exc}") from exc
+    return project_gate.ProjectGate.from_declaration(raw)
 
 
 def run_collection_agent_attempt(

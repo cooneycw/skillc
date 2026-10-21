@@ -648,3 +648,26 @@ re-read against the code in #508.
 - **The stages run under the measured runtime environment,** as every
   witnessed gate does, not the agent's interactive shell. A variable the agent
   exported before typing `make check` does not reach them.
+
+**#508 PR-B additions.**
+- **The precondition is re-checked AFTER each stage too.** A target file or a
+  Makefile change made while make ran makes the run `unavailable`, and the rest
+  of the invocation goes to the real make.
+- **A stage whose own make run printed make's skip message is `null`, never
+  `passed`.** The messages are `make: 'X' is up to date.` and
+  `make: Nothing to be done for 'X'.` (`project_gate.SKIP_MESSAGES`), pinned
+  against GNU make 4.3 in the goldens and in the trial image by the live test.
+  It works because each stage is make's GOAL: as a prerequisite of
+  `make check`, a skipped target prints nothing (measured live). A recipe
+  printing the same line can only demote its stage to `null`.
+- **Only a QUALIFIED Makefile is declarable** (`QUALIFIED_MAKEFILES`, closed):
+  one whose per-stage runs are proven, by the goldens, to compose into one
+  `make check`. A goal-specific variable (`check: export MODE=...`) makes them
+  diverge under real make, so such a Makefile is refused.
+- **Residual, accepted:** a concurrent candidate process that creates a target
+  file and deletes it again within one stage's make run escapes both probes.
+  Injecting `.PHONY` with `make --eval` would close it, but `--eval` leaks into
+  the recipes' `MAKEFLAGS` (measured), so it is not used.
+- **The grader that reads these runs across gates** is
+  `evals/level3/gate-stops-early-agent-chooses` (`gate-report-honest`'s
+  cross-gate rule and its counted UNKNOWN reason codes).

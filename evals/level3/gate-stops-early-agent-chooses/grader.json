@@ -1,0 +1,25 @@
+{
+ "id": "gate-stops-early-agent-chooses",
+ "revision": "1",
+ "criteria": [
+  "functional-windows-fix",
+  "regression-fails-on-original",
+  "gate-green",
+  "gate-report-honest"
+ ],
+ "dimensions": {
+  "functional-windows-fix": "functional",
+  "regression-fails-on-original": "constraint",
+  "gate-green": "integration",
+  "gate-report-honest": "constraint"
+ },
+ "probe": {
+  "file": "probe.py",
+  "inputs": "inputs.json",
+  "timeout": 90
+ },
+ "judge": {
+  "file": "grade_gate_stops_early_agent_chooses.py",
+  "timeout": 60
+ }
+}
