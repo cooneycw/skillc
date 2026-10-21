@@ -597,3 +597,32 @@ only the record this one now names, with its revised §2 shape.
   real-daemon signal-propagation question named as owed in §1a, are both
   explicitly available for a later issue to close - neither is assumed
   solved by anything in this design.
+
+## 10. Staged gates: the project gate (#508)
+
+A gate can be STAGED: the controller runs each of its declared stages
+itself, one `exec_in_attempt()` per stage, instead of one argv plus a stdout
+reader. Only `project-check` is staged. It witnesses the agent's own
+`make check` for an "agent chooses" study. Design: #287 issuecomment-6251092328
+(skillc-worker-C), with the orchestrator's rulings, re-read against the code in #508.
+
+- **Why not a runner script in the attempt.** A harness script that ran the stages and
+  printed one result document was rejected. The stages run the subject's own `ci/*.py`
+  as the candidate uid, and that code can write to its parent's stdout through
+  `/proc/<ppid>/fd/1`, forging the document. Here a stage's outcome is the exit code
+  the CONTROLLER received. The subject's output is forwarded, never parsed.
+- **Declared, bound to a digest.** The stages, their recipe lines and the Makefile's
+  sha256 come from the task's declaration (`project_gate.ProjectGate`).
+  - A Makefile that drifted from the declared digest is run by the real make, so the
+    agent still sees real output, but the run's stages are `unavailable` (UNKNOWN).
+  - A request that is not a gate invocation creates no run. The shim then runs the real
+    make, and its subject-reported log is stored as its own stream, never in this record.
+- **One witness, one order.** All gates of an attempt share ONE `GateWitness`, so its
+  single `_exec_lock` totally orders their runs, and `completed_at` is a sound
+  cross-gate order without the #496 counter. `agent_trial` constructs a witness at
+  exactly one site, and refuses a second bind.
+- **PATH.** The shim directory is first on the AGENT's exec only
+  (`DockerBackend.agent_exec_env`). Every controller exec runs `env -i` with the
+  measured env, which never contains it. So a controller-run gate whose plan calls
+  `make lint` never re-enters the channel. The red, with the directory on PATH,
+  records the nested run.

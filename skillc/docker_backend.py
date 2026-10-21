@@ -925,6 +925,13 @@ class DockerBackend:
     #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
     #: `env`.
     trigger_socket_dir: Path = field(default=DEFAULT_TRIGGER_SOCKET_DIR, repr=False)
+    #: #508: environment applied to the AGENT's own `docker exec` only
+    #: (`execute()`), read when it launches - the project-gate witness puts its
+    #: `make` shim directory first on the agent's PATH this way. Controller
+    #: execs (`exec_in_attempt`, `controller_output`) never receive it, so a
+    #: controller-run gate never re-enters the shim. `None` keeps every
+    #: earlier caller's argv unchanged.
+    agent_exec_env: Callable[[], Mapping[str, str]] | None = field(default=None, repr=False)
 
     def describe(self) -> BackendDescription:
         version = probe_daemon(self.docker_bin, self.daemon_timeout, _docker_env())
@@ -1948,7 +1955,7 @@ class DockerBackend:
         self, handle: _Handle, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
         after_launch: Callable[[], None] | None = None, cwd: str | None = None,
-        stderr_status_record_max: int = 0,
+        stderr_status_record_max: int = 0, exec_env: Mapping[str, str] | None = None,
     ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
         """Shared `docker exec` launch-drain-wait mechanics for `execute()`
         and `exec_in_attempt()` (#269) - everything up to, but NOT
@@ -1980,7 +1987,10 @@ class DockerBackend:
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
-        exec_argv += ["-w", cwd if cwd is not None else CONTAINER_WORKSPACE, "--", handle.name]
+        exec_argv += ["-w", cwd if cwd is not None else CONTAINER_WORKSPACE]
+        if exec_env:
+            exec_argv += _env_args(exec_env)
+        exec_argv += ["--", handle.name]
         if prefix_wrap:
             exec_argv.append(SKILLC_WRAP_PATH)
         exec_argv += list(argv)
@@ -2188,6 +2198,7 @@ class DockerBackend:
         wrapped_argv = ["sh", "-c", 'exec "$@"', token, *inner]
         launched = self._launch_and_wait(
             handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False,
+            exec_env=dict(self.agent_exec_env()) if self.agent_exec_env is not None else None,
         )
         if isinstance(launched, ExecuteResult):
             # Launch itself failed (`OSError` from `Popen`) - `_launch_and_wait`
