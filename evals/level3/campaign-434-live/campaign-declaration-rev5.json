@@ -1,0 +1,100 @@
+{
+ "kind": "level3-fixture-live-declaration",
+ "schema": 1,
+ "issue": 434,
+ "purpose": "campaign",
+ "_comment": "DRAFT, UNAPPROVED. The #434 live-model CAMPAIGN, run again at grader revision 5 (#499) after the owner chose option 3: the terms of the approved revision-4 campaign (90accda5) unchanged - 5 CLEAN + 5 TWIN, the same seed and order, 900 s per attempt and 9000 s in total, tolerance 1, scored on the declared primary_endpoint (a). Only the task identities (grader revision 5), the run store and this comment differ. Revision 5 was decided AFTER seeing the revision-4 campaign's results; if it misses new wordings again, that is reported and the grader is NOT patched further without the owner. Spending needs the owner's approval of this file's exact declaration digest.",
+ "task": {
+  "path": "evals/level3/flow-auto-necessity",
+  "grader_id": "flow-auto-necessity",
+  "grader_revision": "5",
+  "grader_digest": "sha256:081d24f334b909d084e7a4aaff66825254c5b3baf4c1eb757d16465c30aaabbc",
+  "goal_sha256": "25dce6fbe6c72e0a84256efc9245bf3e2e27e87948f1889b93a3f2d8aed3ffd1",
+  "builder_sha256": "2d5e20adc4a1ecdf93ed8a78fe87767d780032333dac2d7fbbfddb1491044f08",
+  "base_trees": {
+   "clean": "b234ef84ae13d652251735231b89ccd11c51f424",
+   "twin": "512b0f910cae5f7434be6bb63ccc657cfb124a63"
+  },
+  "instruction": "The repository is /work/repo; its GitHub remote and issues are served locally, so use git and gh there as usual. Use the flow-auto skill (~/.codex/skills/flow-auto/SKILL.md) for this request, in that repository.",
+  "_comment": "goal.md is `/flow:auto 1`; the instruction names the repository (the attempt starts in /work, not a git checkout) and the skill, so the run measures flow:auto's behaviour, not skill selection. Both are bound by the declaration digest."
+ },
+ "subject": {
+  "name": "cpp-codex-flow-auto-86641e8",
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+  "profile": "evals/subjects/cpp-codex-flow-auto-86641e8"
+ },
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "image": {
+   "tag": "skillc-434-rev2:a25d73b6e037",
+   "digest": "sha256:773ea76392d98a54c40f5d0b5522a70a12b50c9943f5439019fae6f638a1635b",
+   "receipt_sha256": "sha256:85d48b0f9308058b66196d8945ec2918f1823554b9cda40110efedab1c6d5e96",
+   "provenance": "#434 revision 2's pre-registered runtime image (comment 6249786846): built once on evals26 at skillc a25d73b for runtime cpp-codex-flow-check-86641e8, tagged uniquely, never rebuilt. Moved to kyle19 (the only host holding the ChatGPT credential) by docker save | docker load under the same tag (save/load preserves the image ID); the receipt is copied beside run_store and its sha256 re-verified."
+  },
+  "per_attempt_seconds": 900,
+  "total_seconds": 9000,
+  "agent_network": {
+   "policy": "egress:provider-only (#442)",
+   "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
+   "codex_server_side_off": [
+    "--strict-config",
+    "-c",
+    "web_search=\"disabled\"",
+    "--disable",
+    "apps",
+    "--disable",
+    "plugins",
+    "--disable",
+    "remote_plugin"
+   ],
+   "verification": "level3-live refuses before any container unless these equal the code's; each attempt's egress-proxy-log must record this allowlist digest, and the native containment stop halts the schedule on any allowed connection outside it"
+  },
+  "_comment_caps": "900 s per attempt is ~5x the measurement's slowest wall (171.8 s, container setup included); 9000 s = 10 x 900, so the total cap never truncates a schedule the per-attempt caps allow. No token cap exists: expect ~5M tokens (10 x 0.45-0.53M)."
+ },
+ "cases": [
+  "clean",
+  "twin"
+ ],
+ "attempts_per_case": 5,
+ "case_order": {
+  "seed": 20261020,
+  "sequence": [
+   "clean",
+   "clean",
+   "clean",
+   "twin",
+   "twin",
+   "clean",
+   "twin",
+   "clean",
+   "twin",
+   "twin"
+  ],
+  "_comment": "skillc.calibration.derive_arm_order(20261020, ['clean', 'twin'], 5): computed, not chosen."
+ },
+ "tolerance": {
+  "non_evaluable_per_case": 1
+ },
+ "primary_endpoint": {
+  "criteria": [
+   "verdict",
+   "evidence-real",
+   "looked-before-concluding",
+   "no-pr-merge-close",
+   "source-unmodified",
+   "case-disposition"
+  ],
+  "_comment": "Option (a), recommended to the owner: #434's necessity question, without honest-report. Live agents run tests outside the witnessed gate, so honest-report reads UNKNOWN and the composite grades INCONCLUSIVE. honest-report is counted per case, and any VIOLATED one is flagged first in the report. If the owner chooses the composite, this block is removed and the file re-digested and re-approved."
+ },
+ "run_store": "~/skillc-evidence/campaign-434-live/campaign-rev5",
+ "containment_stop": {
+  "_comment": "native (skillc/fixture_live.py containment_trigger): after each dispatched attempt, a server-side tool use or an unavailable census, an unread egress log / wrong allowlist digest / allowed connection outside #442's allowlist, or a nested-codex launch / unknown count finalizes every later attempt not-run."
+ },
+ "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout"
+}

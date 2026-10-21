@@ -35,3 +35,26 @@ Merged since #487 (ad38f82): 6fd94b6 (#492), 64321b2 (#494), 7c1d408 (#493), 7cd
 11. `changelog.d/499.md` - one bullet
 
 Scope: small-medium. Risks: post-hoc widening (bounded: positive template grammar, committed reds); shape 1 is template-adjacent not verbatim; rev 5 spends the rev-4 approval (PR-B brings a new declaration); decided after seeing results.
+
+<!-- flow-run n=2 id=8aabae8434eb4c20bfe37caa5f92984a -->
+## Run 2
+
+- Run-id:            8aabae8434eb4c20bfe37caa5f92984a
+- Run-start:         15de1552a8be7a55de4abffcada17bfca5770dfa
+- Issue:             #499
+- Base SHA:          15de1552a8be7a55de4abffcada17bfca5770dfa
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 orchestrator (wave skillc-400, authority-model orchestrator-only), GO-WITH-CONDITIONS 2026-10-20 (PR-B as planned in run 1's Step 3; re-ordered after #500 by the 2026-10-21 ruling)
+- Recorded at:       2026-10-21T04:05:00Z
+
+### Section B evidence
+PR-A merged as f168121 (#501): grader revision 5; the approved revision-4 campaign declaration (90accda5) is refused as spent. #500 merged as 15de155 (#502) between them; it does not touch fixture_live or the campaign-434 files. Duplicates/superseding: none.
+
+### Section C - the approved plan
+1. `evals/level3/campaign-434-live/campaign-declaration-rev5.json` - NEW: the revision-4 declaration's terms unchanged; only the task identities (grader revision 5), run_store and the comment differ; no approval
+2. `tests/test_fixture_live.py` - append-only: allow-list identity to the approved revision-4 declaration with a tamper control, the draft pinned and unapproved, and the private no-false-stop check over the spent revision-4 run (20261020T195431Z-fab3ce) with its control
+3. `evals/level3/campaign-434-live/README.md` - the revision-5 declaration
+4. `changelog.d/499-campaign-rev5.md` - one bullet
+
+Scope: small. Risks: a term drifting from the approved one (bounded: the allow-list test); a false containment stop (bounded: the no-false-stop check over the spent run's 10 attempts); rev 5 missing new wordings again (reported, not patched without the owner).
