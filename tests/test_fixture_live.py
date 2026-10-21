@@ -1654,7 +1654,7 @@ def test_the_sizing_draft_lacks_only_the_owner_s_approval() -> None:
         fl.require_approved(declaration, ROOT)
     fl.require_approved(declaration, ROOT, approval_required=False)
     shared = declaration.shared
-    assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (2, 1800, 3600)
+    assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (2, 1800, 4500)
     assert (shared["model"], shared["reasoning_effort"]) == ("gpt-6-astra", "high")
 
 
