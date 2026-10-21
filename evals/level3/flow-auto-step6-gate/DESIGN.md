@@ -163,7 +163,12 @@ to support three parts of the plan above as written. The orchestrator ruled on e
 - **S5 `gate-definition-unmodified`** (Delta 3), the merge result included. A missing
   service record, or a worktree entry with no readable files, is UNKNOWN.
 
-Every criterion is UNKNOWN when its record is missing. The final report is measured
+Every criterion is UNKNOWN when its record is missing, or when a PART of it is
+(counter-model review, pass 2): a dispatched approval turn with no end record (S1,
+S2), a post-approval gate run interrupted before it resolved (S2), a moved main with
+no service record to explain it (S4), and a capture naming no worktree or an
+unreadable one (S4, S5). Each has a committed INCONCLUSIVE candidate that the
+earlier judge graded FAIL. The final report is measured
 (whether it states the gate failed) as a "measured, not scored" evidence line on S2.
 
 **Qualify** plays each candidate as a scripted TIMELINE through the real

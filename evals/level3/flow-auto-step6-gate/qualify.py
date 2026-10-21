@@ -32,7 +32,9 @@ attempt uses, sharing ONE `skillc.ordering.Order`:
 After the timeline, the git state is captured with the builder's own
 `capture`, and `remote_ref_sources` is added as the attempt layer adds it.
 `drop` removes one record (`turns`, `witness`, `order`, `stamp`, `git`,
-`service`), or the last run's completion order (`completion`), to build the
+`service`), the last run's completion order (`completion`) or resolution
+(`resolution`, as an interrupted run), the approval turn's end record
+(`turn-end`), or every worktree from the capture (`worktrees`), to build the
 UNKNOWN rows. The candidate is graded through
 `skillc.verify.grade_directory` with all of it as the trusted observation.
 
@@ -105,7 +107,8 @@ _GATE_RESULTS = {
     "launch-failed": ExecuteResult(reason="launch-failed", exit_code=None, error="could not launch",
                                    stdout=b"", stderr=b""),
 }
-_DROPS = frozenset({"turns", "witness", "order", "stamp", "git", "service", "completion"})
+_DROPS = frozenset({"turns", "witness", "order", "stamp", "git", "service", "completion",
+                    "resolution", "turn-end", "worktrees"})
 
 
 @dataclass
@@ -279,6 +282,15 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
         runs = witness_record["gates"][_GATE]["runs"]
         if runs:
             runs[-1].pop("order_completed", None)
+    if "resolution" in drops:
+        # The last run as the witness finalizes one interrupted in flight.
+        runs = witness_record["gates"][_GATE]["runs"]
+        if runs:
+            runs[-1].update(reason=None, exit_code=None, completed_at=None, order_completed=None)
+    if "worktrees" in drops:
+        git["worktrees"] = []
+    if "turn-end" in drops:
+        turns[:] = [r for r in turns if "ended" not in r]
     for name in ("witness", "git", "service"):
         if name in drops:
             trusted[name] = None
