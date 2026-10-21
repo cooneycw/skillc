@@ -107,7 +107,9 @@ from . import (
     witness_capture,
 )
 from . import egress as eg
+from . import fixture_overlay as fo
 from . import fixture_service as fs
+from . import project_gate as pg
 from . import runtime_supply as rs
 from . import source_digest as sd
 from . import transcript_adapter as ta
@@ -550,6 +552,13 @@ class _WitnessSession:
     #: with it, each run records its order and the gated tree's SOURCE digest.
     order: Order | None = field(default=None, repr=False)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
+    #: #508: the declared project gate, witnessed as `project-check` by the
+    #: SAME GateWitness as every other gate, so one `_exec_lock` orders them all.
+    project_gate: pg.ProjectGate | None = None
+    #: #508 ruling 1: `make` invocations the shim passed through to the real
+    #: make, as the SHIM reported them. Subject-reported, never evidence: kept
+    #: out of the gate-witness record and of everything grading reads.
+    passthrough_log: list[dict[str, object]] = field(default_factory=list, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -566,7 +575,24 @@ class _WitnessSession:
             return {"nonce": self.nonce}
         if not self.ready:
             raise ChannelRefusal("witness session is not ready for gates")
+        if request.get("op") == pg.PASSTHROUGH_OP:
+            return self._log_passthrough(request)
         return self.witness.decide(request)
+
+    def _log_passthrough(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        """Record one shim pass-through, bounded; never a gate run."""
+        if self.project_gate is None:
+            raise ChannelRefusal("this attempt witnesses no project gate")
+        if len(self.passthrough_log) >= pg.MAX_PASSTHROUGH_LOG:
+            return {"logged": False, "reason": "the pass-through log is full"}
+        argv, cwd, code, why = (request.get(k) for k in ("argv", "cwd", "exit_code", "why"))
+        if (not isinstance(argv, list) or len(argv) > 64 or not all(isinstance(a, str) and len(a) <= 512 for a in argv)
+                or not isinstance(cwd, str) or len(cwd) > 4096 or not isinstance(code, int) or isinstance(code, bool)
+                or not isinstance(why, str) or len(why) > 128):
+            raise ChannelRefusal("make_passthrough fields are malformed or oversized")
+        self.passthrough_log.append({"argv": list(argv), "cwd": cwd, "exit_code": code, "why": why,
+                                     "at": time.time(), "subject_reported": True})
+        return {"logged": True}
 
     def gate_environment(self) -> Mapping[str, str]:
         """The measured runtime env plus `PYTHONDONTWRITEBYTECODE=1`, as
@@ -595,12 +621,22 @@ class _WitnessSession:
                     return "unreadable: no repository contains the gate's working directory"
                 return sd.digest_tree(root)
 
+        if self.witness is not None:
+            # #508: the cross-gate order is the single `_exec_lock` of ONE
+            # witness per attempt; a second one would break it silently.
+            raise HomeFileVerificationRefused("an attempt's gate witness is bound once; a second one is refused")
         harness = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/{_FLOW_CHECK_GATE_HARNESS_PATH}"
         if self.gate_args is None:
             gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
                      "flow-check-summary": ["bash", harness, "--check-summary"]}
         else:
             gates = {gate: ["bash", harness, *args] for gate, args in self.gate_args.items()}
+        staged: dict[str, pg.StagedRunner] = {}
+        if self.project_gate is not None:
+            # The argv is the record's statement of the entry; the stages run
+            # one controller exec each (`project_gate.StagedRunner`).
+            gates[pg.GATE] = [pg.REAL_MAKE, self.project_gate.goal]
+            staged[pg.GATE] = pg.StagedRunner(self.project_gate)
         self.witness = GateWitness(
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
@@ -612,6 +648,7 @@ class _WitnessSession:
                 gate: functools.partial(stage_capture.capture_stages, plan=plan)
                 for gate, plan in (self.stage_plans or {}).items()},
             order=self.order, source_digest_fn=source_snapshot if self.order is not None else None,
+            staged=staged or None,
         )
         script = (
             "import json,socket,sys; "
@@ -2117,6 +2154,7 @@ def run_one_attempt(
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
+    project_gate: pg.ProjectGate | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
     fixture: AttemptFixture | None = None,
@@ -2250,8 +2288,26 @@ def run_one_attempt(
                 f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
             )
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
-    witness_session = (_WitnessSession(attempt_id, limits, gate_args=gate_args, stage_plans=stage_plans)
-                       if gate_entrypoint is not None else None)
+    if project_gate is not None:
+        if fixture is not None:
+            raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; project_gate cannot also be set")
+        if gate_entrypoint is None:
+            gate_args = {}  # #508: the project gate alone, no CPP gate declared
+    witness_session = (_WitnessSession(attempt_id, limits, gate_args=gate_args, stage_plans=stage_plans,
+                                       project_gate=project_gate)
+                       if gate_entrypoint is not None or project_gate is not None else None)
+    #: #508: the agent's own exec PATH (shim directory first), filled in once
+    #: the runtime env is measured; a launch before then is refused.
+    agent_env: dict[str, str] = {}
+
+    def agent_exec_env() -> Mapping[str, str]:
+        if "PATH" not in agent_env:
+            raise HomeFileVerificationRefused("the project-gate shim was not placed before the agent launch")
+        return dict(agent_env)
+    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args", "make_env") if project_gate is not None else ())})
+    passthrough_route = ({pg.PASSTHROUGH_OP: (witness_session.decide,
+                                              frozenset({"op", "argv", "cwd", "exit_code", "why"}))}
+                         if project_gate is not None and witness_session is not None else {})
     if witness_session is not None:
         witness_session.order = attempt_order
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
@@ -2267,18 +2323,21 @@ def run_one_attempt(
             # One socket, routed by op alone; a mixed request is refused.
             trigger = fixture_session.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
-                "run_gate": (witness_session.decide, frozenset({"op", "gate", "cwd"})),
+                "run_gate": (witness_session.decide, run_gate_keys),
+                **passthrough_route,
                 **fixture_session.routes(),
             }))
         elif attempt_guard is not None and witness_session is not None:
             # #500: the guard shares the witness's one socket, routed by op.
             trigger = attempt_guard.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
-                "run_gate": (witness_session.decide, frozenset({"op", "gate", "cwd"})),
+                "run_gate": (witness_session.decide, run_gate_keys),
+                **passthrough_route,
                 **attempt_guard.routes(),
             }))
         try:
-            backend = replace(backend, witness_io=True, trigger_decide=trigger)
+            backend = replace(backend, witness_io=True, trigger_decide=trigger,
+                              agent_exec_env=agent_exec_env if project_gate is not None else backend.agent_exec_env)
         except (TypeError, ValueError) as exc:
             raise HomeFileVerificationRefused("backend cannot preserve its type while enabling witness IO") from exc
     if attempt_guard is not None and witness_session is None:
@@ -2397,6 +2456,12 @@ def run_one_attempt(
                 fixture_session.bind(ready_backend, handle, witness_session.environment)
             if attempt_guard is not None:
                 attempt_guard.bind(ready_backend, handle, witness_session.environment)
+            if project_gate is not None:
+                # #508: placed LAST, so the check below sees every overlay.
+                pg.install_make_shim(ready_backend, handle, witness_session.environment)
+                pg.verify_agent_path(ready_backend, handle, witness_session.environment,
+                                     codex_guard=fo.CODEX_GUARD_PATH if attempt_guard is not None else None)
+                agent_env["PATH"] = pg.agent_path(witness_session.environment)
     elif attempt_guard is not None:
         install_without_witness = before_execute
 
@@ -2478,6 +2543,13 @@ def run_one_attempt(
         """#442's egress log, and (#500) every retained session of an attempt
         that left more than one transcript, each its own stream."""
         imports = list(egress_imports)
+        if witness_session is not None and witness_session.project_gate is not None:
+            # #508: the shim's pass-through log, its own SUBJECT-REPORTED
+            # stream - never in the gate-witness record grading reads.
+            raw = b"".join(json.dumps(e, sort_keys=True).encode() + b"\n" for e in witness_session.passthrough_log)
+            path = base / f"{attempt_id}.{pg.PASSTHROUGH_STREAM}.jsonl"
+            path.write_bytes(raw)
+            imports.append(trial.Import(path, pg.PASSTHROUGH_STREAM, "client-reported", trial.sha256_bytes(raw)))
         for entry in transcript_sessions:
             evidence = entry.get("evidence")
             if isinstance(evidence, trial.TranscriptEvidence) and evidence.data is not None:

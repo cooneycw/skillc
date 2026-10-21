@@ -1,0 +1,6 @@
+- **A project-gate witness (`project-check`)** (#508, the agent-chooses design from #287) witnesses the agent's own `make check`.
+  - A root-owned `make` shim, first on the agent's PATH only, forwards `make`, `make check` or `make <declared stages>` to the controller.
+  - The controller runs the real make once per declared stage, after checking before each stage that make would run exactly the declared recipes. It records each make run's exit status and replies with make's own bytes. Committed real-make goldens pin the reply.
+  - Any other `make` call, or one carrying `MAKEFLAGS` and the like, runs the real make and is logged as subject-reported, never evidence.
+  - A drifted or shadowed Makefile, or a file named after a target, is run by the real make with no stage truth.
+  - Controller gate execs never carry the shim directory. One gate witness per attempt owns every gate exec.

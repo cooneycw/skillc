@@ -106,11 +106,13 @@ Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from threading import Lock
+from typing import Any, Protocol
 
 from .backend import ExecuteResult, ExecutionBackend, Limits
 from .decide_reply_channel import ChannelRefusal
@@ -137,6 +139,19 @@ StageReader = Callable[[bytes | None, int | None], Mapping[str, object]]
 #: these contributes neither `complete` nor `interrupted` to its gate's
 #: coverage.
 _NOT_STARTED_REASONS = frozenset({"launch-failed", "attempt-not-running", "unsupported"})
+
+
+class StagedGate(Protocol):
+    """#508: a gate the controller runs ONE DECLARED STAGE AT A TIME
+    (`skillc.project_gate.StagedRunner`). `plan()` answers which stages a
+    request asks for, or None when it is not a gate invocation; `run()`
+    executes them and returns the combined result with its stage capture."""
+
+    def plan(self, request: Mapping[str, object]) -> tuple[str, ...] | None: ...
+
+    def run(self, backend: Any, handle: object, limits: Limits, stages: Sequence[str], *,
+            cwd: str | None, env: Mapping[str, str] | None, confine_root: str | None,
+            make_args: Sequence[str]) -> tuple[ExecuteResult, Mapping[str, object]]: ...
 
 
 @dataclass
@@ -322,6 +337,7 @@ class GateWitness:
         stage_capture: Mapping[str, StageReader] | None = None,
         order: Order | None = None,
         source_digest_fn: Callable[[str | None], str] | None = None,
+        staged: Mapping[str, StagedGate] | None = None,
     ) -> None:
         #: #279 PR-2a: the attempt's ordering counter and the source-digest
         #: function (given the gate's working directory). Both None for every
@@ -357,6 +373,16 @@ class GateWitness:
             if unknown_stage_gates:
                 raise ValueError(f"stage_capture names undeclared gate(s): {sorted(unknown_stage_gates)}")
         self._stage_capture: dict[str, StageReader] = dict(stage_capture) if stage_capture else {}
+        #: #508: gates the controller runs stage by stage (the project gate).
+        #: A staged gate has no stdout reader: its stages are the exit codes
+        #: the controller itself received, one exec per stage.
+        if staged:
+            unknown_staged = set(staged) - set(self._declared_argv)
+            if unknown_staged:
+                raise ValueError(f"staged names undeclared gate(s): {sorted(unknown_staged)}")
+            if set(staged) & set(self._stage_capture):
+                raise ValueError("a staged gate cannot also declare a stdout stage reader")
+        self._staged: dict[str, StagedGate] = dict(staged) if staged else {}
         #: #332: the one root a subject-forwarded `cwd` must resolve inside
         #: (after a REAL in-container `realpath`, never a string-prefix
         #: check on the unresolved input - a symlink could point outside
@@ -454,6 +480,18 @@ class GateWitness:
             # Red case 1: the controller's own declared set is the only
             # source of truth for what may be run at all.
             raise ChannelRefusal(f"run_gate: {gate!r} is not a declared gate for this attempt")
+        runner = self._staged.get(gate)
+        requested_stages: tuple[str, ...] | None = None
+        make_args = request.get("make_args", [])
+        if runner is None and ("make_args" in request or "make_env" in request):
+            raise ChannelRefusal(f"run_gate: {gate!r} takes no make_args or make_env")
+        if runner is not None:
+            requested_stages = runner.plan(request)
+            if requested_stages is None:
+                # #508 ruling 1: not a gate invocation. No run exists, and the
+                # shim runs the real make itself - never refused, so the
+                # agent's workflow is unchanged.
+                return {"accepted": False, "passthrough": True, "reason": "not a gate invocation"}
         gate_cwd = self._confine_requested_cwd(request.get("cwd"))
         with self._lock:
             if self._workspace_integrity_unknown:
@@ -498,8 +536,15 @@ class GateWitness:
                                source_digest_at_start=source)
                     self._runs[gate].append(run)
                     unsupported = self._backend_unsupported
+                staged_capture: Mapping[str, object] | None = None
                 if unsupported:
                     result = ExecuteResult(reason="unsupported", exit_code=None)
+                elif runner is not None:
+                    assert requested_stages is not None and isinstance(make_args, list)
+                    result, staged_capture = runner.run(
+                        self._backend, self._handle, self._limits, requested_stages, cwd=gate_cwd,
+                        env=self._declared_env.get(gate), confine_root=self._workspace_root,
+                        make_args=[str(a) for a in make_args])
                 else:
                     result = self._backend.exec_in_attempt(
                         self._handle, list(self._declared_argv[gate]), self._limits,
@@ -514,7 +559,14 @@ class GateWitness:
                     # #334: a capped raw stderr cannot be forwarded as whole.
                     or result.stderr_truncated
                 )
-                stages = self._read_stages(gate, result, output_bad, gate_cwd)
+                stages: Mapping[str, object] | None
+                if runner is not None:
+                    stages = (dict(staged_capture, cwd=gate_cwd, workspace_root=self._workspace_root)
+                              if staged_capture is not None and not output_bad
+                              else _stages_unavailable("controller output is missing or incomplete" if output_bad
+                                                       else f"run did not start (reason {result.reason!r})"))
+                else:
+                    stages = self._read_stages(gate, result, output_bad, gate_cwd)
                 with self._lock:
                     if result.reason == "unsupported":
                         self.channel_unavailable = True
@@ -532,7 +584,14 @@ class GateWitness:
                     run.stages = stages
                 if output_bad:
                     raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
+                lossless: dict[str, object] = {}
+                if runner is not None:
+                    # #508: a staged gate's reply stands in for make's own
+                    # output, so its bytes travel exactly (base64), not decoded.
+                    lossless = {"stdout_b64": base64.b64encode(result.stdout or b"").decode("ascii"),
+                                "stderr_b64": base64.b64encode(result.stderr or b"").decode("ascii")}
                 return {
+                    **lossless,
                     "accepted": True,
                     "exit_code": result.exit_code,
                     "reason": result.reason,

@@ -597,3 +597,54 @@ only the record this one now names, with its revised §2 shape.
   real-daemon signal-propagation question named as owed in §1a, are both
   explicitly available for a later issue to close - neither is assumed
   solved by anything in this design.
+
+## 10. Staged gates: the project gate (#508)
+
+A gate can be STAGED: the controller runs it one declared stage at a time. Each
+stage is the controller's own exec of the image's real `/usr/bin/make <stage>`,
+not one argv plus a stdout reader. Only `project-check` is staged. It witnesses
+the agent's own `make check` for an "agent chooses" study. Design: #287
+issuecomment-6251092328 (skillc-worker-C), with the orchestrator's rulings,
+re-read against the code in #508.
+
+- **A stage's outcome is the exit status the CONTROLLER received** from that
+  make run: 0 is `passed`, 2 (make's "a recipe failed") is `failed`, and
+  anything else is `null` with its reason. The agent receives exactly what
+  those make runs printed. The subject's output is forwarded, never parsed.
+- **Two designs were rejected.**
+  - *A harness runner script in the attempt.* The stage code runs as the
+    candidate uid and can write to its parent's stdout through
+    `/proc/<ppid>/fd/1`, forging the result document.
+  - *The controller running each recipe's argv directly* (counter-model
+    review). Make is part of the gate. It sets the recipe environment
+    (`MAKELEVEL`), skips a target whose file exists, and reports a signal
+    death as `Killed` rather than `Error 137`. Without it, a stage can pass
+    where make fails, and the reply would not be make's.
+- **Make must be about to run exactly the declared recipes,** checked before
+  EVERY stage, because an earlier stage can change the tree:
+  - only the declared name exists among `GNUmakefile`, `makefile` and `Makefile`;
+  - its digest is the declared one;
+  - no file is named after the goal or a remaining stage.
+
+  Otherwise the rest of the invocation runs as one real-make exec, and the
+  stages are `unavailable`. An invocation carrying make's own environment
+  (`MAKEFLAGS`, `MAKEFILES`, `MAKELEVEL`, ...) is not forwarded at all. A
+  non-gate invocation creates no run: the shim runs the real make, and its
+  subject-reported log is its own stream, never in this record or in
+  `verify.witness_envelope`.
+- **Fidelity is pinned by goldens from the real make**
+  (`tests/fixtures/make-gate/goldens.json`). The single-stage runs the
+  controller makes must compose into what one `make check` printed, for every
+  outcome cell, including signal death.
+- **One witness, one order.** All gates of an attempt share ONE `GateWitness`,
+  so its single `_exec_lock` totally orders their runs, and `completed_at` is a
+  sound cross-gate order without the #496 counter. `agent_trial` constructs a
+  witness at exactly one site and refuses a second bind.
+- **PATH.** The shim directory is first on the AGENT's exec only
+  (`DockerBackend.agent_exec_env`). Every controller exec runs `env -i` with
+  the measured env, which never contains it. So a controller-run gate whose
+  plan calls `make lint` never re-enters the channel; the red, with the
+  directory on PATH, records the nested run.
+- **The stages run under the measured runtime environment,** as every
+  witnessed gate does, not the agent's interactive shell. A variable the agent
+  exported before typing `make check` does not reach them.

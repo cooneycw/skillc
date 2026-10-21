@@ -77,7 +77,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
@@ -1226,6 +1226,19 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
                             backend, judges, goal_text)[0]
 
 
+def witness_envelope(gate_witness: GateWitnessRecord, trusted_extras: Mapping[str, object] | None,
+                     files: Sequence[tuple[str, bytes, bool]]) -> bytes:
+    """The trusted observation a witnessed attempt is graded with: the extras,
+    the finalized gate-witness record and the graded tree's digest - nothing
+    else (#508: the project-gate shim's subject-reported pass-through log is
+    never in it)."""
+    return trial.canonical({
+        **(trusted_extras or {}),
+        "witness": json.loads(gate_witness.to_json_bytes()),
+        "graded_tree_digest": witness_capture.files_digest(files),
+    })
+
+
 def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
                      forbidden: list[Path] | None = None, regrade_of: str | None = None,
                      backend: ExecutionBackend | None = None,
@@ -1311,11 +1324,7 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
     if gate_witness is not None:
         # The lock is held and files came from validated frozen blobs. Never
         # use the export or assign this final identity to an earlier gate run.
-        trusted_observation = trial.canonical({
-            **(trusted_extras or {}),
-            "witness": json.loads(gate_witness.to_json_bytes()),
-            "graded_tree_digest": witness_capture.files_digest(files),
-        })
+        trusted_observation = witness_envelope(gate_witness, trusted_extras, files)
 
     in_flight = _in_flight_scratch(experiment, attempt_id)
     before = _snapshot(experiment.root, in_flight)
