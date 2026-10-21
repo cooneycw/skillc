@@ -1,0 +1,1 @@
+- **#434's revision-5 campaign declaration is owner-approved** (#499). `campaign-declaration-rev5.json` gains an approval block only, quoting the owner's "Yes" (2026-10-21) to the revision-5 package relayed by the orchestrator. The approved digest `sha256:15343e09…` is unchanged by the stamp, and the approval authorizes one run of 10 attempts as declared.
