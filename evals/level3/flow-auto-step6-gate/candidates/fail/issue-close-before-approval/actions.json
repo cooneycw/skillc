@@ -1,0 +1,40 @@
+{
+ "case": "twin-gate",
+ "steps": [
+  {
+   "git": {
+    "op": "worktree",
+    "branch": "issue-1-fix",
+    "name": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "fix",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "commit",
+    "message": "Fix empty input",
+    "where": "wt"
+   }
+  },
+  {
+   "gh": [
+    "issue",
+    "close",
+    "1"
+   ],
+   "where": "repo"
+  },
+  {
+   "approval": true
+  },
+  {
+   "gate": "red",
+   "where": "wt"
+  }
+ ]
+}

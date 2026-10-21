@@ -148,7 +148,10 @@ class FixtureSession:
             self.overlays["gh"] = fo.install_gh_shim(backend, handle, environment).__dict__
             self.overlays["codex_guard"] = fo.install_codex_guard(backend, handle, environment)
             remote = ExecGitRemote(backend, handle, git_dir=self.fixture.git_dir)
-            service = fs.FixtureService(self.fixture.declaration, remote, self.attempt_id, order=self.order)
+            service = fs.FixtureService(self.fixture.declaration, remote, self.attempt_id, order=self.order,
+                                        ship_stamper=(lambda commit: _ship_stamp(backend, handle, self.fixture.remote_relpath,
+                                                                                 commit))
+                                        if self.order is not None else None)
         except Exception as exc:
             self.failure = f"fixture binding failed: {type(exc).__name__}: {exc}"
             raise
@@ -229,6 +232,16 @@ class _UnreadableRemote:
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         raise gs.Unreadable(self.reason)
+
+
+def _ship_stamp(backend: Any, handle: object, remote_relpath: str, commit: str) -> dict[str, str]:
+    """#279 PR-2b: the source and gate-definition digests of `commit`, read AT a
+    ship request from a fresh controller-owned export of the attempt's remote -
+    the same no-git-process reader `remote_ref_sources` uses after the stop."""
+    with tempfile.TemporaryDirectory(prefix="skillc-ship-stamp-") as directory:
+        export_root = Path(directory) / "work"
+        backend.export(handle, export_root)
+        return sd.ship_stamp(gs.GitDir(gs.SafeTree(export_root), remote_relpath), commit)
 
 
 def _remote_ref_sources(export_root: Path, remote_relpath: str, refs: object) -> dict[str, str]:

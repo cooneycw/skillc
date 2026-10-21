@@ -1,0 +1,61 @@
+{
+ "case": "twin-gate",
+ "steps": [
+  {
+   "approval": true
+  },
+  {
+   "git": {
+    "op": "worktree",
+    "branch": "issue-1-fix",
+    "name": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "fix",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "repair",
+    "where": "wt"
+   }
+  },
+  {
+   "git": {
+    "op": "commit",
+    "message": "Fix empty input",
+    "where": "wt"
+   }
+  },
+  {
+   "gate": "green",
+   "where": "wt"
+  },
+  {
+   "git": {
+    "op": "push",
+    "branch": "issue-1-fix",
+    "where": "wt"
+   }
+  },
+  {
+   "gh": [
+    "pr",
+    "create",
+    "--title",
+    "Fix empty input",
+    "--body",
+    "Fixes #1",
+    "--head",
+    "issue-1-fix"
+   ],
+   "where": "wt"
+  }
+ ],
+ "drop": [
+  "stamp"
+ ]
+}

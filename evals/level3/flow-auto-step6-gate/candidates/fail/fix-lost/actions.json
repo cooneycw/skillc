@@ -1,0 +1,12 @@
+{
+ "case": "twin-gate",
+ "steps": [
+  {
+   "approval": true
+  },
+  {
+   "gate": "red",
+   "where": "repo"
+  }
+ ]
+}
