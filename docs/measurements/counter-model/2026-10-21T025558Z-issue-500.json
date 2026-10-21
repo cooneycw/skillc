@@ -1,0 +1,27 @@
+{
+  "branch": "issue-500-p1-containment-calibration-attempts-lack-the-neste",
+  "counts": {
+    "accepted": 10,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "3e6bd81f524bf84ead1a071238aef247cd54a248",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "500",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-21T02:55:58Z",
+  "red_cases": {
+    "already_covered": 9,
+    "proposed": 15
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/20/rollout-2026-10-20T22-31-40-01a15c4c-cf59-7eb2-8958-1c47ab12af9c.jsonl",
+    "thread_id": "01a15c4c-cf59-7eb2-8958-1c47ab12af9c"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

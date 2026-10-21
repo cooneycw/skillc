@@ -687,6 +687,9 @@ def run_level1_agent_attempt(
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
+    codex_guard: bool = False,
+    nested_codex_policy: str | None = None,
+    declared_model: str | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -709,7 +712,14 @@ def run_level1_agent_attempt(
     `None`/empty by default. `calibration_run.run_calibration` passes
     the treatment's fields for treated arms only; `uptake_study.run_study`
     passes each selected arm's fields (#346). Treatments without a profile
-    keep their empty verification defaults."""
+    keep their empty verification defaults.
+
+    `codex_guard`/`nested_codex_policy`/`declared_model` (#500): the
+    nested-codex guard on a calibration attempt, forwarded only when the guard
+    is on, so every other caller's call is unchanged."""
+    guard_kwargs: dict[str, object] = (
+        {"codex_guard": True, "nested_codex_policy": nested_codex_policy, "declared_model": declared_model}
+        if codex_guard else {})
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
@@ -728,6 +738,7 @@ def run_level1_agent_attempt(
         preflight_tools=preflight_tools,
         gate_entrypoint=gate_entrypoint,
         gate_witness=gate_witness,
+        **guard_kwargs,  # type: ignore[arg-type]
     )
 
 

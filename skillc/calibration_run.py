@@ -67,6 +67,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agent_trial, calibration, demo, profile, trial, verify
+from . import attempt_guard as ag
 from . import collection_conformance as cc
 from . import matched_pilot as mp
 from . import materialize as m
@@ -559,9 +560,14 @@ def run_calibration(
     outcomes: list[mp.AttemptOutcome] = []
     write_outcomes(run_dir, experiment, outcomes, declaration)
 
+    guarded = guard_kwargs(client_name, model)
+    stop = GuardStop()
+
     def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
         if rehearse:  # #287 P2: only the attempt is swapped; everything around it is the real path
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
+        if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
+            return skipped
         treated = scheduled.arm != calibration.BASELINE_ARM
         instruction = calibration.arm_spec(declaration, scheduled.arm).get("instruction")
         prompt = f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
@@ -582,10 +588,12 @@ def run_calibration(
             preflight_tools=treatment.preflight_tools if treated else None,
             gate_entrypoint=treatment.gate_entrypoint if treated else None,
             gate_witness=treatment.gate_witness if treated else None,
+            **guarded,  # type: ignore[arg-type]
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
+        stop.observe(outcome, bool(guarded))
         write_outcomes(run_dir, experiment, outcomes, declaration)
 
     try:
@@ -603,6 +611,97 @@ def run_calibration(
         write_outcomes(run_dir, experiment, reconcile(experiment, outcomes), declaration)
         raise
     return experiment, outcomes
+
+
+# ------------------------------------------- #500: the nested-codex guard
+
+def _session_tokens(usage: object) -> int | None:
+    total = usage.get("total_tokens") if isinstance(usage, Mapping) else None
+    return total if isinstance(total, int) and not isinstance(total, bool) else None
+
+
+def guard_entry(record: Mapping[str, object], obs: Mapping[str, object], declared: str) -> dict[str, object]:
+    """#500: a report entry's guard and every-session fields, present only
+    for a guarded attempt or one that left more than one transcript (every
+    other entry is byte-identical to before).
+
+    - `nested_codex`: the guard's counts, the transcript backstop's hits and
+      their verdict (`attempt_guard.assess`), with `other_models` widened by
+      every retained session's own model.
+    - `models_all_sessions`: every session's model; any other than the
+      declared one makes the attempt ineligible (applied by the caller).
+    - `tokens_all_sessions`: the sum over every session, or UNKNOWN when one
+      is unreadable - or when a nested launch went past the guard, whose
+      session no transcript holds, so no total can be complete."""
+    guard = record.get("codex_guard")
+    sessions = obs.get("transcript_sessions")
+    if not isinstance(guard, Mapping) and not isinstance(sessions, list):
+        return {}
+    meta = obs.get("run_metadata")
+    rows: list[Mapping[str, object]]
+    if isinstance(sessions, list):
+        rows = [s for s in sessions if isinstance(s, Mapping)]
+    else:
+        rows = [{"model": meta.get("model"), "token_usage": meta.get("token_usage")}] if isinstance(meta, Mapping) else [{}]
+    models = [str(r["model"]) if r.get("model") is not None else UNKNOWN for r in rows]
+    totals = [_session_tokens(r.get("token_usage")) for r in rows]
+    nested: dict[str, object] = dict(guard) if isinstance(guard, Mapping) else {}
+    # A bypass, or any guard record that stops (suspected, unknown, ancestry
+    # unknown), leaves room for a session no transcript holds: the total is
+    # then UNKNOWN, and what was measured is reported beside it.
+    bypassed = bool(nested.get("bypass")) or bool(nested.get("stop"))
+    others = {m for m in models if m != declared}
+    if others:
+        prior = nested.get("other_models")
+        nested["other_models"] = sorted(others | {str(m) for m in prior} if isinstance(prior, list) else others)
+    out: dict[str, object] = {
+        "models_all_sessions": models,
+        "tokens_all_sessions": UNKNOWN if bypassed or any(t is None for t in totals)
+        else sum(t for t in totals if t is not None),
+        "tokens_measured_sessions": sum(t for t in totals if t is not None),
+    }
+    if nested:
+        out["nested_codex"] = nested
+    return out
+
+
+def containment_stop(entries: Sequence[Mapping[str, object]]) -> dict[str, object] | None:
+    """#500: the first guarded attempt whose guard report stops the schedule."""
+    for entry in entries:
+        nested = entry.get("nested_codex")
+        if isinstance(nested, Mapping) and nested.get("stop"):
+            return {"at_attempt": entry.get("attempt_id"), "trigger": nested["stop"]}
+    return None
+
+
+def guard_kwargs(client_name: str, model: str) -> dict[str, object]:
+    """#500: every live codex calibration attempt - discrimination and
+    improvement kinds alike (orchestrator condition 1) - runs under the
+    nested-codex guard, refusing a nested launch before any model contact
+    (`attempt_guard.CALIBRATION_POLICY`). Another client is unguarded: the
+    guard is codex's own front."""
+    if client_name != "codex":
+        return {}
+    return {"codex_guard": True, "nested_codex_policy": ag.CALIBRATION_POLICY, "declared_model": model}
+
+
+@dataclass
+class GuardStop:
+    """#500: the first containment trigger, which skips every later attempt."""
+
+    trigger: str | None = None
+    at_attempt: str | None = None
+
+    def skip(self, experiment: trial.Experiment, attempt_id: str) -> dict[str, object] | None:
+        if self.trigger is None:
+            return None
+        return trial.finalize(experiment, attempt_id, reason=f"containment stop at {self.at_attempt}: {self.trigger}")
+
+    def observe(self, outcome: mp.AttemptOutcome, guarded: bool) -> None:
+        if self.trigger is None and guarded:
+            trigger = ag.containment_trigger(outcome.record)
+            if trigger is not None:
+                self.trigger, self.at_attempt = trigger, outcome.scheduled.attempt_id
 
 
 # --------------------------------------- #287 P3: image, store and egress bindings
@@ -1038,9 +1137,14 @@ def run_discrimination(
     outcomes: list[mp.AttemptOutcome] = []
     write_outcomes(run_dir, experiment, outcomes, declaration)
 
+    guarded = guard_kwargs(client_name, model)
+    stop = GuardStop()
+
     def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
         if rehearse:
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
+        if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
+            return skipped
         chosen = treatments[scheduled.arm]
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
@@ -1052,10 +1156,12 @@ def run_discrimination(
             credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
             verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
             gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,
+            **guarded,  # type: ignore[arg-type]
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
+        stop.observe(outcome, bool(guarded))
         write_outcomes(run_dir, experiment, outcomes, declaration)
 
     try:
@@ -1390,12 +1496,19 @@ def build_report(
                if outcome.scheduled.arm in named_skills else {}),
             "transcript_retention": record.get("transcript_retention", UNKNOWN),
             "runner_note": outcome.runner_note,
+            **guard_entry(record, obs, declared_model),
         })
+        nested_entry = entries[-1].get("nested_codex")
+        if isinstance(nested_entry, Mapping) and any(nested_entry.get(k) for k in ("other_models", "stop", "block")):
+            # #500 (counter-model review): an attempt whose containment is not
+            # clean is never eligible, whichever model a nested launch named.
+            entries[-1]["model_eligible"] = False
     report: dict[str, object] = {
         "version": 2 if endpoint is not None else 1,
         "kind": REPORT_KIND,
         "experiment_id": experiment.id,
         "attempts": entries,
+        **({"containment_stop": containment_stop(entries)} if any("nested_codex" in e for e in entries) else {}),
         "arms": summarize_arms(entries),
         **({"outcome_endpoint": endpoint.to_json(),
             "declaration_digest": calibration.declaration_digest(declaration.data),

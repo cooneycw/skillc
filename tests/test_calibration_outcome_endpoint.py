@@ -404,6 +404,8 @@ def test_runner_dispatches_bound_bytes_and_isolates_baseline(
         return record
 
     monkeypatch.setattr(cc, "run_level1_agent_attempt", attempt)
+    # #500: this fake attempt carries no guard report; the guarded path has its own tests.
+    monkeypatch.setattr(cr, "guard_kwargs", lambda client_name, model: {})
     run = tmp_path / "run"
     run.mkdir()
     experiment, outcomes = cr.run_calibration(
