@@ -4,7 +4,7 @@
 
 **It is a draft.** It carries no `approval`, and `shared.model` and `shared.reasoning_effort` are `UNKNOWN`: they are the owner's to set. `fixture_live.require_approved` refuses it until both are recorded and the owner's approval of the exact digest is added. The orchestrator packages it for the owner; this repository requests nothing.
 
-The draft's declaration digest is `sha256:a1af52ad15da6e2c21ec545e02cd4d3840a45b7b888dd2af548a837643fcfbbe`, computed by `fixture_live.parse_declaration`. Any edit, including the owner's model choice, makes a new digest, and that new digest is the one approved.
+The draft's declaration digest is `sha256:f031e9bca05f14c15b1ee11a1da9be7cf39a34360487a18e76bb56870944a5ca`, computed by `fixture_live.parse_declaration`. Any edit, including the owner's model choice, makes a new digest, and that new digest is the one approved.
 
 ## Bindings
 

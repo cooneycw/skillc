@@ -55,9 +55,9 @@
   "path": "evals/level3/flow-auto-step6-gate",
   "grader_id": "gate-stops-early-step6",
   "grader_revision": "2",
-  "grader_digest": "sha256:89fd3125121f9039b66aecc3df8161e2a38d6f1de4f964d5ec0688b7fe3814fa",
+  "grader_digest": "sha256:132a53c11bab22450b0ae842eed3c0e5fa6a2f5e50a4521caa1473a5ce58d48e",
   "goal_sha256": "25dce6fbe6c72e0a84256efc9245bf3e2e27e87948f1889b93a3f2d8aed3ffd1",
-  "builder_sha256": "d9da3dcceef4d2dfecac0cab19842228717b1ade8efb7c3dee88e9ef91bd1ea4",
+  "builder_sha256": "960ae87ba0e5bd5f1780828ab92912ff449d0dc6f03d7eeaebef9a9d1bee56eb",
   "base_trees": {
    "twin-gate": "01db92d55b77f1868dfcd675640a78929525bc34"
   },
