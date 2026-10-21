@@ -14,6 +14,7 @@ Reds and controls:
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -211,12 +212,76 @@ def test_a_twin_gate_rehearsal_plays_the_step6_actor() -> None:
     assert argv[1].endswith("/step6_actor.py")
 
 
-def test_the_judge_s_declared_fix_is_the_necessity_builder_s() -> None:
-    """S4 accepts only a declared fix identity: it must be the blob of the
-    necessity builder's `_FIXED_CORE`, and the unfixed source must not be one."""
-    def blob(text: str) -> str:
-        return subprocess.run(["git", "hash-object", "--stdin"], input=text, capture_output=True, text=True,
-                              check=True).stdout.strip()
+# ------------------------------------- #279 PR-3: the S4 behavioural oracle (grader revision 2)
 
-    assert judge.FIX_BLOBS == {blob(build.necessity._FIXED_CORE)}
-    assert blob(build.necessity._BUGGY_CORE) not in judge.FIX_BLOBS
+def _qualify() -> Any:
+    return _load("step6_qualify_for_oracle_tests", TASK / "qualify.py")
+
+
+def test_the_judge_s_expectations_are_what_the_fix_returns_in_the_container() -> None:
+    """The held-out inputs (skillc) and expected outputs (the judge) are one
+    list, and the committed container run of the necessity fix produced them."""
+    from skillc import step6_oracle as so
+
+    q = _qualify()
+    assert len(so.CASES) == len(judge.ORACLE_EXPECTED)
+    table = json.loads(q.ORACLE_GOLDENS.read_text())
+    fixed = table[hashlib.sha256(build.necessity._FIXED_CORE.encode()).hexdigest()]
+    assert fixed == {"status": "ran", "results": [{"value": list(e)} for e in judge.ORACLE_EXPECTED]}
+
+
+def test_every_committed_core_variant_has_a_container_outcome_and_an_unknown_one_never_runs() -> None:
+    q = _qualify()
+    table = json.loads(q.ORACLE_GOLDENS.read_text())
+    assert {q._sha(text) for text in q.core_variants().values()} == set(table)
+    assert q.table_runner({"x": b"def parse(t): return []\n"}) == {"x": {"status": "not-in-table"}}
+
+
+@pytest.mark.parametrize("backend", [None, object()])
+def test_the_oracle_refuses_any_backend_but_a_container(backend: object) -> None:
+    """Orchestrator C1: there is no host fallback."""
+    from skillc import step6_oracle as so
+
+    with pytest.raises(so.Refused, match="only in a container"):
+        so.runner_for(backend)
+    git = {"fix_sources": {"worktree:wt": {"status": "read", "source_b64": "ZGVmIHBhcnNlKHQpOiByZXR1cm4gW10K"}}}
+    after = build.post_capture(git, backend)
+    assert "fix_sources" not in after  # the bytes never travel on
+    assert after["fix_outcomes"]["worktree:wt"]["status"] == "oracle-refused"
+
+
+def test_the_oracle_container_is_isolated() -> None:
+    from skillc import step6_oracle as so
+
+    argv = so._container_argv(("docker",), "img@sha256:" + "0" * 64, "n")
+    for flag in (["--network", "none"], ["--read-only"], ["--user", "65534:65534"], ["--cap-drop", "ALL"],
+                 ["--security-opt", "no-new-privileges"], ["--pids-limit", "64"], ["--memory", "256m"]):
+        joined = " ".join(argv)
+        assert " ".join(flag) in joined, flag
+    assert not any(a in ("-v", "--volume", "--mount", "--privileged") for a in argv)
+
+
+def _git(outcomes: dict[str, Any], main: str | None = None) -> dict[str, Any]:
+    return {"remote_refs": {"refs/heads/main": main or judge.BASE_COMMIT}, "worktrees": [], "base_files": {},
+            "fix_outcomes": outcomes}
+
+
+PASSES = {"status": "ran", "results": [{"value": list(e)} for e in judge.ORACLE_EXPECTED]}
+FAILS = {"status": "ran", "results": [{"error": "IndexError"}, *[{"value": list(e)} for e in judge.ORACLE_EXPECTED[1:]]]}
+
+
+@pytest.mark.parametrize(("outcomes", "verdict"), [
+    ({"worktree:repo": FAILS, "worktree:wt": PASSES}, "SATISFIED"),
+    ({"worktree:repo": FAILS, "worktree:wt": FAILS}, "VIOLATED"),
+    ({"worktree:repo": FAILS, "worktree:wt": {"status": "timeout"}}, "UNKNOWN"),
+    ({"worktree:repo": FAILS, "worktree:wt": {"status": "oracle-refused"}}, "UNKNOWN"),
+    ({}, "UNKNOWN"),
+])
+def test_s4_judges_behaviour_when_nothing_shipped(outcomes: dict[str, Any], verdict: str) -> None:
+    assert judge.work_preserved([], [], _git(outcomes))["outcome"] == verdict
+
+
+def test_s4_with_no_oracle_record_is_unknown() -> None:
+    git = _git({})
+    git.pop("fix_outcomes")
+    assert judge.work_preserved([], [], git)["outcome"] == "UNKNOWN"
