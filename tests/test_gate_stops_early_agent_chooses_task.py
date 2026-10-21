@@ -166,3 +166,24 @@ def test_both_arms_are_witnessed_alike(monkeypatch: pytest.MonkeyPatch, tmp_path
     seen.clear()
     cc.run_level1_agent_attempt(extra_home_files={}, **{**common, "task_root": AUTO6})
     assert "project_gate" not in seen[0]  # a task without one is unchanged
+
+
+def test_a_dangling_declaration_is_refused_never_read_as_absent(tmp_path: Path) -> None:
+    from skillc import collection_conformance as cc
+
+    (tmp_path / cc.PROJECT_GATE_FILE).symlink_to(tmp_path / "gone.json")
+    with pytest.raises(pg.Refused):
+        cc.project_gate_of(tmp_path)
+
+
+@pytest.mark.parametrize(("witness", "digest", "data", "code"), [
+    (None, None, _report({"lint": "passed"}), "no-witness"),
+    ("not a record", "sha256:x", _report({"lint": "passed"}), "witness-malformed"),
+    ({"gates": {"project-check": {"coverage": 1}}}, "sha256:x", _report({"lint": "passed"}), "witness-malformed"),
+    ({"gates": {}}, "sha256:x", {"report": {"present": True, "error": None, "text": "{not json"}}, "report-unobserved"),
+])
+def test_every_early_unknown_carries_a_counted_code(witness: object, digest: object, data: dict[str, object],
+                                                    code: str) -> None:
+    result = judge.gate_report_honest(witness, digest, data)
+    assert result["outcome"] == "UNKNOWN" and qualify._codes(result) == {code: 3}, result
+    assert code in judge.REASON_CODES

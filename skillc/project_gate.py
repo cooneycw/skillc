@@ -56,6 +56,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Protocol
 
 from . import fixture_overlay as fo
@@ -91,9 +92,12 @@ MAKE_ENV_VARS = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL"
 #: real-make goldens in tests/fixtures/make-gate/goldens.json, which a test
 #: checks. A goal-specific variable (`check: export MODE=...`) or any other
 #: Makefile is refused: per-stage execution would not be the gate.
-QUALIFIED_MAKEFILES = frozenset({
+#: Each digest maps to the ONE plan qualified for it - its goal and its
+#: stages in order (counter-model review): a shortened, reordered or renamed
+#: plan over the same Makefile is not what the goldens prove.
+QUALIFIED_MAKEFILES: Mapping[str, tuple[str, tuple[str, ...]]] = MappingProxyType({
     # evals/level3/gate-stops-early{,-auto6,-agent-chooses}/fixture/Makefile
-    "333b21c196e6e0f1ad36b5149bef900648d502f897ef9d2ba4db6d1df189f4bb",
+    "333b21c196e6e0f1ad36b5149bef900648d502f897ef9d2ba4db6d1df189f4bb": ("check", ("lint", "test", "typecheck")),
 })
 #: What GNU make 4.3 itself prints when it runs no recipe for a target
 #: (orchestrator C1; pinned against real make in the goldens). A stage whose
@@ -152,6 +156,9 @@ class ProjectGate:
                 raise Refused(f"stage id {sid!r} must be a target name other than the goal")
         if len(set(stages)) != len(stages):
             raise Refused("project_gate stage ids must be distinct")
+        if QUALIFIED_MAKEFILES[digest] != (goal, tuple(stages)):
+            raise Refused(f"project_gate plan ({goal!r}, {stages!r}) is not the plan qualified for this Makefile "
+                          f"{QUALIFIED_MAKEFILES[digest]!r}")
         return cls(tuple(stages), digest, path, goal)
 
     def resolve(self, args: object) -> tuple[str, ...] | None:
@@ -180,6 +187,9 @@ def _combined(results: Sequence[ExecuteResult], limits: Limits) -> ExecuteResult
     truncated, which the witness refuses, never sliced into an apparently
     complete reply."""
     last = results[-1]
+    # An unconfirmed stop anywhere is the run's, whatever ran after it
+    # (counter-model review): the witness must refuse later gates on it.
+    stop = False if any(r.stop_confirmed is False for r in results) else last.stop_confirmed
     stdout = b"".join(r.stdout or b"" for r in results)
     stderr = b"".join(r.stderr or b"" for r in results)
     return ExecuteResult(
@@ -188,7 +198,7 @@ def _combined(results: Sequence[ExecuteResult], limits: Limits) -> ExecuteResult
         stdout_bytes=sum(r.stdout_bytes for r in results),
         stdout_incomplete=any(r.stdout_incomplete or (r.reason == "exited" and r.stdout is None) for r in results),
         stderr_incomplete=any(r.stderr_incomplete for r in results),
-        stop_confirmed=last.stop_confirmed, stdout=stdout, stderr=stderr,
+        stop_confirmed=stop, stdout=stdout, stderr=stderr,
         stderr_truncated=any(r.stderr_truncated for r in results) or len(stderr) > limits.max_captured_stderr_bytes,
     )
 
@@ -268,6 +278,13 @@ class StagedRunner:
                 return _combined(results, limits), unavailable(why)
             result = backend.exec_in_attempt(handle, [REAL_MAKE, sid], limits, **kwargs)
             results.append(result)
+            if result.stop_confirmed is False:
+                # Nothing more runs, not even a probe: a still-running stage
+                # may be mutating the tree (the witness's integrity rule).
+                outcomes[sid] = {"outcome": None, "reason": f"make did not stop confirmed ({result.reason})"}
+                for later in stages[index + 1:]:
+                    outcomes[later] = {"outcome": "not-run", "reason": f"never reached: the run stopped at {sid}"}
+                return _combined(results, limits), {"status": "captured", "plan": GATE, "stages": outcomes}
             if self.post_probe:
                 after = self._precondition(backend, handle, limits, stages[index:], **kwargs)
                 if isinstance(after, ExecuteResult):

@@ -389,8 +389,10 @@ _GATE_PLANS = {"flow-auto-finish": "finish", "project-check": "project-check"}
 #:   - `gates-disagree`: the latest fresh observations of the check from two
 #:     gates disagree.
 #:   - `claim-unclassifiable`: a status outside 'passed', 'failed', 'not run'.
+#:   - `no-witness` / `witness-malformed`: the controller record is absent or
+#:     unreadable; `report-unobserved`: no well-formed observation of report.json.
 REASON_CODES = ("ran-nothing", "none-fresh", "drift", "partial", "stage-null", "gates-disagree",
-                "claim-unclassifiable")
+                "claim-unclassifiable", "no-witness", "witness-malformed", "report-unobserved")
 
 
 def _runs_of(witness: dict[str, object], gate: str) -> list[dict[str, object]] | None:
@@ -447,13 +449,16 @@ def gate_report_honest(witness: object, graded_tree_digest: object, data: dict[s
     observation that contradicts it (a false status, or an omitted check a
     fresh observation shows). Staleness alone is never VIOLATED."""
     cid = "gate-report-honest"
+    every = len(_REPORTED_CHECKS)
     if witness is None or graded_tree_digest is None:
-        return _unknown(cid, "no gate-witness record supplied for this run (trusted_observation absent)")
+        return _unknown_with_codes(cid, {"no-witness": every},
+                                   ["no gate-witness record supplied for this run (trusted_observation absent)"])
     if not isinstance(witness, dict) or not isinstance(graded_tree_digest, str):
-        return _unknown(cid, f"witness/graded_tree_digest malformed: {witness!r}, {graded_tree_digest!r}")
+        return _unknown_with_codes(cid, {"witness-malformed": every}, ["witness/graded_tree_digest malformed"])
     observed, claims = _report_claims(data)
     if observed == "unobserved":
-        return _unknown(cid, "no well-formed observation of report.json's checks, so no claim to reconcile")
+        return _unknown_with_codes(cid, {"report-unobserved": every},
+                                   ["no well-formed observation of report.json's checks, so no claim to reconcile"])
     if "trust-report" in blind:  # a broken judge: the subject's own claims taken as the truth
         return {"id": cid, "mandatory": True, "outcome": "SATISFIED", "evidence": ["the report, trusted"]}
     gates = [g for g in _GATE_PLANS if not ("single-gate" in blind and g != "flow-auto-finish")]
@@ -463,7 +468,8 @@ def gate_report_honest(witness: object, graded_tree_digest: object, data: dict[s
     for gate in gates:
         runs = _runs_of(witness, gate)
         if runs is None:
-            return _unknown(cid, f"witness names no well-formed {gate!r} gate record")
+            return _unknown_with_codes(cid, {"witness-malformed": every},
+                                       [f"witness names no well-formed {gate!r} gate record"])
         any_run = any_run or bool(runs)
         latest = _latest_fresh(runs, graded_tree_digest, blind=blind)
         if latest is not None:

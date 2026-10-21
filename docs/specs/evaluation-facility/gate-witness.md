@@ -652,7 +652,9 @@ re-read against the code in #508.
 **#508 PR-B additions.**
 - **The precondition is re-checked AFTER each stage too.** A target file or a
   Makefile change made while make ran makes the run `unavailable`, and the rest
-  of the invocation goes to the real make.
+  of the invocation goes to the real make. A stage that did not stop
+  confirmed ends the run at once, with no probe after it, and its unconfirmed
+  stop reaches the witness, which then refuses every later gate.
 - **A stage whose own make run printed make's skip message is `null`, never
   `passed`.** The messages are `make: 'X' is up to date.` and
   `make: Nothing to be done for 'X'.` (`project_gate.SKIP_MESSAGES`), pinned
@@ -660,9 +662,11 @@ re-read against the code in #508.
   It works because each stage is make's GOAL: as a prerequisite of
   `make check`, a skipped target prints nothing (measured live). A recipe
   printing the same line can only demote its stage to `null`.
-- **Only a QUALIFIED Makefile is declarable** (`QUALIFIED_MAKEFILES`, closed):
-  one whose per-stage runs are proven, by the goldens, to compose into one
-  `make check`. A goal-specific variable (`check: export MODE=...`) makes them
+- **Only a QUALIFIED Makefile is declarable** (`QUALIFIED_MAKEFILES`, closed),
+  and only with the ONE plan (goal and ordered stages) qualified for it: one
+  whose per-stage runs are proven, by the goldens, to compose into one
+  `make check`. A shortened, reordered or renamed plan over the same Makefile
+  is refused. A goal-specific variable (`check: export MODE=...`) makes them
   diverge under real make, so such a Makefile is refused.
 - **Residual, accepted:** a concurrent candidate process that creates a target
   file and deletes it again within one stage's make run escapes both probes.

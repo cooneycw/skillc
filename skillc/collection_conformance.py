@@ -776,7 +776,7 @@ def project_gate_of(task_root: Path) -> project_gate.ProjectGate | None:
     declaration that is present but unreadable or unqualified is refused,
     never silently dropped (the attempt would then witness nothing)."""
     path = task_root / PROJECT_GATE_FILE
-    if not path.exists():
+    if not os.path.lexists(path):  # a dangling link is PRESENT and unreadable, never absent
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))

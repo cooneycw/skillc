@@ -113,8 +113,9 @@ def _derive(root: Path) -> dict[str, Any]:
               for sid, code in sorted(_singles(), key=str)}
     skips = {"test-up-to-date": _skip(root / "skip-test", ["test"], ["test"]),
              "check-nothing-to-do": _skip(root / "skip-check", ["check"], ["check", *SCRIPTS])}
-    return {"makefile_sha256": hashlib.sha256(MAKEFILE).hexdigest(), "composite": composite, "single": single,
-            "skips": skips}
+    return {"makefile_sha256": hashlib.sha256(MAKEFILE).hexdigest(),
+            "plan": {"goal": "check", "stages": list(SCRIPTS)},
+            "composite": composite, "single": single, "skips": skips}
 
 
 def write_goldens() -> None:
@@ -537,8 +538,11 @@ def test_the_post_stage_probe_catches_a_makefile_rewritten_during_a_stage() -> N
     assert capture["status"] == "unavailable" and "changed from its declared digest" in str(capture["reason"])
 
 
-def _qualification_gaps(qualified: frozenset[str]) -> set[str]:
-    return set(qualified) - {_goldens()["makefile_sha256"]}
+def _qualification_gaps(qualified: Mapping[str, tuple[str, tuple[str, ...]]]) -> set[str]:
+    """Qualified digests (with their plans) that no goldens prove."""
+    goldens = _goldens()
+    proven = {goldens["makefile_sha256"]: (goldens["plan"]["goal"], tuple(goldens["plan"]["stages"]))}
+    return {d for d, plan in qualified.items() if proven.get(d) != plan}
 
 
 def test_every_qualified_makefile_has_goldens() -> None:
@@ -547,7 +551,7 @@ def test_every_qualified_makefile_has_goldens() -> None:
 
 def test_a_digest_added_without_goldens_fails_the_qualification_check(monkeypatch: pytest.MonkeyPatch) -> None:
     """C2's red: the check above must FAIL when the set grows past its proof."""
-    monkeypatch.setattr(pg, "QUALIFIED_MAKEFILES", pg.QUALIFIED_MAKEFILES | {"f" * 64})
+    monkeypatch.setattr(pg, "QUALIFIED_MAKEFILES", {**pg.QUALIFIED_MAKEFILES, "f" * 64: ("check", ("lint",))})
     with pytest.raises(AssertionError):
         test_every_qualified_makefile_has_goldens()
 
@@ -577,3 +581,42 @@ def test_the_goal_variable_makefile_really_diverges_under_real_make(tmp_path: Pa
         return subprocess.run(["make", *args], cwd=tmp_path, capture_output=True, check=False).returncode
 
     assert (make("check"), make("lint"), make("test")) == (2, 0, 0)
+
+
+def test_a_plan_other_than_the_qualified_one_is_refused() -> None:
+    """Counter-model review: the digest alone is not the proof - a shortened,
+    reordered or renamed plan over the same Makefile is refused."""
+    digest = hashlib.sha256(MAKEFILE).hexdigest()
+    for goal, stages in (("check", ["lint"]), ("check", ["test", "lint", "typecheck"]), ("all", ["lint", "test", "typecheck"])):
+        with pytest.raises(pg.Refused, match="not the plan qualified"):
+            pg.ProjectGate.from_declaration({"makefile": {"path": "Makefile", "sha256": digest}, "goal": goal,
+                                             "stages": stages})
+
+
+def test_a_qualified_plan_whose_goldens_differ_is_a_gap() -> None:
+    digest = hashlib.sha256(MAKEFILE).hexdigest()
+    assert _qualification_gaps({digest: ("check", ("lint", "test"))}) == {digest}
+
+
+@pytest.mark.parametrize("probe_stop", [True, None])
+def test_an_unconfirmed_stage_stop_is_never_erased_by_a_later_probe(probe_stop: bool | None) -> None:
+    """Counter-model review: a stage that timed out unconfirmed ends the run
+    at once - no probe runs after it - and the combined result keeps it."""
+    class Stuck(_StageBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            if argv == [pg.REAL_MAKE, "test"]:
+                self.calls.append(list(argv))
+                return ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=False)
+            if argv[0] == "/bin/sh" and [pg.REAL_MAKE, "test"] in self.calls:
+                return ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=probe_stop)
+            return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+    backend = Stuck({"lint": 0, "test": 0, "typecheck": 0})
+    result, capture = pg.StagedRunner(declaration()).run(
+        backend, None, Limits(timeout=5), ("lint", "test", "typecheck"), cwd=None, env=None, confine_root=None,
+        make_args=["check"])
+    assert result.stop_confirmed is False
+    assert backend.calls[-1] == [pg.REAL_MAKE, "test"]  # nothing ran after the unconfirmed stage
+    assert isinstance(capture["stages"], dict) and capture["stages"]["test"]["outcome"] is None
