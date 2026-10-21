@@ -26,6 +26,8 @@ Deliberately stdlib-only.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import socket
@@ -37,6 +39,10 @@ REAL_MAKE = "/usr/bin/make"
 GATE = "project-check"
 _REQUEST_TIMEOUT = 600.0  # a real quality-gate run can take minutes
 _LOG_TIMEOUT = 5.0
+#: make's own environment: sent with every request, and when any is set the
+#: controller declines to stand in for make (a `MAKEFLAGS=n` dry run must not
+#: execute the stages).
+_MAKE_ENV = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL")
 
 
 class _ChannelError(Exception):
@@ -85,7 +91,9 @@ def _passthrough(args: list[str], why: str) -> int:
 def main(argv: list[str]) -> int:
     args = argv[1:]
     try:
-        result = _ask({"op": "run_gate", "gate": GATE, "cwd": os.getcwd(), "make_args": args}, _REQUEST_TIMEOUT)
+        make_env = {k: os.environ[k] for k in _MAKE_ENV if k in os.environ}
+        result = _ask({"op": "run_gate", "gate": GATE, "cwd": os.getcwd(), "make_args": args,
+                       "make_env": make_env}, _REQUEST_TIMEOUT)
     except _ChannelError:
         return _passthrough(args, "channel-unavailable-or-refused")
     if result.get("passthrough") is True:
@@ -93,12 +101,15 @@ def main(argv: list[str]) -> int:
     exit_code = result.get("exit_code")
     if result.get("accepted") is not True or not isinstance(exit_code, int):
         return _passthrough(args, "no-controller-exit-status")
-    stdout, stderr = result.get("stdout"), result.get("stderr")
-    if isinstance(stdout, str):
-        sys.stdout.write(stdout)
-        sys.stdout.flush()
-    if isinstance(stderr, str):
-        sys.stderr.write(stderr)
+    try:
+        stdout = base64.b64decode(str(result.get("stdout_b64")), validate=True)
+        stderr = base64.b64decode(str(result.get("stderr_b64")), validate=True)
+    except (binascii.Error, ValueError):
+        return _passthrough(args, "no-controller-exit-status")
+    sys.stdout.buffer.write(stdout)
+    sys.stdout.buffer.flush()
+    sys.stderr.buffer.write(stderr)
+    sys.stderr.buffer.flush()
     return exit_code
 
 

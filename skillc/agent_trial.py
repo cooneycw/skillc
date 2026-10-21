@@ -2304,7 +2304,7 @@ def run_one_attempt(
         if "PATH" not in agent_env:
             raise HomeFileVerificationRefused("the project-gate shim was not placed before the agent launch")
         return dict(agent_env)
-    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args",) if project_gate is not None else ())})
+    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args", "make_env") if project_gate is not None else ())})
     passthrough_route = ({pg.PASSTHROUGH_OP: (witness_session.decide,
                                               frozenset({"op", "argv", "cwd", "exit_code", "why"}))}
                          if project_gate is not None and witness_session is not None else {})

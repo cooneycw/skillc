@@ -11,6 +11,7 @@ nested-codex guard.
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import os
@@ -74,7 +75,7 @@ def test_a_non_gate_invocation_creates_no_run_and_is_never_refused() -> None:
 
 def test_make_args_are_refused_on_a_gate_that_is_not_staged() -> None:
     witness, _backend = _witness({"lint": 0, "test": 0, "typecheck": 0})
-    with pytest.raises(ChannelRefusal, match="takes no make_args"):
+    with pytest.raises(ChannelRefusal, match="takes no make_args or make_env"):
         witness.decide({"op": "run_gate", "gate": "flow-auto-finish", "make_args": ["check"]})
 
 
@@ -329,3 +330,35 @@ def test_every_unsafe_shim_placement_is_refused(break_: str) -> None:
         return
     with pytest.raises(fo.OverlayRefused):
         pg.install_make_shim(attempt, object(), ENV)
+
+
+def test_a_staged_reply_carries_make_s_bytes_exactly() -> None:
+    class Binary(_WitnessBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            if argv[-1] == SCRIPTS["lint"]:
+                return ExecuteResult(reason="exited", exit_code=0, stdout=b"\xff\xfe raw\n", stderr=b"")
+            return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+    witness, _backend = _witness({"lint": 0, "test": 0, "typecheck": 0})
+    witness._backend = Binary({"lint": 0, "test": 0, "typecheck": 0})  # type: ignore[assignment]
+    reply = witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": "/work", "make_args": ["lint"]})
+    assert base64.b64decode(str(reply["stdout_b64"])) == b"python3 ci/lint.py\n\xff\xfe raw\n"
+
+
+def test_an_oversized_aggregate_is_refused_by_the_witness_never_sliced() -> None:
+    class Chatty(_WitnessBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            if argv[-1] in SCRIPTS.values():
+                return ExecuteResult(reason="exited", exit_code=0, stdout=b"x" * 200, stderr=b"")
+            return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+    witness, _backend = _witness({})
+    witness._backend = Chatty({})  # type: ignore[assignment]
+    witness._limits = Limits(timeout=5, max_captured_stdout_bytes=256)
+    with pytest.raises(ChannelRefusal, match="missing or incomplete"):
+        witness.decide({"op": "run_gate", "gate": pg.GATE, "cwd": "/work", "make_args": ["check"]})
+    assert witness.channel_unavailable is True

@@ -106,6 +106,7 @@ Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -482,8 +483,8 @@ class GateWitness:
         runner = self._staged.get(gate)
         requested_stages: tuple[str, ...] | None = None
         make_args = request.get("make_args", [])
-        if runner is None and "make_args" in request:
-            raise ChannelRefusal(f"run_gate: {gate!r} takes no make_args")
+        if runner is None and ("make_args" in request or "make_env" in request):
+            raise ChannelRefusal(f"run_gate: {gate!r} takes no make_args or make_env")
         if runner is not None:
             requested_stages = runner.plan(request)
             if requested_stages is None:
@@ -583,7 +584,14 @@ class GateWitness:
                     run.stages = stages
                 if output_bad:
                     raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
+                lossless: dict[str, object] = {}
+                if runner is not None:
+                    # #508: a staged gate's reply stands in for make's own
+                    # output, so its bytes travel exactly (base64), not decoded.
+                    lossless = {"stdout_b64": base64.b64encode(result.stdout or b"").decode("ascii"),
+                                "stderr_b64": base64.b64encode(result.stderr or b"").decode("ascii")}
                 return {
+                    **lossless,
                     "accepted": True,
                     "exit_code": result.exit_code,
                     "reason": result.reason,

@@ -50,7 +50,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -73,6 +73,13 @@ PASSTHROUGH_STREAM = "make-passthrough"
 MAX_PASSTHROUGH_LOG = 256
 #: Exit status GNU make reports when a recipe failed.
 MAKE_FAILURE_EXIT = 2
+#: The names GNU make looks for, in its own order (counter-model review): a
+#: higher-priority one beside the declared Makefile is the gate make would run.
+DEFAULT_MAKEFILES = ("GNUmakefile", "makefile", "Makefile")
+#: Environment that changes what make does (`MAKEFLAGS=n` is a dry run,
+#: `MAKEFILES` reads more makefiles, `MAKELEVEL` means a recursive make). The
+#: shim sends any of them it sees; set, the invocation passes through.
+MAKE_ENV_VARS = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL")
 
 _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -113,8 +120,9 @@ class ProjectGate:
         if not isinstance(makefile, Mapping) or set(makefile) != {"path", "sha256"}:
             raise Refused("project_gate.makefile must be exactly {path, sha256}")
         path, digest = makefile["path"], makefile["sha256"]
-        if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
-            raise Refused("project_gate.makefile.path must be a relative path inside the checkout")
+        if path not in DEFAULT_MAKEFILES:
+            # A bare `make` reads only these names in its working directory.
+            raise Refused(f"project_gate.makefile.path must be one of {DEFAULT_MAKEFILES}")
         if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
             raise Refused("project_gate.makefile.sha256 must be 64 lowercase hex digits")
         goal = raw.get("goal", "check")
@@ -174,6 +182,10 @@ def render(gate: ProjectGate, ran: Sequence[tuple[Stage, ExecuteResult]]) -> tup
     return bytes(out), bytes(err), 0
 
 
+#: Prints each argument that names an existing path (or a dangling link).
+_LIST_PRESENT = 'for f in "$@"; do if [ -e "$f" ] || [ -L "$f" ]; then printf "%s\\n" "$f"; fi; done'
+
+
 class _Backend(Protocol):
     def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
                         stdin: bytes | None = None, cwd: str | None = None,
@@ -203,21 +215,55 @@ class StagedRunner:
     gate: ProjectGate
 
     def plan(self, request: Mapping[str, object]) -> tuple[str, ...] | None:
+        make_env = request.get("make_env", {})
+        if not isinstance(make_env, Mapping) or any(make_env.get(k) for k in MAKE_ENV_VARS) \
+                or set(make_env) - set(MAKE_ENV_VARS):
+            return None  # make's own environment changes what it would do
         return self.gate.resolve(request.get("make_args", []))
+
+    def _precondition(self, backend: _Backend, handle: object, limits: Limits, stages: Sequence[str], *,
+                      cwd: str | None, env: Mapping[str, str] | None,
+                      confine_root: str | None) -> ExecuteResult | str | None:
+        """None when make would run exactly the declared recipes; else why not
+        (a string), or the probe's own result when it did not exit - so an
+        unconfirmed stop reaches the witness instead of being erased."""
+        order = DEFAULT_MAKEFILES[:DEFAULT_MAKEFILES.index(self.gate.makefile) + 1]
+        names = [*order, self.gate.goal, *stages]
+        probe = backend.exec_in_attempt(
+            handle, ["/bin/sh", "-c", _LIST_PRESENT, "sh", *names], limits, cwd=cwd, env=env,
+            confine_root=confine_root)
+        if probe.reason != "exited":
+            return probe
+        if probe.exit_code != 0 or probe.stdout is None or probe.stdout_truncated or probe.stdout_incomplete:
+            return "the gate's working directory could not be listed"
+        present = probe.stdout.decode("utf-8", errors="replace").splitlines()
+        if present != [self.gate.makefile]:
+            shadow = [n for n in present if n != self.gate.makefile]
+            if self.gate.makefile not in present:
+                return f"the gate definition {self.gate.makefile!r} is absent"
+            return (f"{shadow!r} exist(s) beside {self.gate.makefile!r}: make would read another makefile or "
+                    "treat a target as up to date")
+        read = backend.exec_in_attempt(handle, ["/bin/cat", "--", self.gate.makefile], limits,
+                                       cwd=cwd, env=env, confine_root=confine_root)
+        if read.reason != "exited":
+            return read
+        if (read.exit_code != 0 or read.stdout is None or read.stdout_truncated
+                or read.stdout_incomplete or read.stderr_incomplete):
+            return f"the gate definition {self.gate.makefile!r} could not be read"
+        if hashlib.sha256(read.stdout).hexdigest() != self.gate.makefile_sha256:
+            return f"the gate definition {self.gate.makefile!r} changed from its declared digest"
+        return None
 
     def run(self, backend: _Backend, handle: object, limits: Limits, stages: Sequence[str], *,
             cwd: str | None, env: Mapping[str, str] | None, confine_root: str | None,
             make_args: Sequence[str]) -> tuple[ExecuteResult, Mapping[str, object]]:
         """The run's combined result (make's rendered reply) and its stage
-        capture. The Makefile is read first; a drifted or unreadable one is run
-        by the real make as one exec, with every stage `unavailable`."""
-        read = backend.exec_in_attempt(handle, ["/bin/cat", "--", self.gate.makefile], limits,
-                                       cwd=cwd, env=env, confine_root=confine_root)
-        drift: str | None = None
-        if read.reason != "exited" or read.exit_code != 0 or read.stdout is None or read.stdout_truncated:
-            drift = f"the gate definition {self.gate.makefile!r} could not be read"
-        elif hashlib.sha256(read.stdout).hexdigest() != self.gate.makefile_sha256:
-            drift = f"the gate definition {self.gate.makefile!r} changed from its declared digest"
+        capture. First, make must be about to run exactly the declared recipes
+        (`_precondition`): otherwise the real make runs as one exec, with every
+        stage `unavailable`, and a probe that did not exit is returned as is."""
+        drift = self._precondition(backend, handle, limits, stages, cwd=cwd, env=env, confine_root=confine_root)
+        if isinstance(drift, ExecuteResult):
+            return drift, unavailable(f"the gate precondition probe did not exit ({drift.reason})")
         if drift is not None:
             result = backend.exec_in_attempt(handle, [REAL_MAKE, *make_args], limits,
                                              cwd=cwd, env=env, confine_root=confine_root)
@@ -243,7 +289,16 @@ class StagedRunner:
                 stopped = sid
         stdout, stderr, exit_code = render(self.gate, ran)
         capture: dict[str, object] = {"status": "captured", "plan": GATE, "stages": outcomes}
-        return _combined([r for _s, r in ran], stdout, stderr, exit_code), capture
+        combined = _combined([r for _s, r in ran], stdout, stderr, exit_code)
+        # The AGGREGATE is bounded like one exec's capture (counter-model
+        # review): over the cap it is marked truncated, which the witness
+        # refuses, never sliced into an apparently complete reply.
+        if len(stdout) > limits.max_captured_stdout_bytes or len(stderr) > limits.max_captured_stderr_bytes:
+            combined = replace(combined, stdout_truncated=combined.stdout_truncated
+                               or len(stdout) > limits.max_captured_stdout_bytes,
+                               stderr_truncated=combined.stderr_truncated
+                               or len(stderr) > limits.max_captured_stderr_bytes)
+        return combined, capture
 
 
 # --- the overlay ----------------------------------------------------------------

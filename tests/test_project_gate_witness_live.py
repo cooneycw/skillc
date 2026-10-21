@@ -71,7 +71,7 @@ def _run(image: str) -> None:
     backend = d.DockerBackend(
         image=image, base_dir=base, network="none", witness_io=True, daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=guard.watch(dispatch({
-            "run_gate": (run_gate, frozenset({"op", "gate", "cwd", "make_args"})),
+            "run_gate": (run_gate, frozenset({"op", "gate", "cwd", "make_args", "make_env"})),
             pg.PASSTHROUGH_OP: (passthrough, frozenset({"op", "argv", "cwd", "exit_code", "why"})),
             **guard.routes()})),
         trigger_socket_dir=trigger_dir,

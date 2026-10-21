@@ -15,6 +15,7 @@ To refresh after a deliberate change: `cd tests && python -c "import test_make_g
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -24,7 +25,7 @@ import socket
 import subprocess
 import sys
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -97,14 +98,19 @@ def write_goldens() -> None:
 class _StageBackend:
     """Replays the stub stages: `cat Makefile` and one exec per stage."""
 
-    def __init__(self, codes: Mapping[str, int], makefile: bytes = MAKEFILE) -> None:
-        self.codes, self.makefile = codes, makefile
+    def __init__(self, codes: Mapping[str, int], makefile: bytes = MAKEFILE,
+                 present: Sequence[str] = ("Makefile",)) -> None:
+        self.codes, self.makefile, self.present = codes, makefile, list(present)
         self.calls: list[list[str]] = []
 
     def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
                         stdin: bytes | None = None, cwd: str | None = None,
                         env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
         self.calls.append(list(argv))
+        if argv[0] == "/bin/sh":  # the precondition probe: which names exist
+            names = argv[4:]
+            return ExecuteResult(reason="exited", exit_code=0, stderr=b"",
+                                 stdout=b"".join(f"{n}\n".encode() for n in names if n in self.present))
         if argv[0] == "/bin/cat":
             return ExecuteResult(reason="exited", exit_code=0, stdout=self.makefile, stderr=b"")
         if argv[0] == pg.REAL_MAKE:
@@ -195,7 +201,8 @@ def test_a_drifted_makefile_is_run_by_the_real_make_with_no_stage_truth() -> Non
                                                 cwd=None, env=None, confine_root=None, make_args=["check"])
     assert capture == {"status": "unavailable",
                        "reason": "the gate definition 'Makefile' changed from its declared digest"}
-    assert backend.calls == [["/bin/cat", "--", "Makefile"], [pg.REAL_MAKE, "check"]]
+    assert [c[0] for c in backend.calls] == ["/bin/sh", "/bin/cat", pg.REAL_MAKE]
+    assert backend.calls[-1] == [pg.REAL_MAKE, "check"]
     assert result.stdout == b"real make\n"
 
 
@@ -270,15 +277,20 @@ def real_make(tmp_path: Path) -> Path:
 
 
 def test_a_gate_invocation_writes_back_the_controllers_reply(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, real_make: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, real_make: Path,
+        capsysbinary: pytest.CaptureFixture[bytes]) -> None:
     server = _Server(tmp_path / "s", lambda r: {"ok": True, "result": {
-        "accepted": True, "exit_code": 2, "stdout": "python3 ci/lint.py\n", "stderr": "make: *** boom\n"}})
+        "accepted": True, "exit_code": 2, "stdout": "lossy", "stderr": "lossy",
+        "stdout_b64": base64.b64encode(b"python3 ci/lint.py\n\xff").decode(),
+        "stderr_b64": base64.b64encode(b"make: *** boom\n").decode()}})
     shim = _load_shim(monkeypatch, tmp_path / "s", real_make)
+    monkeypatch.delenv("MAKEFLAGS", raising=False)
     assert shim.main(["make", "check"]) == 2
-    out = capsys.readouterr()
-    assert out.out == "python3 ci/lint.py\n" and out.err == "make: *** boom\n"
+    out = capsysbinary.readouterr()
+    # Exact bytes, a non-UTF-8 one included: the reply is never decoded.
+    assert out.out == b"python3 ci/lint.py\n\xff" and out.err == b"make: *** boom\n"
     assert server.requests[0] == {"op": "run_gate", "gate": "project-check", "cwd": os.getcwd(),
-                                  "make_args": ["check"]}
+                                  "make_args": ["check"], "make_env": {}}
     assert len(server.requests) == 1  # no pass-through log for a witnessed run
 
 
@@ -308,7 +320,7 @@ def test_the_shim_is_stdlib_only_and_isolated() -> None:
     text = SHIM.read_text()
     assert text.startswith("#!/usr/bin/python3 -I\n")
     imports = {line.split()[1] for line in text.splitlines() if line.startswith(("import ", "from "))}
-    assert imports <= {"__future__", "json", "os", "socket", "subprocess", "sys"}
+    assert imports <= {"__future__", "base64", "binascii", "json", "os", "socket", "subprocess", "sys"}
 
 
 def test_resolve_forwards_only_gate_invocations() -> None:
@@ -323,14 +335,78 @@ def test_resolve_forwards_only_gate_invocations() -> None:
     {}, {"makefile": {"path": "/abs", "sha256": "0" * 64}, "stages": []},
     {"makefile": {"path": "Makefile", "sha256": "xyz"}, "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 1}]},
     {"makefile": {"path": "../M", "sha256": "0" * 64}, "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 1}]},
-    {"makefile": {"path": "M", "sha256": "0" * 64}, "stages": [{"id": "check", "argv": ["x"], "recipe": "x", "line": 1}]},
-    {"makefile": {"path": "M", "sha256": "0" * 64}, "stages": [{"id": "a", "argv": [], "recipe": "x", "line": 1}]},
-    {"makefile": {"path": "M", "sha256": "0" * 64}, "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 0}]},
-    {"makefile": {"path": "M", "sha256": "0" * 64},
+    {"makefile": {"path": "build.mk", "sha256": "0" * 64}, "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 1}]},
+    {"makefile": {"path": "Makefile", "sha256": "0" * 64}, "stages": [{"id": "check", "argv": ["x"], "recipe": "x", "line": 1}]},
+    {"makefile": {"path": "Makefile", "sha256": "0" * 64}, "stages": [{"id": "a", "argv": [], "recipe": "x", "line": 1}]},
+    {"makefile": {"path": "Makefile", "sha256": "0" * 64}, "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 0}]},
+    {"makefile": {"path": "Makefile", "sha256": "0" * 64},
      "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 1}] * 2},
-    {"makefile": {"path": "M", "sha256": "0" * 64}, "extra": 1,
+    {"makefile": {"path": "Makefile", "sha256": "0" * 64}, "extra": 1,
      "stages": [{"id": "a", "argv": ["x"], "recipe": "x", "line": 1}]},
 ])
 def test_a_malformed_declaration_is_refused(broken: dict[str, object]) -> None:
     with pytest.raises(pg.Refused):
         pg.ProjectGate.from_declaration(broken)
+
+
+# --- counter-model review pass 1: make would not run the declared recipes ----------
+
+@pytest.mark.parametrize(("present", "why"), [
+    (("GNUmakefile", "Makefile"), "make would read another makefile"),
+    (("makefile", "Makefile"), "make would read another makefile"),
+    (("Makefile", "lint"), "treat a target as up to date"),
+    (("Makefile", "check"), "treat a target as up to date"),
+    ((), "is absent"),
+])
+def test_when_make_would_run_something_else_the_real_make_runs_with_no_stage_truth(
+        present: tuple[str, ...], why: str) -> None:
+    backend = _StageBackend({"lint": 0, "test": 0, "typecheck": 0}, present=present)
+    result, capture = pg.StagedRunner(declaration()).run(
+        backend, None, Limits(timeout=5), ("lint", "test", "typecheck"), cwd=None, env=None, confine_root=None,
+        make_args=["check"])
+    assert capture["status"] == "unavailable" and why in str(capture["reason"])
+    assert backend.calls[-1] == [pg.REAL_MAKE, "check"] and result.stdout == b"real make\n"
+    assert not any(c[-1] in SCRIPTS.values() for c in backend.calls)  # no stage ran as if make had
+
+
+@pytest.mark.parametrize("probe", ["/bin/sh", "/bin/cat"])
+def test_an_unconfirmed_stop_while_checking_the_gate_reaches_the_witness(probe: str) -> None:
+    class Stuck(_StageBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            if argv[0] == probe:
+                self.calls.append(list(argv))
+                return ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=False)
+            return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+    backend = Stuck({"lint": 0, "test": 0, "typecheck": 0})
+    result, capture = pg.StagedRunner(declaration()).run(
+        backend, None, Limits(timeout=5), ("lint",), cwd=None, env=None, confine_root=None, make_args=["lint"])
+    assert result.reason == "timeout" and result.stop_confirmed is False
+    assert capture["status"] == "unavailable"
+    assert backend.calls[-1][0] == probe  # nothing ran after it, no fallback make
+
+
+@pytest.mark.parametrize("make_env", [{"MAKEFLAGS": "n"}, {"MAKEFLAGS": "k"}, {"MAKEFILES": "x.mk"},
+                                      {"MAKELEVEL": "1"}, {"OTHER": "1"}, "n"])
+def test_make_s_own_environment_passes_the_invocation_through(make_env: object) -> None:
+    runner = pg.StagedRunner(declaration())
+    assert runner.plan({"make_args": ["check"], "make_env": make_env}) is None
+    assert runner.plan({"make_args": ["check"], "make_env": {"MAKEFLAGS": ""}}) == ("lint", "test", "typecheck")
+
+
+def test_an_aggregate_over_the_reply_cap_is_marked_never_sliced() -> None:
+    class Chatty(_StageBackend):
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: Any = None,
+                            stdin: bytes | None = None, cwd: str | None = None,
+                            env: Mapping[str, str] | None = None, confine_root: str | None = None) -> ExecuteResult:
+            if argv[-1] in SCRIPTS.values():
+                return ExecuteResult(reason="exited", exit_code=0, stdout=b"x" * 200, stderr=b"")
+            return super().exec_in_attempt(handle, argv, limits, cwd=cwd, env=env, confine_root=confine_root)
+
+    limits = Limits(timeout=5, max_captured_stdout_bytes=256)
+    result, _capture = pg.StagedRunner(declaration()).run(
+        Chatty({}), None, limits, ("lint", "test", "typecheck"), cwd=None, env=None, confine_root=None,
+        make_args=["check"])
+    assert result.stdout_truncated is True  # each exec was complete; the whole is not
