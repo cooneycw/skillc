@@ -90,6 +90,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any
 
+from . import attempt_guard as ag
 from . import codex_guard as cg
 from . import controller_turns as ct
 from . import (
@@ -1416,9 +1417,19 @@ def _make_observe_before_teardown(
     retained_transcript: dict[str, object] | None = None,
     stored_transcript: dict[str, trial.TranscriptEvidence] | None = None,
     local_mcp_servers: frozenset[str] = frozenset(),
+    sessions: list[dict[str, object]] | None = None,
+    scan_codex: bool = False,
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
+    """`sessions` (#500), when given, receives EVERY transcript file of an
+    attempt that left more than one, redacted and leak-checked, with each
+    session's own model and token usage, so the caller can retain them all
+    rather than none. `scan_codex` (#500, an attempt under `AttemptGuard`)
+    adds `transcript_codex_invocations`: every codex launch the transcript's
+    tool-call commands show (`attempt_guard.scan_codex_invocations`). Both
+    default off, and then the observation is byte-identical to before."""
     def hook(backend: ExecutionBackend, handle: object) -> dict[str, object]:
         assert isinstance(backend, DockerBackend)
+        extra: dict[str, object] = {}
 
         refresh_observed: bool | None = None
         cred_relpath_bytes = delivered_credential_bytes.get("relpath")
@@ -1456,6 +1467,31 @@ def _make_observe_before_teardown(
                 canary_reason=f"expected exactly one transcript file, found {len(matches)}",
                 skill_invocation_detection=spec.skill_invocation_detection,
             )
+            if len(matches) > 1 and sessions is not None:
+                # #500: a second session is the evidence that matters most, so
+                # every file is kept and read - never all of them discarded.
+                summary: list[dict[str, object]] = []
+                for index, (path, raw_session) in enumerate(sorted(matches.items()), start=1):
+                    kept_session = redact_transcript_identities(raw_session)
+                    text_session = raw_session.decode("utf-8", errors="replace")
+                    evidence = retainable_transcript(kept_session)
+                    entry: dict[str, object] = {"index": index, "path": path, "evidence": evidence}
+                    try:
+                        meta = spec.run_metadata(text_session) if spec.run_metadata is not None else None
+                    except Exception as exc:  # noqa: BLE001 - one unreadable session must not lose the rest
+                        meta, entry["error"] = None, f"{type(exc).__name__}: {exc}"
+                    entry["model"] = meta.get("model") if isinstance(meta, Mapping) else None
+                    entry["token_usage"] = meta.get("token_usage") if isinstance(meta, Mapping) else None
+                    sessions.append(entry)
+                    summary.append({k: entry.get(k) for k in ("index", "path", "model", "token_usage", "error")}
+                                   | {"retained": evidence.data is not None,
+                                      "reason": evidence.reason})
+                extra["multiple_transcripts"] = True
+                extra["transcript_sessions"] = summary
+                if scan_codex:
+                    extra["transcript_codex_invocations"] = [
+                        hit for _path, raw_session in sorted(matches.items())
+                        for hit in ag.scan_transcript_text(raw_session.decode("utf-8", errors="replace"))]
         else:
             (matched_path, raw), = matches.items()
             # Account identifiers and encrypted reasoning are redacted before
@@ -1472,6 +1508,12 @@ def _make_observe_before_teardown(
             observation, census, run_metadata = observe_transcript_bytes(
                 spec, raw, expected_prompt=expected_prompt, skill_name=skill_name,
                 local_mcp_servers=local_mcp_servers)
+            if scan_codex:
+                extra["transcript_codex_invocations"] = ag.scan_transcript_text(
+                    raw.decode("utf-8", errors="replace"))
+        if scan_codex and "transcript_codex_invocations" not in extra:
+            # No transcript at all: nothing was scanned, which is not "none found".
+            extra["transcript_codex_invocations"] = None
 
         usage = credential.CredentialUsage(
             client=spec.name, delivered=cred_bytes is not None, refresh_observed_in_container=refresh_observed,
@@ -1483,6 +1525,7 @@ def _make_observe_before_teardown(
             "credential_remaining_seconds_at_launch": remaining_at_launch,
             **census,
             "run_metadata": run_metadata,
+            **extra,
         }
 
     return hook
@@ -2033,6 +2076,8 @@ def run_one_attempt(
     fixture: AttemptFixture | None = None,
     turns: ct.Turns | None = None,
     nested_codex_policy: str | None = None,
+    codex_guard: bool = False,
+    declared_model: str | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2130,6 +2175,12 @@ def run_one_attempt(
     #: (orchestrator ruling R3); every other attempt's records are unchanged.
     attempt_order = Order() if turns is not None and turns.texts else None
     fixture_session = FixtureSession(fixture, attempt_id) if fixture is not None else None
+    #: #500: the nested-codex guard on an attempt with no fixture service (a
+    #: calibration attempt). A fixture attempt already carries it.
+    attempt_guard = (ag.AttemptGuard(attempt_id, nested_policy=nested_codex_policy)
+                     if codex_guard and fixture is None else None)
+    if attempt_guard is not None and not isinstance(backend, DockerBackend):
+        raise HomeFileVerificationRefused("the nested-codex guard requires a supported Docker backend")
     if fixture_session is not None:
         fixture_session.order = attempt_order
         # #279 (ruling G1): the declared nested-codex policy, recorded and
@@ -2164,10 +2215,27 @@ def run_one_attempt(
                 "run_gate": (witness_session.decide, frozenset({"op", "gate", "cwd"})),
                 **fixture_session.routes(),
             }))
+        elif attempt_guard is not None and witness_session is not None:
+            # #500: the guard shares the witness's one socket, routed by op.
+            trigger = attempt_guard.watch(fs.dispatch({
+                "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
+                "run_gate": (witness_session.decide, frozenset({"op", "gate", "cwd"})),
+                **attempt_guard.routes(),
+            }))
         try:
             backend = replace(backend, witness_io=True, trigger_decide=trigger)
         except (TypeError, ValueError) as exc:
             raise HomeFileVerificationRefused("backend cannot preserve its type while enabling witness IO") from exc
+    if attempt_guard is not None and witness_session is None:
+        # #500: no witness, so the guard's channel is the attempt's only socket.
+        assert isinstance(backend, DockerBackend)
+        if backend.trigger_decide is not None:
+            raise HomeFileVerificationRefused("the nested-codex guard conflicts with an existing trigger callback")
+        try:
+            backend = replace(backend, witness_io=True,
+                              trigger_decide=attempt_guard.watch(fs.dispatch(attempt_guard.routes())))
+        except (TypeError, ValueError) as exc:
+            raise HomeFileVerificationRefused("backend cannot preserve its type while enabling the guard") from exc
 
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
@@ -2271,18 +2339,41 @@ def run_one_attempt(
             witness_session.bind_and_check(ready_backend, handle)
             if fixture_session is not None:
                 fixture_session.bind(ready_backend, handle, witness_session.environment)
+            if attempt_guard is not None:
+                attempt_guard.bind(ready_backend, handle, witness_session.environment)
+    elif attempt_guard is not None:
+        install_without_witness = before_execute
+
+        def before_execute(ready_backend: ExecutionBackend, handle: object) -> None:
+            install_without_witness(ready_backend, handle)
+            assert isinstance(ready_backend, DockerBackend)
+            bounded = replace(limits, timeout=min(limits.timeout, 5), max_captured_stdout_bytes=rs.MAX_JSON + 1)
+            env = rs.environment(ready_backend.controller_output(handle, ["env", "-0"], bounded))
+            attempt_guard.bind(ready_backend, handle, env)
 
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,
     # leak-checked first. Empty only when the hook itself failed before it
     # reached the transcript - which the fallback below states as such.
     stored_transcript: dict[str, trial.TranscriptEvidence] = {}
+    #: #500: every session of an attempt that left more than one transcript.
+    transcript_sessions: list[dict[str, object]] = []
     observe_before_teardown = _make_observe_before_teardown(
         spec=spec, expected_prompt=full_prompt, skill_name=skill_name,
         delivered_credential_bytes=delivered_credential_bytes,
         retained_transcript=retained_transcript, stored_transcript=stored_transcript,
         local_mcp_servers=frozenset(resolved_mcp_servers),
+        sessions=transcript_sessions, scan_codex=attempt_guard is not None,
     )
+    if attempt_guard is not None:
+        observe_unguarded = observe_before_teardown
+
+        def observe_before_teardown(observed_backend: ExecutionBackend, handle: object) -> Mapping[str, object]:
+            try:
+                attempt_guard.finish(observed_backend, handle)
+            except Exception:  # noqa: BLE001 - the record then reads unknown, never zero
+                attempt_guard.guard.channel_unavailable = True
+            return observe_unguarded(observed_backend, handle)
 
     if witness_session is not None:
         observe_transcript = observe_before_teardown
@@ -2327,16 +2418,31 @@ def run_one_attempt(
             None, "the transcript observation hook did not complete; no transcript was read",
         )
 
+    def imports_for_capture() -> list[trial.Import]:
+        """#442's egress log, and (#500) every retained session of an attempt
+        that left more than one transcript, each its own stream."""
+        imports = list(egress_imports)
+        for entry in transcript_sessions:
+            evidence = entry.get("evidence")
+            if isinstance(evidence, trial.TranscriptEvidence) and evidence.data is not None:
+                stream = f"{records.CLIENT_TRANSCRIPT}-session-{entry['index']}"
+                path = base / f"{attempt_id}.{stream}.jsonl"
+                path.write_bytes(evidence.data)
+                imports.append(trial.Import(path, stream, "client-reported", trial.sha256_bytes(evidence.data)))
+        return imports
+
     record = run_through_backend(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
         transcript_for_capture=transcript_for_capture,
-        imports_for_capture=lambda: egress_imports,
+        imports_for_capture=imports_for_capture,
         next_turn=next_turn if declared_turns else None,
         order=attempt_order,
     )
     delivered = sum(1 for e in experiment.events(attempt_id)
                     if e.get("event") == "controller-turn" and e.get("delivered") is True)
+    if attempt_guard is not None:
+        attempt_guard.expected_top_level = ct.expected_top_level(delivered)
     if fixture_session is not None:
         # Each delivered turn is one more legitimate top-level launch (#279).
         fixture_session.expected_top_level = ct.expected_top_level(delivered)
@@ -2366,7 +2472,9 @@ def run_one_attempt(
             observation, client=client, disposition=record.get("disposition"),
             witness_failure=(witness_session.failure or "controller witness was never finalized")
             if witness_session is not None and (witness_session.failure or witness_session.record is None) else None,
-            fixture_block=(lambda: _fixture_credit_block(fixture_session)) if fixture_session is not None else None,
+            fixture_block=(lambda: _fixture_credit_block(fixture_session)) if fixture_session is not None
+            else (lambda: ag.credit_block(attempt_guard.report(observation, declared_model)))
+            if attempt_guard is not None else None,
         )
         if grading_blocked_reason is None:
             assert isinstance(observation, dict)  # credit_block passes only an observed dict
@@ -2466,6 +2574,8 @@ def run_one_attempt(
                              "git_unreadable": fixture_session.git_unreadable,
                              "codex_guard": fixture_session.guard_record()["nested"],
                              "evidence_digest": fixture_evidence}
+    if attempt_guard is not None:
+        result["codex_guard"] = attempt_guard.report(observation, declared_model)
     if declared_turns:
         result["controller_turns"] = {
             "declared": len(declared_turns), "delivered": delivered,

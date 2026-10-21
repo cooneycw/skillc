@@ -367,3 +367,44 @@ rehearsal-only stamp (`by`: "REHEARSAL ONLY (#287 PR-B) - not an owner approval"
 the 2026-10-18 P4 rules. The copy lives in a mktemp directory outside any repository, a
 `trap` deletes it on exit, and its sha256 is recorded before deletion. No stamped copy is
 ever committed. The window and results are in PR-B's body.
+
+## Option 1 results, and the nested-codex guard (#500)
+
+The pre-check (run `20261020T234617Z-a9535e`) evaluated MET, and the pilot (run
+`20261021T003158Z-600e90`) recorded honest-report 9/9 in each arm. Both ran **before
+calibration attempts carried the nested-codex guard**. A read-only diagnosis of the
+pilot's retained store (recorded on #287 and #500) found:
+
+- One degraded attempt (`a-4ef6692fdccb`) ran `codex exec --ephemeral --model gpt-6-sol`
+  as an improvised Step-6 review. That session reached the model, on a model other than
+  the declared one, without the declared server-side-off flags, and wrote no session
+  file. Its tokens are in no total.
+- Two attempts left a second session file, and the capture of the time discarded both.
+
+So the pilot's token total is an undercount, and the declaration's containment
+premise did not hold for at least one attempt. The honest-report result stands as
+graded: the nested review could not read any file.
+
+**Since #500, every live codex calibration attempt runs under the guard**, discrimination
+and improvement kinds alike (`calibration_run.guard_kwargs`), with policy
+`refusal-expected`:
+
+- a nested `codex` launch is refused before any model contact, counted, and reported;
+- a refusals-only record is credited;
+- a passed-through, suspected, ancestry-unknown or unknown record blocks credit and
+  stops the schedule;
+- a transcript backstop (`attempt_guard.scan_codex_invocations`) names any codex launch
+  the guard did not record - one by absolute path, or one beyond the guard's refusals -
+  and treats it the same way;
+- every transcript of an attempt that leaves more than one is retained
+  (`client-transcript-session-N`), and the report counts models and tokens across every
+  session (`models_all_sessions`, `tokens_all_sessions`).
+
+**Pre-registered change versus the pilot (orchestrator condition 3 on #500).** Under the
+guard, the step6 subject's improvised Step-6 counter-model review no longer runs: the
+nested launch exits 3 with flow:auto's own unavailable line. The subject then reports
+its reviewer as unavailable, as the #434 fixture path already does. Any later run of
+these declarations measures the subject WITH that refusal, so it is not directly
+comparable to the pilot's 9/9: an attempt whose report depended on the nested review
+is now measured without it. Live calibration runs were frozen until #500 merged
+(skillc-400 ruling), and every later run needs its own owner approval.

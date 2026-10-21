@@ -141,6 +141,11 @@ def _run(
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome], Path, cr.Treatment]:
     declaration = declaration or _declaration(attempts=3)
     treatment = _treatment(tmp_path, monkeypatch)
+    # #500: these tests cover the UNGUARDED attempt path. Their fake docker
+    # holds no real codex for the nested-codex guard to front, and a guarded
+    # attempt there is refused, as it must be; the guarded path has its own
+    # tests (tests/test_attempt_guard.py).
+    monkeypatch.setattr(cr, "guard_kwargs", lambda client_name, model: {})
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     docker_state = tmp_path / "docker-state"
