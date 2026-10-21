@@ -398,7 +398,8 @@ def build_case(task_root: Path, case: str, where: Path) -> tuple[dict[str, objec
     (where / ".remote").mkdir()
     (where / "remote.git").rename(where / ".remote" / "widget.git")
     fixture = fa.AttemptFixture(case=case, declaration=build.declaration(case, GIT_DIR, facts), facts=facts,
-                                capture=lambda export, held: build.capture_snapshot(export, dict(held)))
+                                capture=lambda export, held: build.capture_snapshot(export, dict(held)),
+                                post_capture=getattr(build, "post_capture", None))
     return {"repo": where / "repo", ".remote": where / ".remote"}, fixture
 
 

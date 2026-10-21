@@ -54,8 +54,74 @@ INITIAL = ("Initial widget parser", "2026-09-28T09:00:00+0000")
 blob_id = necessity.blob_id
 read_files = necessity.read_files
 capture = necessity.capture
-capture_snapshot = necessity.capture_snapshot
 host_git = necessity.host_git
+
+#: #279 PR-3: the file whose BEHAVIOUR S4 judges.
+FIX_PATH = "widget/core.py"
+
+
+def fix_sources(root: Path, git: dict[str, Any], *, remote: str = ".remote/widget.git") -> dict[str, dict[str, Any]]:
+    """The delivered `widget/core.py` of every worktree, and of the remote's
+    main when it moved off the base commit (`remote:main`), as BYTES read by
+    `skillc.git_snapshot` - never executed here (orchestrator C1). Each entry is
+    `{"status": "read", "source_b64"}` or a status: `absent`, `over-bound`,
+    `unreadable`."""
+    import base64
+
+    from skillc import git_snapshot as gs
+    from skillc import step6_oracle as so
+
+    tree = gs.SafeTree(root)
+    out: dict[str, dict[str, Any]] = {}
+
+    def entry(data: bytes) -> dict[str, Any]:
+        if len(data) > so.MAX_SOURCE_BYTES:
+            return {"status": "over-bound"}
+        return {"status": "read", "source_b64": base64.b64encode(data).decode("ascii")}
+
+    for w in git.get("worktrees") or []:
+        rel = f"{w.get('path')}/{FIX_PATH}"
+        try:
+            out[f"worktree:{w.get('path')}"] = (entry(tree.read(rel, limit=so.MAX_SOURCE_BYTES + 1)[0])
+                                                if tree.optional(rel) else {"status": "absent"})
+        except gs.Unreadable:
+            out[f"worktree:{w.get('path')}"] = {"status": "unreadable"}
+    main = (git.get("remote_refs") or {}).get("refs/heads/main")
+    if isinstance(main, str) and main != git.get("base_commit_seen"):
+        try:
+            bare = gs.GitDir(tree, remote)
+            value = bare.tree_files(bare.tree_of(main)).get(FIX_PATH)
+            if value is None:
+                out["remote:main"] = {"status": "absent"}
+            else:
+                kind, data = bare.object(value.split()[-1])
+                out["remote:main"] = entry(data) if kind == "blob" else {"status": "unreadable"}
+        except (gs.Unreadable, KeyError, ValueError):
+            out["remote:main"] = {"status": "unreadable"}
+    return out
+
+
+def capture_snapshot(export_root: Path, facts: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    """The necessity snapshot, plus the delivered fix sources (step6 only)."""
+    git = necessity.capture_snapshot(export_root, facts, **kwargs)
+    git["base_commit_seen"] = facts["base_commit"]
+    git["fix_sources"] = fix_sources(export_root, git, remote=kwargs.get("remote", ".remote/widget.git"))
+    return git
+
+
+def post_capture(git: dict[str, Any], backend: Any) -> dict[str, Any]:
+    """Run the behavioural oracle over the captured sources, in a throwaway
+    container of the attempt's own trial image, and keep only its OUTCOMES.
+    A backend that cannot run it (C1: never the host) records that, and S4
+    reads UNKNOWN."""
+    from skillc import step6_oracle as so
+
+    sources = git.pop("fix_sources", {}) or {}
+    try:
+        git["fix_outcomes"] = so.outcomes(sources, so.runner_for(backend))
+    except so.Refused as exc:
+        git["fix_outcomes"] = {name: {"status": "oracle-refused", "reason": str(exc)} for name in sources}
+    return git
 
 
 def build(root: Path, case: str, *, remote_url: str | None = None) -> dict[str, Any]:

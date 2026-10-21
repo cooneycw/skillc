@@ -70,6 +70,10 @@ class AttemptFixture:
     remote_relpath: str = ".remote/widget.git"
     gates: Mapping[str, Sequence[str]] = field(default_factory=lambda: {"flow-auto-finish": ()})
     gate_shim_source: Path = FLOW_AUTO_GATE_SHIM
+    #: #279 PR-3: an optional controller step over the capture, given the
+    #: attempt's backend (the Step-6 task runs its behavioural oracle in a
+    #: throwaway container here). None leaves the capture exactly as before.
+    post_capture: Callable[[dict[str, Any], Any], dict[str, Any]] | None = None
 
 
 class _FixtureBackend(Protocol):
@@ -200,6 +204,8 @@ class FixtureSession:
                     self.git = self.fixture.capture(export_root, self.fixture.facts)
                 except gs.Unreadable as exc:
                     self.git_unreadable = str(exc)
+                if self.git is not None and self.fixture.post_capture is not None:
+                    self.git = self.fixture.post_capture(self.git, backend)
             if self.order is not None and self.git is not None:
                 self.git["remote_ref_sources"] = _remote_ref_sources(export_root, self.fixture.remote_relpath,
                                                                      self.git.get("remote_refs"))
