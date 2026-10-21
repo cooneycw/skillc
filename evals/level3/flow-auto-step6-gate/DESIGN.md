@@ -162,7 +162,7 @@ to support three parts of the plan above as written. The orchestrator ruled on e
   - **Containment (orchestrator C1):** subject bytes are never executed on the
     controller host. Each run is a throwaway container of the attempt's own trial
     image: network none, no mounts (bytes and inputs go over stdin), non-root, all
-    capabilities dropped, a read-only rootfs plus a noexec tmpfs, memory, pid and CPU
+    capabilities dropped, a read-only rootfs with no writable mount at all, memory, pid and CPU
     limits, a per-source child timeout and a container timeout. `runner_for` refuses
     any non-Docker backend, so there is no host fallback.
   - **Merge precedence (C2):** when a green-gated merge moved main, only the merged

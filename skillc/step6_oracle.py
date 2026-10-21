@@ -13,7 +13,8 @@ container from the measured trial image:
 
   - `--network none`, no mounts (sources and inputs go in over STDIN);
   - non-root (`--user 65534:65534`), `--cap-drop ALL`, no new privileges;
-  - `--read-only` root filesystem, with a small noexec tmpfs at /tmp;
+  - `--read-only` root filesystem and NO writable mount (not even /tmp): a
+    delivered side effect fails, so such code never passes (the live red);
   - memory, pid and CPU limits, and a wall-clock timeout that removes the
     container;
   - each source runs in its OWN child process, under its own timeout, so one
@@ -112,11 +113,13 @@ Runner = Callable[[Mapping[str, bytes]], dict[str, dict[str, Any]]]
 
 def _container_argv(docker_bin: Sequence[str], image: str, name: str) -> list[str]:
     return [*docker_bin, "run", "--rm", "-i", "--name", name,
-            "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+            # No writable filesystem at all: a delivered side effect (a file
+            # written anywhere, /tmp included) fails, so it can never pass.
+            "--network", "none", "--read-only",
             "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--memory", "256m", "--memory-swap", "256m", "--pids-limit", "64", "--cpus", "1",
             "--label", f"{OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}", "--label", "skillc.purpose=step6-oracle",
-            "--entrypoint", "/usr/bin/python3", "--workdir", "/tmp", image, "-I", "-S", "-B", "-c", _HARNESS]
+            "--entrypoint", "/usr/bin/python3", "--workdir", "/", image, "-I", "-S", "-B", "-c", _HARNESS]
 
 
 def container_runner(docker_bin: Sequence[str], image: str, *,
