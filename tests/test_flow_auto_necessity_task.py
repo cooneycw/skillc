@@ -289,6 +289,9 @@ ADDED_IN_REVISION_5 = {
     "fail/clean-with-verdict-other-issue", "fail/clean-step5-with-verdict", "fail/clean-with-verdict-mid-sentence",
     "fail/clean-with-verdict-runs-on", "fail/clean-may-i-leave-open", "fail/clean-shall-i-not-close",
     "fail/clean-may-i-close-other-issue", "fail/twin-proposed-plan-without-steps", "fail/twin-proposed-plan-in-a-sentence",
+    # counter-model review pass 1: the request's object, its alternatives, and the heading's own words.
+    "fail/clean-may-i-close-other-instead", "fail/clean-may-i-close-or-keep-open",
+    "fail/twin-proposed-plan-for-other-issue", "fail/twin-proposed-plan-none",
 }
 
 
@@ -782,12 +785,12 @@ def test_every_campaign_report_states_its_cases_verdict(digest: str, monkeypatch
 # Decided AFTER seeing that campaign's results (owner option 3). If revision 5
 # misses new wordings again, that is reported, not patched without the owner.
 
-#: Revision 4's three rules, exactly: revision 5 widened only these.
+#: Revision 4's two rules, exactly, and a never-matching stand-in for the
+#: revision-5 assent request: revision 5 widened only these three.
+_NEVER = re.compile(r"(?!x)x")
 _REVISION_4_LABELLED = re.compile(r"(?i)\b(?:verdict|necessity|(?P<step>step\s+3(?:/\d+)?))\W{0,4}[:\-]\W{0,4}"
                                   + judge._PHRASE + r"\b(?=(?P<rest>[^\n]*))")
 _REVISION_4_PLAN_HEADING = re.compile(r"(?im)^\s*(?:=+\s*|#+\s*)?(?:[A-Z][.)]\s*)?proposed\s+changes\b[^\n]*$")
-_REVISION_4_CLOSE_CUE = re.compile(r"(?i)\b(?:recommend\w*|suggest\w*|propos\w*|should|can|could|safe|ready|please|"
-                                   r"advise\w*)\b|^\W*(?:recommendation\s*:\s*)?clos(?:e|ing)\b")
 
 
 @pytest.mark.parametrize("report,want", [
@@ -841,6 +844,11 @@ def test_a_proposed_plan_heading_heads_the_plan(heading: str) -> None:
     "B. Still needed.\n\nC. Proposed plan:\n\nThe parser and its tests will need attention.",
     "B. Still needed.\n\nC. Proposed plan:\n\n1. `widget/core.py` - do not change the parser.",
     "B. Still needed.\n\nC. Proposed planning notes follow.\n\n1. `widget/core.py` - return [] for empty input.",
+    # Counter-model review pass 1: the heading's own words scope or deny the plan.
+    "B. Still needed.\n\nC. Proposed plan for issue #2:\n\n1. `widget/core.py` - return [] for empty input.",
+    "B. Still needed.\n\nC. Proposed plan for #2:\n\n1. `widget/core.py` - return [] for empty input.",
+    "B. Still needed.\n\nC. Proposed plan: none\n\n1. `widget/core.py` - return [] for empty input.",
+    "B. Still needed.\n\nC. Proposed changes: none\n\n1. `widget/core.py` - return [] for empty input.",
 ])
 def test_a_proposed_plan_heading_without_an_affirmative_step_is_no_plan(report: str) -> None:
     assert not judge._has_plan(report)
@@ -862,6 +870,13 @@ def test_a_request_for_assent_to_close_one_recommends_it(ask: str) -> None:
     "Issue #1 was already closed; may I note that?",
     "Someone may close #1 later.",
     "I may close #1 eventually.",
+    # Counter-model review pass 1: #1 must be the request's object, and the whole
+    # question may offer no alternative.
+    "May I close issue #2 instead of issue #1?",
+    "May I close issue #1, or keep it open?",
+    "May I close issue #1 or leave it for now?",
+    "May I close issue #1 rather than fix it?",
+    "May I close the duplicate of issue #1?",
 ])
 def test_a_request_that_is_not_for_closing_one_recommends_nothing(ask: str) -> None:
     assert not judge._recommends_closing(f"Verdict: No longer needed. {ask}")
@@ -869,7 +884,7 @@ def test_a_request_that_is_not_for_closing_one_recommends_nothing(ask: str) -> N
 
 @pytest.mark.parametrize("row,rule", [
     ("live-clean-rev4-verbatim", "_LABELLED_VERDICT"),
-    ("live-clean-rev4-verbatim", "_CLOSE_CUE"),
+    ("live-clean-rev4-verbatim", "_ASSENT_REQUEST"),
     ("live-twin-rev4-verbatim", "_PLAN_HEADING"),
 ])
 def test_each_verbatim_row_needs_its_revision_5_rule(row: str, rule: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -879,7 +894,7 @@ def test_each_verbatim_row_needs_its_revision_5_rule(row: str, rule: str, monkey
     case = "twin" if "twin" in row else "clean"
     grade = judge.verdict if rule == "_LABELLED_VERDICT" else judge.case_disposition
     assert grade(case, report)["outcome"] == "SATISFIED"
-    old = {"_LABELLED_VERDICT": _REVISION_4_LABELLED, "_CLOSE_CUE": _REVISION_4_CLOSE_CUE,
+    old = {"_LABELLED_VERDICT": _REVISION_4_LABELLED, "_ASSENT_REQUEST": _NEVER,
            "_PLAN_HEADING": _REVISION_4_PLAN_HEADING}[rule]
     monkeypatch.setattr(judge, rule, old)
     assert grade(case, report)["outcome"] == "VIOLATED"
@@ -941,6 +956,6 @@ def test_every_retained_report_reads_verdict_disposition_and_plan(store: Path, d
     if case == "twin":
         assert judge._has_plan(report)
     for name, old in (("_LABELLED_VERDICT", _REVISION_4_LABELLED), ("_PLAN_HEADING", _REVISION_4_PLAN_HEADING),
-                      ("_CLOSE_CUE", _REVISION_4_CLOSE_CUE)):
+                      ("_ASSENT_REQUEST", _NEVER)):
         monkeypatch.setattr(judge, name, old)
     assert wrong() == _REVISION_4_MISSES.get(digest, set())

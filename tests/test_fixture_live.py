@@ -970,12 +970,21 @@ def test_the_spent_revision_4_campaign_declaration_is_refused_since_grader_revis
         fl.require_approved(declaration, ROOT)
 
 
-def test_the_revision_4_approval_does_not_survive_a_changed_field() -> None:
+def test_the_revision_4_approval_does_not_survive_a_changed_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The approval binds the exact declaration. Since grader revision 5 (#499)
+    the repository refuses the spent file on its identities first, so the
+    repository's identities are pinned to the file's own (counter-model review):
+    the unchanged file then authorizes, and only the changed field refuses."""
     data = json.loads(CAMPAIGN_REV4.read_text())
+    real = fl.task_identity
+
+    def as_declared(root: Path, task_path: str = fl.TASK_PATH) -> dict[str, object]:
+        return {k: data["task"][k] for k in real(root, task_path)}
+
+    monkeypatch.setattr(fl, "task_identity", as_declared)
+    fl.require_approved(fl.parse_declaration(copy.deepcopy(data)), ROOT)
     data["shared"]["per_attempt_seconds"] = 901
-    # Since grader revision 5 (#499) the identity check refuses the spent file
-    # first; the changed field is refused all the same.
-    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration|differ from the repository"):
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
         fl.require_approved(fl.parse_declaration(data), ROOT)
 
 
