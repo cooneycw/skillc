@@ -45,6 +45,8 @@ EVIDENCE = CAL / "evidence" / "auto6-mutation-diagnose.json"
 #: The drafts' content digests, as they go into the owner's approval package.
 PRECHECK_DIGEST = "sha256:e44ae179c8a8214c8fbf0b6e9d20d6174907eed27520b487ae1e2b44531dc60e"
 PILOT_DIGEST = "sha256:9568c901b4a7e4750a046c64bfa9435ecb30147c2c99b7fa4ad6a8dcc5ba4357"
+#: The MET pre-check run 20261020T234617Z-a9535e (private evidence, not committed).
+PRECHECK_REPORT_SHA256 = "sha256:f63fe1b128a6fdf6af3e5c24d6755459c6b3b2b6161b8a56a03071861aceca2d"
 MUTATED_DIGEST = "sha256:a4cc27d11eafe5529ba00bbfdb014af38e01a93c818a8d3a900edec4ee8c1973"
 
 
@@ -124,7 +126,7 @@ def test_the_scan_finds_a_planted_line_of_the_block() -> None:
 
 @pytest.mark.parametrize(("path", "digest", "n", "per", "total"), [
     (PRECHECK, PRECHECK_DIGEST, 1, 1200, 2400), (PILOT, PILOT_DIGEST, 10, 1200, 24000)])
-def test_the_declarations_are_the_approved_design_and_unapproved(path: Path, digest: str, n: int, per: int,
+def test_the_declarations_are_the_approved_design_and_owner_approved(path: Path, digest: str, n: int, per: int,
                                                                 total: int) -> None:
     declaration = calibration.load_discrimination_declaration(path)
     assert calibration.declaration_digest(declaration.data) == digest
@@ -137,20 +139,21 @@ def test_the_declarations_are_the_approved_design_and_unapproved(path: Path, dig
     assert declaration.arm_order == tuple(calibration.derive_arm_order(20261020, ["intact", "degraded"], n))
     evidence: dict[str, Any] = cr.require_textual_evidence(declaration, ROOT)
     assert evidence["occurrence_scan"]["verdict"] == "NO_TEXTUAL_SURVIVOR"
-    if path == PRECHECK:
-        # The owner's "Approve 287" (2026-10-20), stamped on the pre-check only.
-        approval = declaration.approval
-        assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_arm"] == 1
-        assert "Approve 287" in str(approval["source"]) and approval["declaration_digest"] == PRECHECK_DIGEST
-        calibration.require_approved_discrimination(declaration, ROOT)
-    else:
-        assert "approval" not in declaration.data  # stamped only after a MET pre-check
-        with pytest.raises(calibration.DeclarationRefused, match="approval"):
-            calibration.require_approved_discrimination(declaration, ROOT)
+    # The owner's "Approve 287" (2026-10-20); the pilot additionally the owner's
+    # "Yes", stamped only after auto6_precheck.py printed MET over the pre-check.
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_arm"] == n
+    assert "Approve 287" in str(approval["source"]) and approval["declaration_digest"] == digest
+    calibration.require_approved_discrimination(declaration, ROOT)
+    if path == PILOT:
+        assert "'Yes'" in str(approval["source"])
+        cited = approval["precheck"]
+        assert isinstance(cited, dict) and cited["report_sha256"] == PRECHECK_REPORT_SHA256
 
 
-def test_the_precheck_approval_does_not_survive_a_changed_field() -> None:
-    data = _json(PRECHECK)
+@pytest.mark.parametrize("path", [PRECHECK, PILOT])
+def test_the_precheck_approval_does_not_survive_a_changed_field(path: Path) -> None:
+    data = _json(path)
     data["shared"]["per_attempt_seconds"] = 1201
     with pytest.raises(calibration.DeclarationRefused):
         calibration.require_approved_discrimination(calibration.parse_discrimination_declaration(data), ROOT)
@@ -441,8 +444,8 @@ def test_the_pilot_approval_tripwire_can_fail(approval: dict[str, Any]) -> None:
 def test_the_rehearsal_stamp_never_reaches_a_committed_declaration() -> None:
     for path in (PRECHECK, PILOT):
         assert "REHEARSAL" not in path.read_text(encoding="utf-8")
-    assert _json(PILOT).get("approval") is None
-    assert "REHEARSAL" not in str(_json(PRECHECK)["approval"])
+    for path in (PRECHECK, PILOT):
+        assert "REHEARSAL" not in str(_json(path)["approval"])
 
 
 # ------------------------------------------- the dispatch guard (ruling (A))

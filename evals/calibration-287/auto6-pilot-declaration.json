@@ -166,5 +166,22 @@
   "evaluator": "evals/calibration-287/auto6_precheck.py",
   "required_verdict": "MET",
   "rule": "this pilot is run only after the pre-check at that digest has run and auto6_precheck.py prints MET over its report"
+ },
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-20",
+  "attempts_per_arm": 10,
+  "source": "the owner's words, 'Approve 287' (2026-10-20), replying to the #287 option-1 approval package (pre-check sha256:e44ae179c8a8214c8fbf0b6e9d20d6174907eed27520b487ae1e2b44531dc60e, pilot sha256:9568c901b4a7e4750a046c64bfa9435ecb30147c2c99b7fa4ad6a8dcc5ba4357), and the owner's 'Yes' confirming the pilot conditional on a MET pre-check, relayed by skillc-400 (orchestrator, owner-delegated), applied by skillc-400 to this pilot after auto6_precheck.py printed MET over the pre-check report cited below",
+  "scope": "one run of this pilot: 10 attempts per arm (intact, degraded), 1200 s per attempt and 24000 s in total, as declared, on kyle19 under the operator's codex subscription login with provider-only egress (#442), dispatched with --precondition-report naming the cited pre-check report; exploratory, draws no verdict; no re-run",
+  "profile_inventory_digest": "sha256:c264490609ccf6699a9df31faca0a917c8bbfd405fb727ea292a29cf04a4030b",
+  "mutated_digest": "sha256:a4cc27d11eafe5529ba00bbfdb014af38e01a93c818a8d3a900edec4ee8c1973",
+  "task_fixture": "discrimination/fixture",
+  "precheck": {
+   "verdict": "MET",
+   "declaration_digest": "sha256:e44ae179c8a8214c8fbf0b6e9d20d6174907eed27520b487ae1e2b44531dc60e",
+   "report_sha256": "sha256:f63fe1b128a6fdf6af3e5c24d6755459c6b3b2b6161b8a56a03071861aceca2d",
+   "run": "20261020T234617Z-a9535e (experiment calibration-d2a188f3); the report itself is private run evidence and is not committed"
+  },
+  "declaration_digest": "sha256:9568c901b4a7e4750a046c64bfa9435ecb30147c2c99b7fa4ad6a8dcc5ba4357"
  }
 }
