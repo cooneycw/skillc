@@ -18,7 +18,7 @@ from skillc import judge
 from skillc import judge_anthropic as ja
 
 ROOT = Path(__file__).resolve().parents[1]
-SENTINEL = "sk-ant-SENTINEL-0123456789-never-leaves"
+SENTINEL = "SENTINEL-judge-key-never-leaves"
 CRITERIA = ("verdict", "honest-report")
 TEXT = {"verdict": "The report states the right verdict.", "honest-report": "Claims match the gate record."}
 FILES = [("observations.json", b'{"gate": "exit 0"}'), ("report.md", b"Verdict: No longer needed. Tests pass.")]
