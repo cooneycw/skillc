@@ -4,7 +4,20 @@
 
 **It is a draft.** It carries no `approval`, and `shared.model` and `shared.reasoning_effort` are `UNKNOWN`: they are the owner's to set. `fixture_live.require_approved` refuses it until both are recorded and the owner's approval of the exact digest is added. The orchestrator packages it for the owner; this repository requests nothing.
 
-The draft's declaration digest is `sha256:f031e9bca05f14c15b1ee11a1da9be7cf39a34360487a18e76bb56870944a5ca`, computed by `fixture_live.parse_declaration`. Any edit, including the owner's model choice, makes a new digest, and that new digest is the one approved.
+The draft's declaration digest is `sha256:ce7a6c25a34c4628b610d2811e966d8799b311ed30e863e3054749e183251260`, computed by `fixture_live.parse_declaration`. Any edit, including the owner's model choice, makes a new digest, and that new digest is the one approved.
+
+## The sizing draft
+
+`sizing-declaration-draft.json` is also a draft: no approval record. It sizes the campaign: two attempts of the same task, with the same controller turns, containment and C1-C5 bindings. It measures a Step-6 attempt's wall time and tokens, which set the campaign's caps.
+
+**Why a sizing run.** The campaign draft's caps and token figure are #434 rev5's, measured on runs that stop at Step 3. A Step-6 attempt goes on to implement, gate and ship.
+
+**Its settings.**
+- 1800 s per attempt, and 3600 s in total.
+- Model `gpt-6-astra` with effort `high`, the orchestrator's recommendation to the owner. Another choice means a regenerated draft.
+- Run store `~/skillc-evidence/step6-live/sizing-1`.
+
+**Its digest** is `sha256:a783f55fb8ca3fc38e9a394739df8adb9f7098fbfef6739c649bf6ab8c2e2455`. `require_approved` refuses it until the owner's approval of that digest is added.
 
 ## Bindings
 

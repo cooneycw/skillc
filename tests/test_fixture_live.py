@@ -1628,3 +1628,37 @@ def test_executable_comes_from_the_source_mode_and_cannot_be_shadowed() -> None:
     with pytest.raises(fl.LiveRefused, match="shadows a source-executable"):
         fl.require_turn_dispatch(_turn_declaration(), _with_files({path: b"x"}, {path: "100755"}), {path: b"y"})
     fl.require_turn_dispatch(_turn_declaration(), _with_files({path: b"x"}, {path: "100644"}), {path: b"y"})
+
+
+# -------------------- #279 PR-4: the Step-6 drafts parse, and are refused until approved
+
+STEP6_LIVE = ROOT / "evals" / "level3" / "flow-auto-step6-live"
+
+
+@pytest.mark.parametrize("name", ["declaration-draft.json", "sizing-declaration-draft.json"])
+def test_the_step6_drafts_parse_and_are_refused_until_approved(name: str) -> None:
+    data = json.loads((STEP6_LIVE / name).read_text())
+    declaration = fl.parse_declaration(data)
+    assert "approval" not in data
+    assert declaration.digest in (STEP6_LIVE / "README.md").read_text()  # the stated digest is this file's
+    with pytest.raises(fl.LiveRefused):
+        fl.require_approved(declaration, ROOT)
+    fl.require_turn_dispatch(declaration, _treatment())  # containment declared (#500)
+
+
+def test_the_sizing_draft_lacks_only_the_owner_s_approval() -> None:
+    """The red and its control: refused for approval alone - with approval
+    not required, every identity, binding and task check passes."""
+    declaration = fl.parse_declaration(json.loads((STEP6_LIVE / "sizing-declaration-draft.json").read_text()))
+    with pytest.raises(fl.LiveRefused, match="not approved"):
+        fl.require_approved(declaration, ROOT)
+    fl.require_approved(declaration, ROOT, approval_required=False)
+    shared = declaration.shared
+    assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (2, 1800, 3600)
+    assert (shared["model"], shared["reasoning_effort"]) == ("gpt-6-astra", "high")
+
+
+def test_the_campaign_draft_still_waits_for_the_owner_s_model() -> None:
+    declaration = fl.parse_declaration(json.loads((STEP6_LIVE / "declaration-draft.json").read_text()))
+    with pytest.raises(fl.LiveRefused, match="shared.model"):
+        fl.require_approved(declaration, ROOT, approval_required=False)

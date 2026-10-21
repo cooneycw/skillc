@@ -38,7 +38,7 @@
    ],
    "verification": "level3-live refuses before any container unless these equal the code's; each attempt's egress-proxy-log must record this allowlist digest, and the native containment stop halts the schedule on any allowed connection outside it"
   },
-  "_comment_caps": "900 s per attempt is ~5x the measurement's slowest wall (171.8 s, container setup included); 9000 s = 10 x 900, so the total cap never truncates a schedule the per-attempt caps allow. No token cap exists: expect ~5M tokens (10 x 0.45-0.53M)."
+  "_comment_caps": "Carried from #434 rev5 and NOT measured for this task: rev5's ~0.45-0.53M tokens per attempt and its 171.8 s slowest wall were measured on runs that STOP at flow:auto's Step 3. A Step-6 attempt also implements, gates and ships after the approval turn, so its cost and wall time are unknown here. The campaign's caps (per_attempt_seconds, total_seconds) will be set from the sizing run (sizing-declaration-draft.json) before this draft is packaged; the values below are rev5's and are expected to change."
  },
  "tolerance": {
   "non_evaluable_per_case": 1
