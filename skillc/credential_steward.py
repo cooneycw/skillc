@@ -193,7 +193,7 @@ class CredentialSteward:
         placement) and start it; confirmed by its `armed` event."""
         place(STEWARD_SOURCE.read_bytes())
         before = len(self.session.events)
-        argv = ["python3", "-IS", STEWARD_PATH, "--home-codex", self.home_codex, "--vault", VAULT,
+        argv = ["python3", "-IS", STEWARD_PATH, "--codex-dir", self.home_codex, "--vault", VAULT,
                 "--pidfile", PIDFILE, "--quiet-ms", str(QUIET_MS), "--deadline-s", str(DEADLINE_S)]
         if not backend.start_root_daemon_in_attempt(handle, argv):
             raise StewardFailed("the credential steward could not be started")

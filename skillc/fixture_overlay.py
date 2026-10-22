@@ -24,6 +24,13 @@ that directory is root-owned and empty, so the guard goes there and the real
 link is never touched. Check 4 is what makes the PATH order a verified fact
 rather than an assumption.
 
+#518: CHECK 4 HELD ONLY FOR THE INHERITED PATH. codex runs every tool command as
+`bash -lc`, and a login shell takes /etc/profile's non-root PATH, which drops
+/usr/local/sbin: there a bare `codex` was the real client (sizing-2's nested
+review ran unrefused while the guard read zero). A root-owned
+`/etc/profile.d/00-skillc-codex-guard.sh` puts /usr/local/sbin first again,
+and check 4 now runs in a login shell too.
+
 The guard's CONFIG (the realpaths of node, the real codex.js and the vendored
 native binaries) is resolved in the container now, by the controller, and
 written root-owned beside the harness. The guard trusts nothing derived at run

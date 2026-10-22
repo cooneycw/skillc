@@ -166,3 +166,9 @@ def test_a_missing_stop_reads_unknown() -> None:
     driver, fake, placed = _driver()
     driver.start(fake, object(), placed.append)
     assert driver.record()["status"] == "unknown"  # never stopped
+
+
+def test_the_steward_watches_the_backends_own_codex_home() -> None:
+    from skillc import docker_backend as d
+    assert cs.HOME_CODEX == f"{d.CONTAINER_HOME}/.codex"
+    assert cs.STEWARD_SOURCE.is_file()

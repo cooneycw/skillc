@@ -194,7 +194,7 @@ def _on_term(signum: int, frame: object) -> None:
 def main(argv: list[str]) -> int:
     args = dict(zip(argv[1::2], argv[2::2], strict=False))
     try:
-        home, vault = args["--home-codex"], args["--vault"]
+        home, vault = args["--codex-dir"], args["--vault"]
         quiet_s = int(args.get("--quiet-ms", "3000")) / 1000
         deadline_s = float(args.get("--deadline-s", "30"))
     except (KeyError, ValueError):
