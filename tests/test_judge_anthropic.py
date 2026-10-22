@@ -7,7 +7,9 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import socket
 import stat
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -209,14 +211,109 @@ def test_the_provider_success_path_reads_the_field_and_passes_only_the_id(tmp_pa
     assert "--secret-id skillc" in argv and "k" not in argv.split()
 
 
+def _imports_the_judge(source: str) -> bool:
+    """Whether `source` DIRECTLY imports `judge_anthropic`, in any import form.
+    Transitive imports and a key reaching a container env some other way are
+    not what this answers."""
+    tree = ast.parse(source)
+    names = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+    names |= {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    return any(part == "judge_anthropic" for name in names for part in name.split("."))
+
+
+@pytest.mark.parametrize("source", [
+    "from skillc import judge_anthropic\n", "from . import judge_anthropic as ja\n",
+    "from .judge_anthropic import AnthropicJudge\n", "import skillc.judge_anthropic\n",
+    "import skillc.judge_anthropic as ja\n",
+])
+def test_red_the_import_detector_sees_every_import_form(source: str) -> None:
+    assert _imports_the_judge(source)
+    assert not _imports_the_judge("from skillc import judge\nimport skillc.judge_mcp_second_opinion\n")
+
+
 def test_no_container_path_module_imports_the_judge() -> None:
     """The judge is controller-side only: no module that builds or runs a trial
-    container imports it, so its key can never enter a container's env."""
+    container directly imports it, so its key can never enter a container's env
+    through that module."""
     for module in ("docker_backend", "agent_trial", "fixture_attempt", "gate_witness", "backend"):
-        tree = ast.parse((ROOT / "skillc" / f"{module}.py").read_text(encoding="utf-8"))
-        imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
-        imported |= {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
-        assert not any("judge_anthropic" in name for name in imported), module
+        assert not _imports_the_judge((ROOT / "skillc" / f"{module}.py").read_text(encoding="utf-8")), module
+
+
+def _raw_server(reply: bytes) -> tuple[socket.socket, str, list[bytes]]:
+    """A one-shot TCP server answering every connection with `reply` verbatim
+    and recording what it received: a malformed or redirecting peer the stdlib
+    HTTP server will not impersonate."""
+    sock = socket.create_server(("127.0.0.1", 0))
+    received: list[bytes] = []
+
+    def serve() -> None:
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            with conn:
+                conn.settimeout(2)
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+                received.append(data)
+                conn.sendall(reply)
+    threading.Thread(target=serve, daemon=True).start()
+    return sock, f"http://127.0.0.1:{sock.getsockname()[1]}", received
+
+
+def test_red_a_redirect_is_unavailable_and_the_key_never_follows_it() -> None:
+    """Codex review (#513): urllib's default handler follows a 302 and copies
+    every header, `x-api-key` included, to wherever `Location` points."""
+    elsewhere, target, seen = _raw_server(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n")
+    redirector, url, _ = _raw_server(
+        f"HTTP/1.1 302 Found\r\nlocation: {target}/v1/messages\r\ncontent-length: 0\r\n\r\n".encode())
+    try:
+        result = judge.run_tier(judge.INDEPENDENT_TIER, _judge(url), CRITERIA, "/flow:auto 1", FILES)
+    finally:
+        redirector.close()
+        elsewhere.close()
+    assert not any(SENTINEL.encode() in r for r in seen), "the key followed the redirect"
+    assert seen == [] and result["status"] == "UNAVAILABLE" and "302" in str(result["reason"])
+    assert SENTINEL not in json.dumps(result)
+
+
+@pytest.mark.parametrize("reply", [
+    b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n10\r\n{\"trunc",
+    b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\nzz\r\n",
+    b"NOT-HTTP garbage\r\n\r\n",
+])
+def test_red_a_malformed_http_reply_is_unavailable_not_an_escape(reply: bytes) -> None:
+    server, url, _ = _raw_server(reply)
+    try:
+        result = judge.run_tier(judge.INDEPENDENT_TIER, _judge(url), CRITERIA, "/flow:auto 1", FILES)
+    finally:
+        server.close()
+    assert result["status"] == "UNAVAILABLE" and SENTINEL not in json.dumps(result)
+
+
+def test_red_a_machine_identity_in_a_criterion_definition_is_refused_before_the_key() -> None:
+    """Codex review (#513): the definitions leave the machine too, and
+    `run_tier`'s own leak check sees only the goal, files and criterion ids."""
+    calls: list[str] = []
+    # Assembled at runtime so the source itself carries no home-path literal.
+    leaky = {**TEXT, "verdict": "Compare with " + "/home/" + "alice/private/project/notes."}
+
+    def provider() -> str:
+        calls.append("key")
+        return SENTINEL
+    fake = ja.FakeMessagesServer(_ok)
+    with fake.running() as url:
+        bad = ja.AnthropicJudge(key_provider=provider, criteria_text=leaky, base_url=url, timeout=5.0)
+        with pytest.raises(judge.JudgeInputLeaked, match="criterion definition 'verdict'"):
+            judge.run_tier(judge.INDEPENDENT_TIER, bad, CRITERIA, "/flow:auto 1", FILES)
+        # Only the definitions actually sent are checked: an unasked criterion's text never leaves.
+        judge.run_tier(judge.INDEPENDENT_TIER, bad, ("honest-report",), "/flow:auto 1", FILES)
+    assert calls == ["key"] and len(fake.requests) == 1
 
 
 def _always(outcome: str) -> ja.Responder:

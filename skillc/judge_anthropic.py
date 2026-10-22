@@ -52,6 +52,7 @@ without a key or a network. A paid call needs an owner-approved declaration
 
 from __future__ import annotations
 
+import http.client
 import http.server
 import json
 import os
@@ -64,7 +65,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from .judge import JudgeAnswer, JudgeDescription, JudgeUnavailable
+from . import leak
+from .judge import JudgeAnswer, JudgeDescription, JudgeInputLeaked, JudgeUnavailable
 
 #: The owner's ruling (2026-10-21): "an anthropic grader (opus 5_5)".
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -219,6 +221,7 @@ class AnthropicJudge:
     def evaluate(self, criteria: Sequence[str], goal_text: str,
                  candidate_files: Sequence[tuple[str, bytes]]) -> JudgeAnswer:
         body = self.request_body(criteria, goal_text, candidate_files)
+        self._check_definitions(criteria)
         if len(body) > self.max_request_bytes:
             raise JudgeUnavailable(f"judge request is {len(body)} bytes, over the {self.max_request_bytes}-byte "
                                    "cap; refused, not truncated")
@@ -227,16 +230,45 @@ class AnthropicJudge:
             self.base_url.rstrip("/") + "/v1/messages", data=body, method="POST",
             headers={"content-type": "application/json", "anthropic-version": API_VERSION, "x-api-key": key})
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with _OPENER.open(request, timeout=self.timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
             exc.close()
             raise JudgeUnavailable(f"Messages API answered HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise JudgeUnavailable(f"Messages API unreachable ({type(exc).__name__})") from None
+        except (http.client.HTTPException, ValueError) as exc:
+            # A truncated chunk or a garbled status line (Codex review): the
+            # reply is not an answer, and must not escape the tier boundary.
+            raise JudgeUnavailable(f"Messages API reply is malformed HTTP ({type(exc).__name__})") from None
         if len(raw) > self.max_response_bytes:
             raise JudgeUnavailable(f"Messages API reply exceeds {self.max_response_bytes} bytes")
         return _parse_reply(raw)
+
+
+    def _check_definitions(self, criteria: Sequence[str]) -> None:
+        """Leak-check the definitions this request sends (Codex review):
+        `run_tier` checks the goal, files and criterion ids, never the rubric
+        text, which leaves the machine all the same. Before the key is read."""
+        for c in criteria:
+            findings = list(leak.scan_text(self.criteria_text[c], frozenset(), leak.default_host_paths()))
+            if findings:
+                lineno, kind, detail = findings[0]
+                raise JudgeInputLeaked(f"judge input 'criterion definition {c!r}' carries a machine-identity "
+                                       f"finding at line {lineno} ({kind}: {detail}); refused before sending")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect (Codex review): the default handler copies every
+    header, `x-api-key` included, to wherever `Location` points. A 3xx then
+    surfaces as the `HTTPError` it is, so it is `JudgeUnavailable`."""
+
+    def redirect_request(self, req: urllib.request.Request, fp: Any, code: int, msg: str,
+                         headers: Any, newurl: str) -> None:
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _parse_reply(raw: bytes) -> JudgeAnswer:
