@@ -612,7 +612,9 @@ class Stop:
 #: controller reads the session id only from there - then runs the actor
 #: unchanged. A resume (`resume <id> <text>` as the last three arguments) makes
 #: one bare `codex --version` call, so the real guard records exactly one more
-#: top-level launch, as the real client's resume is one, and stops.
+#: top-level launch, as the real client's resume is one, and stops. Its header
+#: is preceded by the client's own tracing line, as codex-cli 0.157.1 printed
+#: it in the #279 sizing run (#516), so a rehearsal exercises the real shape.
 TURN_ACTOR_SESSION_ID = "01a14f6a-cd7e-7851-8061-5cdeaaca5863"
 TURN_ACTOR_SOURCE = """\
 import os, subprocess, sys
@@ -620,7 +622,7 @@ import os, subprocess, sys
 if len(sys.argv) >= 4 and sys.argv[-3] == "resume":
     subprocess.run(["codex", "--version"])
     sys.exit(0)
-sys.stderr.write("OpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
+sys.stderr.write("Reading additional input from stdin...\\n2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models\\nOpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
 sys.stderr.flush()
 actor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "actor.py")
 os.execv(sys.executable, [sys.executable, actor, *sys.argv[1:]])
@@ -707,7 +709,7 @@ def main():
     resume = len(sys.argv) >= 4 and sys.argv[-3] == "resume"
     transcript = os.path.join(home, "@TRANSCRIPT@")
     if not resume:
-        sys.stderr.write("OpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
+        sys.stderr.write("Reading additional input from stdin...\\n2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models\\nOpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
         sys.stderr.flush()
         subprocess.run(["codex", "--version"])
         for item in steps[:cut]:

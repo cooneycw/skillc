@@ -150,6 +150,54 @@ def test_the_session_id_is_read_only_from_the_client_header(stderr: bytes, expec
     assert ct.session_id_from_header(stderr) == expected
 
 
+#: #516: turn 1's stderr as codex-cli 0.157.1 actually printed it in the #279
+#: sizing run (attempt 1, 2026-10-22): its own tracing lines BEFORE the header.
+REAL_TRACING_STDERR = (Path(__file__).parent / "fixtures" / "controller-turns"
+                       / "codex-0.157.1-tracing-before-header.stderr").read_bytes()
+REAL_SESSION = "01a16366-924a-7070-b0bc-06f9ecbead51"
+_TRACE = "2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models\n"
+
+
+def test_red_516_the_real_header_after_client_tracing_lines_is_read() -> None:
+    """Failed on the code before #516: `_STARTUP` refused the client's own
+    tracing lines, so the real header was never read and no approval was sent."""
+    assert b"Z ERROR codex_models_manager::manager: " in REAL_TRACING_STDERR
+    assert ct.session_id_from_header(REAL_TRACING_STDERR) == REAL_SESSION
+    assert ct.header_refusal(REAL_TRACING_STDERR) is None
+
+
+@pytest.mark.parametrize(("before", "why"), [
+    ("ERROR codex_models_manager::manager: no timestamp\n", "before the header"),
+    ("2026-10-22T11:37:08Z ERROR codex_models_manager::manager\n", "before the header"),    # no ': message'
+    ("2026-10-22T11:37:08Z NOTICE codex_models_manager::manager: not a level\n", "before the header"),
+    ("2026-10-22 11:37:08Z ERROR codex_models_manager::manager: not RFC3339\n", "before the header"),
+    ("2026-10-22T11:37:08Z ERROR Codex Models: not a module path\n", "before the header"),
+    ("I am the agent and I printed first\n", "before the header"),
+])
+def test_red_516_any_other_line_before_the_header_still_refuses(before: str, why: str) -> None:
+    stderr = (_TRACE + before + _HEADER).encode()
+    assert ct.session_id_from_header(stderr) is None
+    assert why in str(ct.header_refusal(stderr))
+
+
+def test_red_516_a_forged_header_after_tracing_and_agent_output_still_refuses() -> None:
+    forged = (_TRACE + "exec\nsome agent output\nOpenAI Codex v0.157.1\n--------\nsession id: "
+              + SESSION + "\n--------\n")
+    assert ct.session_id_from_header(forged.encode()) is None
+
+
+@pytest.mark.parametrize(("stderr", "why"), [
+    (b"", "no stderr"),
+    (b"just output\n", "no 'OpenAI Codex v' line"),
+    (_HEADER.replace("--------\nuser", "user").encode(), "never closed"),
+    (_HEADER.replace("provider: openai", "plugin: github").encode(), "not a known header line"),
+    (_HEADER.replace(SESSION, "not-a-uuid").encode(), "exactly one session id"),
+])
+def test_516_a_refused_header_says_why(stderr: bytes, why: str) -> None:
+    assert ct.session_id_from_header(stderr) is None
+    assert why in str(ct.header_refusal(stderr))
+
+
 # --------------------------------------------- the guard counts each delivered turn
 
 
@@ -223,7 +271,7 @@ def test_green_control_an_approval_delivered_is_acted_on_in_the_same_session(
     assert entries[1] == {"turn": "resume", "session_id": SESSION, "text": APPROVAL, "proceeded": True}
     assert record["controller_turns"] == {
         "declared": 1, "delivered": 1, "expected_top_level": 2, "session_id_source": "client-stderr-header",
-        "session_id_found": True, "stopped": "every declared turn was delivered",
+        "session_id_found": True, "stopped": "every declared turn was delivered", "header_refusal": None,
     }
     assert [(e.get("index"), e.get("dispatched"), e.get("ended"), e.get("delivered"))
             for e in _turn_events(experiment, attempt_id)] == [(2, True, None, None), (2, None, "exited", True)]
@@ -241,6 +289,18 @@ def test_red_case_an_approval_withheld_stops_the_actor_at_step_three(
     assert "controller_turns" not in record and _turn_events(experiment, attempt_id) == []
 
 
+def test_red_516_a_header_after_client_tracing_lines_gets_its_approval_turn(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """End to end through the backend: before #516 this attempt stopped at
+    Step 3 with no approval turn, exactly as the #279 sizing run's did."""
+    record, entries, _experiment, _attempt_id = _attempt(store, base, docker_state, tmp_path,
+                                                         turns=ct.Turns((APPROVAL,)), header="tracing")
+    assert [e["turn"] for e in entries] == [1, "resume"]
+    turns = record["controller_turns"]
+    assert isinstance(turns, dict) and turns["delivered"] == 1 and turns["header_refusal"] is None
+
+
 @pytest.mark.parametrize("header, stopped", [
     ("absent", "no session id"),
     ("twice", "no session id"),
@@ -253,6 +313,7 @@ def test_red_case_no_unambiguous_session_id_means_no_further_turn(
     assert [e["turn"] for e in entries] == [1]
     turns = record["controller_turns"]
     assert isinstance(turns, dict) and turns["delivered"] == 0 and stopped in str(turns["stopped"])
+    assert isinstance(turns["header_refusal"], str) and turns["header_refusal"]  # #516: the why is recorded
     assert _turn_events(experiment, attempt_id) == []
 
 

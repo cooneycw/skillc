@@ -55,8 +55,21 @@ anything else:
 
 Only that header block is read (from the version line to the second
 separator), it must be the INITIAL output (only the client's own start-up
-warnings may precede it), and it must hold exactly one `session id:` line with
-a UUID. Text the agent prints later cannot supply or replace it, not even a
+diagnostics may precede it), and it must hold exactly one `session id:` line
+with a UUID.
+
+THE CLIENT'S OWN TRACING LINES ARE START-UP DIAGNOSTICS (#516). Codex can
+print timestamped log lines before its header, measured in the #279 sizing
+run on codex-cli 0.157.1:
+
+    2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models: ...
+
+They are printed before the agent can act - the agent's first token comes
+after the header and the prompt echo - so accepting them keeps the id
+controller-held. The accepted shape is exactly the measured one (an RFC3339
+UTC timestamp, a level, a Rust module path, `: ` and a message); any other
+line before the header still refuses it. Before #516 these lines refused the
+real header, so no approval turn was ever sent. Text the agent prints later cannot supply or replace it, not even a
 complete forged header when the real one is missing. No header, or an
 ambiguous one, means no further turn.
 
@@ -84,8 +97,11 @@ _SESSION_LINE = re.compile(r"^session id:\s*(\S+)\s*$")
 _HEADER_LINE = re.compile(
     r"^(workdir|model|provider|approval|sandbox|reasoning effort|reasoning summaries|session id): .*$")
 #: What the pinned client prints before its header (measured): PATH-alias
-#: warnings and the stdin notice. Anything else before the header refuses it.
-_STARTUP = re.compile(r"^(WARNING: .*|Reading additional input from stdin\.\.\.|\s*)$")
+#: warnings, the stdin notice, and (#516) its own tracing lines. Anything else
+#: before the header refuses it.
+_TRACING = (r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z (?:ERROR|WARN|INFO|DEBUG|TRACE) "
+            r"[a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*: .*")
+_STARTUP = re.compile(r"^(WARNING: .*|Reading additional input from stdin\.\.\.|" + _TRACING + r"|\s*)$")
 
 
 class TurnsRefused(ValueError):
@@ -153,37 +169,49 @@ def parse_turns(data: object, cases: Sequence[str]) -> CaseTurns:
 
 def session_id_from_header(stderr: bytes | None) -> str | None:
     """Turn 1's session id from the client's own header block, or `None`."""
+    return _parse_header(stderr)[0]
+
+
+def header_refusal(stderr: bytes | None) -> str | None:
+    """Why `session_id_from_header` found no id, or `None` when it found one
+    (#516). Names the rule and the line NUMBER, never the line's text, so a
+    refused exit-0 attempt can be diagnosed from its record."""
+    return _parse_header(stderr)[1]
+
+
+def _parse_header(stderr: bytes | None) -> tuple[str | None, str | None]:
     if not stderr:
-        return None
+        return None, "no stderr captured"
     lines = stderr.decode("utf-8", errors="replace").splitlines()
     start = next((i for i, line in enumerate(lines) if _HEADER_START.match(line)), None)
     if start is None:
-        return None
+        return None, "no 'OpenAI Codex v' line"
     # The header must be the INITIAL region: everything before it must be one
     # of the client's own start-up diagnostics. A header found later, after any
     # other output, could be the agent's (#279 counter-model review).
-    if not all(_STARTUP.match(line) for line in lines[:start]):
-        return None
+    stray = next((i for i, line in enumerate(lines[:start]) if not _STARTUP.match(line)), None)
+    if stray is not None:
+        return None, f"line {stray + 1} before the header is not a client start-up line"
     # A bounded grammar (#279 counter-model review, pass 2): the version line,
     # a separator, ONLY the measured `key: value` header lines, then the
     # closing separator. Any other line before it - a prompt echo, a command,
     # a second version line - means the header never closed, and nothing
     # after that point may supply the id.
     if start + 1 >= len(lines) or not _SEPARATOR.match(lines[start + 1]):
-        return None
+        return None, "the version line is not followed by a separator"
     body: list[str] = []
-    for line in lines[start + 2:]:
+    for offset, line in enumerate(lines[start + 2:], start=start + 3):
         if _SEPARATOR.match(line):
             break
         if not _HEADER_LINE.match(line):
-            return None
+            return None, f"line {offset} inside the header is not a known header line, so it never closed"
         body.append(line)
     else:
-        return None
+        return None, "the header never closed"
     found = [m.group(1) for line in body if (m := _SESSION_LINE.match(line))]
     if len(found) != 1 or not _UUID.match(found[0]):
-        return None
-    return found[0]
+        return None, f"the header holds {len(found)} session id line(s), not exactly one session id UUID"
+    return found[0], None
 
 
 def resume_argv(client: str, base_argv: Sequence[str], session_id: str, text: str) -> tuple[str, ...]:

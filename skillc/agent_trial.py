@@ -2412,6 +2412,9 @@ def run_one_attempt(
         if done == 1:
             turn_state["session_id"] = ct.session_id_from_header(previous.stderr)
             turn_state["session_id_found"] = turn_state["session_id"] is not None
+            # #516: why, kept in the record - turn 1's stderr is not retained
+            # on an exit-0 attempt, so this is the only trace of a refusal.
+            turn_state["header_refusal"] = ct.header_refusal(previous.stderr)
         if done > len(declared_turns):
             turn_state["stopped"] = "every declared turn was delivered"
             return None
@@ -2710,6 +2713,7 @@ def run_one_attempt(
             "expected_top_level": ct.expected_top_level(delivered),
             "session_id_source": turn_state["session_id_source"],
             "session_id_found": turn_state["session_id_found"], "stopped": turn_state["stopped"],
+            "header_refusal": turn_state.get("header_refusal"),
         }
     result["transcript_retention"] = transcript_retention(experiment, attempt_id, record.get("disposition"))
     # Persisted on EVERY path (#106): the observation used to exist only in

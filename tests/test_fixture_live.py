@@ -8,10 +8,12 @@ chosen record. The live path itself is rehearsed on a daemon with
 
 from __future__ import annotations
 
+import ast
 import copy
 import functools
 import importlib.util as _ilu
 import json
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -24,6 +26,7 @@ from skillc import calibration, profile, trial, verify
 from skillc import calibration_run as cr
 from skillc import codex_guard as cg
 from skillc import collection_conformance as cc
+from skillc import controller_turns as ct
 from skillc import egress as eg
 from skillc import fixture_live as fl
 from skillc import matched_pilot as mp
@@ -1365,6 +1368,25 @@ def test_the_turn_actor_wraps_only_a_case_with_turns() -> None:
     assert set(home) - set(plain_home) == {".skillc-fixture-campaign/turn_actor.py"}
     header = fl.TURN_ACTOR_SOURCE.split("sys.stderr.write(")[1].split(")")[0]
     assert fl.TURN_ACTOR_SESSION_ID in header
+
+
+#: The pre-#516 start-up grammar, kept here only to prove the rehearsal is no
+#: longer blind to the shape that refused the real header.
+_PRE_516_STARTUP = re.compile(r"^(WARNING: .*|Reading additional input from stdin\.\.\.|\s*)$")
+
+
+@pytest.mark.parametrize("source", ["TURN_ACTOR_SOURCE", "STEP6_ACTOR_SOURCE"])
+def test_red_516_the_rehearsal_actors_print_tracing_lines_before_their_header(source: str) -> None:
+    """Before #516 both rehearsal actors printed a clean header, so a rehearsal
+    passed a path that real codex then failed. Each now prints the measured
+    tracing line first: the header reads under the current grammar, and the
+    pre-#516 grammar would refuse it - which is what makes it a red."""
+    literal = getattr(fl, source).split("sys.stderr.write(")[1].split(")\n")[0]
+    stderr = ast.literal_eval(literal).replace("@SESSION@", fl.TURN_ACTOR_SESSION_ID)
+    assert ct.session_id_from_header(stderr.encode()) == fl.TURN_ACTOR_SESSION_ID
+    before = stderr.split("OpenAI Codex v")[0].splitlines()
+    assert any(" ERROR codex_models_manager::manager: " in line for line in before)
+    assert not all(_PRE_516_STARTUP.match(line) for line in before)
 
 
 def test_the_service_clock_is_the_fixtures_not_the_witnesss() -> None:
