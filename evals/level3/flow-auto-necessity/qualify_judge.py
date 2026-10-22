@@ -44,10 +44,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
 sys.path.insert(0, str(HERE))
 
-import qualify  # noqa: E402 - this task's own harness builds each candidate's trusted observation
+import qualify
 
-from skillc import judge  # noqa: E402
-from skillc import judge_anthropic as ja  # noqa: E402
+from skillc import judge
+from skillc import judge_anthropic as ja
 
 BANNER = ("PLUMBING ONLY: a scripted oracle (each candidate's expected.json) answers every call. A PASS shows "
           "what reaches the judge and what comes back intact; it is NOT evidence that the model grades well, "

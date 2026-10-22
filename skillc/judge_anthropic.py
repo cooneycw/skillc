@@ -190,7 +190,8 @@ class AnthropicJudge:
         undefined = [c for c in criteria if not self.criteria_text.get(c, "").strip()]
         if undefined:
             raise JudgeUnavailable(f"no definition for criteria {undefined}; the judge would grade a name")
-        facts, claims = [], []
+        facts: list[dict[str, str]] = []
+        claims: list[dict[str, str]] = []
         for name, content in candidate_files:
             entry = {"name": name, "content": content.decode("utf-8", errors="replace")}
             (facts if name in self.observation_files else claims).append(entry)
@@ -226,7 +227,7 @@ class AnthropicJudge:
             self.base_url.rstrip("/") + "/v1/messages", data=body, method="POST",
             headers={"content-type": "application/json", "anthropic-version": API_VERSION, "x-api-key": key})
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 - fixed scheme
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
             exc.close()
@@ -293,7 +294,7 @@ class FakeMessagesServer:
         fake = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:  # noqa: N802 - http.server's name
+            def do_POST(self) -> None:
                 length = int(self.headers.get("content-length", "0"))
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
                 fake.requests.append({"path": self.path, "headers": dict(self.headers.items()), "body": body})
@@ -309,7 +310,7 @@ class FakeMessagesServer:
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
-            def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server's name
+            def log_message(self, format: str, *args: object) -> None:
                 return
 
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)

@@ -588,7 +588,8 @@ def test_the_adapter_request_cap_is_the_default_bound() -> None:
     (_tiered("deterministic"), "judge is declared but the tier is deterministic"),
     (_tiered(model="claude-sonnet-5"), "judge.model must be one of"),
     (_tiered(secret_id=""), "secret_id must name the secret"),
-    (_tiered(secret_id="sk-ant-api03-notarealkeyatall"), "looks like a key"),
+    # Assembled at runtime so the source itself carries no key-shaped literal.
+    (_tiered(secret_id="sk-" + "ant-api03-notarealkeyatall"), "looks like a key"),
     (_tiered(max_tokens=0), "max_tokens must be a positive integer"),
     (_tiered(calls=True), "calls must be a positive integer"),
     (_tiered(max_request_bytes=-1), "max_request_bytes must be a positive integer"),

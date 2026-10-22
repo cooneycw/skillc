@@ -70,7 +70,7 @@ import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -378,7 +378,7 @@ def _parse_tier(data: Mapping[str, Any]) -> tuple[str, JudgeDeclaration | None]:
     if not isinstance(read_on, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", read_on):
         raise LiveRefused("primary_endpoint.judge.price.read_on must be the YYYY-MM-DD date the price was read")
     try:
-        datetime.strptime(read_on, "%Y-%m-%d")
+        date.fromisoformat(read_on)
         model_price = cost_estimate.ModelPrice(str(judge["model"]), price["input_usd_per_million"],
                                                price["output_usd_per_million"], source)
     except ValueError as exc:

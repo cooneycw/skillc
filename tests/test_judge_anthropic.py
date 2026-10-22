@@ -10,7 +10,7 @@ import logging
 import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -70,7 +70,7 @@ def test_red_a_forged_schema_invalid_entry_is_unknown_for_that_criterion_alone()
     result, _ = _run(lambda b: (200, ja.tool_reply(
         [{"id": "verdict", "outcome": "MAYBE", "evidence": ["x"]},
          {"id": "honest-report", "outcome": "SATISFIED", "evidence": ["gate exit 0"]}])))
-    by_id = {c["id"]: c for c in result["criteria"]}  # type: ignore[union-attr]
+    by_id = {c["id"]: c for c in cast(list[dict[str, Any]], result["criteria"])}
     assert by_id["verdict"]["outcome"] == "UNKNOWN" and "malformed" in by_id["verdict"]["missing"]
     assert by_id["honest-report"]["outcome"] == "SATISFIED"
     assert result["status"] == "INCONCLUSIVE"
