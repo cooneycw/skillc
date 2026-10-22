@@ -165,7 +165,7 @@ def test_red_an_unapproved_or_re_edited_declaration_is_refused(tmp_path: Path) -
 def test_red_a_worst_case_over_the_ceiling_is_refused_at_declare(tmp_path: Path) -> None:
     root = _items(tmp_path)
     labels = _labels(tmp_path, root)
-    counts = {p.name: {"request_sha256": "sha256:" + "1" * 64, "request_bytes": 1, "max_tokens": 1536,
+    counts = {p.name: {"request_sha256": "sha256:" + "1" * 64, "request_bytes": 1, "max_tokens": 1536, "effort": "medium",
                        "input_tokens": 400_000}
               for p in jv.items_of(root)}
     with pytest.raises(jv.Refused, match=r"worst case \$\d+\.\d\d exceeds the \$5\.00 ceiling"):
@@ -318,3 +318,35 @@ def test_red_a_run_whose_calls_are_all_unavailable_certifies_nothing(tmp_path: P
         result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
     assert all(o is None for runs in result["outcomes"].values() for o in runs)
     assert all(r["answered"] == 0 and r["verdict"] == "UNKNOWN" for r in result["agreement"].values())
+
+
+# --- #513 run 1: 60 of 60 unavailable read COMPLETE -------------------------
+
+def test_red_513_a_run_below_its_answered_floor_is_failed_and_says_why(tmp_path: Path) -> None:
+    """Run 1 spent $3.40, answered 0 of 60 and read COMPLETE. Below the
+    declared floor a run is FAILED, and every call's reason and envelope is kept."""
+    with ja.FakeMessagesServer(_always("SATISFIED")).running() as url:
+        root, data, labels = _declared(tmp_path, ja.FakeMessagesServer(_always("SATISFIED")), url)
+    reply = json.dumps({"type": "message", "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": "not json"}]}).encode()
+    with ja.FakeMessagesServer(lambda b: (200, reply)).running() as url:
+        result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    assert result["status"] == "FAILED" and result["answered_calls"] == 0
+    assert "below the declared floor" in result["stopped"] and result["headline"].startswith("STOPPED (only 0 of 9")
+    assert len(result["calls_log"]) == 9
+    assert all(c["status"] == "UNAVAILABLE" and "not JSON" in c["reason"]
+               and c["envelope"]["block_types"] == ["text"] for c in result["calls_log"])
+
+
+def test_counts_at_another_effort_are_refused_and_the_declaration_pins_it(tmp_path: Path) -> None:
+    fake = ja.FakeMessagesServer(_always("SATISFIED"))
+    with fake.running() as url:
+        root = _items(tmp_path)
+        counts = jv.count(root, jv.make_judge(key_provider=lambda: "k", base_url=url, effort="high"))
+    labels = _labels(tmp_path, root)
+    with pytest.raises(jv.Refused, match="another effort than the declared 'medium'"):
+        jv.declare(root, counts, labels, k=3, max_tokens=1536, price=PRICE, secret_id="skillc", threshold=2 / 3)
+    data = jv.declare(root, counts, labels, k=3, max_tokens=1536, price=PRICE, secret_id="skillc",
+                      threshold=2 / 3, effort="high")
+    assert data["effort"] == "high" and data["min_answered_calls"] == 9  # ceil(0.9 x 9)
+    assert all(r["body"]["output_config"]["effort"] == "high" for r in fake.requests)

@@ -190,6 +190,13 @@ class AnthropicJudge:
     #: #513 validation: receives each reply's `usage` (the billed tokens),
     #: whether or not the reply then parses - the call was billed either way.
     usage_sink: Callable[[Mapping[str, int]], None] | None = None
+    #: #513: receives each reply's ENVELOPE (stop_reason, block types, usage) -
+    #: never its content - so a failed call can be diagnosed afterwards.
+    envelope_sink: Callable[[Mapping[str, Any]], None] | None = None
+    #: Pinned reasoning effort (`output_config.effort`). claude-opus-5-5 always
+    #: thinks (adaptive; it cannot be disabled) and its default effort is not a
+    #: declaration, so it is stated here and in every #513 declaration.
+    effort: str = "medium"
 
     def describe(self) -> JudgeDescription:
         return JudgeDescription(name=JUDGE_NAME, model=self.model, version=API_VERSION)
@@ -222,7 +229,7 @@ class AnthropicJudge:
             "max_tokens": self.max_tokens,
             "system": SYSTEM_TEXT,
             "messages": [{"role": "user", "content": json.dumps(document, ensure_ascii=False)}],
-            "output_config": {"format": {"type": "json_schema", "schema": VERDICTS_SCHEMA}},
+            "output_config": {"format": {"type": "json_schema", "schema": VERDICTS_SCHEMA}, "effort": self.effort},
         }
         return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
@@ -259,6 +266,8 @@ class AnthropicJudge:
                 raise JudgeUnavailable(f"Messages API reply is malformed HTTP ({type(exc).__name__})") from None
             if len(raw) > self.max_response_bytes:
                 raise JudgeUnavailable(f"Messages API reply exceeds {self.max_response_bytes} bytes")
+            if self.envelope_sink is not None:
+                self.envelope_sink(reply_envelope(raw))
             if self.usage_sink is not None:
                 settled = True
                 self.usage_sink(reply_usage(raw))
@@ -347,6 +356,25 @@ def reply_usage(raw: bytes) -> dict[str, int]:
     return out
 
 
+THINKING_BLOCKS = ("thinking", "redacted_thinking")
+
+
+def reply_envelope(raw: bytes) -> dict[str, Any]:
+    """A reply's structure only - stop_reason, block types in order, usage -
+    never a block's content."""
+    try:
+        reply = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"parse": "not JSON", "bytes": len(raw)}
+    if not isinstance(reply, dict):
+        return {"parse": "not an object", "bytes": len(raw)}
+    content = reply.get("content")
+    return {"type": reply.get("type"), "stop_reason": reply.get("stop_reason"),
+            "block_types": [b.get("type") if isinstance(b, dict) else None for b in content]
+            if isinstance(content, list) else None,
+            "usage": reply.get("usage") if isinstance(reply.get("usage"), dict) else None}
+
+
 def _parse_reply(raw: bytes) -> JudgeAnswer:
     try:
         reply = json.loads(raw.decode("utf-8"))
@@ -358,11 +386,16 @@ def _parse_reply(raw: bytes) -> JudgeAnswer:
         raise JudgeUnavailable(f"Messages API stopped with {reply.get('stop_reason')!r}, not a complete "
                                "structured answer")
     content = reply.get("content")
-    if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict) \
-            or content[0].get("type") != "text" or not isinstance(content[0].get("text"), str):
-        raise JudgeUnavailable("Messages API reply does not hold exactly one text block")
+    # #513: claude-opus-5-5 always thinks, so a real reply is [thinking, text]
+    # (observed 2026-10-22; the thinking block is empty unless displayed).
+    # Thinking blocks are skipped; what remains must be exactly one text block.
+    answer_blocks = [b for b in content if not (isinstance(b, dict) and b.get("type") in THINKING_BLOCKS)] \
+        if isinstance(content, list) else []
+    if len(answer_blocks) != 1 or not isinstance(answer_blocks[0], dict) \
+            or answer_blocks[0].get("type") != "text" or not isinstance(answer_blocks[0].get("text"), str):
+        raise JudgeUnavailable("Messages API reply does not hold exactly one text block besides thinking")
     try:
-        answer = json.loads(content[0]["text"])
+        answer = json.loads(answer_blocks[0]["text"])
     except json.JSONDecodeError:
         raise JudgeUnavailable("the structured answer is not JSON") from None
     verdicts = answer.get("verdicts") if isinstance(answer, dict) and set(answer) == {"verdicts"} else None
@@ -383,13 +416,16 @@ def _quarter_count(body: dict[str, Any]) -> tuple[int, bytes]:
 
 
 def verdict_reply(verdicts: Sequence[Mapping[str, object]], *, model: str = DEFAULT_MODEL,
-                  usage: Mapping[str, int] | None = None) -> bytes:
-    """A well-formed structured-output reply carrying `verdicts`: one text block
-    holding `{"verdicts": [...]}`, `stop_reason` `end_turn` (and `usage`, when given)."""
+                  usage: Mapping[str, int] | None = None, thinking: bool = True,
+                  stop_reason: str = "end_turn") -> bytes:
+    """A structured-output reply carrying `verdicts`, in the shape
+    claude-opus-5-5 actually returns (observed 2026-10-22, #513): an EMPTY
+    thinking block, then one text block holding `{"verdicts": [...]}`."""
+    content: list[dict[str, Any]] = [{"type": "thinking", "thinking": "", "signature": "sig-fake"}] if thinking else []
+    content.append({"type": "text", "text": json.dumps({"verdicts": list(verdicts)})})
     reply: dict[str, Any] = {
         "id": "msg_fake", "type": "message", "role": "assistant", "model": model,
-        "stop_reason": "end_turn",
-        "content": [{"type": "text", "text": json.dumps({"verdicts": list(verdicts)})}],
+        "stop_reason": stop_reason, "content": content,
     }
     if usage is not None:
         reply["usage"] = dict(usage)

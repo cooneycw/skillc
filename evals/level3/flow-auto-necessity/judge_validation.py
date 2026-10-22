@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import random
 import sys
@@ -74,10 +75,12 @@ def digest(data: Mapping[str, Any]) -> str:
 
 
 def make_judge(*, key_provider: ja.KeyProvider, base_url: str = ja.DEFAULT_BASE_URL, max_tokens: int = 1536,
-               before_send: Any = None, usage_sink: Any = None) -> ja.AnthropicJudge:
+               effort: str = "medium", before_send: Any = None, usage_sink: Any = None,
+               envelope_sink: Any = None) -> ja.AnthropicJudge:
     return ja.AnthropicJudge(key_provider=key_provider, criteria_text=RUBRIC,
                              observation_files=frozenset({OBSERVATIONS}), base_url=base_url, max_tokens=max_tokens,
-                             before_send=before_send, usage_sink=usage_sink)
+                             effort=effort, before_send=before_send, usage_sink=usage_sink,
+                             envelope_sink=envelope_sink)
 
 
 def item_files(item: Path) -> list[tuple[str, bytes]]:
@@ -153,7 +156,7 @@ def count(root: Path, j: ja.AnthropicJudge) -> dict[str, dict[str, Any]]:
         j.check_definitions(CRITERIA)
         body = j.request_body(CRITERIA, GOAL, files)
         counts[item.name] = {"request_sha256": sha256_bytes(body), "request_bytes": len(body),
-                             "max_tokens": j.max_tokens, "input_tokens": j.count_tokens(body)}
+                             "max_tokens": j.max_tokens, "effort": j.effort, "input_tokens": j.count_tokens(body)}
     return counts
 
 
@@ -182,10 +185,15 @@ def worst_case(counts: Mapping[str, Mapping[str, Any]], k: int, max_tokens: int,
 
 
 def declare(root: Path, counts: Mapping[str, Mapping[str, Any]], labels_path: Path, *, k: int, max_tokens: int,
-            price: Mapping[str, Any], secret_id: str, threshold: float) -> dict[str, Any]:
+            price: Mapping[str, Any], secret_id: str, threshold: float, effort: str = "medium",
+            min_answered_fraction: float = 0.9) -> dict[str, Any]:
     items = [p.name for p in items_of(root)]
     if sorted(counts) != sorted(items):
         raise Refused("the counts do not name exactly the exported items")
+    if any(c.get("effort") != effort for c in counts.values()):
+        raise Refused(f"the counts were taken at another effort than the declared {effort!r}: recount")
+    if not 0 < min_answered_fraction <= 1:
+        raise Refused("min_answered_fraction must be in (0, 1]")
     if any(c.get("max_tokens") != max_tokens for c in counts.values()):
         raise Refused(f"the counts were taken at another max_tokens than the declared {max_tokens}: "
                       "max_tokens is part of every counted body, so recount at the declared value")
@@ -198,7 +206,8 @@ def declare(root: Path, counts: Mapping[str, Mapping[str, Any]], labels_path: Pa
     manifest = json.loads((root / "items-manifest.json").read_text())
     return {"kind": KIND, "schema": SCHEMA, "model": ja.DEFAULT_MODEL, "secret_id": secret_id, "k": k,
             "max_tokens": max_tokens, "repeat_agreement_threshold": threshold, "price": dict(price),
-            "count_margin": COUNT_MARGIN, "calls": k * len(items),
+            "count_margin": COUNT_MARGIN, "calls": k * len(items), "effort": effort,
+            "min_answered_calls": max(1, math.ceil(min_answered_fraction * k * len(items))),
             "items_digest": sha256_bytes(json.dumps(manifest, sort_keys=True).encode()),
             "labels_sha256": labels_sha, "counts": dict(counts), "worst_case_usd": round(bound, 4),
             "limits": LIMITS}
@@ -282,14 +291,19 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
             raise Refused(f"{item_id}: the request body changed after it was counted")
         budget.admit(int(declared["input_tokens"]))
 
+    envelopes: list[Mapping[str, Any]] = []
     j = make_judge(key_provider=key_provider, base_url=base_url, max_tokens=int(declaration["max_tokens"]),
-                   before_send=before_send, usage_sink=budget.charge)
+                   effort=str(declaration["effort"]), before_send=before_send, usage_sink=budget.charge,
+                   envelope_sink=envelopes.append)
     k = int(declaration["k"])
     #: One entry per call: the criterion outcomes, or None when the tier was
     #: UNAVAILABLE - never folded into an UNKNOWN vote (Codex review).
     outcomes: dict[str, list[dict[str, str] | None]] = {}
     calls = 0
     stopped: str | None = None
+    #: Every call, in order: its tier status, its UNAVAILABLE reason, and the
+    #: reply's envelope (structure only). Run 1 kept none of this (#513).
+    call_log: list[dict[str, Any]] = []
     for item in items:
         if stopped:
             break
@@ -299,7 +313,10 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
             if calls >= int(declaration["calls"]):
                 raise Refused("the declared call count is exhausted")
             calls += 1
+            before = len(envelopes)
             tier = judge.run_tier(judge.INDEPENDENT_TIER, j, CRITERIA, GOAL, item_files(item))
+            call_log.append({"item": item.name, "status": tier.get("status"), "reason": tier.get("reason"),
+                             "envelope": envelopes[before] if len(envelopes) > before else None})
             if tier.get("status") == "UNAVAILABLE":
                 outcomes[item.name].append(None)
             else:
@@ -309,9 +326,17 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
                 stopped = f"budget stop: {budget.broken}"
                 break
     report = agreement(outcomes, labels, float(declaration["repeat_agreement_threshold"]), k=k)
-    return {"status": "STOPPED" if stopped else "COMPLETE", "stopped": stopped, "calls": calls,
-            "spent_usd": round(budget.spent, 4), "headline": headline(report, stopped), "limits": LIMITS,
-            "agreement": report, "outcomes": outcomes}
+    answered = sum(o is not None for runs in outcomes.values() for o in runs)
+    floor = int(declaration["min_answered_calls"])
+    # #513 run 1 read COMPLETE with 0 of 60 calls answered: a run below its
+    # declared floor is FAILED, whatever else it reports.
+    status = "STOPPED" if stopped else ("FAILED" if answered < floor else "COMPLETE")
+    note = stopped or (f"only {answered} of {calls} calls answered, below the declared floor of {floor}"
+                       if status == "FAILED" else None)
+    return {"status": status, "stopped": note, "calls": calls, "answered_calls": answered,
+            "min_answered_calls": floor, "spent_usd": round(budget.spent, 4),
+            "headline": headline(report, note), "limits": LIMITS, "agreement": report,
+            "outcomes": outcomes, "calls_log": call_log}
 
 
 def agreement(outcomes: Mapping[str, Sequence[Mapping[str, str] | None]], labels: Mapping[str, Mapping[str, str]],
@@ -392,6 +417,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     c.add_argument("--items", type=Path, required=True)
     c.add_argument("--secret-id", required=True)
     c.add_argument("--max-tokens", type=int, default=1536)
+    c.add_argument("--effort", default="medium")
     c.add_argument("--out", type=Path, required=True)
     d = sub.add_parser("declare")
     d.add_argument("--items", type=Path, required=True)
@@ -402,6 +428,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     d.add_argument("--k", type=int, default=3)
     d.add_argument("--max-tokens", type=int, default=1536)
     d.add_argument("--threshold", type=float, default=2 / 3)
+    d.add_argument("--effort", default="medium")
+    d.add_argument("--min-answered-fraction", type=float, default=0.9)
     d.add_argument("--out", type=Path, required=True)
     r = sub.add_parser("run")
     r.add_argument("--items", type=Path, required=True)
@@ -414,13 +442,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(export(args.run, args.out, seed=args.seed)))
         elif args.step == "count":
             counts = count(args.items, make_judge(key_provider=ja.aws_secret_key_provider(args.secret_id),
-                                                  max_tokens=args.max_tokens))
+                                                  max_tokens=args.max_tokens, effort=args.effort))
             args.out.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n")
             print(json.dumps({"items": len(counts), "input_tokens": sum(v["input_tokens"] for v in counts.values())}))
         elif args.step == "declare":
             data = declare(args.items, json.loads(args.counts.read_text()), args.labels, k=args.k,
                            max_tokens=args.max_tokens, price=json.loads(args.price.read_text()),
-                           secret_id=args.secret_id, threshold=args.threshold)
+                           secret_id=args.secret_id, threshold=args.threshold, effort=args.effort,
+                           min_answered_fraction=args.min_answered_fraction)
             args.out.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
             print(json.dumps({"digest": digest(data), "calls": data["calls"], "worst_case_usd": data["worst_case_usd"]}))
         else:

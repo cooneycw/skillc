@@ -118,7 +118,7 @@ def request_problem(c: qualify.Candidate, body: Mapping[str, Any]) -> str | None
     """What is wrong with the request the judge received for `c`, or None."""
     observations, report = judge_input(c)
     if body.get("model") != ja.DEFAULT_MODEL or "tool_choice" in body or body.get("output_config") != {
-            "format": {"type": "json_schema", "schema": ja.VERDICTS_SCHEMA}}:
+            "format": {"type": "json_schema", "schema": ja.VERDICTS_SCHEMA}, "effort": "medium"}:
         return "not the pinned model with the structured verdict format"
     document = ja.user_document(body)
     if document.get("observed_facts") != [{"name": OBSERVATIONS, "content": observations.decode("utf-8")}]:
