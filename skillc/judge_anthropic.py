@@ -8,14 +8,19 @@ there): a direct API call to `claude-opus-5-5` is a second permitted judge
 mechanism beside `mcp-second-opinion`. No SDK is imported, matching
 `docker_backend.py` and `judge_mcp_second_opinion.py`.
 
-STRUCTURED OUTPUT, STILL STRICT. The request offers ONE tool whose
-`input_schema` is the verdict list and forces it with `tool_choice`. The
-tool's `input.verdicts` is handed to `run_tier` unchanged, and every entry
-still goes through `parse_judge_verdict`: a schema-invalid entry is UNKNOWN for
-its criterion alone. A reply that is not one forced tool call at all (no
-`tool_use`, a different tool, a `stop_reason` other than `tool_use`, invalid
-JSON, an oversize body) is `JudgeUnavailable` for the whole tier, never a
-fabricated or partial verdict.
+STRUCTURED OUTPUT, STILL STRICT (#519). The request asks for a JSON-schema
+response, `output_config.format = {"type": "json_schema", "schema":
+VERDICTS_SCHEMA}`. It does NOT force a tool: `claude-opus-5-5` rejects
+`tool_choice` "tool" and "any" with HTTP 400 (measured 2026-10-22; documented
+under "Forcing tool use"), so the forced-tool design #513 shipped could never
+have graded on its pinned model. The reply's ONE text block is parsed as
+`{"verdicts": [...]}` and the list is handed to `run_tier` unchanged; every
+entry still goes through `parse_judge_verdict`, so a schema-invalid entry is
+UNKNOWN for its criterion alone. A reply that is not exactly that - a
+`stop_reason` other than `end_turn` (a `refusal`, or `max_tokens`, whose JSON
+may be cut off), any block count but one text block, text that is not that
+object, invalid JSON, an oversize body - is `JudgeUnavailable` for the whole
+tier, never a fabricated or partial verdict.
 
 AGENT PROSE IS DATA, NEVER INSTRUCTIONS (orchestrator C1). The user message is
 ONE JSON document. Every observation and every agent claim is a JSON string
@@ -74,7 +79,6 @@ DEFAULT_BASE_URL = "https://api.anthropic.com"
 #: The Messages API version header this adapter speaks.
 API_VERSION = "2023-06-01"
 JUDGE_NAME = "anthropic-messages"
-TOOL_NAME = "record_verdicts"
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_MAX_TOKENS = 4096
 #: A judge request is a goal, a rubric, an observation record and a report;
@@ -97,8 +101,8 @@ SYSTEM_TEXT = (
     "references to observed_facts or agent_claims that decide it;\n"
     "- UNKNOWN, with `missing`: what evidence would be needed, when "
     "observed_facts cannot decide it.\n"
-    f"Answer only by calling the `{TOOL_NAME}` tool once, with one entry per "
-    "criterion id, exactly as given."
+    "Answer only with the JSON object the response format requires: one "
+    "`verdicts` entry per criterion id, exactly as given."
 )
 
 VERDICTS_SCHEMA: dict[str, Any] = {
@@ -212,9 +216,7 @@ class AnthropicJudge:
             "max_tokens": self.max_tokens,
             "system": SYSTEM_TEXT,
             "messages": [{"role": "user", "content": json.dumps(document, ensure_ascii=False)}],
-            "tools": [{"name": TOOL_NAME, "description": "Record one verdict per criterion.",
-                       "input_schema": VERDICTS_SCHEMA}],
-            "tool_choice": {"type": "tool", "name": TOOL_NAME},
+            "output_config": {"format": {"type": "json_schema", "schema": VERDICTS_SCHEMA}},
         }
         return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
@@ -278,17 +280,20 @@ def _parse_reply(raw: bytes) -> JudgeAnswer:
         raise JudgeUnavailable("Messages API reply is not JSON") from None
     if not isinstance(reply, dict) or reply.get("type") != "message":
         raise JudgeUnavailable("Messages API reply is not a message")
-    if reply.get("stop_reason") != "tool_use":
-        raise JudgeUnavailable(f"Messages API stopped with {reply.get('stop_reason')!r}, not the forced tool call")
+    if reply.get("stop_reason") != "end_turn":
+        raise JudgeUnavailable(f"Messages API stopped with {reply.get('stop_reason')!r}, not a complete "
+                               "structured answer")
     content = reply.get("content")
-    calls = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"] \
-        if isinstance(content, list) else []
-    if len(calls) != 1 or calls[0].get("name") != TOOL_NAME:
-        raise JudgeUnavailable(f"Messages API reply does not hold exactly one {TOOL_NAME!r} call")
-    tool_input = calls[0].get("input")
-    verdicts = tool_input.get("verdicts") if isinstance(tool_input, dict) else None
+    if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict) \
+            or content[0].get("type") != "text" or not isinstance(content[0].get("text"), str):
+        raise JudgeUnavailable("Messages API reply does not hold exactly one text block")
+    try:
+        answer = json.loads(content[0]["text"])
+    except json.JSONDecodeError:
+        raise JudgeUnavailable("the structured answer is not JSON") from None
+    verdicts = answer.get("verdicts") if isinstance(answer, dict) and set(answer) == {"verdicts"} else None
     if not isinstance(verdicts, list):
-        raise JudgeUnavailable(f"the {TOOL_NAME!r} call carries no verdict list")
+        raise JudgeUnavailable("the structured answer is not exactly {verdicts: [...]}: no verdict list")
     model = reply.get("model")
     return JudgeAnswer(verdicts=verdicts, model=model if isinstance(model, str) and model else None)
 
@@ -299,14 +304,30 @@ def _parse_reply(raw: bytes) -> JudgeAnswer:
 Responder = Callable[[dict[str, Any]], tuple[int, bytes]]
 
 
-def tool_reply(verdicts: Sequence[Mapping[str, object]], *, model: str = DEFAULT_MODEL) -> bytes:
-    """A well-formed forced-tool reply carrying `verdicts`."""
+def verdict_reply(verdicts: Sequence[Mapping[str, object]], *, model: str = DEFAULT_MODEL) -> bytes:
+    """A well-formed structured-output reply carrying `verdicts`: one text block
+    holding `{"verdicts": [...]}`, `stop_reason` `end_turn`."""
     return json.dumps({
         "id": "msg_fake", "type": "message", "role": "assistant", "model": model,
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "toolu_fake", "name": TOOL_NAME,
-                     "input": {"verdicts": list(verdicts)}}],
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": json.dumps({"verdicts": list(verdicts)})}],
     }).encode("utf-8")
+
+
+#: Models that refuse a forced `tool_choice` with HTTP 400 (#519; "Forcing tool
+#: use", read 2026-10-22). The fake refuses it the same way, so a test can fail
+#: the way the real API did.
+FORCED_TOOL_REFUSED = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1")
+FORCED_TOOL_ERROR = """tool_choice: type "tool" and "any" are not supported for this model."""
+
+
+def refuses_forced_tool(body: Mapping[str, Any]) -> bytes | None:
+    """The real API's 400 for a forced tool on a model that refuses it, else None."""
+    choice = body.get("tool_choice")
+    if body.get("model") in FORCED_TOOL_REFUSED and isinstance(choice, dict) and choice.get("type") in ("tool", "any"):
+        return json.dumps({"type": "error", "error": {"type": "invalid_request_error",
+                                                      "message": FORCED_TOOL_ERROR}}).encode("utf-8")
+    return None
 
 
 @dataclass
@@ -332,7 +353,8 @@ class FakeMessagesServer:
                 fake.requests.append({"path": self.path, "headers": dict(self.headers.items()), "body": body})
                 if fake.delay:
                     threading.Event().wait(fake.delay)
-                status, payload = fake.responder(body)
+                refusal = refuses_forced_tool(body)
+                status, payload = (400, refusal) if refusal is not None else fake.responder(body)
                 try:
                     self.send_response(status)
                     self.send_header("content-type", "application/json")

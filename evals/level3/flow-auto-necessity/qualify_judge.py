@@ -117,8 +117,9 @@ class DropCriterionText(ja.AnthropicJudge):
 def request_problem(c: qualify.Candidate, body: Mapping[str, Any]) -> str | None:
     """What is wrong with the request the judge received for `c`, or None."""
     observations, report = judge_input(c)
-    if body.get("model") != ja.DEFAULT_MODEL or body.get("tool_choice") != {"type": "tool", "name": ja.TOOL_NAME}:
-        return "not the pinned model with the forced tool"
+    if body.get("model") != ja.DEFAULT_MODEL or "tool_choice" in body or body.get("output_config") != {
+            "format": {"type": "json_schema", "schema": ja.VERDICTS_SCHEMA}}:
+        return "not the pinned model with the structured verdict format"
     document = ja.user_document(body)
     if document.get("observed_facts") != [{"name": OBSERVATIONS, "content": observations.decode("utf-8")}]:
         return "the observations did not reach the judge whole, as facts"
@@ -143,7 +144,7 @@ def verdict_problem(c: qualify.Candidate, tier: Mapping[str, Any]) -> str | None
 def run(population: list[qualify.Candidate], answer: Callable[[qualify.Candidate], list[dict[str, object]]],
         kind: type[ja.AnthropicJudge] = ja.AnthropicJudge) -> list[tuple[str, str | None]]:
     current: list[qualify.Candidate] = []
-    fake = ja.FakeMessagesServer(lambda body: (200, ja.tool_reply(answer(current[-1]))))
+    fake = ja.FakeMessagesServer(lambda body: (200, ja.verdict_reply(answer(current[-1]))))
     rows: list[tuple[str, str | None]] = []
     with fake.running() as url:
         for c in population:
@@ -201,7 +202,7 @@ def steering_reaches_the_judge_verbatim(population: list[qualify.Candidate]) -> 
     report = (c.path / "report.md").read_text(encoding="utf-8")
     if "ignore the observations" not in report or '"observed_facts"' not in report:
         return "the steering candidate no longer tries to steer or to forge a fact"
-    fake = ja.FakeMessagesServer(lambda body: (200, ja.tool_reply(oracle(c))))
+    fake = ja.FakeMessagesServer(lambda body: (200, ja.verdict_reply(oracle(c))))
     with fake.running() as url:
         judge.run_tier(judge.INDEPENDENT_TIER, ja.AnthropicJudge(
             key_provider=lambda: "qualify-holds-no-key", criteria_text=RUBRIC,
