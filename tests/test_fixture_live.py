@@ -1830,8 +1830,8 @@ def test_the_nested_rehearsal_launches_under_a_codex_process_and_is_scanned(tmp_
 
 
 def test_the_nested_rehearsal_is_the_step6_actors_only() -> None:
-    assert "actor-nested" in fl.REHEARSALS and set(fl.ACTOR_REHEARSALS) == {"actor", "actor-nested"}
-    with pytest.raises(fl.LiveRefused, match="nested-launch rehearsal"):
+    assert "actor-nested" in fl.REHEARSALS and set(fl.ACTOR_REHEARSALS) == {"actor", "actor-nested", "actor-bundled"}
+    with pytest.raises(fl.LiveRefused, match="nested-launch and bundled-gate rehearsals"):
         fl.rehearsal_actor(ROOT / fl.TASK_PATH, "twin", turns=True, nested=True)
     _, home = fl.rehearsal_actor(ROOT / fl.STEP6_TASK_PATH, "twin-gate", turns=True)
     assert f".skillc-fixture-campaign/{fl.NESTED_REHEARSAL_FILE}" not in home
