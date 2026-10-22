@@ -184,6 +184,9 @@ class _Run:
     order_requested: int | None = None
     order_completed: int | None = None
     source_digest_at_start: str | None = None
+    #: #525: the declared variant this run executed (which copy of the gate the
+    #: subject invoked); None for the gate's own default argv.
+    via: str | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +206,8 @@ class GateRunRecord:
     order_requested: int | None = None
     order_completed: int | None = None
     source_digest_at_start: str | None = None
+    #: #525: see `_Run.via`.
+    via: str | None = None
 
     def to_json(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -221,6 +226,10 @@ class GateRunRecord:
             data["order_requested"] = self.order_requested
             data["order_completed"] = self.order_completed
             data["source_digest_at_start"] = self.source_digest_at_start
+        if self.via is not None:
+            # Only a run through a declared variant carries it (#525), so
+            # every other record is byte-identical.
+            data["via"] = self.via
         return data
 
 
@@ -338,6 +347,7 @@ class GateWitness:
         order: Order | None = None,
         source_digest_fn: Callable[[str | None], str] | None = None,
         staged: Mapping[str, StagedGate] | None = None,
+        declared_variants: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
     ) -> None:
         #: #279 PR-2a: the attempt's ordering counter and the source-digest
         #: function (given the gate's working directory). Both None for every
@@ -355,6 +365,19 @@ class GateWitness:
         self._declared_argv: dict[str, tuple[str, ...]] = {
             gate: tuple(argv) for gate, argv in declared_gates.items()
         }
+        #: #525: per-gate VARIANTS - other copies of the same gate the subject
+        #: may invoke (a skill-bundled gate beside the installed one). A request
+        #: naming `via` runs that variant's argv, declared by the CALLER like the
+        #: default; an undeclared `via` is refused. The run is recorded under the
+        #: SAME gate name, with `via`, so a grader reading the gate is unchanged.
+        self._declared_variants: dict[str, dict[str, tuple[str, ...]]] = {}
+        for gate, variants in (declared_variants or {}).items():
+            if gate not in self._declared_argv:
+                raise ValueError(f"declared_variants names an undeclared gate: {gate!r}")
+            for via, argv in variants.items():
+                if not via or not argv:
+                    raise ValueError(f"declared_variants[{gate!r}] needs a non-empty name and argv")
+            self._declared_variants[gate] = {via: tuple(argv) for via, argv in variants.items()}
         #: #332: per-gate exec environment, declared by the CALLER exactly
         #: like `_declared_argv` - never read from the subject. A gate with
         #: no entry here runs under `exec_in_attempt()`'s own default
@@ -480,7 +503,13 @@ class GateWitness:
             # Red case 1: the controller's own declared set is the only
             # source of truth for what may be run at all.
             raise ChannelRefusal(f"run_gate: {gate!r} is not a declared gate for this attempt")
+        via = request.get("via")
+        if "via" in request and (not isinstance(via, str) or via not in self._declared_variants.get(gate, {})):
+                raise ChannelRefusal(f"run_gate: {via!r} is not a declared variant of {gate!r}")
         runner = self._staged.get(gate)
+        if via is not None and runner is not None:
+            raise ChannelRefusal(f"run_gate: a variant of the staged gate {gate!r} is not supported (#525)")
+        argv = self._declared_variants[gate][via] if isinstance(via, str) else self._declared_argv[gate]
         requested_stages: tuple[str, ...] | None = None
         make_args = request.get("make_args", [])
         if runner is None and ("make_args" in request or "make_env" in request):
@@ -533,7 +562,7 @@ class GateWitness:
                 with self._lock:
                     run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest,
                                order_requested=self._order.next() if self._order is not None else None,
-                               source_digest_at_start=source)
+                               source_digest_at_start=source, via=via if isinstance(via, str) else None)
                     self._runs[gate].append(run)
                     unsupported = self._backend_unsupported
                 staged_capture: Mapping[str, object] | None = None
@@ -547,7 +576,7 @@ class GateWitness:
                         make_args=[str(a) for a in make_args])
                 else:
                     result = self._backend.exec_in_attempt(
-                        self._handle, list(self._declared_argv[gate]), self._limits,
+                        self._handle, list(argv), self._limits,
                         cwd=gate_cwd, env=self._declared_env.get(gate),
                         # #338's opened-directory boundary, never replaced by
                         # the earlier realpath check or a subject status claim.
@@ -664,7 +693,7 @@ class GateWitness:
                                 else _stages_unavailable("run never resolved") if gate in self._stage_capture
                                 else None),
                         order_requested=r.order_requested, order_completed=r.order_completed,
-                        source_digest_at_start=r.source_digest_at_start,
+                        source_digest_at_start=r.source_digest_at_start, via=r.via,
                     )
                     for r in runs
                 )
