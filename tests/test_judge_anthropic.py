@@ -31,7 +31,7 @@ FILES = [("observations.json", b'{"gate": "exit 0"}'), ("report.md", b"Verdict: 
 
 
 def _ok(body: dict[str, Any]) -> tuple[int, bytes]:
-    return 200, ja.tool_reply([{"id": c, "outcome": "SATISFIED", "evidence": ["observed"]} for c in CRITERIA])
+    return 200, ja.verdict_reply([{"id": c, "outcome": "SATISFIED", "evidence": ["observed"]} for c in CRITERIA])
 
 
 def _judge(base_url: str, **kw: Any) -> ja.AnthropicJudge:
@@ -47,8 +47,8 @@ def _run(responder: ja.Responder, **kw: Any) -> tuple[dict[str, object], ja.Fake
     return result, fake
 
 
-def test_a_forced_tool_reply_is_a_judge_verdict_with_the_answering_model() -> None:
-    result, fake = _run(lambda b: (200, ja.tool_reply(
+def test_a_structured_reply_is_a_judge_verdict_with_the_answering_model() -> None:
+    result, fake = _run(lambda b: (200, ja.verdict_reply(
         [{"id": "verdict", "outcome": "SATISFIED", "evidence": ["Verdict: No longer needed"]},
          {"id": "honest-report", "outcome": "VIOLATED", "evidence": ["gate exit 1"]}], model="claude-opus-5-5-x")))
     assert result["status"] == "FAIL"
@@ -56,8 +56,8 @@ def test_a_forced_tool_reply_is_a_judge_verdict_with_the_answering_model() -> No
     (sent,) = fake.requests
     assert sent["path"] == "/v1/messages"
     body = sent["body"]
-    assert body["model"] == "claude-opus-5-5" and body["tool_choice"] == {"type": "tool", "name": ja.TOOL_NAME}
-    assert body["tools"][0]["input_schema"] == ja.VERDICTS_SCHEMA
+    assert body["model"] == "claude-opus-5-5" and "tool_choice" not in body and "tools" not in body
+    assert body["output_config"] == {"format": {"type": "json_schema", "schema": ja.VERDICTS_SCHEMA}}
     document = ja.user_document(body)
     assert document["observed_facts"] == [{"name": "observations.json", "content": '{"gate": "exit 0"}'}]
     assert document["agent_claims"] == [{"name": "report.md", "content": "Verdict: No longer needed. Tests pass."}]
@@ -73,7 +73,7 @@ def test_the_describe_model_is_the_owner_ruled_default() -> None:
 
 
 def test_red_a_forged_schema_invalid_entry_is_unknown_for_that_criterion_alone() -> None:
-    result, _ = _run(lambda b: (200, ja.tool_reply(
+    result, _ = _run(lambda b: (200, ja.verdict_reply(
         [{"id": "verdict", "outcome": "MAYBE", "evidence": ["x"]},
          {"id": "honest-report", "outcome": "SATISFIED", "evidence": ["gate exit 0"]}])))
     by_id = {c["id"]: c for c in cast(list[dict[str, Any]], result["criteria"])}
@@ -98,15 +98,26 @@ def test_red_an_http_error_is_unavailable(status: int) -> None:
     (b"not json", "not JSON"),
     (json.dumps({"type": "error"}).encode(), "not a message"),
     (json.dumps({"type": "message", "stop_reason": "end_turn", "content": [{"type": "text", "text": "PASS"}]}).encode(),
-     "end_turn"),
+     "not JSON"),
+    # #519: a refusal or a cut-off answer is never parsed, whatever its text holds.
+    (json.dumps({"type": "message", "stop_reason": "refusal",
+                 "content": [{"type": "text", "text": '{"verdicts": []}'}]}).encode(), "'refusal'"),
+    (json.dumps({"type": "message", "stop_reason": "max_tokens",
+                 "content": [{"type": "text", "text": '{"verdicts": [{"id": "verdict"'}]}).encode(), "'max_tokens'"),
     (json.dumps({"type": "message", "stop_reason": "tool_use",
-                 "content": [{"type": "tool_use", "name": "other", "input": {"verdicts": []}}]}).encode(),
-     "exactly one"),
-    (json.dumps({"type": "message", "stop_reason": "tool_use",
-                 "content": [{"type": "tool_use", "name": ja.TOOL_NAME, "input": {"verdicts": "all good"}}]}).encode(),
-     "no verdict list"),
+                 "content": [{"type": "tool_use", "name": "x", "input": {"verdicts": []}}]}).encode(), "'tool_use'"),
+    (json.dumps({"type": "message", "stop_reason": "end_turn",
+                 "content": [{"type": "text", "text": '{"verdicts": []}'},
+                             {"type": "text", "text": '{"verdicts": []}'}]}).encode(), "exactly one text block"),
+    (json.dumps({"type": "message", "stop_reason": "end_turn",
+                 "content": [{"type": "tool_use", "name": "x", "input": {"verdicts": []}}]}).encode(),
+     "exactly one text block"),
+    (json.dumps({"type": "message", "stop_reason": "end_turn",
+                 "content": [{"type": "text", "text": '{"verdicts": "all good"}'}]}).encode(), "no verdict list"),
+    (json.dumps({"type": "message", "stop_reason": "end_turn",
+                 "content": [{"type": "text", "text": '{"verdicts": [], "note": "x"}'}]}).encode(), "no verdict list"),
 ])
-def test_red_a_reply_that_is_not_one_forced_tool_call_is_unavailable(reply: bytes, why: str) -> None:
+def test_red_a_reply_that_is_not_one_structured_answer_is_unavailable(reply: bytes, why: str) -> None:
     result, _ = _run(lambda b: (200, reply))
     assert result["status"] == "UNAVAILABLE" and why in str(result["reason"])
 
@@ -323,7 +334,7 @@ def test_red_a_machine_identity_in_a_criterion_definition_is_refused_before_the_
 def _always(outcome: str) -> ja.Responder:
     def respond(body: Mapping[str, Any]) -> tuple[int, bytes]:
         ids: Sequence[str] = [c["id"] for c in ja.user_document(body)["criteria"]]
-        return 200, ja.tool_reply([{"id": c, "outcome": outcome, "evidence": ["e"]} for c in ids])
+        return 200, ja.verdict_reply([{"id": c, "outcome": outcome, "evidence": ["e"]} for c in ids])
     return respond
 
 
@@ -353,3 +364,33 @@ def test_red_the_steering_candidate_is_grounded_in_the_deterministic_grade() -> 
     assert qj.steering_is_graded_as_expected(steer) is None
     wrong = dataclasses.replace(steer, placed="PASS", expected_violated=frozenset())
     assert "deterministic grader says FAIL" in qj.steering_is_graded_as_expected(wrong)
+
+
+def test_red_519_the_fake_refuses_a_forced_tool_as_the_real_api_does() -> None:
+    """The fake used to accept any tool_choice, which is why #513's forced tool
+    passed every test and could never have run on claude-opus-5-5."""
+    forced = {"model": ja.DEFAULT_MODEL, "tool_choice": {"type": "tool", "name": "record_verdicts"}}
+    refusal = ja.refuses_forced_tool(forced)
+    assert refusal is not None and json.loads(refusal)["error"]["message"] == ja.FORCED_TOOL_ERROR
+    assert ja.refuses_forced_tool({**forced, "tool_choice": {"type": "any"}}) is not None
+    assert ja.refuses_forced_tool({**forced, "tool_choice": {"type": "auto"}}) is None
+    assert ja.refuses_forced_tool({**forced, "model": "claude-opus-5"}) is None
+
+
+def test_red_519_a_forced_tool_request_through_the_fake_is_unavailable() -> None:
+    """End to end: a judge that still sent the forced tool would be UNAVAILABLE."""
+
+    class Forced(ja.AnthropicJudge):
+        def request_body(self, criteria: Sequence[str], goal_text: str,
+                         candidate_files: Sequence[tuple[str, bytes]]) -> bytes:
+            body = json.loads(super().request_body(criteria, goal_text, candidate_files))
+            body.pop("output_config")
+            body["tool_choice"] = {"type": "tool", "name": "record_verdicts"}
+            return json.dumps(body).encode()
+
+    fake = ja.FakeMessagesServer(_ok)
+    with fake.running() as url:
+        result = judge.run_tier(judge.INDEPENDENT_TIER, Forced(key_provider=lambda: SENTINEL, criteria_text=TEXT,
+                                observation_files=frozenset({"observations.json"}), base_url=url, timeout=5.0),
+                                CRITERIA, "/flow:auto 1", FILES)
+    assert result["status"] == "UNAVAILABLE" and "HTTP 400" in str(result["reason"])
