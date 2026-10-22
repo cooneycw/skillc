@@ -90,6 +90,31 @@ machine, because the server calls external providers. Full requirements
 and acceptance: #69 (not yet delivered - #10's grading-boundary work
 leaves the seam open but does not build tiers 2 and 3).
 
+**Amendment (#513, owner ruling 2026-10-21):** a direct Anthropic Messages
+API call is a second permitted mechanism for the independent tier. The
+owner's ruling, verbatim: "assign 513 and 484 - you can amend the ADR 0005 to
+permit an api call for an anthropic grader (opus 5_5)." It is
+`skillc/judge_anthropic.py`, the stdlib `AnthropicJudge` behind the same
+`Judge` Protocol, and it changes nothing else in this section:
+
+- The model is pinned to `claude-opus-5-5`, in `describe()` and in every
+  declaration that selects it (`primary_endpoint.tier = "independent"` with a
+  `judge` block; `skillc/fixture_live.py` refuses any other model).
+- It runs on the controller, never inside a trial container. Its key comes
+  from skillc's own AWS Secrets Manager secret at call time and never reaches
+  the repository, the run store, a log or a container environment.
+- Its inputs pass the #63 leak check before they leave the machine, as
+  `mcp-second-opinion`'s do.
+- Its spend is dollar-metered under sections 5 and 6. A declaration carries
+  the per-call cap, the number of calls and a price with the URL and date it
+  was read from, and is refused when that worst case exceeds the $5 ceiling.
+  No paid call happens without the owner's approval of the exact declaration
+  digest.
+- It never overrides the deterministic tier, which stays the floor.
+
+`mcp-second-opinion` stays a permitted mechanism; this adds one and retires
+none.
+
 ### 5. Cost stop: an authorized budget, not an issue or a merged doc
 
 Filing an issue, or merging planning documents (including this one), never
