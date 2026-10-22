@@ -526,6 +526,27 @@ def test_red_case_a_cancel_between_turns_launches_no_approval(store: Path) -> No
     assert len(events) == 1 and events[0]["delivered"] is False and "cancelled" in str(events[0]["reason"])
 
 
+@pytest.mark.parametrize("raises", [False, True])
+def test_before_stop_runs_while_the_attempt_is_up_and_never_blocks_the_stop(store: Path, raises: bool) -> None:
+    """#518 review (HIGH): the credential steward must report from a RUNNING
+    container, so `before_stop` comes after the last turn and before
+    `end_attempt` - and a hook that raises still lets the attempt end."""
+    from skillc import lifecycle
+
+    experiment, attempt_id = _planned(store)
+    backend = _MemoryTurns()
+    seen: list[tuple[int, int]] = []
+
+    def before_stop(_backend: object, _handle: object) -> None:
+        seen.append((len(backend.turns), backend.ended))
+        if raises:
+            raise RuntimeError("steward unreachable")
+
+    lifecycle._run_turns(backend, object(), experiment, attempt_id, ["turn-1"], Limits(timeout=60),  # type: ignore[arg-type]
+                         None, lambda *_: None, before_stop=before_stop)
+    assert seen == [(1, 0)] and backend.ended == 1
+
+
 def test_red_case_a_declared_but_undelivered_turn_still_ends_with_a_confirmed_stop(
     store: Path, base: Path, docker_state: Path, tmp_path: Path,
 ) -> None:

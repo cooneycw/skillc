@@ -84,8 +84,11 @@ class CredentialStewardSession:
             return f"unknown event {request.get('event')!r}"
         if not all(_count(request.get(k)) for k in ("seq", "opens", "closes")):
             return "seq, opens and closes must be non-negative integers"
-        if self.events and int(request["seq"]) <= int(self.events[-1]["seq"]):  # type: ignore[call-overload]
-            return "seq did not increase"
+        # Exactly 1, 2, 3...: a gap is an event the steward sent and this
+        # record never got (a failed send), so coverage is incomplete.
+        expected = int(self.events[-1]["seq"]) + 1 if self.events else 1
+        if request["seq"] != expected:
+            return f"seq {request['seq']} is not the next ({expected}); an event is missing or replayed"
         if len(self.events) >= MAX_EVENTS:
             return f"more than {MAX_EVENTS} events"
         return None
@@ -150,7 +153,6 @@ def stop_reason(record: Mapping[str, Any] | None) -> str | None:
 # ------------------------------------------------------------- the driver
 
 STEWARD_SOURCE = Path(__file__).resolve().parent.parent / "docker" / "fixture-service" / "skillc-credential-steward.py"
-CANDIDATE = "candidate"
 
 
 class StewardBackend(Protocol):
@@ -179,6 +181,8 @@ class CredentialSteward:
     sleep: Callable[[float], None] = time.sleep
     failure: str | None = None
     arms_requested: int = 0
+    stopped: bool = False
+    final_vault: bytes | None = None
 
     def _await(self, event: str, after: int) -> bool:
         deadline = self.clock() + self.wait_s
@@ -202,28 +206,35 @@ class CredentialSteward:
             raise StewardFailed("the credential steward never reported armed")
 
     def restore_for_turn(self, backend: StewardBackend, handle: object) -> None:
-        """Before a resume turn: RE-ARM FIRST (so the restore is not read as a
-        re-creation), confirmed by `armed`; then restore the vaulted file,
-        candidate-owned 0600, for the resumed client to read."""
+        """Before a resume turn: signal the steward, which RESTORES the vaulted
+        file itself (through its held directory fd, never following a link),
+        discards its own write's events, and only then re-arms - so its
+        `armed` is the confirmation, and every open it counts afterwards is
+        the resumed client's."""
         before = len(self.session.events)
         if backend.root_output_in_attempt(handle, ["sh", "-c", 'kill -USR1 "$(cat "$1")"', "sh", PIDFILE]) is None:
-            raise StewardFailed("the credential steward could not be signalled to re-arm")
+            raise StewardFailed("the credential steward could not be signalled to restore and re-arm")
         self.arms_requested += 1
         if not self._await("armed", before):
-            raise StewardFailed("the credential steward never re-armed for the resume turn")
-        dest = f"{self.home_codex}/{self.auth_relpath}"
-        script = ('cp -- "$1/auth.json" "$2" && chown "$3:$3" -- "$2" && chmod 0600 -- "$2"')
-        if backend.root_output_in_attempt(handle, ["sh", "-c", script, "sh", VAULT, dest, CANDIDATE]) is None:
-            raise StewardFailed("the vaulted credential could not be restored for the resume turn")
+            raise StewardFailed("the credential steward never restored and re-armed for the resume turn")
 
     def stop(self, backend: StewardBackend, handle: object) -> None:
+        """Read the vault, then stop the steward - both while the container
+        still runs (lifecycle's `before_stop`). Once only: a later call
+        (`finish()`, after the container is gone) changes nothing."""
+        if self.stopped:
+            return
+        self.stopped = True
+        self.final_vault = backend.root_output_in_attempt(handle, ["cat", "--", f"{VAULT}/auth.json"])
         before = len(self.session.events)
         backend.root_output_in_attempt(handle, ["sh", "-c", 'kill -TERM "$(cat "$1")"', "sh", PIDFILE])
         self._await("stopped", before)  # a missing `stopped` reads UNKNOWN in the record
 
     def vault_bytes(self, backend: StewardBackend, handle: object) -> bytes | None:
         """The credential as it ends the attempt: the vault's copy (the home
-        no longer holds it). For #98's refresh observation."""
+        no longer holds it), as read at `stop()`. For #98's refresh observation."""
+        if self.stopped:
+            return self.final_vault
         return backend.root_output_in_attempt(handle, ["cat", "--", f"{VAULT}/auth.json"])
 
     def record(self) -> dict[str, Any]:

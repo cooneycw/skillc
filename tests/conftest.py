@@ -183,6 +183,7 @@ class FakeStewardDriver:
         from skillc import credential_steward as cs
         assert isinstance(session, cs.CredentialStewardSession)
         self.session, self.backend, self.handle, self.arms, self.seq = session, backend, handle, 0, 0
+        self.stopped = False
         if FakeStewardDriver.mode == "never-arms":
             raise cs.StewardFailed("the credential steward never reported armed")
         self._arm()
@@ -203,7 +204,15 @@ class FakeStewardDriver:
         self._arm()
 
     def stop(self, backend: object, handle: object) -> None:
-        self._emit("stopped")
+        """Like the real one, it can report only from a RUNNING container
+        (#518 review: a stop after the container was killed never arrives),
+        and only once."""
+        from skillc.backend import Confirmation
+        if self.stopped:
+            return
+        self.stopped = True
+        if backend.confirm_stopped(handle) is Confirmation.NOT_CONFIRMED:  # type: ignore[attr-defined]
+            self._emit("stopped")
 
     def vault_bytes(self, backend: object, handle: object) -> bytes | None:
         # No real withdrawal happened, so the home still holds the credential.

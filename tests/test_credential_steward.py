@@ -57,13 +57,29 @@ def test_red_a_malformed_event_makes_the_channel_unavailable(request_: dict[str,
     assert s.channel_unavailable and s.finalize(0)["status"] == "unknown"
 
 
-def test_red_a_replayed_seq_and_a_late_event_are_refused() -> None:
+@pytest.mark.parametrize(("first", "second"), [
+    (1, 1),   # replayed
+    (1, 3),   # a gap: event 2 was sent and never arrived
+    (2, 3),   # the record never saw event 1
+])
+def test_red_a_replayed_skipped_or_late_starting_seq_is_refused(first: int, second: int) -> None:
+    s = cs.CredentialStewardSession("a-1")
+    event = {"op": "credential_steward", "opens": 4, "closes": 4}
+    if first != 1:
+        with pytest.raises(ChannelRefusal, match="missing or replayed"):
+            s.decide({**event, "event": "armed", "seq": first})
+    else:
+        s.decide({**event, "event": "armed", "seq": first})
+        with pytest.raises(ChannelRefusal, match="missing or replayed"):
+            s.decide({**event, "event": "withdrawn", "seq": second})
+    assert s.finalize(1)["status"] == "unknown"
+
+
+def test_red_a_late_event_is_refused() -> None:
     s = _session("armed")
-    with pytest.raises(ChannelRefusal, match="seq did not increase"):
-        s.decide({"op": "credential_steward", "event": "withdrawn", "seq": 1, "opens": 4, "closes": 4})
     s.finalize(1)
     with pytest.raises(ChannelRefusal, match="finalized"):
-        s.decide({"op": "credential_steward", "event": "stopped", "seq": 9, "opens": 0, "closes": 0})
+        s.decide({"op": "credential_steward", "event": "stopped", "seq": 2, "opens": 0, "closes": 0})
 
 
 def test_the_absent_record_blocks() -> None:
@@ -97,20 +113,20 @@ class _FakeSteward:
                                max_bytes: int = 1 << 20) -> bytes | None:
         script = argv[2] if argv[0] == "sh" else " ".join(argv)
         if "kill -USR1" in script:
-            self.calls.append("rearm")
+            # The steward restores the file itself, then re-arms - or reports
+            # `error` and never arms when the restore fails.
+            self.calls.append("restore+rearm")
             if self.signal_ok and self.arms:
-                self._emit("armed")
+                self._emit("armed" if self.restore_ok else "error")
+                if self.restore_ok:
+                    self._emit("withdrawn")
             return b"" if self.signal_ok else None
-        if script.startswith("cp "):
-            self.calls.append("restore")
-            if self.restore_ok:
-                self._emit("withdrawn")
-            return b"" if self.restore_ok else None
         if "kill -TERM" in script:
             self.calls.append("stop")
             self._emit("stopped")
             return b""
         if argv[0] == "cat":
+            self.calls.append("vault")
             return b'{"tokens": {}}'
         raise AssertionError(argv)
 
@@ -128,7 +144,8 @@ def test_a_turn_and_a_resume_end_held_and_rearm_comes_before_restore() -> None:
     driver.restore_for_turn(fake, object())
     driver.stop(fake, object())
     assert placed == [cs.STEWARD_SOURCE.read_bytes()]
-    assert fake.calls == ["start", "rearm", "restore", "stop"]  # never restore before the re-arm
+    # No controller-side root copy at all (#518 review): the steward restores.
+    assert fake.calls == ["start", "restore+rearm", "vault", "stop"]
     assert driver.record()["status"] == "held"
 
 
@@ -144,7 +161,7 @@ def test_red_a_steward_that_does_not_start_or_arm_refuses_the_attempt(kw: dict[s
 
 @pytest.mark.parametrize(("kw", "match"), [
     ({"signal_ok": False}, "could not be signalled"),
-    ({"restore_ok": False}, "could not be restored"),
+    ({"restore_ok": False}, "never restored and re-armed"),
 ])
 def test_red_a_resume_the_steward_cannot_cover_is_refused(kw: dict[str, Any], match: str) -> None:
     driver, fake, placed = _driver(**kw)
@@ -157,9 +174,21 @@ def test_red_a_resume_with_no_rearm_ack_is_refused_before_any_restore() -> None:
     driver, fake, placed = _driver()
     driver.start(fake, object(), placed.append)
     fake.arms = False
-    with pytest.raises(cs.StewardFailed, match="never re-armed"):
+    with pytest.raises(cs.StewardFailed, match="never restored and re-armed"):
         driver.restore_for_turn(fake, object())
-    assert "restore" not in fake.calls
+
+
+def test_stop_reads_the_vault_first_and_runs_once() -> None:
+    """#518 review: `finish()` runs after the container is stopped, so the
+    stop in `before_stop` must be the one that counts, and a second call
+    must not reach the (gone) container."""
+    driver, fake, placed = _driver()
+    driver.start(fake, object(), placed.append)
+    driver.stop(fake, object())
+    driver.stop(fake, object())
+    assert fake.calls == ["start", "vault", "stop"]
+    assert driver.vault_bytes(fake, object()) == b'{"tokens": {}}' and fake.calls[-1] == "stop"
+    assert driver.record()["status"] == "held"
 
 
 def test_a_missing_stop_reads_unknown() -> None:

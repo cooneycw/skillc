@@ -2138,7 +2138,7 @@ def _fixture_credit_block(session: FixtureSession, observation: object = None) -
         return "not credited: the fixture service record was never finalized"
     guard = session.guard_record()
     block = cg.credit_block(guard, nested_policy=session.nested_policy)
-    if block is None and (bypass := ag.nested_bypass(guard, observation, session.nested_policy)):
+    if block is None and (bypass := ag.nested_bypass(ag.guard_nested(guard), observation, session.nested_policy)):
         block = "not credited: nested codex past the guard (" + "; ".join(bypass) + ")"
     return block or cs.credit_block(session.steward_record())  # #518
 
@@ -2600,9 +2600,19 @@ def run_one_attempt(
                 imports.append(trial.Import(path, stream, "client-reported", trial.sha256_bytes(evidence.data)))
         return imports
 
+    stewarded = [h for h in (fixture_session, attempt_guard) if h is not None]
+
+    def before_stop(stopping_backend: ExecutionBackend, handle: object) -> None:
+        """#518: the steward reports `stopped` and its vault is read while the
+        container still runs; `finish()`, after the stop, cannot reach it."""
+        for holder in stewarded:
+            if holder.steward_driver is not None:
+                holder.steward_driver.stop(stopping_backend, handle)  # type: ignore[arg-type]
+
     record = run_through_backend(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
+        before_stop=before_stop if stewarded else None,
         transcript_for_capture=transcript_for_capture,
         imports_for_capture=imports_for_capture,
         next_turn=next_turn if declared_turns else None,

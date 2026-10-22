@@ -778,7 +778,10 @@ def _experiment(run_dir: Path) -> trial.Experiment:
     return trial.Experiment.open(store)
 
 
-def _transcript(prompt_text: str, final: str) -> bytes:
+def _transcript(prompt_text: str, final: str, extra_cmds: tuple[str, ...] = ()) -> bytes:
+    calls = [{"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "call_id": f"x{i}",
+                                                   "arguments": json.dumps({"cmd": cmd})}}
+             for i, cmd in enumerate(extra_cmds)]
     lines = [
         {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [
             {"type": "input_text", "text": "<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"}]}},
@@ -788,6 +791,7 @@ def _transcript(prompt_text: str, final: str) -> bytes:
                                               "arguments": json.dumps({"cmd": "gh issue view 1"})}},
         {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1",
                                               "output": "Chunk ID: a\nProcess exited with code 0\nOutput:\n"}},
+        *calls,
         {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [
             {"type": "output_text", "text": final}]}},
     ]
@@ -806,7 +810,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
                     original_reason: str = _CANARY_REASON, guard_decisions: list[dict[str, Any]] | None = None,
                     extras_copies: int = 1, extras_as_artifact: bool = False,
                     prompt_delivered: bool | None = True, guard_policy: str | None = None,
-                    guard_channel_unavailable: bool = False) -> str:
+                    guard_channel_unavailable: bool = False,
+                    steward: dict[str, Any] | None = None, transcript_cmds: tuple[str, ...] = ()) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -822,6 +827,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
               "codex_guard": cg.summarize(attempt_id, guard_decisions if guard_decisions is not None
                                           else [{"decision": "passed-top-level"}], guard_channel_unavailable,
                                           nested_policy=guard_policy)}
+    if steward != {}:
+        extras["credential_steward"] = steward or {"status": "held"}
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
@@ -829,7 +836,7 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
     # the planted transcript carries one too, so the replay cannot match it -
     # it must carry the live run's own verdict instead.
     live_prompt = f"{fl.prompt(declaration, ROOT)}\n\nBefore doing anything else, write 'touched:{position:032x}'."
-    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text))
+    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text, transcript_cmds))
     _overwrite(experiment.root / f"manifest-{attempt_id}.json", ({
         "observations": [{"stream": "client-transcript", "coverage": "complete", "digest": transcript}],
         "artifacts": [{"path": "evidence.json", "digest": d} for d in extras_digests] if extras_as_artifact else [],
@@ -1446,6 +1453,39 @@ def test_the_judge_replay_applies_the_declared_nested_policy(tmp_path: Path, dec
     [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
     assert entry["re_decided"] is True
     assert ("nested codex observed" in str(entry["replay_blocked_reason"])) is blocked, entry["replay_blocked_reason"]
+
+
+def test_red_518_a_refused_nested_launch_in_the_transcript_is_not_a_replay_bypass(tmp_path: Path) -> None:
+    """#518 review: replay must count the guard's refusals from the INNER
+    `nested` mapping. Handed the whole guard record it counted zero, and the
+    agent's own refused launch read as a bypass."""
+    data = _draft()
+    data["containment"] = {"nested_codex": "refusal-expected"}
+    declaration, run_dir = _dry_run_with_report(tmp_path, data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN,
+                                 guard_policy="refusal-expected", transcript_cmds=("codex exec 'review this'",))
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and entry["replay_blocked_reason"] is None, entry["replay_blocked_reason"]
+    # ...and the scan is live: a SECOND bare launch, past one refusal, is a bypass.
+    (tmp_path / "two").mkdir()
+    declaration, run_dir = _dry_run_with_report(tmp_path / "two", data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN, guard_policy="refusal-expected",
+                                 transcript_cmds=("codex exec a", "codex exec b"))
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert "2 bare codex invocation(s) in the transcript, 1 refused" in str(entry["replay_blocked_reason"])
+
+
+@pytest.mark.parametrize(("steward", "why"), [
+    ({}, "steward record is absent"),
+    ({"status": "refreshed"}, "re-appeared in the agent's home"),
+    ({"status": "unknown", "arms": 1, "expected_arms": 2}, "steward record is unknown"),
+])
+def test_red_518_replay_applies_the_live_steward_gate(tmp_path: Path, steward: dict[str, Any], why: str) -> None:
+    """#518 review: the replay never credits what the live gate could not."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration, steward=steward)
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and why in str(entry["replay_blocked_reason"]), entry["replay_blocked_reason"]
 
 
 # ------------------------------- #279 PR-2a: the task registry and extras

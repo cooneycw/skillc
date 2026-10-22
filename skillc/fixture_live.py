@@ -552,6 +552,7 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
     # it surfaced only by accident, as "census unavailable".
     fixture_rec = record.get("fixture")
     guard_rec = fixture_rec.get("codex_guard") if isinstance(fixture_rec, Mapping) else None
+    # The live record keeps the guard's INNER `nested` mapping (agent_trial).
     bypass = ag.nested_bypass(guard_rec if isinstance(guard_rec, Mapping) else None, obs, nested_policy)
     if bypass:
         return "nested codex past the guard: " + "; ".join(bypass)
@@ -1106,7 +1107,10 @@ _ADAPTER_DEPENDENT_REASONS = ("prompt_delivered=", "not credited: the transcript
 #: grading envelope (which adds the witness and the graded tree digest).
 _RAW_EXTRAS_KEYS = frozenset({"case", "service", "git", "git_unreadable", "final_report", "codex_guard"})
 #: #279 PR-2a: a multi-turn attempt's raw extras also carry its ordered turns.
-_RAW_EXTRAS_KEY_SETS = (_RAW_EXTRAS_KEYS, _RAW_EXTRAS_KEYS | {"controller_turns"})
+#: #518: and, from #518 on, the credential steward's record - a run without
+#: it is still found, and its replay is then never credited (`fixture_block`).
+_RAW_EXTRAS_KEY_SETS = tuple(base | extra for base in (_RAW_EXTRAS_KEYS, _RAW_EXTRAS_KEYS | {"controller_turns"})
+                             for extra in (frozenset(), frozenset({"credential_steward"})))
 
 
 def _sha256_file(path: Path) -> str:
@@ -1365,10 +1369,13 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             # The live gate's own policy (#279 ruling G1), never a stricter or looser one.
             block = cg.credit_block(guard if isinstance(guard, Mapping) else None,
                                     nested_policy=declaration.nested_policy)
-            if block is None and (bypass := ag.nested_bypass(guard if isinstance(guard, Mapping) else None,
-                                                             observed, declaration.nested_policy)):
+            if block is None and (bypass := ag.nested_bypass(ag.guard_nested(guard), observed,
+                                                             declaration.nested_policy)):
                 block = "not credited: nested codex past the guard (" + "; ".join(bypass) + ")"
-            return block
+            # #518: the live gate's steward requirement too - replay never credits
+            # an attempt the live path could not.
+            steward = fixture.get("credential_steward")
+            return block or cs.credit_block(steward if isinstance(steward, Mapping) else None)
 
         # The live gate's witness and disposition checks precede the canary, so
         # an adapter-dependent original reason means both had passed.

@@ -153,6 +153,14 @@ class AttemptGuard:
         return result
 
 
+def guard_nested(guard_record: object) -> Mapping[str, Any] | None:
+    """The `nested` mapping inside a `codex_guard.summarize` record - what
+    `assess`/`nested_bypass` count refusals from. Passing the whole record
+    reads zero refusals, so every legitimate refusal would read as a bypass."""
+    nested = guard_record.get("nested") if isinstance(guard_record, Mapping) else None
+    return nested if isinstance(nested, Mapping) else None
+
+
 def nested_bypass(nested: Mapping[str, Any] | None, observation: object,
                   nested_policy: str | None) -> list[str]:
     """#518: what the transcript shows that the guard did not record - a second

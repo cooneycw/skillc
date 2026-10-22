@@ -385,3 +385,24 @@ def test_red_518_a_steward_that_never_arms_refuses_the_attempt(
                                        report=(candidate / "report.md").read_text())
     assert result["graded"] is None and trusted == []
     assert "never reported armed" in str(result["fixture"]["failure"])
+
+
+def test_red_518_a_refused_nested_launch_is_not_a_bypass_at_the_fixture_gate() -> None:
+    """#518 review: the gate counts the guard's refusals from its INNER
+    `nested` mapping. Handed the whole record it counted zero, so the agent's
+    own refused launch, seen in the transcript, read as a bypass."""
+    from types import SimpleNamespace
+
+    from skillc import codex_guard as cg
+
+    def session(decisions: list[str]) -> Any:
+        guard = cg.summarize("a-1", [{"decision": d, "argv_digest": "sha256:" + "0" * 64, "seq": i}
+                                     for i, d in enumerate(decisions)], False, nested_policy="refusal-expected")
+        return SimpleNamespace(failure=None, record={}, nested_policy="refusal-expected",
+                               guard_record=lambda: guard, steward_record=lambda: {"status": "held"})
+
+    one = {"transcript_codex_invocations": [{"program": "codex", "guarded": True}], "transcript_files_found": 1}
+    assert at._fixture_credit_block(session(["passed-top-level", "refused-nested"]), one) is None
+    two = {**one, "transcript_codex_invocations": [{"program": "codex", "guarded": True}] * 2}
+    assert "2 bare codex invocation(s) in the transcript, 1 refused" in str(
+        at._fixture_credit_block(session(["passed-top-level", "refused-nested"]), two))
