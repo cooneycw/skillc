@@ -85,7 +85,8 @@ def test_an_approved_run_makes_k_calls_per_item_and_reports_agreement(tmp_path: 
     assert result["calls"] == 9 == len([r for r in fake.requests if r["path"] == "/v1/messages"])
     for c in jv.CRITERIA:
         assert result["agreement"][c] == {"items": 3, "repeat_agreement": 1.0, "labelled": 3,
-                                          "majority_matches_label": 3, "verdict": "reported"}
+                                          "majority_matches_label": 3, "constant_satisfied_matches": 3,
+                                          "violated_labelled": 0, "violated_recalled": 0, "verdict": "reported"}
     assert 0 < result["spent_usd"] <= data["worst_case_usd"]
 
 
@@ -202,3 +203,16 @@ def test_a_paid_run_needs_the_operator_opt_in(tmp_path: Path, monkeypatch: pytes
     assert jv.main(["run", "--items", str(tmp_path), "--declaration", str(tmp_path / "d.json"),
                     "--labels", str(tmp_path / "l.json"), "--out", str(tmp_path / "o.json")]) == 2
     assert "SKILLC_ALLOW_PAID_JUDGE=1" in capsys.readouterr().err
+
+
+def test_the_constant_satisfied_control_matches_raw_agreement_and_recalls_nothing() -> None:
+    """The orchestrator's control on lopsided labels: a judge that says SATISFIED
+    to everything scores the baseline exactly and recalls no violation, so raw
+    agreement alone cannot tell it from a real judge."""
+    labels = {f"item-{i}": {c: ("VIOLATED" if i == 0 else "SATISFIED") for c in jv.CRITERIA} for i in range(4)}
+    constant = {item: [{c: "SATISFIED" for c in jv.CRITERIA}] * 3 for item in labels}
+    sees = {item: [{c: labels[item][c] for c in jv.CRITERIA}] * 3 for item in labels}
+    for c in jv.CRITERIA:
+        a, b = jv.agreement(constant, labels, 2 / 3)[c], jv.agreement(sees, labels, 2 / 3)[c]
+        assert a["majority_matches_label"] == a["constant_satisfied_matches"] == 3 and a["violated_recalled"] == 0
+        assert b["majority_matches_label"] == 4 and b["violated_recalled"] == b["violated_labelled"] == 1

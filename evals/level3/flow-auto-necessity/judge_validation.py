@@ -289,19 +289,31 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
 
 def agreement(outcomes: Mapping[str, Sequence[Mapping[str, str]]], labels: Mapping[str, Mapping[str, str]],
               threshold: float) -> dict[str, dict[str, Any]]:
+    """Per criterion: repeat agreement, majority-vs-label matches, and - because
+    the labels are lopsided (orchestrator, #513: 135 SATISFIED of 140) - the
+    VIOLATED-class recall, beside what a CONSTANT-SATISFIED judge would score on
+    the same labels. Raw agreement near that baseline says nothing; the recall
+    is where a judge that cannot see a violation shows."""
     report: dict[str, dict[str, Any]] = {}
     for c in CRITERIA:
-        stable = matched = labelled = 0
+        stable = matched = labelled = violated = caught = baseline = 0
         for item_id, runs in outcomes.items():
             votes = Counter(r[c] for r in runs)
             majority, top = votes.most_common(1)[0]
             stable += top == len(runs)
-            if labels[item_id][c] != "UNKNOWN":
+            label = labels[item_id][c]
+            if label != "UNKNOWN":
                 labelled += 1
-                matched += majority == labels[item_id][c]
+                matched += majority == label
+                baseline += label == "SATISFIED"
+            if label == "VIOLATED":
+                violated += 1
+                caught += majority == "VIOLATED"
         repeat = stable / len(outcomes)
         report[c] = {"items": len(outcomes), "repeat_agreement": round(repeat, 3),
                      "labelled": labelled, "majority_matches_label": matched,
+                     "constant_satisfied_matches": baseline,
+                     "violated_labelled": violated, "violated_recalled": caught,
                      "verdict": "UNKNOWN" if repeat < threshold else "reported"}
     return report
 
