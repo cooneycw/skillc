@@ -30,9 +30,11 @@ Stdlib only (AGENTS.md).
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Protocol
 
 from .decide_reply_channel import ChannelRefusal
 
@@ -143,3 +145,86 @@ def stop_reason(record: Mapping[str, Any] | None) -> str | None:
     """Why the schedule stops, or None. Every non-`held` record stops it."""
     block = credit_block(record)
     return block.removeprefix("not credited: ") if block else None
+
+
+# ------------------------------------------------------------- the driver
+
+STEWARD_SOURCE = Path(__file__).resolve().parent.parent / "docker" / "fixture-service" / "skillc-credential-steward.py"
+CANDIDATE = "candidate"
+
+
+class StewardBackend(Protocol):
+    def start_root_daemon_in_attempt(self, handle: object, argv: Sequence[str],
+                                     timeout: float | None = None) -> bool: ...
+
+    def root_output_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None,
+                               max_bytes: int = ...) -> bytes | None: ...
+
+
+class StewardFailed(Exception):
+    """The steward could not be placed, started, re-armed or restored."""
+
+
+@dataclass
+class CredentialSteward:
+    """Drives one attempt's steward and holds its record. Each step is
+    confirmed by the steward's OWN event over the trigger socket, never by a
+    docker return code."""
+
+    session: CredentialStewardSession
+    home_codex: str
+    auth_relpath: str = "auth.json"
+    wait_s: float = 10.0
+    clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+    failure: str | None = None
+    arms_requested: int = 0
+
+    def _await(self, event: str, after: int) -> bool:
+        deadline = self.clock() + self.wait_s
+        while self.clock() < deadline:
+            if any(e["event"] == event for e in self.session.events[after:]):
+                return True
+            self.sleep(0.05)
+        return False
+
+    def start(self, backend: StewardBackend, handle: object, place: Callable[[bytes], None]) -> None:
+        """Place the steward root-owned (via `place`, the overlay's verified
+        placement) and start it; confirmed by its `armed` event."""
+        place(STEWARD_SOURCE.read_bytes())
+        before = len(self.session.events)
+        argv = ["python3", "-IS", STEWARD_PATH, "--home-codex", self.home_codex, "--vault", VAULT,
+                "--pidfile", PIDFILE, "--quiet-ms", str(QUIET_MS), "--deadline-s", str(DEADLINE_S)]
+        if not backend.start_root_daemon_in_attempt(handle, argv):
+            raise StewardFailed("the credential steward could not be started")
+        self.arms_requested += 1
+        if not self._await("armed", before):
+            raise StewardFailed("the credential steward never reported armed")
+
+    def restore_for_turn(self, backend: StewardBackend, handle: object) -> None:
+        """Before a resume turn: RE-ARM FIRST (so the restore is not read as a
+        re-creation), confirmed by `armed`; then restore the vaulted file,
+        candidate-owned 0600, for the resumed client to read."""
+        before = len(self.session.events)
+        if backend.root_output_in_attempt(handle, ["sh", "-c", 'kill -USR1 "$(cat "$1")"', "sh", PIDFILE]) is None:
+            raise StewardFailed("the credential steward could not be signalled to re-arm")
+        self.arms_requested += 1
+        if not self._await("armed", before):
+            raise StewardFailed("the credential steward never re-armed for the resume turn")
+        dest = f"{self.home_codex}/{self.auth_relpath}"
+        script = ('cp -- "$1/auth.json" "$2" && chown "$3:$3" -- "$2" && chmod 0600 -- "$2"')
+        if backend.root_output_in_attempt(handle, ["sh", "-c", script, "sh", VAULT, dest, CANDIDATE]) is None:
+            raise StewardFailed("the vaulted credential could not be restored for the resume turn")
+
+    def stop(self, backend: StewardBackend, handle: object) -> None:
+        before = len(self.session.events)
+        backend.root_output_in_attempt(handle, ["sh", "-c", 'kill -TERM "$(cat "$1")"', "sh", PIDFILE])
+        self._await("stopped", before)  # a missing `stopped` reads UNKNOWN in the record
+
+    def vault_bytes(self, backend: StewardBackend, handle: object) -> bytes | None:
+        """The credential as it ends the attempt: the vault's copy (the home
+        no longer holds it). For #98's refresh observation."""
+        return backend.root_output_in_attempt(handle, ["cat", "--", f"{VAULT}/auth.json"])
+
+    def record(self) -> dict[str, Any]:
+        return self.session.finalize(expected_arms=self.arms_requested)

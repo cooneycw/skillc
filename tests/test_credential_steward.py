@@ -68,3 +68,101 @@ def test_red_a_replayed_seq_and_a_late_event_are_refused() -> None:
 
 def test_the_absent_record_blocks() -> None:
     assert cs.credit_block(None) == "not credited: the credential steward record is absent"
+
+
+# --- the driver, against a fake backend that plays the steward --------------
+
+class _FakeSteward:
+    """Answers the driver's root calls the way the in-container steward
+    would, by sending its events into the session."""
+
+    def __init__(self, session: cs.CredentialStewardSession, *, start_ok: bool = True, arms: bool = True,
+                 signal_ok: bool = True, restore_ok: bool = True) -> None:
+        self.session, self.start_ok, self.arms, self.signal_ok, self.restore_ok = session, start_ok, arms, signal_ok, restore_ok
+        self.calls: list[str] = []
+        self.seq = 0
+
+    def _emit(self, event: str) -> None:
+        self.seq += 1
+        self.session.decide({"op": "credential_steward", "event": event, "seq": self.seq, "opens": 4, "closes": 4})
+
+    def start_root_daemon_in_attempt(self, handle: object, argv: Any, timeout: float | None = None) -> bool:
+        self.calls.append("start")
+        if self.start_ok and self.arms:
+            self._emit("armed")
+            self._emit("withdrawn")
+        return self.start_ok
+
+    def root_output_in_attempt(self, handle: object, argv: Any, timeout: float | None = None,
+                               max_bytes: int = 1 << 20) -> bytes | None:
+        script = argv[2] if argv[0] == "sh" else " ".join(argv)
+        if "kill -USR1" in script:
+            self.calls.append("rearm")
+            if self.signal_ok and self.arms:
+                self._emit("armed")
+            return b"" if self.signal_ok else None
+        if script.startswith("cp "):
+            self.calls.append("restore")
+            if self.restore_ok:
+                self._emit("withdrawn")
+            return b"" if self.restore_ok else None
+        if "kill -TERM" in script:
+            self.calls.append("stop")
+            self._emit("stopped")
+            return b""
+        if argv[0] == "cat":
+            return b'{"tokens": {}}'
+        raise AssertionError(argv)
+
+
+def _driver(**kw: Any) -> tuple[cs.CredentialSteward, _FakeSteward, list[bytes]]:
+    session = cs.CredentialStewardSession("a-1")
+    placed: list[bytes] = []
+    driver = cs.CredentialSteward(session, "/home/candidate/.codex", wait_s=0.2, sleep=lambda s: None)
+    return driver, _FakeSteward(session, **kw), placed
+
+
+def test_a_turn_and_a_resume_end_held_and_rearm_comes_before_restore() -> None:
+    driver, fake, placed = _driver()
+    driver.start(fake, object(), placed.append)
+    driver.restore_for_turn(fake, object())
+    driver.stop(fake, object())
+    assert placed == [cs.STEWARD_SOURCE.read_bytes()]
+    assert fake.calls == ["start", "rearm", "restore", "stop"]  # never restore before the re-arm
+    assert driver.record()["status"] == "held"
+
+
+@pytest.mark.parametrize(("kw", "match"), [
+    ({"start_ok": False}, "could not be started"),
+    ({"arms": False}, "never reported armed"),
+])
+def test_red_a_steward_that_does_not_start_or_arm_refuses_the_attempt(kw: dict[str, Any], match: str) -> None:
+    driver, fake, placed = _driver(**kw)
+    with pytest.raises(cs.StewardFailed, match=match):
+        driver.start(fake, object(), placed.append)
+
+
+@pytest.mark.parametrize(("kw", "match"), [
+    ({"signal_ok": False}, "could not be signalled"),
+    ({"restore_ok": False}, "could not be restored"),
+])
+def test_red_a_resume_the_steward_cannot_cover_is_refused(kw: dict[str, Any], match: str) -> None:
+    driver, fake, placed = _driver(**kw)
+    driver.start(fake, object(), placed.append)
+    with pytest.raises(cs.StewardFailed, match=match):
+        driver.restore_for_turn(fake, object())
+
+
+def test_red_a_resume_with_no_rearm_ack_is_refused_before_any_restore() -> None:
+    driver, fake, placed = _driver()
+    driver.start(fake, object(), placed.append)
+    fake.arms = False
+    with pytest.raises(cs.StewardFailed, match="never re-armed"):
+        driver.restore_for_turn(fake, object())
+    assert "restore" not in fake.calls
+
+
+def test_a_missing_stop_reads_unknown() -> None:
+    driver, fake, placed = _driver()
+    driver.start(fake, object(), placed.append)
+    assert driver.record()["status"] == "unknown"  # never stopped
