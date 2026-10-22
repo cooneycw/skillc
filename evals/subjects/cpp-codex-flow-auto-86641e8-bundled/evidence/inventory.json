@@ -1,7 +1,7 @@
 {
  "inventory_schema": 1,
  "profile": "cpp-codex-flow-auto-86641e8-bundled",
- "profile_digest": "sha256:0bbe59ee7d4df1aec1026ab33f7b5446445d378103e5b03766b1e05f4bb6a0b1",
+ "profile_digest": "sha256:17579728566709d973ce3ae6c205d2d90662c52367b6ff8e9c25f5ec5e21e967",
  "subject": {
   "declaration_digest": "sha256:50c3aaa0547ab7cb53e4e3dad24c36a8a0649574fbb6803e8cc262339a3ee71f",
   "locator": "github.com/cooneycw/claude-power-pack",
@@ -2802,6 +2802,18 @@
   {
    "path": ".codex/skills/flow-auto/scripts/flow-plan-record.py",
    "reason": "byte-identical to scripts/flow-plan-record.py at CPP 86641e8 (measured #525): attribution of repository mirrors only, never a verification of the installed skill"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/scripts/flow-helpers-install.sh",
+   "reason": "measured #525 (CPP 86641e8 :181-197): verifies the bundle IT runs from (SOURCE_DIR = its own skill's scripts/, or $FLOW_HELPERS_SOURCE), never flow-auto's; flow-auto's Step 6 only TELLS the user to run /flow-repair (reference.md:164, :319) and does not run it. Pointed at flow-auto's shimmed bundle it reports TAMPERED (exit 5) - a visible refusal, never a false pass. Delivered with the subject's other skills, outside this closure"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/codex-skill-sync.py",
+   "reason": "byte-identical to flow-auto's bundled copy at CPP 86641e8 (measured #525); same reason: generates manifests and checks a CPP repository's own mirrors, never the installed skill on the Step-6 path"
+  },
+  {
+   "path": ".codex/skills/flow-repair/scripts/flow-helpers-install.sh",
+   "reason": "byte-identical to flow-doctor's copy at CPP 86641e8 (measured #525); same reason: verifies its own bundle, not flow-auto's"
   }
  ],
  "installed_surface": {
