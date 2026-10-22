@@ -1141,9 +1141,12 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
         # the shipped skill (the witnessed gate's shim), as each entry declares.
         head = {"treatment_deviation": {
             "attempts": deviated,
-            "statement": "a skill-bundled gate was replaced by the witness shim (its real copy ran from a "
-                         "root-owned mirror verified against the skill's own SHA256SUMS); the installed skill "
-                         "fails its checksum on exactly that file"}, **head}
+            # INSTALLATION, never execution (counter-model review): whether the
+            # real copy ran is what each attempt's witnessed runs (`via`) say.
+            "statement": "a skill-bundled gate was replaced by the witness shim; its real copy was installed in a "
+                         "root-owned mirror verified against the skill's own SHA256SUMS, and the installed skill "
+                         "fails its checksum on exactly that file. Whether the gate ran is what the witnessed runs "
+                         "(via) record, not this statement"}, **head}
     return {**head,
         "kind": REPORT_KIND, "schema": SCHEMA, "experiment_id": experiment.id,
         "declaration_digest": declaration.digest, "approved": approved, "rehearsal": rehearse,

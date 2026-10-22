@@ -2236,7 +2236,7 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
     if "treatment_deviation" in report:  # #525: first, in the headline
         shimmed = sorted({p for a in report["treatment_deviation"]["attempts"] for p in a["shimmed"]})
         print(f"skillc: TREATMENT DEVIATION (declared): {len(report['treatment_deviation']['attempts'])} attempt(s) "
-              f"ran with the witness shim in place of {shimmed}", file=sys.stderr)
+              f"were set up with the witness shim in place of {shimmed}", file=sys.stderr)
     for case, counts in report["cases"].items():
         print(f"skillc: {case}: {counts}", file=sys.stderr)
     if stop.trigger is not None:

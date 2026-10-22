@@ -2415,6 +2415,12 @@ def run_one_attempt(
     if bundled_gate_entrypoints:
         if gate_entrypoint is None:
             raise HomeFileVerificationRefused("bundled gate entrypoints need the declared gate_entrypoint they copy")
+        if fixture is None:
+            # Counter-model review: only the fixture-live report surfaces the
+            # declared deviation (record AND head); a calibration or
+            # discrimination report would drop it, so those routes refuse.
+            raise HomeFileVerificationRefused("a bundled gate is witnessed only on the fixture-live route, whose "
+                                              "report declares the treatment deviation (#525)")
         if gate_shim_source.read_bytes().count(_SHIM_VIA_LINE) != 1:
             raise HomeFileVerificationRefused("this attempt's gate witness cannot see a skill-bundled gate: the "
                                               "flow-check witness of a bundled gate is deferred (#525)")

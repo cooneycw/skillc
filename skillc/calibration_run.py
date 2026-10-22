@@ -149,6 +149,8 @@ class _ClosureResult:
     gate_witness: str | None = None
     #: #525: the inventory's declared `bundled_gate_entrypoints`, absent = ().
     bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: the inventory's declared `checksum_consumers` (path -> reason).
+    checksum_consumers: Mapping[str, str] = field(default_factory=dict)
     #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
     #: cross-checked against the pins derived from the installed bytes.
     skill_pins: tuple[dict[str, str], ...] = ()
@@ -245,8 +247,10 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
     if missing:
         raise CalibrationRefused(f"profile {subject_profile!r} declares bundled gate entrypoint(s) {missing} its "
                                  "installed_home_files do not carry - they cannot be witnessed (#525)")
+    consumers = {str(c["path"]): str(c["reason"]) for c in inventory.get("checksum_consumers", ())}
     return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
-                          gate_witness=gate_witness, bundled_gate_entrypoints=bundled, skill_pins=skill_pins,
+                          gate_witness=gate_witness, bundled_gate_entrypoints=bundled, checksum_consumers=consumers,
+                          skill_pins=skill_pins,
                           home_modes=profile.installed_home_modes(inventory, tree))
 
 
@@ -312,6 +316,15 @@ def build_treatment(
                 f"{mode_disagreeing}"
             )
         home_files.update(closure_files)
+        # #525: the bundled-gate checks over the WHOLE delivered home, not only
+        # the profile's closure - a subject selecting more skills installs them
+        # all, and any of them could run an unwitnessed bundled gate or verify
+        # the shimmed skill's checksums (counter-model review).
+        problems = profile.bundled_gate_problems(
+            home_files, closure.gate_entrypoint, closure.bundled_gate_entrypoints, closure.checksum_consumers,
+            require_consumers_installed=True)
+        if problems:
+            raise CalibrationRefused(f"profile {subject_profile!r}, as delivered: {problems[0][1]}")
         home_modes.update(closure.home_modes)
         # Every closure file, not a curated subset (orchestrator ruling:
         # "read back the digest of every closure
