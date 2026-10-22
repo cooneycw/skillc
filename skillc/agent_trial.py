@@ -106,6 +106,7 @@ from . import (
     verify,
     witness_capture,
 )
+from . import credential_steward as cs
 from . import egress as eg
 from . import fixture_overlay as fo
 from . import fixture_service as fs
@@ -1499,6 +1500,7 @@ def _make_observe_before_teardown(
     local_mcp_servers: frozenset[str] = frozenset(),
     sessions: list[dict[str, object]] | None = None,
     scan_codex: bool = False,
+    credential_reader: Callable[[ExecutionBackend, object], bytes | None] | None = None,
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
     """`sessions` (#500), when given, receives EVERY transcript file of an
     attempt that left more than one, redacted and leak-checked, with each
@@ -1515,8 +1517,14 @@ def _make_observe_before_teardown(
         cred_relpath_bytes = delivered_credential_bytes.get("relpath")
         cred_bytes = delivered_credential_bytes.get("bytes")
         if isinstance(cred_relpath_bytes, bytes) and isinstance(cred_bytes, bytes):
-            current = backend.read_home_file(handle, cred_relpath_bytes.decode("utf-8"))
-            refresh_observed = credential.refresh_observed(cred_bytes, current)
+            if credential_reader is not None:
+                # #518: the steward withdrew the credential into its vault; the
+                # home no longer holds it. An unreadable vault is unknown.
+                vaulted = credential_reader(backend, handle)
+                refresh_observed = credential.refresh_observed(cred_bytes, vaulted) if vaulted is not None else None
+            else:
+                current = backend.read_home_file(handle, cred_relpath_bytes.decode("utf-8"))
+                refresh_observed = credential.refresh_observed(cred_bytes, current)
 
         tree = backend.read_home_tree(handle, spec.transcript_container_reldir)
         matches = {path: data for path, data in tree.items() if path.endswith(spec.transcript_suffix)}
@@ -2106,6 +2114,19 @@ def _build_discovery_receipt(
     }
 
 
+def _steward_vault_reader(fixture_session: FixtureSession | None, attempt_guard: ag.AttemptGuard | None
+                          ) -> Callable[[ExecutionBackend, object], bytes | None] | None:
+    """#518: where the credential is at teardown - the steward's vault."""
+    holder = fixture_session or attempt_guard
+    if holder is None:
+        return None
+
+    def read(backend: ExecutionBackend, handle: object) -> bytes | None:
+        driver = holder.steward_driver
+        return driver.vault_bytes(backend, handle) if driver is not None else None  # type: ignore[arg-type]
+    return read
+
+
 def _fixture_credit_block(session: FixtureSession, observation: object = None) -> str | None:
     """#434's credit-gate reasons, or `None` when the fixture's evidence lets
     the attempt be graded at all (the judge still decides each criterion).
@@ -2119,7 +2140,7 @@ def _fixture_credit_block(session: FixtureSession, observation: object = None) -
     block = cg.credit_block(guard, nested_policy=session.nested_policy)
     if block is None and (bypass := ag.nested_bypass(guard, observation, session.nested_policy)):
         block = "not credited: nested codex past the guard (" + "; ".join(bypass) + ")"
-    return block
+    return block or cs.credit_block(session.steward_record())  # #518
 
 
 def _fixture_extras(session: FixtureSession | None,
@@ -2428,6 +2449,16 @@ def run_one_attempt(
         if not isinstance(session_id, str):
             turn_state["stopped"] = "no session id in turn 1's client header: no further turn"
             return None
+        # #518: the resumed client needs the credential back - for its startup
+        # reads only. The steward re-arms first, then the file is restored.
+        holder = fixture_session or attempt_guard
+        driver = holder.steward_driver if holder is not None else None
+        if driver is not None:
+            try:
+                driver.restore_for_turn(_backend, _handle)  # type: ignore[arg-type]
+            except cs.StewardFailed as exc:
+                turn_state["stopped"] = f"the credential steward could not cover the resume: {exc}"
+                return None
         return ct.resume_argv(client, invocation.argv, session_id, declared_turns[done - 1])
 
     ctx = _AttemptContext(workdir=resolved_workdir, mcp_servers=resolved_mcp_servers, cli_version=resolved_cli_version)
@@ -2494,6 +2525,7 @@ def run_one_attempt(
         retained_transcript=retained_transcript, stored_transcript=stored_transcript,
         local_mcp_servers=frozenset(resolved_mcp_servers),
         sessions=transcript_sessions, scan_codex=attempt_guard is not None or fixture_session is not None,
+        credential_reader=_steward_vault_reader(fixture_session, attempt_guard),
     )
     if attempt_guard is not None:
         observe_unguarded = observe_before_teardown
@@ -2711,6 +2743,7 @@ def run_one_attempt(
         result["fixture"] = {"case": fixture_session.fixture.case, "failure": fixture_session.failure,
                              "git_unreadable": fixture_session.git_unreadable,
                              "codex_guard": fixture_session.guard_record()["nested"],
+                             "credential_steward": fixture_session.steward_record(),
                              "evidence_digest": fixture_evidence}
     if attempt_guard is not None:
         result["codex_guard"] = attempt_guard.report(observation, declared_model)

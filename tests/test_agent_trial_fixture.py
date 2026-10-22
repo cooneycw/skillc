@@ -342,3 +342,46 @@ def test_the_post_stop_finalize_reads_the_exported_remote(
     assert envelope["service"]["remote_integrity"] == integrity
     assert kind in [d["kind"] for d in envelope["service"]["divergence"]]
     assert _outcome(result)["status"] != "PASS"
+
+
+# --- #518 A: the credential steward, through the live wiring -----------------
+
+def test_a_held_credential_is_recorded_and_credited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text())
+    assert result["fixture"]["credential_steward"]["status"] == "held" and result["graded"] is not None
+    [envelope] = trusted
+    assert envelope["credential_steward"]["status"] == "held"
+
+
+def test_red_518_a_credential_that_re_appeared_mid_attempt_is_not_credited(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The steward captured a re-created auth.json: a nested client could have
+    read it during the gap, so the attempt is never graded."""
+    from conftest import FakeStewardDriver
+    FakeStewardDriver.mode = "refreshed"
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text())
+    assert result["graded"] is None and trusted == []
+    assert result["grading_blocked_reason"] == ("not credited: the codex credential re-appeared in the agent's "
+                                                "home mid-attempt")
+    assert result["fixture"]["credential_steward"]["status"] == "refreshed"
+
+
+def test_red_518_a_steward_that_never_arms_refuses_the_attempt(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conftest import FakeStewardDriver
+    FakeStewardDriver.mode = "never-arms"
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text())
+    assert result["graded"] is None and trusted == []
+    assert "never reported armed" in str(result["fixture"]["failure"])

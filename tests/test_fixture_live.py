@@ -193,7 +193,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
                                    "allowed": {"chatgpt.com:443": 12, "auth.openai.com:443": 1}, "denied": {}},
                         "run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high",
                                          "token_usage": {"total_tokens": 1000, "input_tokens": 900}}},
-        "fixture": {"codex_guard": {"status": "zero", "top_level": 1, "confirmed": 0, "suspected": 0}},
+        "fixture": {"codex_guard": {"status": "zero", "top_level": 1, "confirmed": 0, "suspected": 0},
+                    "credential_steward": {"status": "held"}},
         "graded": {"status": "PASS", "criteria": [{"id": "source-unmodified", "outcome": "SATISFIED"}]},
     }
     for path, value in changes.items():
@@ -234,7 +235,7 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"observation.egress.allowed": _DELETE}, "census is incomplete"),
     ({"fixture.codex_guard": {"status": "observed", "confirmed": 1, "suspected": 0}}, "nested codex observed"),
     ({"fixture.codex_guard": {"status": "unknown"}}, "nested-codex count is unknown"),
-    ({"fixture": _DELETE}, "nested-codex count is unknown"),
+    ({"fixture": _DELETE}, "steward record is absent"),  # #518: the first of the two absent records named
     # #518: what the guard cannot see. sizing-2's shape: the guard reads zero
     # beside a SECOND session file - the agent's own nested client.
     ({"observation.transcript_files_found": 2}, "nested codex past the guard: 2 transcript sessions"),
@@ -243,6 +244,10 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"observation.transcript_codex_invocations": [{"program": "codex", "guarded": True}]},
      "1 bare codex invocation(s) in the transcript, 0 refused"),
     ({"observation.transcript_codex_invocations": None}, "codex invocations were not scanned"),
+    # #518 A: the credential steward's record must read held.
+    ({"fixture.credential_steward": {"status": "refreshed"}}, "re-appeared in the agent's home"),
+    ({"fixture.credential_steward": {"status": "unknown", "arms": 0, "expected_arms": 1}}, "steward record is unknown"),
+    ({"fixture.credential_steward": _DELETE}, "steward record is absent"),
 ])
 def test_each_trigger_stops_the_schedule(change: dict[str, Any], match: str) -> None:
     """One committed red per trigger: the stop is a gate nothing downstream re-derives."""
@@ -1170,7 +1175,9 @@ def _retained_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
         at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV4), ROOT),
         skill_name=None)
     proxy = _retained_object(CAMPAIGN_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
-    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id)},
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id),
+                                                # #518: these runs predate the steward; held, to isolate the census.
+                                                "credential_steward": {"status": "held"}},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
                             # #518: the live fixture path now scans the transcript too.
                             "transcript_codex_invocations": ag.scan_transcript_text(
@@ -1565,7 +1572,9 @@ def _rev4_run_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
         at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV5), ROOT),
         skill_name=None)
     proxy = _retained_object(REV4_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
-    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id)},
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id),
+                                                # #518: these runs predate the steward; held, to isolate the census.
+                                                "credential_steward": {"status": "held"}},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
                             # #518: the live fixture path now scans the transcript too.
                             "transcript_codex_invocations": ag.scan_transcript_text(

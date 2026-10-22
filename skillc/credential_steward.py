@@ -188,7 +188,7 @@ class CredentialSteward:
             self.sleep(0.05)
         return False
 
-    def start(self, backend: StewardBackend, handle: object, place: Callable[[bytes], None]) -> None:
+    def start(self, backend: StewardBackend, handle: object, place: Callable[[bytes], object]) -> None:
         """Place the steward root-owned (via `place`, the overlay's verified
         placement) and start it; confirmed by its `armed` event."""
         place(STEWARD_SOURCE.read_bytes())
@@ -228,3 +228,22 @@ class CredentialSteward:
 
     def record(self) -> dict[str, Any]:
         return self.session.finalize(expected_arms=self.arms_requested)
+
+
+#: The candidate's codex home, as `docker_backend.CONTAINER_HOME` lays it out.
+HOME_CODEX = "/home/candidate/.codex"
+
+
+def start_for(session: CredentialStewardSession, backend: Any, handle: object) -> CredentialSteward:
+    """Place (root-owned, verified like the guard) and start one attempt's steward."""
+    from . import fixture_overlay as fo
+    driver = CredentialSteward(session, HOME_CODEX)
+    driver.start(backend, handle, place=lambda data: fo._place(backend, handle, STEWARD_PATH, data, 0o755))
+    return driver
+
+
+def record_of(session: CredentialStewardSession, driver: CredentialSteward | None) -> dict[str, Any]:
+    """The finalized record: a steward that never started reads UNKNOWN."""
+    if driver is not None:
+        return driver.record()
+    return session.finalize(expected_arms=1)

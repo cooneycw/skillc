@@ -79,6 +79,7 @@ from . import calibration, cost_estimate, trial, verify
 from . import calibration_run as cr
 from . import codex_guard as cg
 from . import controller_turns as ct
+from . import credential_steward as cs
 from . import egress as eg
 from . import fixture_campaign as fc
 from . import judge_anthropic as ja
@@ -554,6 +555,11 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
     bypass = ag.nested_bypass(guard_rec if isinstance(guard_rec, Mapping) else None, obs, nested_policy)
     if bypass:
         return "nested codex past the guard: " + "; ".join(bypass)
+    # #518: the credential must have stayed out of the agent's home; a record
+    # that is not `held` (re-created, unknown, absent) stops the schedule.
+    steward = fixture_rec.get("credential_steward") if isinstance(fixture_rec, Mapping) else None
+    if (steward_stop := cs.stop_reason(steward if isinstance(steward, Mapping) else None)) is not None:
+        return steward_stop
     uses = obs.get("server_side_tool_uses")
     if not isinstance(uses, list):
         return "the server-side tool census is unavailable for a dispatched attempt"
