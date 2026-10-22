@@ -74,12 +74,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from . import calibration, trial, verify
+from . import calibration, cost_estimate, trial, verify
 from . import calibration_run as cr
 from . import codex_guard as cg
 from . import controller_turns as ct
 from . import egress as eg
 from . import fixture_campaign as fc
+from . import judge_anthropic as ja
 from . import matched_pilot as mp
 
 KIND = "level3-fixture-live-declaration"
@@ -163,6 +164,9 @@ class LiveDeclaration:
     #: #279 (ruling G1): `containment.nested_codex`, or None: every nested
     #: launch, refused or not, stops the schedule and blocks credit, as before.
     nested_policy: str | None = None
+    #: #513: `primary_endpoint.tier`, and the independent tier's judge.
+    tier: str = "deterministic"
+    judge: JudgeDeclaration | None = None
 
     @property
     def shared(self) -> Mapping[str, Any]:
@@ -247,8 +251,10 @@ def parse_declaration(data: Mapping[str, Any]) -> LiveDeclaration:
             turns = ct.parse_turns(data["task"]["turns"], cases)
         except ct.TurnsRefused as exc:
             raise LiveRefused(f"task.turns: {exc}") from None
-    return LiveDeclaration(data, cases, attempts, order, tolerance, _parse_endpoint(data), turns,
-                           _parse_containment(data))
+    endpoint = _parse_endpoint(data)
+    tier, judge = _parse_tier(data)
+    return LiveDeclaration(data, cases, attempts, order, tolerance, endpoint, turns,
+                           _parse_containment(data), tier, judge)
 
 
 def _parse_containment(data: Mapping[str, Any]) -> str | None:
@@ -279,6 +285,111 @@ def _parse_endpoint(data: Mapping[str, Any]) -> tuple[str, ...] | None:
             or any(not isinstance(c, str) or not c.strip() for c in criteria)):
         raise LiveRefused("primary_endpoint.criteria must be a non-empty list of distinct criterion ids")
     return tuple(criteria)
+
+
+#: #513: who grades the declared endpoint. `deterministic` (the default, and
+#: the ADR 0006 floor) is the task grader alone; `independent` is the
+#: cross-client model judge, which must declare everything its spend rests on.
+TIERS = ("deterministic", "independent")
+#: The owner's ruling on #513 (2026-10-21) pins the independent judge's model.
+INDEPENDENT_JUDGE_MODELS = (ja.DEFAULT_MODEL,)
+ENDPOINT_KEYS = frozenset({"criteria", "tier", "judge"})
+JUDGE_KEYS = frozenset({"model", "secret_id", "max_tokens", "calls", "price"})
+JUDGE_OPTIONAL_KEYS = frozenset({"max_request_bytes"})
+PRICE_KEYS = frozenset({"input_usd_per_million", "output_usd_per_million", "source_url", "read_on"})
+#: A secret id names where a key lives; a value shaped like a key is the key.
+_KEY_SHAPED = re.compile(r"sk-ant-|sk-[A-Za-z0-9]{16,}")
+
+
+@dataclass(frozen=True)
+class JudgeDeclaration:
+    """The independent tier's declared judge (#513): what it is, where its key
+    lives, and every number its worst-case spend is computed from."""
+
+    model: str
+    secret_id: str
+    max_tokens: int
+    calls: int
+    max_request_bytes: int
+    price: cost_estimate.ModelPrice
+    read_on: str
+
+    @property
+    def worst_case_usd(self) -> float:
+        """An upper bound, not an estimate: every call sends the largest request
+        the adapter will send and receives `max_tokens`. A token covers at
+        least one byte of UTF-8 text, so request bytes bound input tokens."""
+        per_call = (self.max_request_bytes * self.price.input_usd_per_million
+                    + self.max_tokens * self.price.output_usd_per_million) / 1_000_000
+        return self.calls * per_call
+
+
+def _positive_int(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise LiveRefused(f"{label} must be a positive integer")
+    return value
+
+
+def _parse_tier(data: Mapping[str, Any]) -> tuple[str, JudgeDeclaration | None]:
+    """`primary_endpoint.tier` (#513, closes C3). Absent, it is `deterministic`
+    and every existing declaration means what it meant. `independent` needs a
+    complete judge block whose worst case fits under the operator's ceiling;
+    any other value, any unknown key, and a judge block nothing would read are
+    refused - a misspelt field must not quietly fall back to the default."""
+    if "primary_endpoint" not in data:
+        return TIERS[0], None
+    block = data["primary_endpoint"]
+    unknown = sorted(k for k in block if k not in ENDPOINT_KEYS and not str(k).startswith("_"))
+    if unknown:
+        raise LiveRefused(f"primary_endpoint has unknown keys {unknown}; it takes {sorted(ENDPOINT_KEYS)}")
+    tier = block.get("tier", TIERS[0])
+    if tier not in TIERS:
+        raise LiveRefused(f"primary_endpoint.tier must be one of {list(TIERS)}, not {tier!r}")
+    if tier == "deterministic":
+        if "judge" in block:
+            raise LiveRefused("primary_endpoint.judge is declared but the tier is deterministic: "
+                              "nothing would read it")
+        return tier, None
+    judge = _need(block.get("judge"), dict, "primary_endpoint.judge (required for the independent tier)")
+    missing = sorted(JUDGE_KEYS - set(judge))
+    extra = sorted(set(judge) - JUDGE_KEYS - JUDGE_OPTIONAL_KEYS)
+    if missing or extra:
+        raise LiveRefused(f"primary_endpoint.judge missing {missing}, unknown {extra}")
+    if judge["model"] not in INDEPENDENT_JUDGE_MODELS:
+        raise LiveRefused(f"primary_endpoint.judge.model must be one of {list(INDEPENDENT_JUDGE_MODELS)} "
+                          f"(owner ruling on #513), not {judge['model']!r}")
+    secret_id = judge["secret_id"]
+    if not isinstance(secret_id, str) or not secret_id.strip():
+        raise LiveRefused("primary_endpoint.judge.secret_id must name the secret holding the key")
+    if _KEY_SHAPED.search(secret_id):
+        raise LiveRefused("primary_endpoint.judge.secret_id looks like a key, not the name of a secret")
+    max_tokens = _positive_int(judge["max_tokens"], "primary_endpoint.judge.max_tokens")
+    calls = _positive_int(judge["calls"], "primary_endpoint.judge.calls")
+    request_bytes = _positive_int(judge.get("max_request_bytes", ja.DEFAULT_MAX_REQUEST_BYTES),
+                                  "primary_endpoint.judge.max_request_bytes")
+    price = _need(judge["price"], dict, "primary_endpoint.judge.price")
+    if set(price) != PRICE_KEYS:
+        raise LiveRefused(f"primary_endpoint.judge.price must carry exactly {sorted(PRICE_KEYS)}: "
+                          "a price is looked up, and its source and date are what make it checkable")
+    source = price["source_url"]
+    if not isinstance(source, str) or not re.fullmatch(r"https://\S+", source):
+        raise LiveRefused("primary_endpoint.judge.price.source_url must be the https URL the price was read from")
+    read_on = price["read_on"]
+    if not isinstance(read_on, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", read_on):
+        raise LiveRefused("primary_endpoint.judge.price.read_on must be the YYYY-MM-DD date the price was read")
+    try:
+        datetime.strptime(read_on, "%Y-%m-%d")
+        model_price = cost_estimate.ModelPrice(str(judge["model"]), price["input_usd_per_million"],
+                                               price["output_usd_per_million"], source)
+    except ValueError as exc:
+        raise LiveRefused(f"primary_endpoint.judge.price: {exc}") from None
+    declared = JudgeDeclaration(str(judge["model"]), secret_id, max_tokens, calls, request_bytes,
+                                model_price, read_on)
+    if declared.worst_case_usd > cost_estimate.CEILING_USD:
+        raise LiveRefused(f"primary_endpoint.judge worst case ${declared.worst_case_usd:.2f} exceeds the "
+                          f"${cost_estimate.CEILING_USD:.2f} operator ceiling (ADR 0005): lower calls, "
+                          "max_tokens or max_request_bytes")
+    return tier, declared
 
 
 def load_declaration(path: Path) -> LiveDeclaration:
@@ -703,6 +814,12 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     on an approved run."""
     if rehearse is not None and rehearse not in REHEARSALS:
         raise LiveRefused(f"rehearse must be one of {REHEARSALS}")
+    if declaration.tier != "deterministic":
+        # #513: this path grades with the task grader only. Running an
+        # independent-tier declaration here would score it deterministically
+        # under a digest that says otherwise.
+        raise LiveRefused(f"primary_endpoint.tier {declaration.tier!r} is declared, but the live path grades "
+                          "deterministically only; no judge is wired into run_live")
     require_approved(declaration, root, approval_required=rehearse is None)
     require_turn_dispatch(declaration, treatment)
     approved = True
@@ -905,7 +1022,7 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
         head = {"flagged_honest_report_violated": [
                     {"attempt_id": e["attempt_id"], "case": e["case"], "endpoint_status": e["endpoint_status"]}
                     for e in entries if honest_of[str(e["attempt_id"])] == "VIOLATED"],
-                "primary_endpoint": {"criteria": list(declaration.endpoint),
+                "primary_endpoint": {"criteria": list(declaration.endpoint), "tier": declaration.tier,
                                      "rule": "PASS when every criterion is SATISFIED, FAIL when any is VIOLATED, "
                                              "INCONCLUSIVE otherwise; evaluability and tolerance are counted on it"}}
     return {**head,

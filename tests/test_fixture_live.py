@@ -538,6 +538,104 @@ def test_a_malformed_primary_endpoint_is_refused(endpoint: Any, match: str) -> N
         fl.parse_declaration(data)
 
 
+#: #513: a complete independent-tier judge block whose worst case
+#: (3 x (20000 B x $5/M + 1000 x $25/M) = $0.375) is under the ceiling. The
+#: price values are test inputs, not a claim about any model's real price.
+JUDGE: dict[str, Any] = {
+    "model": "claude-opus-5-5", "secret_id": "skillc", "max_tokens": 1000, "calls": 3,
+    "max_request_bytes": 20000,
+    "price": {"input_usd_per_million": 5.0, "output_usd_per_million": 25.0,
+              "source_url": "https://example.invalid/pricing", "read_on": "2026-10-22"}}
+
+
+def _tiered(tier: object = "independent", **judge: object) -> dict[str, Any]:
+    data = json.loads(CAMPAIGN.read_text())
+    data["primary_endpoint"]["tier"] = tier
+    block = copy.deepcopy(JUDGE)
+    for key, value in judge.items():
+        if value is None:
+            block.pop(key, None)
+        else:
+            block[key] = value
+    data["primary_endpoint"]["judge"] = block
+    return data
+
+
+def test_an_undeclared_tier_is_deterministic_and_every_existing_digest_is_unchanged() -> None:
+    declaration = fl.parse_declaration(json.loads(CAMPAIGN.read_text()))
+    assert (declaration.tier, declaration.judge) == ("deterministic", None)
+    assert declaration.digest == CAMPAIGN_DIGEST
+
+
+def test_a_complete_independent_tier_parses_with_its_worst_case() -> None:
+    declaration = fl.parse_declaration(_tiered())
+    assert declaration.tier == "independent" and declaration.judge is not None
+    assert declaration.judge.model == "claude-opus-5-5" and declaration.judge.read_on == "2026-10-22"
+    assert declaration.judge.worst_case_usd == pytest.approx(0.375)
+    assert declaration.digest != CAMPAIGN_DIGEST  # the tier is bound by the approval digest
+
+
+def test_the_adapter_request_cap_is_the_default_bound() -> None:
+    declaration = fl.parse_declaration(_tiered(max_request_bytes=None, calls=1))
+    assert declaration.judge is not None
+    assert declaration.judge.max_request_bytes == fl.ja.DEFAULT_MAX_REQUEST_BYTES
+
+
+# Each case is a red: it parses (see the test above) without the check that names it.
+@pytest.mark.parametrize(("data", "match"), [
+    (_tiered("graded-by-vibes"), r"tier must be one of \['deterministic', 'independent'\]"),
+    (_tiered(True), "tier must be one of"),
+    (_tiered("deterministic"), "judge is declared but the tier is deterministic"),
+    (_tiered(model="claude-sonnet-5"), "judge.model must be one of"),
+    (_tiered(secret_id=""), "secret_id must name the secret"),
+    (_tiered(secret_id="sk-ant-api03-notarealkeyatall"), "looks like a key"),
+    (_tiered(max_tokens=0), "max_tokens must be a positive integer"),
+    (_tiered(calls=True), "calls must be a positive integer"),
+    (_tiered(max_request_bytes=-1), "max_request_bytes must be a positive integer"),
+    (_tiered(calls=None), r"missing \['calls'\]"),
+    (_tiered(price=None), r"missing \['price'\]"),
+    (_tiered(temperature=0), r"unknown \['temperature'\]"),
+    (_tiered(price={**JUDGE["price"], "source_url": None}), "source_url must be the https URL"),
+    (_tiered(price={k: v for k, v in JUDGE["price"].items() if k != "source_url"}), "must carry exactly"),
+    (_tiered(price={k: v for k, v in JUDGE["price"].items() if k != "read_on"}), "must carry exactly"),
+    (_tiered(price={**JUDGE["price"], "source_url": "http://example.invalid/pricing"}), "https URL"),
+    (_tiered(price={**JUDGE["price"], "read_on": "last week"}), "YYYY-MM-DD"),
+    (_tiered(price={**JUDGE["price"], "read_on": "2026-02-30"}), "judge.price:"),
+    (_tiered(price={**JUDGE["price"], "input_usd_per_million": -1.0}), "must not be negative"),
+    # 20 x (20000 B x $5/M + 1000 x $25/M) = $2.50; 50 calls is $6.25.
+    (_tiered(calls=50), r"worst case \$6\.25 exceeds the \$5\.00 operator ceiling"),
+    (_tiered(max_request_bytes=None, calls=3), r"worst case \$6\.\d\d exceeds"),
+])
+def test_an_incomplete_or_unknown_tier_is_refused(data: dict[str, Any], match: str) -> None:
+    with pytest.raises(fl.LiveRefused, match=match):
+        fl.parse_declaration(data)
+
+
+def test_an_independent_tier_without_a_judge_is_refused() -> None:
+    data = json.loads(CAMPAIGN.read_text())
+    data["primary_endpoint"]["tier"] = "independent"
+    with pytest.raises(fl.LiveRefused, match="judge .required for the independent tier. must be a dict"):
+        fl.parse_declaration(data)
+
+
+def test_a_misspelt_endpoint_key_is_refused_not_defaulted() -> None:
+    """Without the unknown-key check, `teir` would read as an undeclared tier
+    and the declaration would run deterministic under a digest that says
+    otherwise."""
+    data = json.loads(CAMPAIGN.read_text())
+    data["primary_endpoint"]["teir"] = "independent"
+    with pytest.raises(fl.LiveRefused, match=r"unknown keys \['teir'\]"):
+        fl.parse_declaration(data)
+
+
+def test_the_live_path_refuses_an_independent_tier_before_anything_runs(tmp_path: Path) -> None:
+    def never() -> tuple[Any, Any]:
+        raise AssertionError("no backend may be built")
+    with pytest.raises(fl.LiveRefused, match="grades deterministically only"):
+        fl.run_live(fl.parse_declaration(_tiered()), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
+                    image_digest=None, backends=never, client_argv=["codex"], credential_explicit_path=None)
+
+
 def test_an_endpoint_naming_a_criterion_the_grader_lacks_is_refused() -> None:
     data = _campaign_draft()
     data["primary_endpoint"]["criteria"] = [*ENDPOINT, "tests-pass"]
