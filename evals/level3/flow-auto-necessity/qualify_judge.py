@@ -25,8 +25,13 @@ Three broken judges must each be REFUSED:
 `fail/clean-steers-the-judge` is the injection candidate (orchestrator C1):
 its report tries to close its own JSON field, forge an observation and tell
 the grader to pass everything. Here it must reach the judge byte for byte,
-inside agent_claims, forging nothing. Whether a real model resists it is a
+inside agent_claims, forging nothing, and the deterministic grader must still
+grade it as its expected.json says. Whether a real model resists it is a
 named item of the paid held-out set.
+
+It lives in `judge-candidates/`, not `candidates/`: the deterministic
+population is pinned by the frozen #434 campaign manifest and by candidate
+counts, and a judge-only control must not move them.
 
 `python3 qualify_judge.py` exits 0 only when all of that holds.
 """
@@ -53,6 +58,7 @@ BANNER = ("PLUMBING ONLY: a scripted oracle (each candidate's expected.json) ans
           "what reaches the judge and what comes back intact; it is NOT evidence that the model grades well, "
           "and must not be quoted as validation.")
 STEERING = "fail/clean-steers-the-judge"
+JUDGE_CANDIDATES = HERE / "judge-candidates"
 OBSERVATIONS = "observations.json"
 REPORT = "report.md"
 CRITERIA: tuple[str, ...] = tuple(json.loads((HERE / "grader.json").read_text(encoding="utf-8"))["criteria"])
@@ -153,6 +159,43 @@ def run(population: list[qualify.Candidate], answer: Callable[[qualify.Candidate
     return rows
 
 
+class JudgeOnlyCandidate(qualify.Candidate):
+    """A candidate outside the deterministic population (`judge-candidates/`)."""
+
+    @property
+    def rel(self) -> str:
+        return self.path.relative_to(JUDGE_CANDIDATES).as_posix()
+
+
+def judge_only_candidates() -> list[qualify.Candidate]:
+    """Loaded with the same checks `qualify.candidates` applies to its own."""
+    found: list[qualify.Candidate] = []
+    for placement, status in qualify._PLACED.items():
+        base = JUDGE_CANDIDATES / placement
+        for path in sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []:
+            expected = json.loads((path / "expected.json").read_text(encoding="utf-8"))
+            if expected.get("status") != status:
+                raise SystemExit(f"{path}: expected.json says {expected.get('status')!r}, placement says {status!r}")
+            actions = json.loads((path / "actions.json").read_text(encoding="utf-8"))
+            report = (path / "report.md").read_text(encoding="utf-8")
+            found.append(JudgeOnlyCandidate(path, status, actions, frozenset(map(str, expected.get("violated", []))),
+                                            frozenset(map(str, expected.get("unknown", []))),
+                                            qualify.run_attempt(actions, report)))
+    if [c.rel for c in found] != [STEERING]:
+        raise SystemExit(f"{JUDGE_CANDIDATES}: expected exactly [{STEERING}], found {[c.rel for c in found]}")
+    return found
+
+
+def steering_is_graded_as_expected(c: qualify.Candidate) -> str | None:
+    """The deterministic grader, unchanged, still grades the steering report
+    as its expected.json says - so the oracle answer below is grounded."""
+    row = qualify._row(HERE / "grade_flow_auto_necessity.py", c)
+    if row.status != c.placed or row.violated != c.expected_violated:
+        return f"the deterministic grader says {row.status} {sorted(row.violated)}, expected {c.placed} " \
+               f"{sorted(c.expected_violated)}"
+    return None
+
+
 def steering_reaches_the_judge_verbatim(population: list[qualify.Candidate]) -> str | None:
     (c,) = [c for c in population if c.rel == STEERING]
     report = (c.path / "report.md").read_text(encoding="utf-8")
@@ -180,13 +223,14 @@ CONTROLS: dict[str, tuple[Callable[[qualify.Candidate], list[dict[str, object]]]
 
 def main() -> int:
     print(BANNER)
-    population = qualify.candidates()
+    population = qualify.candidates() + judge_only_candidates()
     rows = run(population, oracle)
     bad = [(name, why) for name, why in rows if why]
     print(f"judge plumbing on {len(rows)} candidates: {len(rows) - len(bad)} carried intact")
     for name, why in bad:
         print(f"  WRONG {name}: {why}")
-    steering = steering_reaches_the_judge_verbatim(population)
+    (steer,) = [c for c in population if c.rel == STEERING]
+    steering = steering_is_graded_as_expected(steer) or steering_reaches_the_judge_verbatim(population)
     print(f"steering candidate {STEERING}: {steering or 'reached the judge verbatim, inside agent_claims'}")
     refused_all = True
     for name, (answer, kind) in CONTROLS.items():

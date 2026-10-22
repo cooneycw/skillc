@@ -5,10 +5,14 @@ test makes a real call or holds a real key (#69)."""
 from __future__ import annotations
 
 import ast
+import dataclasses
+import importlib
 import json
 import logging
 import socket
 import stat
+import subprocess
+import sys
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -326,3 +330,26 @@ def _always(outcome: str) -> ja.Responder:
 def test_the_fake_answers_what_it_is_asked() -> None:
     result, _ = _run(_always("VIOLATED"))
     assert result["status"] == "FAIL"
+
+
+QUALIFY_JUDGE = ROOT / "evals" / "level3" / "flow-auto-necessity" / "qualify_judge.py"
+
+
+def test_qualify_judge_qualifies_the_plumbing_and_says_only_that() -> None:
+    done = subprocess.run([sys.executable, str(QUALIFY_JUDGE)], capture_output=True, text=True, timeout=300, check=False,
+                          cwd=QUALIFY_JUDGE.parent)
+    assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
+    assert "judge plumbing on 98 candidates: 98 carried intact" in done.stdout
+    assert done.stdout.count(": REFUSED (") == 3 and "PLUMBING QUALIFIED - PLUMBING ONLY" in done.stdout
+
+
+def test_red_the_steering_candidate_is_grounded_in_the_deterministic_grade() -> None:
+    sys.path.insert(0, str(QUALIFY_JUDGE.parent))
+    try:
+        qj = importlib.import_module("qualify_judge")
+    finally:
+        sys.path.remove(str(QUALIFY_JUDGE.parent))
+    (steer,) = qj.judge_only_candidates()
+    assert qj.steering_is_graded_as_expected(steer) is None
+    wrong = dataclasses.replace(steer, placed="PASS", expected_violated=frozenset())
+    assert "deterministic grader says FAIL" in qj.steering_is_graded_as_expected(wrong)
