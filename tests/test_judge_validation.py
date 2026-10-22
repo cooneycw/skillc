@@ -49,7 +49,7 @@ def _always(outcome: str, usage: Mapping[str, int] | None = None) -> ja.Responde
     def respond(body: Mapping[str, Any]) -> tuple[int, bytes]:
         ids = [c["id"] for c in ja.user_document(body)["criteria"]]
         billed = {"input_tokens": len(json.dumps(body)) // 4, "output_tokens": 300}  # what the fake counts
-        return 200, ja.tool_reply([{"id": c, "outcome": outcome, "evidence": ["e"]} for c in ids],
+        return 200, ja.verdict_reply([{"id": c, "outcome": outcome, "evidence": ["e"]} for c in ids],
                                   usage=billed if usage is None else usage)
     return respond
 
@@ -70,7 +70,7 @@ def test_count_binds_each_exact_body_to_its_sha_and_strips_max_tokens(tmp_path: 
         counts = jv.count(root, jv.make_judge(key_provider=lambda: "k", base_url=url))
     assert sorted(counts) == ["item-01", "item-02", "item-03"]
     sent = [r for r in fake.requests if r["path"].endswith("/count_tokens")]
-    assert len(sent) == 3 and all("max_tokens" not in r["body"] and "tool_choice" in r["body"] for r in sent)
+    assert len(sent) == 3 and all("max_tokens" not in r["body"] and "output_config" in r["body"] and "tool_choice" not in r["body"] for r in sent)
     for item, entry in counts.items():
         body = jv.make_judge(key_provider=lambda: "k").request_body(
             jv.CRITERIA, jv.GOAL, jv.item_files(root / "items" / item))
