@@ -239,22 +239,32 @@ class AnthropicJudge:
         request = urllib.request.Request(
             self.base_url.rstrip("/") + "/v1/messages", data=body, method="POST",
             headers={"content-type": "application/json", "anthropic-version": API_VERSION, "x-api-key": key})
+        # Every request that may have been dispatched settles its usage EXACTLY
+        # ONCE (#513 harness, Codex review): a reply that fails to arrive, to
+        # read or to fit is still possibly billed, so it reports UNKNOWN usage,
+        # which a budget charges at its worst case - never silently nothing.
+        settled = False
         try:
-            with _OPENER.open(request, timeout=self.timeout) as response:
-                raw = response.read(self.max_response_bytes + 1)
-        except urllib.error.HTTPError as exc:
-            exc.close()
-            raise JudgeUnavailable(f"Messages API answered HTTP {exc.code}") from None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise JudgeUnavailable(f"Messages API unreachable ({type(exc).__name__})") from None
-        except (http.client.HTTPException, ValueError) as exc:
-            # A truncated chunk or a garbled status line (Codex review): the
-            # reply is not an answer, and must not escape the tier boundary.
-            raise JudgeUnavailable(f"Messages API reply is malformed HTTP ({type(exc).__name__})") from None
-        if len(raw) > self.max_response_bytes:
-            raise JudgeUnavailable(f"Messages API reply exceeds {self.max_response_bytes} bytes")
-        if self.usage_sink is not None:
-            self.usage_sink(reply_usage(raw))
+            try:
+                with _OPENER.open(request, timeout=self.timeout) as response:
+                    raw = response.read(self.max_response_bytes + 1)
+            except urllib.error.HTTPError as exc:
+                exc.close()
+                raise JudgeUnavailable(f"Messages API answered HTTP {exc.code}") from None
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                raise JudgeUnavailable(f"Messages API unreachable ({type(exc).__name__})") from None
+            except (http.client.HTTPException, ValueError) as exc:
+                # A truncated chunk or a garbled status line (Codex review): the
+                # reply is not an answer, and must not escape the tier boundary.
+                raise JudgeUnavailable(f"Messages API reply is malformed HTTP ({type(exc).__name__})") from None
+            if len(raw) > self.max_response_bytes:
+                raise JudgeUnavailable(f"Messages API reply exceeds {self.max_response_bytes} bytes")
+            if self.usage_sink is not None:
+                settled = True
+                self.usage_sink(reply_usage(raw))
+        finally:
+            if self.usage_sink is not None and not settled:
+                self.usage_sink(UNKNOWN_USAGE)
         return _parse_reply(raw)
 
     def count_tokens(self, body: bytes) -> int:
@@ -287,6 +297,11 @@ class AnthropicJudge:
         return tokens
 
 
+    def check_definitions(self, criteria: Sequence[str]) -> None:
+        """The leak check on the definitions a request for `criteria` sends;
+        public so any other path that transmits them (a token count) runs it too."""
+        self._check_definitions(criteria)
+
     def _check_definitions(self, criteria: Sequence[str]) -> None:
         """Leak-check the definitions this request sends (Codex review):
         `run_tier` checks the goal, files and criterion ids, never the rubric
@@ -310,6 +325,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+#: Usage that could not be read: every field -1, which a budget charges at worst.
+UNKNOWN_USAGE: Mapping[str, int] = {"input_tokens": -1, "output_tokens": -1, "cache_creation_input_tokens": -1,
+                                    "cache_read_input_tokens": -1}
 
 
 def reply_usage(raw: bytes) -> dict[str, int]:

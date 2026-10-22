@@ -144,11 +144,16 @@ def export(runs: Sequence[Path], out: Path, *, seed: int) -> dict[str, Any]:
 # ------------------------------------------------------------------ count
 
 def count(root: Path, j: ja.AnthropicJudge) -> dict[str, dict[str, Any]]:
+    """Count each item's exact request body. The SAME leak checks as a paid call
+    run first (Codex review): a free endpoint is still off the machine."""
     counts = {}
     for item in items_of(root):
-        body = j.request_body(CRITERIA, GOAL, item_files(item))
+        files = item_files(item)
+        judge.check_judge_input(GOAL, files, CRITERIA)
+        j.check_definitions(CRITERIA)
+        body = j.request_body(CRITERIA, GOAL, files)
         counts[item.name] = {"request_sha256": sha256_bytes(body), "request_bytes": len(body),
-                             "input_tokens": j.count_tokens(body)}
+                             "max_tokens": j.max_tokens, "input_tokens": j.count_tokens(body)}
     return counts
 
 
@@ -181,6 +186,9 @@ def declare(root: Path, counts: Mapping[str, Mapping[str, Any]], labels_path: Pa
     items = [p.name for p in items_of(root)]
     if sorted(counts) != sorted(items):
         raise Refused("the counts do not name exactly the exported items")
+    if any(c.get("max_tokens") != max_tokens for c in counts.values()):
+        raise Refused(f"the counts were taken at another max_tokens than the declared {max_tokens}: "
+                      "max_tokens is part of every counted body, so recount at the declared value")
     _, labels_sha = load_labels(labels_path, items)
     model_price = cost_estimate.ModelPrice(ja.DEFAULT_MODEL, price["input_usd_per_million"],
                                            price["output_usd_per_million"], price["source_url"])
@@ -192,7 +200,8 @@ def declare(root: Path, counts: Mapping[str, Mapping[str, Any]], labels_path: Pa
             "max_tokens": max_tokens, "repeat_agreement_threshold": threshold, "price": dict(price),
             "count_margin": COUNT_MARGIN, "calls": k * len(items),
             "items_digest": sha256_bytes(json.dumps(manifest, sort_keys=True).encode()),
-            "labels_sha256": labels_sha, "counts": dict(counts), "worst_case_usd": round(bound, 4)}
+            "labels_sha256": labels_sha, "counts": dict(counts), "worst_case_usd": round(bound, 4),
+            "limits": LIMITS}
 
 
 # ------------------------------------------------------------------ run
@@ -225,17 +234,23 @@ class Budget:
         self.pending_worst = worst
 
     def charge(self, usage: Mapping[str, int]) -> None:
+        """Settle one dispatched call. A known component is charged as billed and
+        an unknown one at its worst case; a known input overrun breaks the budget
+        whatever else is missing (Codex review)."""
         worst = self.pending_worst or 0.0
         self.pending_worst = None
-        fields = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-        if any(usage.get(f, -1) < 0 for f in fields[:2]):
+        known_in = usage.get("input_tokens", -1) >= 0
+        known_out = usage.get("output_tokens", -1) >= 0
+        if not known_in and not known_out:
             self.spent += worst  # unreported usage is charged its worst case
             return
         tokens_in = usage["input_tokens"] + max(0, usage.get("cache_creation_input_tokens", 0)) \
-            + max(0, usage.get("cache_read_input_tokens", 0))
-        self.spent += (tokens_in * self.price.input_usd_per_million
-                       + usage["output_tokens"] * self.price.output_usd_per_million) / 1_000_000
-        if tokens_in > COUNT_MARGIN * self.pending_counted:
+            + max(0, usage.get("cache_read_input_tokens", 0)) if known_in else None
+        cost_in = (tokens_in * self.price.input_usd_per_million if tokens_in is not None
+                   else COUNT_MARGIN * self.pending_counted * self.price.input_usd_per_million)
+        cost_out = (usage["output_tokens"] if known_out else self.max_tokens) * self.price.output_usd_per_million
+        self.spent += (cost_in + cost_out) / 1_000_000
+        if tokens_in is not None and tokens_in > COUNT_MARGIN * self.pending_counted:
             self.broken = (f"a reply billed {tokens_in} input tokens against a count of {self.pending_counted}; "
                            "the count no longer bounds the spend")
 
@@ -270,9 +285,14 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
     j = make_judge(key_provider=key_provider, base_url=base_url, max_tokens=int(declaration["max_tokens"]),
                    before_send=before_send, usage_sink=budget.charge)
     k = int(declaration["k"])
-    outcomes: dict[str, list[dict[str, str]]] = {}
+    #: One entry per call: the criterion outcomes, or None when the tier was
+    #: UNAVAILABLE - never folded into an UNKNOWN vote (Codex review).
+    outcomes: dict[str, list[dict[str, str] | None]] = {}
     calls = 0
+    stopped: str | None = None
     for item in items:
+        if stopped:
+            break
         expected["item"] = item.name
         outcomes[item.name] = []
         for _ in range(k):
@@ -280,27 +300,42 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
                 raise Refused("the declared call count is exhausted")
             calls += 1
             tier = judge.run_tier(judge.INDEPENDENT_TIER, j, CRITERIA, GOAL, item_files(item))
-            got = {str(c["id"]): str(c["outcome"]) for c in tier.get("criteria") or []}  # type: ignore[union-attr]
-            outcomes[item.name].append({c: got.get(c, "UNKNOWN") for c in CRITERIA})
-    return {"calls": calls, "spent_usd": round(budget.spent, 4),
-            "agreement": agreement(outcomes, labels, float(declaration["repeat_agreement_threshold"])),
-            "outcomes": outcomes}
+            if tier.get("status") == "UNAVAILABLE":
+                outcomes[item.name].append(None)
+            else:
+                got = {str(c["id"]): str(c["outcome"]) for c in tier.get("criteria") or []}  # type: ignore[union-attr]
+                outcomes[item.name].append({c: got.get(c, "UNKNOWN") for c in CRITERIA})
+            if budget.broken is not None:  # checked after EVERY reply, the last one included
+                stopped = f"budget stop: {budget.broken}"
+                break
+    report = agreement(outcomes, labels, float(declaration["repeat_agreement_threshold"]), k=k)
+    return {"status": "STOPPED" if stopped else "COMPLETE", "stopped": stopped, "calls": calls,
+            "spent_usd": round(budget.spent, 4), "headline": headline(report, stopped), "limits": LIMITS,
+            "agreement": report, "outcomes": outcomes}
 
 
-def agreement(outcomes: Mapping[str, Sequence[Mapping[str, str]]], labels: Mapping[str, Mapping[str, str]],
-              threshold: float) -> dict[str, dict[str, Any]]:
-    """Per criterion: repeat agreement, majority-vs-label matches, and - because
-    the labels are lopsided (orchestrator, #513: 135 SATISFIED of 140) - the
-    VIOLATED-class recall, beside what a CONSTANT-SATISFIED judge would score on
-    the same labels. Raw agreement near that baseline says nothing; the recall
-    is where a judge that cannot see a violation shows."""
+def agreement(outcomes: Mapping[str, Sequence[Mapping[str, str] | None]], labels: Mapping[str, Mapping[str, str]],
+              threshold: float, *, k: int | None = None) -> dict[str, dict[str, Any]]:
+    """Per criterion, over items whose k calls ALL answered (an UNAVAILABLE call
+    is a missing answer, never a vote): repeat agreement, the STRICT-majority
+    verdict (a tie is UNRESOLVED and matches no label), label matches beside a
+    CONSTANT-SATISFIED judge's, VIOLATED recall, and false alarms (majority
+    VIOLATED on a SATISFIED label). The labels are lopsided (#513: 135 of 140
+    SATISFIED), so raw agreement near the constant baseline says nothing."""
     report: dict[str, dict[str, Any]] = {}
     for c in CRITERIA:
-        stable = matched = labelled = violated = caught = baseline = 0
+        answered = stable = matched = labelled = violated = caught = baseline = satisfied = alarms = 0
+        unresolved = 0
         for item_id, runs in outcomes.items():
-            votes = Counter(r[c] for r in runs)
-            majority, top = votes.most_common(1)[0]
-            stable += top == len(runs)
+            got = [r for r in runs if r is not None]
+            if not got or (k is not None and len(got) != k) or len(got) != len(runs):
+                continue
+            answered += 1
+            votes = Counter(r[c] for r in got)
+            top_outcome, top = votes.most_common(1)[0]
+            majority = top_outcome if top * 2 > len(got) else "UNRESOLVED"
+            unresolved += majority == "UNRESOLVED"
+            stable += top == len(got)
             label = labels[item_id][c]
             if label != "UNKNOWN":
                 labelled += 1
@@ -309,13 +344,39 @@ def agreement(outcomes: Mapping[str, Sequence[Mapping[str, str]]], labels: Mappi
             if label == "VIOLATED":
                 violated += 1
                 caught += majority == "VIOLATED"
-        repeat = stable / len(outcomes)
-        report[c] = {"items": len(outcomes), "repeat_agreement": round(repeat, 3),
+            if label == "SATISFIED":
+                satisfied += 1
+                alarms += majority == "VIOLATED"
+        repeat = stable / answered if answered else None
+        report[c] = {"attempted": len(outcomes), "answered": answered, "repeat_agreement":
+                     None if repeat is None else round(repeat, 3), "unresolved": unresolved,
                      "labelled": labelled, "majority_matches_label": matched,
                      "constant_satisfied_matches": baseline,
                      "violated_labelled": violated, "violated_recalled": caught,
-                     "verdict": "UNKNOWN" if repeat < threshold else "reported"}
+                     "satisfied_labelled": satisfied, "false_alarms": alarms,
+                     "verdict": "UNKNOWN" if repeat is None or repeat < threshold else "reported"}
     return report
+
+
+#: The orchestrator's statement of what this validation can and cannot show
+#: (#513, 2026-10-22). It travels with the declaration and every result.
+LIMITS = ("recall: anecdotal - 1 VIOLATED item on each of 4 criteria, unmeasurable on 3 with none; "
+          "false-alarm rate over the SATISFIED labels; k=3 stability; raw agreement is reported only beside a "
+          "constant-SATISFIED judge's, which it cannot be told apart from")
+
+
+def headline(report: Mapping[str, Mapping[str, Any]], stopped: str | None) -> str:
+    alarms = sum(r["false_alarms"] for r in report.values())
+    satisfied = sum(r["satisfied_labelled"] for r in report.values())
+    caught = sum(r["violated_recalled"] for r in report.values())
+    violated = sum(r["violated_labelled"] for r in report.values())
+    matched = sum(r["majority_matches_label"] for r in report.values())
+    baseline = sum(r["constant_satisfied_matches"] for r in report.values())
+    labelled = sum(r["labelled"] for r in report.values())
+    return (f"{'STOPPED (' + stopped + '); ' if stopped else ''}"
+            f"false alarms {alarms}/{satisfied} SATISFIED labels (constant-SATISFIED: 0); "
+            f"VIOLATED recalled {caught}/{violated} (constant-SATISFIED: 0); "
+            f"label agreement {matched}/{labelled} (constant-SATISFIED: {baseline}/{labelled}). LIMITS: {LIMITS}")
 
 
 # ------------------------------------------------------------------ cli
@@ -330,6 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     c = sub.add_parser("count")
     c.add_argument("--items", type=Path, required=True)
     c.add_argument("--secret-id", required=True)
+    c.add_argument("--max-tokens", type=int, default=1536)
     c.add_argument("--out", type=Path, required=True)
     d = sub.add_parser("declare")
     d.add_argument("--items", type=Path, required=True)
@@ -351,7 +413,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.step == "export":
             print(json.dumps(export(args.run, args.out, seed=args.seed)))
         elif args.step == "count":
-            counts = count(args.items, make_judge(key_provider=ja.aws_secret_key_provider(args.secret_id)))
+            counts = count(args.items, make_judge(key_provider=ja.aws_secret_key_provider(args.secret_id),
+                                                  max_tokens=args.max_tokens))
             args.out.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n")
             print(json.dumps({"items": len(counts), "input_tokens": sum(v["input_tokens"] for v in counts.values())}))
         elif args.step == "declare":
@@ -367,8 +430,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run(args.items, declaration, args.labels,
                          key_provider=ja.aws_secret_key_provider(declaration["secret_id"]))
             args.out.write_text(json.dumps(result, indent=1, sort_keys=True) + "\n")
-            print(json.dumps({"calls": result["calls"], "spent_usd": result["spent_usd"],
-                              "agreement": result["agreement"]}))
+            print(result["headline"])
+            print(json.dumps({"status": result["status"], "calls": result["calls"], "spent_usd": result["spent_usd"]}))
+            if result["status"] != "COMPLETE":
+                return 3
     except (Refused, judge.JudgeUnavailable, judge.JudgeInputLeaked, ValueError, OSError) as exc:
         print(f"judge-validation: refused - {exc}", file=sys.stderr)
         return 2

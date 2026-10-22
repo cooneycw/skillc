@@ -84,9 +84,11 @@ def test_an_approved_run_makes_k_calls_per_item_and_reports_agreement(tmp_path: 
         result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
     assert result["calls"] == 9 == len([r for r in fake.requests if r["path"] == "/v1/messages"])
     for c in jv.CRITERIA:
-        assert result["agreement"][c] == {"items": 3, "repeat_agreement": 1.0, "labelled": 3,
-                                          "majority_matches_label": 3, "constant_satisfied_matches": 3,
-                                          "violated_labelled": 0, "violated_recalled": 0, "verdict": "reported"}
+        assert result["agreement"][c] == {"attempted": 3, "answered": 3, "repeat_agreement": 1.0, "unresolved": 0,
+                                          "labelled": 3, "majority_matches_label": 3, "constant_satisfied_matches": 3,
+                                          "violated_labelled": 0, "violated_recalled": 0, "satisfied_labelled": 3,
+                                          "false_alarms": 0, "verdict": "reported"}
+    assert result["status"] == "COMPLETE" and result["limits"] == jv.LIMITS and "LIMITS:" in result["headline"]
     assert 0 < result["spent_usd"] <= data["worst_case_usd"]
 
 
@@ -128,8 +130,9 @@ def test_red_inflated_usage_stops_the_run_early(tmp_path: Path) -> None:
     with ja.FakeMessagesServer(_always("SATISFIED")).running() as url:
         root, data, labels = _declared(tmp_path, ja.FakeMessagesServer(_always("SATISFIED")), url)
     fake = ja.FakeMessagesServer(_always("SATISFIED", usage={"input_tokens": 600_000, "output_tokens": 1500}))
-    with fake.running() as url, pytest.raises(jv.Refused, match="budget stop"):
-        jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    with fake.running() as url:
+        result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    assert result["status"] == "STOPPED" and "budget stop" in result["stopped"]
     paid = [r for r in fake.requests if r["path"] == "/v1/messages"]
     assert len(paid) == 1  # the first over-count reply breaks the bound; nothing more is sent
     assert (600_000 * 4 + 1500 * 20) / 1e6 <= 5.0
@@ -162,7 +165,8 @@ def test_red_an_unapproved_or_re_edited_declaration_is_refused(tmp_path: Path) -
 def test_red_a_worst_case_over_the_ceiling_is_refused_at_declare(tmp_path: Path) -> None:
     root = _items(tmp_path)
     labels = _labels(tmp_path, root)
-    counts = {p.name: {"request_sha256": "sha256:" + "1" * 64, "request_bytes": 1, "input_tokens": 400_000}
+    counts = {p.name: {"request_sha256": "sha256:" + "1" * 64, "request_bytes": 1, "max_tokens": 1536,
+                       "input_tokens": 400_000}
               for p in jv.items_of(root)}
     with pytest.raises(jv.Refused, match=r"worst case \$\d+\.\d\d exceeds the \$5\.00 ceiling"):
         jv.declare(root, counts, labels, k=3, max_tokens=1536, price=PRICE, secret_id="skillc", threshold=2 / 3)
@@ -189,6 +193,7 @@ def test_a_criterion_the_judge_flips_on_is_unknown_not_reported() -> None:
     labels = {"item-01": {c: "SATISFIED" for c in jv.CRITERIA}}
     report = jv.agreement(flip, labels, threshold=2 / 3)
     assert all(r["repeat_agreement"] == 0.0 and r["verdict"] == "UNKNOWN" for r in report.values())
+    assert all(r["majority_matches_label"] == 1 for r in report.values())  # 2 of 3 is a strict majority
 
 
 def test_the_label_template_names_criterion_ids_and_never_the_rubric() -> None:
@@ -215,4 +220,101 @@ def test_the_constant_satisfied_control_matches_raw_agreement_and_recalls_nothin
     for c in jv.CRITERIA:
         a, b = jv.agreement(constant, labels, 2 / 3)[c], jv.agreement(sees, labels, 2 / 3)[c]
         assert a["majority_matches_label"] == a["constant_satisfied_matches"] == 3 and a["violated_recalled"] == 0
+        assert a["false_alarms"] == 0
         assert b["majority_matches_label"] == 4 and b["violated_recalled"] == b["violated_labelled"] == 1
+
+
+
+# --- Codex review of the harness (2026-10-22): one red per finding ---------
+
+def _settled(responder: ja.Responder, **kw: Any) -> list[Mapping[str, int]]:
+    seen: list[Mapping[str, int]] = []
+    fake = ja.FakeMessagesServer(responder)
+    with fake.running() as url:
+        j = ja.AnthropicJudge(key_provider=lambda: "k", criteria_text=jv.RUBRIC, base_url=url, timeout=5.0,
+                              usage_sink=seen.append, **kw)
+        jv.judge.run_tier(jv.judge.INDEPENDENT_TIER, j, jv.CRITERIA, jv.GOAL, [("report.md", b"hi")])
+    return seen
+
+
+@pytest.mark.parametrize(("responder", "kw"), [
+    (_always("SATISFIED"), {"max_response_bytes": 16}),          # oversize: read, then refused
+    (lambda b: (500, b'{"type": "error"}'), {}),                   # an HTTP error after dispatch
+])
+def test_red_every_dispatched_request_settles_its_usage_exactly_once(responder: Any, kw: dict[str, Any]) -> None:
+    """Failed reads used to raise before the sink, so the budget charged nothing."""
+    assert _settled(responder, **kw) == [ja.UNKNOWN_USAGE]
+
+
+def test_red_a_known_input_overrun_breaks_the_budget_even_with_output_missing() -> None:
+    budget = jv.Budget(ja_price(), max_tokens=1536, ceiling=5.0)
+    budget.admit(1000)
+    budget.charge({"input_tokens": 2_000_000, "output_tokens": -1})
+    assert budget.broken is not None
+    assert budget.spent == pytest.approx((2_000_000 * 4 + 1536 * 20) / 1e6)  # known input as billed, output at worst
+
+
+def test_red_the_count_path_runs_the_same_leak_checks_before_anything_leaves(tmp_path: Path) -> None:
+    root = _items(tmp_path)
+    leaky = root / "items" / "item-01" / jv.OBSERVATIONS
+    leaky.write_text(json.dumps({"case": "twin", "where": "/home/" + "example/private-task"}))
+    fake = ja.FakeMessagesServer(_always("SATISFIED"))
+    with fake.running() as url, pytest.raises(jv.judge.JudgeInputLeaked):
+        jv.count(root, jv.make_judge(key_provider=lambda: "k", base_url=url))
+    assert fake.requests == []
+
+
+def test_red_a_breach_on_the_final_reply_stops_the_run_and_says_so(tmp_path: Path) -> None:
+    with ja.FakeMessagesServer(_always("SATISFIED")).running() as url:
+        root, data, labels = _declared(tmp_path, ja.FakeMessagesServer(_always("SATISFIED")), url, k=1)
+    calls = []
+
+    def respond(body: Mapping[str, Any]) -> tuple[int, bytes]:
+        calls.append(1)
+        usage = {"input_tokens": 10, "output_tokens": 10} if len(calls) < 3 else {"input_tokens": 900_000,
+                                                                                 "output_tokens": 10}
+        return _always("SATISFIED", usage=usage)(dict(body))
+    fake = ja.FakeMessagesServer(respond)
+    with fake.running() as url:
+        result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    assert result["calls"] == 3 and result["status"] == "STOPPED" and "budget stop" in result["stopped"]
+    assert result["headline"].startswith("STOPPED (")
+
+
+def test_red_unavailable_calls_are_missing_answers_not_unanimous_votes() -> None:
+    labels = {"item-01": {c: "SATISFIED" for c in jv.CRITERIA}}
+    report = jv.agreement({"item-01": [None, None, None]}, labels, 2 / 3, k=3)
+    assert all(r["answered"] == 0 and r["repeat_agreement"] is None and r["verdict"] == "UNKNOWN"
+               for r in report.values())
+
+
+def test_red_a_tie_is_unresolved_and_order_does_not_move_any_score() -> None:
+    labels = {"item-01": {c: "VIOLATED" for c in jv.CRITERIA}}
+    votes = [{c: o for c in jv.CRITERIA} for o in ("SATISFIED", "VIOLATED", "UNKNOWN")]
+    a = jv.agreement({"item-01": votes}, labels, 2 / 3)
+    b = jv.agreement({"item-01": list(reversed(votes))}, labels, 2 / 3)
+    assert a == b
+    assert all(r["unresolved"] == 1 and r["violated_recalled"] == 0 and r["majority_matches_label"] == 0
+               for r in a.values())
+
+
+def test_red_counts_taken_at_another_max_tokens_are_refused_at_declare(tmp_path: Path) -> None:
+    fake = ja.FakeMessagesServer(_always("SATISFIED"))
+    with fake.running() as url:
+        root = _items(tmp_path)
+        counts = jv.count(root, jv.make_judge(key_provider=lambda: "k", base_url=url, max_tokens=1024))
+    labels = _labels(tmp_path, root)
+    with pytest.raises(jv.Refused, match="another max_tokens than the declared 1536"):
+        jv.declare(root, counts, labels, k=3, max_tokens=1536, price=PRICE, secret_id="skillc", threshold=2 / 3)
+
+
+def test_red_a_run_whose_calls_are_all_unavailable_certifies_nothing(tmp_path: Path) -> None:
+    """End to end: UNAVAILABLE replies are recorded as missing answers, so they
+    can never read as three unanimous UNKNOWN votes with perfect agreement."""
+    with ja.FakeMessagesServer(_always("SATISFIED")).running() as url:
+        root, data, labels = _declared(tmp_path, ja.FakeMessagesServer(_always("SATISFIED")), url)
+    fake = ja.FakeMessagesServer(lambda b: (500, b'{"type": "error"}'))
+    with fake.running() as url:
+        result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    assert all(o is None for runs in result["outcomes"].values() for o in runs)
+    assert all(r["answered"] == 0 and r["verdict"] == "UNKNOWN" for r in result["agreement"].values())
