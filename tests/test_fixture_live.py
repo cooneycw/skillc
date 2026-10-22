@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from skillc import agent_trial as at
+from skillc import attempt_guard as ag
 from skillc import calibration, profile, trial, verify
 from skillc import calibration_run as cr
 from skillc import codex_guard as cg
@@ -183,6 +184,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
     record: dict[str, Any] = {
         "disposition": "captured",
         "observation": {"server_side_tool_uses": [],
+                        # #518: a clean record is one whose transcript was scanned and held one session.
+                        "transcript_codex_invocations": [], "transcript_files_found": 1,
                         "transcript_response_items_inspected": 4,
                         "transcript_unrecognized_types": [],
                         "transcript_line_types": {"response_item/message": 4, "session_meta": 1},
@@ -232,6 +235,14 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"fixture.codex_guard": {"status": "observed", "confirmed": 1, "suspected": 0}}, "nested codex observed"),
     ({"fixture.codex_guard": {"status": "unknown"}}, "nested-codex count is unknown"),
     ({"fixture": _DELETE}, "nested-codex count is unknown"),
+    # #518: what the guard cannot see. sizing-2's shape: the guard reads zero
+    # beside a SECOND session file - the agent's own nested client.
+    ({"observation.transcript_files_found": 2}, "nested codex past the guard: 2 transcript sessions"),
+    ({"observation.transcript_codex_invocations": [{"program": "/usr/local/bin/codex", "guarded": False}]},
+     "codex by path, past the guard: /usr/local/bin/codex"),
+    ({"observation.transcript_codex_invocations": [{"program": "codex", "guarded": True}]},
+     "1 bare codex invocation(s) in the transcript, 0 refused"),
+    ({"observation.transcript_codex_invocations": None}, "codex invocations were not scanned"),
 ])
 def test_each_trigger_stops_the_schedule(change: dict[str, Any], match: str) -> None:
     """One committed red per trigger: the stop is a gate nothing downstream re-derives."""
@@ -1161,6 +1172,9 @@ def _retained_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
     proxy = _retained_object(CAMPAIGN_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
     return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id)},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            # #518: the live fixture path now scans the transcript too.
+                            "transcript_codex_invocations": ag.scan_transcript_text(
+                                transcript.decode("utf-8", errors="replace")),
                             "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
 
 
@@ -1553,6 +1567,9 @@ def _rev4_run_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
     proxy = _retained_object(REV4_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
     return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id)},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            # #518: the live fixture path now scans the transcript too.
+                            "transcript_codex_invocations": ag.scan_transcript_text(
+                                transcript.decode("utf-8", errors="replace")),
                             "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
 
 
@@ -1849,3 +1866,14 @@ def test_the_sizing_declaration_without_its_approval_is_refused() -> None:
 
 def test_no_rehearsal_stamp_reaches_the_sizing_declaration() -> None:
     assert "REHEARSAL" not in (STEP6_LIVE / "sizing-declaration-draft.json").read_text(encoding="utf-8")
+
+
+
+def test_red_518_a_second_session_blocks_credit_even_with_the_guard_at_zero() -> None:
+    """The live credit gate and the judge replay both read the transcript now,
+    not only the guard's record: sizing-2's attempt would otherwise be credited."""
+    record = _clean_record(**{"observation.transcript_files_found": 2})
+    guard = record["fixture"]["codex_guard"]
+    assert guard["status"] == "zero"
+    assert ag.nested_bypass(guard, record["observation"], "refusal-expected") == ["2 transcript sessions in one attempt"]
+    assert ag.nested_bypass(guard, _clean_record()["observation"], "refusal-expected") == []

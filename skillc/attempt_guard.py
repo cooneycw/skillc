@@ -126,6 +126,22 @@ class AttemptGuard:
                          nested_policy=self.nested_policy, sessions=files if isinstance(files, int) else None)}
 
 
+def nested_bypass(nested: Mapping[str, Any] | None, observation: object,
+                  nested_policy: str | None) -> list[str]:
+    """#518: what the transcript shows that the guard did not record - a second
+    session (the agent's own client: a resume appends to the SAME session, so
+    one attempt is one session whatever its turns), or a codex invocation by
+    path or unrefused by name. Read on EVERY path, the Level-3 fixture path
+    included: the guard sees only launches that come through it, and a login
+    shell's PATH never reaches it (#518). An unscanned transcript is itself a
+    bypass - absence of evidence is never a clean read."""
+    obs = observation if isinstance(observation, Mapping) else {}
+    files = obs.get("transcript_files_found")
+    result = assess(nested, obs.get("transcript_codex_invocations"), None, nested_policy=nested_policy,
+                    sessions=files if isinstance(files, int) and not isinstance(files, bool) else None)
+    return list(result["bypass"])
+
+
 def credit_block(report: Mapping[str, Any] | None) -> str | None:
     """The credit gate's reason from an `AttemptGuard.report`, or None."""
     if not isinstance(report, Mapping):

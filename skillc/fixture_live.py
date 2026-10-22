@@ -74,6 +74,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from . import attempt_guard as ag
 from . import calibration, cost_estimate, trial, verify
 from . import calibration_run as cr
 from . import codex_guard as cg
@@ -545,6 +546,14 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
         return None
     observation = record.get("observation")
     obs: Mapping[str, Any] = observation if isinstance(observation, Mapping) else {}
+    # #518 FIRST: a nested client the guard never saw (a second session, or an
+    # unguarded invocation in the transcript) is named as itself - in sizing-2
+    # it surfaced only by accident, as "census unavailable".
+    fixture_rec = record.get("fixture")
+    guard_rec = fixture_rec.get("codex_guard") if isinstance(fixture_rec, Mapping) else None
+    bypass = ag.nested_bypass(guard_rec if isinstance(guard_rec, Mapping) else None, obs, nested_policy)
+    if bypass:
+        return "nested codex past the guard: " + "; ".join(bypass)
     uses = obs.get("server_side_tool_uses")
     if not isinstance(uses, list):
         return "the server-side tool census is unavailable for a dispatched attempt"
@@ -1322,7 +1331,10 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             egress = ({"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}
                       if proxy is not None else {"status": "unread", "reason": "no egress proxy log retained"})
             record["observation"] = {"status": "observed", **observation.to_fields(), **census,
-                                     "run_metadata": run_metadata, "egress": egress}
+                                     "run_metadata": run_metadata, "egress": egress,
+                                     # #518: the replay re-runs the live path's transcript scan.
+                                     "transcript_codex_invocations":
+                                         ag.scan_transcript_text(transcript.decode("utf-8", errors="replace"))}
         adapter_dependent = isinstance(original_reason, str) and original_reason.startswith(_ADAPTER_DEPENDENT_REASONS)
         if was_graded or not adapter_dependent:
             # Carried over: the replay re-decides only what the adapter decided.
@@ -1331,7 +1343,8 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             outcomes.append(mp.AttemptOutcome(scheduled, record, wall))
             continue
 
-        def fixture_block(fixture: dict[str, object] | str = fixture) -> str | None:
+        def fixture_block(fixture: dict[str, object] | str = fixture,
+                          observed: object = record.get("observation")) -> str | None:
             if isinstance(fixture, str):
                 return f"not credited: {fixture}"
             if not assume_fixture_finalized:
@@ -1344,8 +1357,12 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
                 return "not credited: the fixture service's channel was unavailable"
             guard = fixture.get("codex_guard")
             # The live gate's own policy (#279 ruling G1), never a stricter or looser one.
-            return cg.credit_block(guard if isinstance(guard, Mapping) else None,
-                                   nested_policy=declaration.nested_policy)
+            block = cg.credit_block(guard if isinstance(guard, Mapping) else None,
+                                    nested_policy=declaration.nested_policy)
+            if block is None and (bypass := ag.nested_bypass(guard if isinstance(guard, Mapping) else None,
+                                                             observed, declaration.nested_policy)):
+                block = "not credited: nested codex past the guard (" + "; ".join(bypass) + ")"
+            return block
 
         # The live gate's witness and disposition checks precede the canary, so
         # an adapter-dependent original reason means both had passed.

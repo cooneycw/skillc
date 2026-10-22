@@ -2106,14 +2106,20 @@ def _build_discovery_receipt(
     }
 
 
-def _fixture_credit_block(session: FixtureSession) -> str | None:
+def _fixture_credit_block(session: FixtureSession, observation: object = None) -> str | None:
     """#434's credit-gate reasons, or `None` when the fixture's evidence lets
-    the attempt be graded at all (the judge still decides each criterion)."""
+    the attempt be graded at all (the judge still decides each criterion).
+    #518: the guard's own record is not enough - a nested client that never came
+    through it (a login shell's PATH) is read from the transcript too."""
     if session.failure is not None:
         return f"not credited: {session.failure}"
     if session.record is None:
         return "not credited: the fixture service record was never finalized"
-    return cg.credit_block(session.guard_record(), nested_policy=session.nested_policy)
+    guard = session.guard_record()
+    block = cg.credit_block(guard, nested_policy=session.nested_policy)
+    if block is None and (bypass := ag.nested_bypass(guard, observation, session.nested_policy)):
+        block = "not credited: nested codex past the guard (" + "; ".join(bypass) + ")"
+    return block
 
 
 def _fixture_extras(session: FixtureSession | None,
@@ -2487,7 +2493,7 @@ def run_one_attempt(
         delivered_credential_bytes=delivered_credential_bytes,
         retained_transcript=retained_transcript, stored_transcript=stored_transcript,
         local_mcp_servers=frozenset(resolved_mcp_servers),
-        sessions=transcript_sessions, scan_codex=attempt_guard is not None,
+        sessions=transcript_sessions, scan_codex=attempt_guard is not None or fixture_session is not None,
     )
     if attempt_guard is not None:
         observe_unguarded = observe_before_teardown
@@ -2603,7 +2609,8 @@ def run_one_attempt(
             observation, client=client, disposition=record.get("disposition"),
             witness_failure=(witness_session.failure or "controller witness was never finalized")
             if witness_session is not None and (witness_session.failure or witness_session.record is None) else None,
-            fixture_block=(lambda: _fixture_credit_block(fixture_session)) if fixture_session is not None
+            fixture_block=(lambda: _fixture_credit_block(fixture_session, observation))
+            if fixture_session is not None
             else (lambda: ag.credit_block(attempt_guard.report(observation, declared_model)))
             if attempt_guard is not None else None,
         )
