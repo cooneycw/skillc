@@ -746,6 +746,28 @@ def test_an_endpoint_pass_with_a_violated_honest_report_is_flagged_first(tmp_pat
     assert report["cases"][first["case"]]["honest_report_violated"] == 1
 
 
+def test_525_a_declared_deviation_heads_the_report_without_claiming_the_gate_ran(tmp_path: Path) -> None:
+    """#525 (orchestrator): the deviation is in the attempt record AND first in
+    the report. Counter-model review: it states INSTALLATION - an attempt that
+    never ran a gate still carries it, so the head must not claim execution."""
+    deviation = {"path": ".codex/skills/flow-auto/scripts/flow-finish-gate.sh", "via": "bundled:flow-auto"}
+    declaration = fl.parse_declaration(json.loads(CAMPAIGN.read_text()))
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None)
+    outcomes = [mp.AttemptOutcome(s, {**_clean_record(graded=LIVE_SHAPE),
+                                      **({"treatment_deviation": [deviation]} if i == 0 else {})}, 10.0)
+                for i, s in enumerate(schedule)]
+    report = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
+    assert next(iter(report)) == "treatment_deviation"
+    first = report["attempts"][0]
+    assert first["treatment_deviation"] == [deviation]
+    assert report["treatment_deviation"]["attempts"] == [
+        {"attempt_id": first["attempt_id"], "case": first["case"], "shimmed": [deviation["path"]]}]
+    statement = report["treatment_deviation"]["statement"]
+    assert "installed" in statement and " ran from" not in statement and "witnessed runs" in statement
+    assert all("treatment_deviation" not in a for a in report["attempts"][1:])
+
+
 # --------------------------------------------------- #486: the judge replay
 
 _TASK = ROOT / "evals" / "level3" / "flow-auto-necessity"

@@ -614,6 +614,27 @@ def _gate_witness_choice(
     return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
 
 
+def _require_bundled_route(bundled: Sequence[str], gate_entrypoint: str | None, fixture: AttemptFixture | None,
+                           shim_source: Path, gate_args: Mapping[str, Sequence[str]] | None) -> None:
+    """#525: where a bundled gate may be witnessed at all; refuses otherwise."""
+    if not bundled:
+        return
+    if gate_entrypoint is None:
+        raise HomeFileVerificationRefused("bundled gate entrypoints need the declared gate_entrypoint they copy")
+    if fixture is None:
+        # Counter-model review: only the fixture-live report surfaces the
+        # declared deviation (record AND head); a calibration or
+        # discrimination report would drop it, so those routes refuse.
+        raise HomeFileVerificationRefused("a bundled gate is witnessed only on the fixture-live route, whose "
+                                          "report declares the treatment deviation (#525)")
+    if shim_source.read_bytes().count(_SHIM_VIA_LINE) != 1:
+        raise HomeFileVerificationRefused("this attempt's gate witness cannot see a skill-bundled gate: the "
+                                          "flow-check witness of a bundled gate is deferred (#525)")
+    if gate_args is None or tuple(gate_args.get(_FLOW_FINISH_GATE, ("missing",))) != ():
+        raise HomeFileVerificationRefused(f"a bundled gate is witnessed as {_FLOW_FINISH_GATE!r}, which this "
+                                          "attempt does not declare as a bare call (#525)")
+
+
 @dataclass
 class _WitnessSession:
     """One controller-owned holder; the subject can never supply its record."""
@@ -2412,21 +2433,7 @@ def run_one_attempt(
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
     #: #525: the declared treatment deviations the bundled-gate overlay makes.
     treatment_deviation: list[dict[str, object]] = []
-    if bundled_gate_entrypoints:
-        if gate_entrypoint is None:
-            raise HomeFileVerificationRefused("bundled gate entrypoints need the declared gate_entrypoint they copy")
-        if fixture is None:
-            # Counter-model review: only the fixture-live report surfaces the
-            # declared deviation (record AND head); a calibration or
-            # discrimination report would drop it, so those routes refuse.
-            raise HomeFileVerificationRefused("a bundled gate is witnessed only on the fixture-live route, whose "
-                                              "report declares the treatment deviation (#525)")
-        if gate_shim_source.read_bytes().count(_SHIM_VIA_LINE) != 1:
-            raise HomeFileVerificationRefused("this attempt's gate witness cannot see a skill-bundled gate: the "
-                                              "flow-check witness of a bundled gate is deferred (#525)")
-        if gate_args is None or tuple(gate_args.get(_FLOW_FINISH_GATE, ("missing",))) != ():
-            raise HomeFileVerificationRefused(f"a bundled gate is witnessed as {_FLOW_FINISH_GATE!r}, which this "
-                                              "attempt does not declare as a bare call (#525)")
+    _require_bundled_route(bundled_gate_entrypoints, gate_entrypoint, fixture, gate_shim_source, gate_args)
     if project_gate is not None:
         if fixture is not None:
             raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; project_gate cannot also be set")

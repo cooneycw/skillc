@@ -319,4 +319,55 @@ def test_the_committed_rehearsal_profile_validates_against_the_snapshot() -> Non
     assert inv["bundled_gate_entrypoints"] == [GATE]
     assert {c["path"] for c in inv["checksum_consumers"]} == {
         ".claude/scripts/flow-plan-record.py", ".codex/skills/flow-auto/reference.md",
-        ".codex/skills/flow-auto/scripts/codex-skill-sync.py", ".codex/skills/flow-auto/scripts/flow-plan-record.py"}
+        ".codex/skills/flow-auto/scripts/codex-skill-sync.py", ".codex/skills/flow-auto/scripts/flow-plan-record.py",
+        # delivered neighbours outside the closure (counter-model review): measured, declared
+        ".codex/skills/flow-doctor/scripts/flow-helpers-install.sh",
+        ".codex/skills/flow-repair/scripts/flow-helpers-install.sh", ".codex/skills/flow-finish/scripts/codex-skill-sync.py"}
+
+
+# ------------------------------------------------------------------ counter-model review (#525)
+
+def test_review_the_treatment_check_sees_a_delivered_neighbour_the_profile_closure_does_not() -> None:
+    """Finding 1: a subject selecting more skills installs them all, so the
+    bundled checks run over the WHOLE delivered home - a neighbour invoking its
+    own bundled gate, or verifying checksums undeclared, is refused there."""
+    home = {**_SKILL, GATE: b"#!/usr/bin/env bash\n",
+            ".codex/skills/flow-check/reference.md": CA3030D_STEP6.encode(),
+            ".codex/skills/flow-check/scripts/flow-finish-gate.sh": b"#!/usr/bin/env bash\n"}
+    problems = p.bundled_gate_problems(home, ".claude/scripts/flow-finish-gate.sh", (GATE,), {},
+                                       require_consumers_installed=True)
+    assert [c for c, _m, _p in problems] == ["bundled-gate-unwitnessed"]
+    assert problems[0][2] == ".codex/skills/flow-check/scripts/flow-finish-gate.sh"
+    neighbour = {**_SKILL, ".codex/skills/flow-doctor/scripts/install.sh": b"sha256sum -c SHA256SUMS\n"}
+    assert [c for c, _m, _p in p.bundled_gate_problems(neighbour, ".claude/scripts/flow-finish-gate.sh", (GATE,), {},
+                                                        require_consumers_installed=True)] == [
+        "checksum-consumer-undeclared"]
+
+
+def test_review_a_stale_consumer_declaration_is_refused_where_the_population_exists() -> None:
+    problems = p.bundled_gate_problems(_SKILL, ".claude/scripts/flow-finish-gate.sh", (GATE,),
+                                       {".codex/skills/gone/scripts/x.sh": "measured"}, require_consumers_installed=True)
+    assert [c for c, _m, _p in problems] == ["checksum-consumer-not-installed"]
+
+
+def test_review_a_synthetic_checksum_consumer_is_scanned_not_skipped() -> None:
+    """Finding 2: a profile-authored (synthetic) file is installed bytes too."""
+    files = dict(_SKILL)
+    installed = _installed(files)
+    installed[".claude/scripts/verify.sh"] = {"origin": "synthetic", "source": None,
+                                              "content": "sha256sum -c SHA256SUMS\n"}
+    walk = type("W", (), {"problems": None})()
+    with pytest.raises(p.Refused, match="not a declared checksum_consumer"):
+        p._check_bundled_gates(walk, _gate_profile(bundled=(GATE,)), _Tree(files), installed)  # type: ignore[arg-type]
+
+
+def test_review_a_bundled_gate_off_the_fixture_live_route_is_refused() -> None:
+    """Finding 3: only the fixture-live report declares the deviation, so a
+    calibration or discrimination attempt with a bundled gate is refused."""
+    gates = {"flow-auto-finish": ()}
+    with pytest.raises(at.HomeFileVerificationRefused, match="only on the fixture-live route"):
+        at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", None, SHIM, gates)
+    at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(), SHIM, gates)  # type: ignore[arg-type]
+    with pytest.raises(at.HomeFileVerificationRefused, match="deferred"):
+        at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(),  # type: ignore[arg-type]
+                                  at._FLOW_CHECK_GATE_SHIM_SOURCE, gates)
