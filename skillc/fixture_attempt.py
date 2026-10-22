@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import codex_guard as cg
+from . import credential_steward as cs
 from . import fixture_overlay as fo
 from . import fixture_service as fs
 from . import git_snapshot as gs
@@ -87,6 +88,13 @@ class _FixtureBackend(Protocol):
 
     def trigger_dropped(self, handle: object) -> int | None: ...
 
+    # #518: the credential steward's root primitives.
+    def start_root_daemon_in_attempt(self, handle: object, argv: Sequence[str],
+                                     timeout: float | None = None) -> bool: ...
+
+    def root_output_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None,
+                               max_bytes: int = ...) -> bytes | None: ...
+
 
 @dataclass
 class FixtureSession:
@@ -112,14 +120,20 @@ class FixtureSession:
     #: digest of every remote ref head and the extras the controller turns.
     order: Order | None = None
     turn_records: list[dict[str, Any]] | None = None
+    #: #518: the credential steward's record and driver.
+    steward: cs.CredentialStewardSession = field(init=False)
+    steward_driver: cs.CredentialSteward | None = None
+    _steward_record: dict[str, Any] | None = None
     _finishing: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
         self.guard = cg.CodexGuardSession(self.attempt_id)
+        self.steward = cs.CredentialStewardSession(self.attempt_id)
 
     def routes(self) -> dict[str, tuple[Callable[[Mapping[str, object]], Mapping[str, object]], frozenset[str]]]:
-        return {"gh": (self._gh, fs.REQUEST_KEYS), "codex_guard": (self._guard, cg.REQUEST_KEYS)}
+        return {"gh": (self._gh, fs.REQUEST_KEYS), "codex_guard": (self._guard, cg.REQUEST_KEYS),
+                "credential_steward": (self.steward.decide, cs.REQUEST_KEYS)}
 
     def watch(self, decide: Callable[[Mapping[str, object]], Mapping[str, object]]
               ) -> Callable[[Mapping[str, object]], Mapping[str, object]]:
@@ -133,6 +147,8 @@ class FixtureSession:
             except ChannelRefusal:
                 if request.get("op") == "codex_guard":
                     self.guard.channel_unavailable = True
+                elif request.get("op") == "credential_steward":
+                    self.steward.channel_unavailable = True
                 raise
         return watched
 
@@ -152,6 +168,7 @@ class FixtureSession:
         try:
             self.overlays["gh"] = fo.install_gh_shim(backend, handle, environment).__dict__
             self.overlays["codex_guard"] = fo.install_codex_guard(backend, handle, environment)
+            self.steward_driver = cs.start_for(self.steward, backend, handle)  # #518
             remote = ExecGitRemote(backend, handle, git_dir=self.fixture.git_dir)
             service = fs.FixtureService(self.fixture.declaration, remote, self.attempt_id, order=self.order,
                                         ship_stamper=(lambda commit: _ship_stamp(backend, handle, self.fixture.remote_relpath,
@@ -171,6 +188,8 @@ class FixtureSession:
                 return
             self._finishing = True
             service = self.service
+        if self.steward_driver is not None:
+            self.steward_driver.stop(backend, handle)  # while the channel still listens
         channel_ok = True
         try:
             channel_ok = backend.trigger_log(handle) is not None
@@ -184,8 +203,10 @@ class FixtureSession:
             # A connection closed before any route saw it may have been a guard
             # line (counter-model review, pass 2): the count cannot be zero.
             self.guard.channel_unavailable = True
+            self.steward.channel_unavailable = True
         if not channel_ok:
             self.guard.channel_unavailable = True
+            self.steward.channel_unavailable = True
             if service is not None:
                 service.channel_unavailable = True
         with tempfile.TemporaryDirectory(prefix="skillc-fixture-export-") as directory:
@@ -212,6 +233,11 @@ class FixtureSession:
                                                                      self.git.get("remote_refs"))
         self.guard.finalize()
 
+    def steward_record(self) -> dict[str, Any]:
+        if self._steward_record is None:
+            self._steward_record = cs.record_of(self.steward, self.steward_driver)
+        return self._steward_record
+
     def guard_record(self) -> dict[str, Any]:
         return cg.summarize(self.attempt_id, list(self.guard.decisions), self.guard.channel_unavailable,
                             expected_top_level=self.expected_top_level, nested_policy=self.nested_policy)
@@ -220,7 +246,7 @@ class FixtureSession:
         extras: dict[str, object] = {
             "case": self.fixture.case, "service": self.record, "git": self.git,
             "git_unreadable": self.git_unreadable, "final_report": final_report,
-            "codex_guard": self.guard_record()}
+            "codex_guard": self.guard_record(), "credential_steward": self.steward_record()}
         if self.order is not None:
             # #279 PR-2a: the turns as the controller recorded them, ordered.
             extras["controller_turns"] = list(self.turn_records or [])

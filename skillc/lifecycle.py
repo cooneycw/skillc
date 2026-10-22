@@ -249,6 +249,7 @@ def _run_turns(
     limits: Limits, cancel: Callable[[], bool] | None,
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None],
     order: Order | None = None,
+    before_stop: Callable[[ExecutionBackend, object], None] | None = None,
 ) -> ExecuteResult:
     """#279: one attempt as controller-delivered turns, each in the SAME
     still-running container (`TurnCapableBackend.execute_turn`). A further turn
@@ -262,7 +263,9 @@ def _run_turns(
     `delivered` = it actually launched); the returned result is the last
     turn's, which the stop record describes. With `order` (#279 PR-2a) every
     controller-turn record carries the attempt's ordering counter, so a grader
-    can place a service event or a gate run before or after a turn."""
+    can place a service event or a gate run before or after a turn.
+    `before_stop` (#518) runs in the same `finally`, BEFORE `end_attempt`,
+    while the container still runs; it never blocks the stop."""
     assert isinstance(backend, TurnCapableBackend)
 
     def stamp() -> dict[str, object]:
@@ -301,6 +304,11 @@ def _run_turns(
                               exit_code=result.exit_code, delivered=result.reason not in _NEVER_STARTED, **stamp())
         return result
     finally:
+        if before_stop is not None:
+            try:
+                before_stop(backend, handle)
+            except Exception:  # noqa: BLE001, S110 - the hook's own record reads the failure; the stop still happens
+                pass
         backend.end_attempt(handle)
 
 
@@ -321,6 +329,7 @@ def run_through_backend(
     imports_for_capture: Callable[[], Sequence[trial.Import]] | None = None,
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None] | None = None,
     order: Order | None = None,
+    before_stop: Callable[[ExecutionBackend, object], None] | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -381,6 +390,14 @@ def run_through_backend(
     because the transcript only exists after `observe_before_teardown` has
     read it out of the container. Omitted, the manifest declares no
     transcript stream, exactly as before.
+
+    `before_stop` (#518) runs once, after the subject's last turn and BEFORE
+    the container is stopped - `observe_before_teardown` runs after the stop,
+    when nothing inside the container can still run or report. Anything that
+    must finish IN the container (the credential steward's own `stopped`)
+    goes here. Given one, the attempt takes the turn path even for a single
+    turn, since plain `execute()` stops the container itself. A raise is
+    swallowed: the hook's own record must read it, and the stop still runs.
 
     TEARDOWN IS UNCONDITIONAL once `prepare()` has returned a handle
     (found by cross-model review: the first version of this function let an
@@ -475,11 +492,22 @@ def run_through_backend(
 
                 experiment.record(attempt_id, "dispatched")
                 experiment.record(attempt_id, "started")
-                if next_turn is None:
+                if next_turn is None and (before_stop is None or not isinstance(backend, TurnCapableBackend)):
+                    # A backend that cannot keep the container up gets its
+                    # `before_stop` after the stop: the hook then fails to
+                    # reach it and its record reads that, never a clean stop.
                     result = backend.execute(handle, argv, limits, cancel)
+                    if before_stop is not None:
+                        try:
+                            before_stop(backend, handle)
+                        except Exception:  # noqa: BLE001, S110 - see `_run_turns`
+                            pass
                 else:
-                    result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel, next_turn,
-                                        order=order)
+                    # #518: a `before_stop` needs the container still up after
+                    # the subject exits, which only the turn path keeps - a
+                    # single turn is the turn path with no next turn.
+                    result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel,
+                                        next_turn or (lambda *_: None), order=order, before_stop=before_stop)
                 assert isinstance(result, ExecuteResult)
                 if result.reason != "exited":
                     experiment.record(attempt_id, "stop-requested", reason=result.reason)

@@ -2785,6 +2785,39 @@ class DockerBackend:
             return False
         return proc.returncode == 0
 
+    def start_root_daemon_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None) -> bool:
+        """Starts `argv` DETACHED inside the live container AS ROOT
+        (`docker exec -d -u 0`): #518's credential steward, which must outlive
+        this call and run as a uid the candidate cannot signal. Returns `True`
+        when docker accepted the start, `False` on any failure - never raises.
+        A caller confirms the daemon by its own first report (the steward's
+        `armed` event over the trigger socket), never by this return value."""
+        assert isinstance(handle, _Handle)
+        wait = timeout if timeout is not None else self.daemon_timeout
+        try:
+            proc = subprocess.run([*self.docker_bin, "exec", "-d", "-u", "0", "--", handle.name, *argv],
+                                  capture_output=True, env=handle.env, timeout=wait, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    def root_output_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None,
+                               max_bytes: int = 1 << 20) -> bytes | None:
+        """Runs `argv` inside the container AS ROOT and returns its stdout, or
+        `None` on any failure, a nonzero exit or output over `max_bytes`
+        (#518: the steward's vault and signals, which the candidate cannot
+        reach). Never raises."""
+        assert isinstance(handle, _Handle)
+        wait = timeout if timeout is not None else self.daemon_timeout
+        try:
+            proc = subprocess.run([*self.docker_bin, "exec", "-u", "0", "--", handle.name, *argv],
+                                  capture_output=True, env=handle.env, timeout=wait, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0 or len(proc.stdout) > max_bytes:
+            return None
+        return proc.stdout
+
     def remove_file_in_attempt(self, handle: object, path: str, timeout: float = 5.0) -> bool:
         """Deletes `path` inside the attempt's container and confirms it is
         gone, via a bare `docker exec` - deliberately NOT routed through

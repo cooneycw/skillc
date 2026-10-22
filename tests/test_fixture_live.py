@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from skillc import agent_trial as at
+from skillc import attempt_guard as ag
 from skillc import calibration, profile, trial, verify
 from skillc import calibration_run as cr
 from skillc import codex_guard as cg
@@ -183,6 +184,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
     record: dict[str, Any] = {
         "disposition": "captured",
         "observation": {"server_side_tool_uses": [],
+                        # #518: a clean record is one whose transcript was scanned and held one session.
+                        "transcript_codex_invocations": [], "transcript_files_found": 1,
                         "transcript_response_items_inspected": 4,
                         "transcript_unrecognized_types": [],
                         "transcript_line_types": {"response_item/message": 4, "session_meta": 1},
@@ -190,7 +193,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
                                    "allowed": {"chatgpt.com:443": 12, "auth.openai.com:443": 1}, "denied": {}},
                         "run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high",
                                          "token_usage": {"total_tokens": 1000, "input_tokens": 900}}},
-        "fixture": {"codex_guard": {"status": "zero", "top_level": 1, "confirmed": 0, "suspected": 0}},
+        "fixture": {"codex_guard": {"status": "zero", "top_level": 1, "confirmed": 0, "suspected": 0},
+                    "credential_steward": {"status": "held"}},
         "graded": {"status": "PASS", "criteria": [{"id": "source-unmodified", "outcome": "SATISFIED"}]},
     }
     for path, value in changes.items():
@@ -231,7 +235,19 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"observation.egress.allowed": _DELETE}, "census is incomplete"),
     ({"fixture.codex_guard": {"status": "observed", "confirmed": 1, "suspected": 0}}, "nested codex observed"),
     ({"fixture.codex_guard": {"status": "unknown"}}, "nested-codex count is unknown"),
-    ({"fixture": _DELETE}, "nested-codex count is unknown"),
+    ({"fixture": _DELETE}, "steward record is absent"),  # #518: the first of the two absent records named
+    # #518: what the guard cannot see. sizing-2's shape: the guard reads zero
+    # beside a SECOND session file - the agent's own nested client.
+    ({"observation.transcript_files_found": 2}, "nested codex past the guard: 2 transcript sessions"),
+    ({"observation.transcript_codex_invocations": [{"program": "/usr/local/bin/codex", "guarded": False}]},
+     "codex by path, past the guard: /usr/local/bin/codex"),
+    ({"observation.transcript_codex_invocations": [{"program": "codex", "guarded": True}]},
+     "1 bare codex invocation(s) in the transcript, 0 refused"),
+    ({"observation.transcript_codex_invocations": None}, "codex invocations were not scanned"),
+    # #518 A: the credential steward's record must read held.
+    ({"fixture.credential_steward": {"status": "refreshed"}}, "re-appeared in the agent's home"),
+    ({"fixture.credential_steward": {"status": "unknown", "arms": 0, "expected_arms": 1}}, "steward record is unknown"),
+    ({"fixture.credential_steward": _DELETE}, "steward record is absent"),
 ])
 def test_each_trigger_stops_the_schedule(change: dict[str, Any], match: str) -> None:
     """One committed red per trigger: the stop is a gate nothing downstream re-derives."""
@@ -762,7 +778,10 @@ def _experiment(run_dir: Path) -> trial.Experiment:
     return trial.Experiment.open(store)
 
 
-def _transcript(prompt_text: str, final: str) -> bytes:
+def _transcript(prompt_text: str, final: str, extra_cmds: tuple[str, ...] = ()) -> bytes:
+    calls = [{"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "call_id": f"x{i}",
+                                                   "arguments": json.dumps({"cmd": cmd})}}
+             for i, cmd in enumerate(extra_cmds)]
     lines = [
         {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [
             {"type": "input_text", "text": "<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"}]}},
@@ -772,6 +791,7 @@ def _transcript(prompt_text: str, final: str) -> bytes:
                                               "arguments": json.dumps({"cmd": "gh issue view 1"})}},
         {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1",
                                               "output": "Chunk ID: a\nProcess exited with code 0\nOutput:\n"}},
+        *calls,
         {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [
             {"type": "output_text", "text": final}]}},
     ]
@@ -790,7 +810,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
                     original_reason: str = _CANARY_REASON, guard_decisions: list[dict[str, Any]] | None = None,
                     extras_copies: int = 1, extras_as_artifact: bool = False,
                     prompt_delivered: bool | None = True, guard_policy: str | None = None,
-                    guard_channel_unavailable: bool = False) -> str:
+                    guard_channel_unavailable: bool = False,
+                    steward: dict[str, Any] | None = None, transcript_cmds: tuple[str, ...] = ()) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -806,6 +827,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
               "codex_guard": cg.summarize(attempt_id, guard_decisions if guard_decisions is not None
                                           else [{"decision": "passed-top-level"}], guard_channel_unavailable,
                                           nested_policy=guard_policy)}
+    if steward != {}:
+        extras["credential_steward"] = steward or {"status": "held"}
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
@@ -813,7 +836,7 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
     # the planted transcript carries one too, so the replay cannot match it -
     # it must carry the live run's own verdict instead.
     live_prompt = f"{fl.prompt(declaration, ROOT)}\n\nBefore doing anything else, write 'touched:{position:032x}'."
-    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text))
+    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text, transcript_cmds))
     _overwrite(experiment.root / f"manifest-{attempt_id}.json", ({
         "observations": [{"stream": "client-transcript", "coverage": "complete", "digest": transcript}],
         "artifacts": [{"path": "evidence.json", "digest": d} for d in extras_digests] if extras_as_artifact else [],
@@ -1159,8 +1182,13 @@ def _retained_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
         at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV4), ROOT),
         skill_name=None)
     proxy = _retained_object(CAMPAIGN_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
-    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id)},
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id),
+                                                # #518: these runs predate the steward; held, to isolate the census.
+                                                "credential_steward": {"status": "held"}},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            # #518: the live fixture path now scans the transcript too.
+                            "transcript_codex_invocations": ag.scan_transcript_text(
+                                transcript.decode("utf-8", errors="replace")),
                             "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
 
 
@@ -1427,6 +1455,39 @@ def test_the_judge_replay_applies_the_declared_nested_policy(tmp_path: Path, dec
     assert ("nested codex observed" in str(entry["replay_blocked_reason"])) is blocked, entry["replay_blocked_reason"]
 
 
+def test_red_518_a_refused_nested_launch_in_the_transcript_is_not_a_replay_bypass(tmp_path: Path) -> None:
+    """#518 review: replay must count the guard's refusals from the INNER
+    `nested` mapping. Handed the whole guard record it counted zero, and the
+    agent's own refused launch read as a bypass."""
+    data = _draft()
+    data["containment"] = {"nested_codex": "refusal-expected"}
+    declaration, run_dir = _dry_run_with_report(tmp_path, data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN,
+                                 guard_policy="refusal-expected", transcript_cmds=("codex exec 'review this'",))
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and entry["replay_blocked_reason"] is None, entry["replay_blocked_reason"]
+    # ...and the scan is live: a SECOND bare launch, past one refusal, is a bypass.
+    (tmp_path / "two").mkdir()
+    declaration, run_dir = _dry_run_with_report(tmp_path / "two", data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN, guard_policy="refusal-expected",
+                                 transcript_cmds=("codex exec a", "codex exec b"))
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert "2 bare codex invocation(s) in the transcript, 1 refused" in str(entry["replay_blocked_reason"])
+
+
+@pytest.mark.parametrize(("steward", "why"), [
+    ({}, "steward record is absent"),
+    ({"status": "refreshed"}, "re-appeared in the agent's home"),
+    ({"status": "unknown", "arms": 1, "expected_arms": 2}, "steward record is unknown"),
+])
+def test_red_518_replay_applies_the_live_steward_gate(tmp_path: Path, steward: dict[str, Any], why: str) -> None:
+    """#518 review: the replay never credits what the live gate could not."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration, steward=steward)
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and why in str(entry["replay_blocked_reason"]), entry["replay_blocked_reason"]
+
+
 # ------------------------------- #279 PR-2a: the task registry and extras
 
 def test_the_task_registry_selects_cases_and_keeps_434_byte_identical() -> None:
@@ -1551,8 +1612,13 @@ def _rev4_run_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
         at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV5), ROOT),
         skill_name=None)
     proxy = _retained_object(REV4_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
-    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id)},
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id),
+                                                # #518: these runs predate the steward; held, to isolate the census.
+                                                "credential_steward": {"status": "held"}},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            # #518: the live fixture path now scans the transcript too.
+                            "transcript_codex_invocations": ag.scan_transcript_text(
+                                transcript.decode("utf-8", errors="replace")),
                             "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
 
 
@@ -1849,3 +1915,14 @@ def test_the_sizing_declaration_without_its_approval_is_refused() -> None:
 
 def test_no_rehearsal_stamp_reaches_the_sizing_declaration() -> None:
     assert "REHEARSAL" not in (STEP6_LIVE / "sizing-declaration-draft.json").read_text(encoding="utf-8")
+
+
+
+def test_red_518_a_second_session_blocks_credit_even_with_the_guard_at_zero() -> None:
+    """The live credit gate and the judge replay both read the transcript now,
+    not only the guard's record: sizing-2's attempt would otherwise be credited."""
+    record = _clean_record(**{"observation.transcript_files_found": 2})
+    guard = record["fixture"]["codex_guard"]
+    assert guard["status"] == "zero"
+    assert ag.nested_bypass(guard, record["observation"], "refusal-expected") == ["2 transcript sessions in one attempt"]
+    assert ag.nested_bypass(guard, _clean_record()["observation"], "refusal-expected") == []

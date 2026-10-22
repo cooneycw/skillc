@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import codex_guard as cg
+from . import credential_steward as cs
 from . import fixture_overlay as fo
 from .decide_reply_channel import ChannelRefusal
 
@@ -59,6 +60,10 @@ class AttemptGuard:
     overlay: dict[str, object] | None = None
     failure: str | None = None
     guard: cg.CodexGuardSession = field(init=False)
+    #: #518: the credential steward's record and driver.
+    steward: cs.CredentialStewardSession = field(init=False)
+    steward_driver: cs.CredentialSteward | None = None
+    _steward_record: dict[str, Any] | None = None
     _finished: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -66,9 +71,11 @@ class AttemptGuard:
         if self.nested_policy is not None and self.nested_policy not in cg.NESTED_POLICIES:
             raise ValueError(f"nested_policy must be one of {cg.NESTED_POLICIES}, not {self.nested_policy!r}")
         self.guard = cg.CodexGuardSession(self.attempt_id)
+        self.steward = cs.CredentialStewardSession(self.attempt_id)
 
     def routes(self) -> dict[str, tuple[Decide, frozenset[str]]]:
-        return {"codex_guard": (self.guard.decide, cg.REQUEST_KEYS)}
+        return {"codex_guard": (self.guard.decide, cg.REQUEST_KEYS),
+                "credential_steward": (self.steward.decide, cs.REQUEST_KEYS)}
 
     def watch(self, decide: Decide) -> Decide:
         """`FixtureSession.watch`'s rule: a `codex_guard` request refused
@@ -80,13 +87,17 @@ class AttemptGuard:
             except ChannelRefusal:
                 if request.get("op") == "codex_guard":
                     self.guard.channel_unavailable = True
+                elif request.get("op") == "credential_steward":
+                    self.steward.channel_unavailable = True
                 raise
         return watched
 
     def bind(self, backend: Any, handle: object, environment: Mapping[str, str]) -> None:
-        """Place the guard before the agent starts; any failure refuses the attempt."""
+        """Place the guard and start the credential steward (#518) before the
+        agent starts; any failure refuses the attempt."""
         try:
             self.overlay = fo.install_codex_guard(backend, handle, environment)
+            self.steward_driver = cs.start_for(self.steward, backend, handle)
         except Exception as exc:
             self.failure = f"codex guard binding failed: {type(exc).__name__}: {exc}"
             raise
@@ -97,18 +108,28 @@ class AttemptGuard:
             if self._finished:
                 return
             self._finished = True
+        if self.steward_driver is not None:
+            self.steward_driver.stop(backend, handle)  # while the channel still listens
         try:
             if backend.trigger_log(handle) is None:
                 self.guard.channel_unavailable = True
+                self.steward.channel_unavailable = True
         except Exception:  # noqa: BLE001 - a failed drain is an unhealthy channel, never a clean one
             self.guard.channel_unavailable = True
+            self.steward.channel_unavailable = True
         try:
             dropped = backend.trigger_dropped(handle)
         except Exception:  # noqa: BLE001 - an unreadable count is incomplete coverage
             dropped = None
         if dropped is None or dropped > 0:
             self.guard.channel_unavailable = True
+            self.steward.channel_unavailable = True
         self.guard.finalize()
+
+    def steward_record(self) -> dict[str, Any]:
+        if self._steward_record is None:
+            self._steward_record = cs.record_of(self.steward, self.steward_driver)
+        return self._steward_record
 
     def record(self) -> dict[str, Any]:
         return cg.summarize(self.attempt_id, list(self.guard.decisions), self.guard.channel_unavailable,
@@ -121,9 +142,39 @@ class AttemptGuard:
         invocations = (observation.get("transcript_codex_invocations")
                        if isinstance(observation, Mapping) else None)
         files = observation.get("transcript_files_found") if isinstance(observation, Mapping) else None
-        return {"nested": nested, "failure": self.failure, "transcript_invocations": invocations,
-                **assess(nested, invocations, declared_model, failure=self.failure,
-                         nested_policy=self.nested_policy, sessions=files if isinstance(files, int) else None)}
+        result = {"nested": nested, "failure": self.failure, "transcript_invocations": invocations,
+                  **assess(nested, invocations, declared_model, failure=self.failure,
+                           nested_policy=self.nested_policy, sessions=files if isinstance(files, int) else None)}
+        # #518: the credential must have been held out of the agent's home.
+        steward = self.steward_record()
+        result["credential_steward"] = steward
+        result["block"] = result["block"] or cs.credit_block(steward)
+        result["stop"] = result["stop"] or cs.stop_reason(steward)
+        return result
+
+
+def guard_nested(guard_record: object) -> Mapping[str, Any] | None:
+    """The `nested` mapping inside a `codex_guard.summarize` record - what
+    `assess`/`nested_bypass` count refusals from. Passing the whole record
+    reads zero refusals, so every legitimate refusal would read as a bypass."""
+    nested = guard_record.get("nested") if isinstance(guard_record, Mapping) else None
+    return nested if isinstance(nested, Mapping) else None
+
+
+def nested_bypass(nested: Mapping[str, Any] | None, observation: object,
+                  nested_policy: str | None) -> list[str]:
+    """#518: what the transcript shows that the guard did not record - a second
+    session (the agent's own client: a resume appends to the SAME session, so
+    one attempt is one session whatever its turns), or a codex invocation by
+    path or unrefused by name. Read on EVERY path, the Level-3 fixture path
+    included: the guard sees only launches that come through it, and a login
+    shell's PATH never reaches it (#518). An unscanned transcript is itself a
+    bypass - absence of evidence is never a clean read."""
+    obs = observation if isinstance(observation, Mapping) else {}
+    files = obs.get("transcript_files_found")
+    result = assess(nested, obs.get("transcript_codex_invocations"), None, nested_policy=nested_policy,
+                    sessions=files if isinstance(files, int) and not isinstance(files, bool) else None)
+    return list(result["bypass"])
 
 
 def credit_block(report: Mapping[str, Any] | None) -> str | None:

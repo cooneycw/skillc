@@ -342,3 +342,67 @@ def test_the_post_stop_finalize_reads_the_exported_remote(
     assert envelope["service"]["remote_integrity"] == integrity
     assert kind in [d["kind"] for d in envelope["service"]["divergence"]]
     assert _outcome(result)["status"] != "PASS"
+
+
+# --- #518 A: the credential steward, through the live wiring -----------------
+
+def test_a_held_credential_is_recorded_and_credited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text())
+    assert result["fixture"]["credential_steward"]["status"] == "held" and result["graded"] is not None
+    [envelope] = trusted
+    assert envelope["credential_steward"]["status"] == "held"
+
+
+def test_red_518_a_credential_that_re_appeared_mid_attempt_is_not_credited(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The steward captured a re-created auth.json: a nested client could have
+    read it during the gap, so the attempt is never graded."""
+    from conftest import FakeStewardDriver
+    FakeStewardDriver.mode = "refreshed"
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text())
+    assert result["graded"] is None and trusted == []
+    assert result["grading_blocked_reason"] == ("not credited: the codex credential re-appeared in the agent's "
+                                                "home mid-attempt")
+    assert result["fixture"]["credential_steward"]["status"] == "refreshed"
+
+
+def test_red_518_a_steward_that_never_arms_refuses_the_attempt(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conftest import FakeStewardDriver
+    FakeStewardDriver.mode = "never-arms"
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text())
+    assert result["graded"] is None and trusted == []
+    assert "never reported armed" in str(result["fixture"]["failure"])
+
+
+def test_red_518_a_refused_nested_launch_is_not_a_bypass_at_the_fixture_gate() -> None:
+    """#518 review: the gate counts the guard's refusals from its INNER
+    `nested` mapping. Handed the whole record it counted zero, so the agent's
+    own refused launch, seen in the transcript, read as a bypass."""
+    from types import SimpleNamespace
+
+    from skillc import codex_guard as cg
+
+    def session(decisions: list[str]) -> Any:
+        guard = cg.summarize("a-1", [{"decision": d, "argv_digest": "sha256:" + "0" * 64, "seq": i}
+                                     for i, d in enumerate(decisions)], False, nested_policy="refusal-expected")
+        return SimpleNamespace(failure=None, record={}, nested_policy="refusal-expected",
+                               guard_record=lambda: guard, steward_record=lambda: {"status": "held"})
+
+    one = {"transcript_codex_invocations": [{"program": "codex", "guarded": True}], "transcript_files_found": 1}
+    assert at._fixture_credit_block(session(["passed-top-level", "refused-nested"]), one) is None
+    two = {**one, "transcript_codex_invocations": [{"program": "codex", "guarded": True}] * 2}
+    assert "2 bare codex invocation(s) in the transcript, 1 refused" in str(
+        at._fixture_credit_block(session(["passed-top-level", "refused-nested"]), two))

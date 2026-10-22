@@ -168,3 +168,66 @@ def p3_bindings(data: dict) -> dict:
     data["run_store"] = "~/skillc-evidence/test"
     data.setdefault("tolerance", {"non_evaluable_per_arm": 1})
     return data
+
+
+class FakeStewardDriver:
+    """#518: a well-behaved credential steward for every non-live test, which
+    has no container in which a real one could run. It emits the real
+    protocol's events into the session: start -> armed, withdrawn; a resume
+    -> armed, withdrawn; stop -> stopped. A test that needs a steward that
+    misbehaves sets `mode` (or builds its own)."""
+
+    mode = "held"  # "held" | "never-arms" | "refreshed"
+
+    def __init__(self, session: object, backend: object, handle: object) -> None:
+        from skillc import credential_steward as cs
+        assert isinstance(session, cs.CredentialStewardSession)
+        self.session, self.backend, self.handle, self.arms, self.seq = session, backend, handle, 0, 0
+        self.stopped = False
+        if FakeStewardDriver.mode == "never-arms":
+            raise cs.StewardFailed("the credential steward never reported armed")
+        self._arm()
+        if FakeStewardDriver.mode == "refreshed":
+            self._emit("refreshed-captured")
+
+    def _emit(self, event: str) -> None:
+        self.seq += 1
+        self.session.decide({"op": "credential_steward", "event": event, "seq": self.seq,  # type: ignore[attr-defined]
+                             "opens": 4, "closes": 4})
+
+    def _arm(self) -> None:
+        self.arms += 1
+        self._emit("armed")
+        self._emit("withdrawn")
+
+    def restore_for_turn(self, backend: object, handle: object) -> None:
+        self._arm()
+
+    def stop(self, backend: object, handle: object) -> None:
+        """Like the real one, it can report only from a RUNNING container
+        (#518 review: a stop after the container was killed never arrives),
+        and only once."""
+        from skillc.backend import Confirmation
+        if self.stopped:
+            return
+        self.stopped = True
+        if backend.confirm_stopped(handle) is Confirmation.NOT_CONFIRMED:  # type: ignore[attr-defined]
+            self._emit("stopped")
+
+    def vault_bytes(self, backend: object, handle: object) -> bytes | None:
+        # No real withdrawal happened, so the home still holds the credential.
+        return backend.read_home_file(handle, ".codex/auth.json")  # type: ignore[attr-defined, no-any-return]
+
+    def record(self) -> dict[str, object]:
+        return self.session.finalize(expected_arms=self.arms)  # type: ignore[attr-defined, no-any-return]
+
+
+@pytest.fixture(autouse=True)
+def _fake_credential_steward(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Non-live tests get `FakeStewardDriver`; live (`real_docker`) tests run the real steward."""
+    if request.node.get_closest_marker("real_docker") is None:
+        from skillc import credential_steward as cs
+        monkeypatch.setattr(cs, "start_for", FakeStewardDriver)
+    FakeStewardDriver.mode = "held"
+    yield
+    FakeStewardDriver.mode = "held"

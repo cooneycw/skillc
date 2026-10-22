@@ -408,6 +408,15 @@ class _FakeAttempt:
             return ok(f"{path}\n".encode()) if path in self.files else ok(b"", 1)
         if argv[0] == "cat":
             return ok(self.files[argv[-1]])
+        if argv[0] == "bash" and argv[1] == "-lc" and "command -v" in argv[2]:
+            # /etc/profile's non-root PATH (measured, #518), then profile.d.
+            path = "/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games"
+            if fo.LOGIN_PROFILE_PATH in self.files and b'PATH="/usr/local/sbin:$PATH"' in self.files[fo.LOGIN_PROFILE_PATH]:
+                path = "/usr/local/sbin:" + path
+            for directory in path.split(":"):
+                if f"{directory}/{argv[-1]}" in self.files:
+                    return ok(f"{directory}/{argv[-1]}\n".encode())
+            return ok(b"", 1)
         if argv[0] == "sh" and "command -v" in argv[2]:
             path = (env or {}).get("PATH", self.path)
             for directory in path.split(":"):
@@ -441,6 +450,9 @@ def test_the_guard_and_the_gh_shim_are_placed_and_verified() -> None:
     assert json.loads(attempt.files[fo.CODEX_GUARD_CONFIG]) == placed["resolved"]
     assert shim.digest == hashlib.sha256(fo.GH_SHIM_SOURCE.read_bytes()).hexdigest()
     assert attempt.links[fo.REAL_CODEX] in attempt.files  # the real codex link is untouched
+    profile = placed["login_profile"]
+    assert attempt.files[fo.LOGIN_PROFILE_PATH] == fo.LOGIN_PROFILE
+    assert isinstance(profile, dict) and profile["path"] == fo.LOGIN_PROFILE_PATH
 
 
 @pytest.mark.parametrize("break_", ["pre-planted-guard", "pre-planted-gh", "path-order", "writable-sbin",
@@ -587,3 +599,32 @@ def test_without_a_policy_the_record_is_byte_identical() -> None:
     nested = _record(["passed-top-level"], expected=1, policy=None)["nested"]
     assert isinstance(nested, dict)
     assert set(nested) == {"status", "top_level", "confirmed", "suspected", "ancestry_unknown"}
+
+
+
+def test_red_518_a_login_shell_that_misses_the_guard_is_refused() -> None:
+    """codex runs its tool commands as `bash -lc`, whose PATH dropped the
+    guard's directory: a bare `codex` there was the real client (sizing-2).
+    The placement now proves the login shell resolves to the guard too."""
+    attempt = _FakeAttempt()
+    real_place = fo._place
+
+    def no_profile(backend: object, handle: object, path: str, content: bytes, mode: int) -> object:
+        if path == fo.LOGIN_PROFILE_PATH:  # the pre-#518 install: no login-shell fix
+            return fo.PlacedFile(path, "skipped")
+        return real_place(backend, handle, path, content, mode)  # type: ignore[arg-type]
+    fo_place, fo._place = fo._place, no_profile  # type: ignore[assignment]
+    try:
+        with pytest.raises(fo.OverlayRefused, match="in a login shell `codex` resolves to '/usr/local/bin/codex'"):
+            fo.install_codex_guard(attempt, object(), ENVIRONMENT)
+    finally:
+        fo._place = fo_place  # type: ignore[assignment]
+    profile = fo.install_codex_guard(_FakeAttempt(), object(), ENVIRONMENT)["login_profile"]
+    assert isinstance(profile, dict) and profile["path"] == fo.LOGIN_PROFILE_PATH
+
+
+def test_a_pre_planted_login_profile_is_refused() -> None:
+    attempt = _FakeAttempt()
+    attempt.files[fo.LOGIN_PROFILE_PATH] = b"subject's own"
+    with pytest.raises(fo.OverlayRefused):
+        fo.install_codex_guard(attempt, object(), ENVIRONMENT)
