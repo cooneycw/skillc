@@ -36,8 +36,13 @@ opens a store. There are two rehearsals, and both spend nothing:
   `unavailable` (calibration's rehearsal).
 - `rehearse="actor"`: the real live path, with egress, with a scripted actor
   playing a committed qualify candidate and a dummy credential.
+- `rehearse="actor-nested"` (#279 sizing-3 preflight): the Step-6 actor, whose
+  turn-1 launch is a real codex process (`codex sandbox`, no model) running
+  sizing-2's nested `codex exec` in a login shell, recorded in the transcript
+  as the agent's tool call. It must read REFUSED (the guard) and DETECTED
+  (the transcript scan) and, under `refusal-expected`, still be credited.
 
-Only these two may run an UNAPPROVED declaration, so the approval package can
+Only these may run an UNAPPROVED declaration, so the approval package can
 be rehearsed before it is approved. Both still run every check except the
 approval record itself, and the report says `approved: false`.
 
@@ -101,7 +106,9 @@ EXPERIMENT_LABEL = "level3-fixture-live"
 TRIAL_PREFIX = "live"
 REPORT_KIND = "level3-fixture-live-report"
 REPORT_FILENAME = "live-report.json"
-REHEARSALS = ("dry", "actor")
+REHEARSALS = ("dry", "actor", "actor-nested")
+#: The rehearsals that run a scripted actor in a real container.
+ACTOR_REHEARSALS = ("actor", "actor-nested")
 UNKNOWN = calibration.UNKNOWN
 TOKEN_CAP_STATEMENT = ("no token cap exists in the stack: only wall time is capped (per attempt and in total); "
                        "each attempt's tokens are recorded from its own rollout")
@@ -632,17 +639,56 @@ class Stop:
 #: is preceded by the client's own tracing line, as codex-cli 0.157.1 printed
 #: it in the #279 sizing run (#516), so a rehearsal exercises the real shape.
 TURN_ACTOR_SESSION_ID = "01a14f6a-cd7e-7851-8061-5cdeaaca5863"
-TURN_ACTOR_SOURCE = """\
-import os, subprocess, sys
+#: #518: both turn actors load the credential as the real client does, and end
+#: a turn only once the credential steward has withdrawn it - a scripted turn
+#: is seconds long, and a resume signalled while the steward is still armed is
+#: refused (the attempt is stopped, never credited).
+_CREDENTIAL_HELPERS = """
+CREDENTIAL = os.path.join(os.environ["HOME"], ".codex", "auth.json")
 
+
+def client_reads():
+    # Read the credential as codex-cli 0.157.1 does at start (#518 A1: four
+    # reads), so the credential steward sees the client load it. True when it
+    # was there to read.
+    try:
+        for _ in range(4):
+            with open(CREDENTIAL, "rb") as handle:
+                handle.read()
+    except OSError:
+        return False
+    return True
+
+
+def await_withdrawal(present, seconds=20.0):
+    # A real turn lasts minutes, so the steward has withdrawn the credential
+    # long before it ends; a scripted turn lasts seconds. Wait for it, as the
+    # real timing would, so the resume finds it withdrawn (#518).
+    deadline = time.monotonic() + seconds
+    while present and os.path.exists(CREDENTIAL) and time.monotonic() < deadline:
+        time.sleep(0.2)
+"""
+#: #279 sizing-3 preflight (`actor-nested`): sizing-2's nested launch, made from
+#: under a REAL codex process (`codex sandbox`, no model call) in the login
+#: shell codex runs tool commands in - so the guard sees a codex ancestor.
+NESTED_REHEARSAL_COMMAND = ("codex exec -m gpt-6-sol -s read-only --json -o /tmp/review.md "
+                            "'Review the current uncommitted diff against origin/main for issue #1.'")
+NESTED_REHEARSAL_FILE = "nested.json"
+TURN_ACTOR_SOURCE = """\
+import os, subprocess, sys, time
+@CREDENTIAL_HELPERS@
+present = client_reads()
 if len(sys.argv) >= 4 and sys.argv[-3] == "resume":
     subprocess.run(["codex", "--version"])
+    await_withdrawal(present)
     sys.exit(0)
 sys.stderr.write("Reading additional input from stdin...\\n2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models\\nOpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
 sys.stderr.flush()
 actor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "actor.py")
-os.execv(sys.executable, [sys.executable, actor, *sys.argv[1:]])
-""".replace("@SESSION@", TURN_ACTOR_SESSION_ID)
+code = subprocess.run([sys.executable, actor, *sys.argv[1:]]).returncode
+await_withdrawal(present)
+sys.exit(code)
+""".replace("@SESSION@", TURN_ACTOR_SESSION_ID).replace("@CREDENTIAL_HELPERS@", _CREDENTIAL_HELPERS)
 
 
 #: #279 PR-3: the turn-aware Step-6 actor. It plays a step6 qualify candidate's
@@ -657,8 +703,8 @@ os.execv(sys.executable, [sys.executable, actor, *sys.argv[1:]])
 #: (the real client's resume is one top-level launch) and appends the
 #: candidate's report to the session's transcript.
 STEP6_ACTOR_SOURCE = """\
-import json, os, subprocess, sys, tempfile
-
+import json, os, subprocess, sys, tempfile, time
+@CREDENTIAL_HELPERS@
 IDENTITY = ["-c", "user.name=Widget Maintainer", "-c", "user.email=maintainer@fixture.invalid",
             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
 DATE = "2026-10-17T12:30:00+0000"
@@ -724,14 +770,31 @@ def main():
     cut = next((i for i, s in enumerate(steps) if s.get("approval") is True), len(steps))
     resume = len(sys.argv) >= 4 and sys.argv[-3] == "resume"
     transcript = os.path.join(home, "@TRANSCRIPT@")
+    present = client_reads()
+    nested = os.path.join(here, "@NESTED_FILE@")
     if not resume:
         sys.stderr.write("Reading additional input from stdin...\\n2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models\\nOpenAI Codex v0.157.1\\n--------\\nworkdir: /work\\nsession id: @SESSION@\\n--------\\n")
         sys.stderr.flush()
-        subprocess.run(["codex", "--version"])
+        command = None
+        if os.path.exists(nested):
+            with open(nested, encoding="utf-8") as handle:
+                command = json.load(handle)["command"]
+            # The turn's one top-level launch is a real codex process; the
+            # nested launch is its child, in a login shell, as a tool call is.
+            subprocess.run(["codex", "sandbox", "-c", 'sandbox_mode="danger-full-access"', "--", "bash", "-lc",
+                            "timeout 20 %s </dev/null" % command])
+        else:
+            subprocess.run(["codex", "--version"])
         for item in steps[:cut]:
             step(work, home, contents, item)
         subprocess.run([sys.executable, os.path.join(here, "fake_agent_client.py"), "--format", "codex-fake",
                         "--home", home, "--transcript-relpath", "@TRANSCRIPT@", sys.argv[-1]], check=True)
+        if command is not None:
+            call = {"type": "response_item", "payload": {"type": "function_call", "name": "exec_command",
+                                                         "call_id": "nested-1",
+                                                         "arguments": json.dumps({"cmd": command})}}
+            write(transcript, json.dumps(call) + "\\n", append=True)
+        await_withdrawal(present)
         return
     subprocess.run(["codex", "--version"])
     for item in steps[cut + 1:]:
@@ -741,16 +804,19 @@ def main():
     line = {"type": "response_item", "payload": {"type": "message", "role": "assistant",
                                                   "content": [{"type": "output_text", "text": report}]}}
     write(transcript, json.dumps(line) + "\\n", append=True)
+    await_withdrawal(present)
 
 
 if __name__ == "__main__":
     main()
 """.replace("@HOME_DIR@", fc.HOME_DIR).replace("@TRANSCRIPT@", fc.TRANSCRIPT_RELPATH).replace(
-    "@SESSION@", TURN_ACTOR_SESSION_ID)
+    "@SESSION@", TURN_ACTOR_SESSION_ID).replace("@CREDENTIAL_HELPERS@", _CREDENTIAL_HELPERS).replace(
+    "@NESTED_FILE@", NESTED_REHEARSAL_FILE)
 
 
-def step6_actor(task_root: Path, case: str) -> tuple[list[str], dict[str, bytes]]:
-    """#279 PR-3: the Step-6 actor's base argv and home files for `case`."""
+def step6_actor(task_root: Path, case: str, *, nested: bool = False) -> tuple[list[str], dict[str, bytes]]:
+    """#279 PR-3: the Step-6 actor's base argv and home files for `case`;
+    with `nested`, turn 1 also makes `NESTED_REHEARSAL_COMMAND`."""
     candidate = REHEARSAL_BY_TASK[task_root.name][case]
     files = fc.candidate_files(task_root, fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", "", None,
                                                  {}, None))
@@ -763,10 +829,13 @@ def step6_actor(task_root: Path, case: str) -> tuple[list[str], dict[str, bytes]
             f"{fc.HOME_DIR}/fake_agent_client.py": fc.lc.FAKE_CLIENT.read_bytes(),
             f"{fc.HOME_DIR}/actions.json": files["actions.json"], f"{fc.HOME_DIR}/report.md": files["report.md"],
             f"{fc.HOME_DIR}/contents.json": json.dumps(contents, sort_keys=True).encode("utf-8")}
+    if nested:
+        home[f"{fc.HOME_DIR}/{NESTED_REHEARSAL_FILE}"] = json.dumps({"command": NESTED_REHEARSAL_COMMAND}).encode()
     return ["/usr/bin/python3", f"{fc.CONTAINER_HOME}/{actor}", *eg.CODEX_SERVER_SIDE_OFF], home
 
 
-def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple[list[str], dict[str, bytes]]:
+def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False,
+                    nested: bool = False) -> tuple[list[str], dict[str, bytes]]:
     """The actor's base argv and home files for `case`: fixture_campaign's own,
     playing `REHEARSAL_CANDIDATES[case]`. The server-side-off flags ride after
     its guard and gate arguments (the actor reads `argv[1]`, `argv[2]` and the
@@ -777,7 +846,9 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False) -> tuple
     if candidate is not None and task_root.name == Path(STEP6_TASK_PATH).name:
         if not turns:
             raise LiveRefused("the Step-6 actor plays a turn timeline; its case must declare controller turns")
-        return step6_actor(task_root, case)
+        return step6_actor(task_root, case, nested=nested)
+    if nested:
+        raise LiveRefused("the nested-launch rehearsal is the Step-6 actor's; this task has none")
     if candidate is None:
         owed = OWED_REHEARSAL_ACTORS.get(task_root.name)
         raise LiveRefused(f"no rehearsal candidate is declared for {task_root.name}/{case}"
@@ -871,8 +942,9 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable",
                                   reason=cr.REHEARSAL_REASON)
         case_turns = declaration.turns.for_case(scheduled.arm) if declaration.turns is not None else None
-        base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns))
-                                 if rehearse == "actor" else (argv, {}))
+        base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns),
+                                                 nested=rehearse == "actor-nested")
+                                 if rehearse in ACTOR_REHEARSALS else (argv, {}))
         agent, grading = backends()
         case_dir = run_dir / "fixtures" / scheduled.attempt_id
         surface, fixture = fc.build_case(task_root, scheduled.arm, case_dir)

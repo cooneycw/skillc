@@ -1748,6 +1748,95 @@ def test_the_step6_actor_plays_the_timeline_across_turns(tmp_path: Path, monkeyp
     assert json.loads(transcript[-1])["payload"]["content"][0]["text"] == report
 
 
+def _step6_on_host(tmp_path: Path, *, nested: bool = False) -> dict[str, Any]:
+    """The Step-6 actor's home and work tree on the host, with stub codex/gh/gate
+    (as `test_the_step6_actor_plays_the_timeline_across_turns`)."""
+    import shutil
+    import subprocess
+    task = ROOT / fl.STEP6_TASK_PATH
+    argv, home_files = fl.rehearsal_actor(task, "twin-gate", turns=True, nested=nested)
+    from skillc import fixture_campaign as fc
+    work, home, log = tmp_path / "work", tmp_path / "home", tmp_path / "calls.log"
+    work.mkdir(parents=True)
+    fc._builder(task).build(work, "twin-gate")
+    shutil.move(str(work / "remote.git"), str(tmp_path / "remote.git"))
+    subprocess.run(["git", "-C", str(work / "repo"), "remote", "set-url", "origin", str(tmp_path / "remote.git")],
+                   check=True)
+    for rel, data in home_files.items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_bytes(data)
+    bin_dir = tmp_path / "bin"
+    _stub(bin_dir / "codex", f'echo "codex $*" >> {log}')
+    _stub(bin_dir / "gh", f'echo "gh $(pwd) $*" >> {log}')
+    _stub(home / ".claude" / "scripts" / "flow-finish-gate.sh", f'echo "gate $(pwd)" >> {log}')
+    return {"argv": argv, "work": work, "home": home, "log": log, "transcript": home / fc.TRANSCRIPT_RELPATH,
+            "env": {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+            "script": str(home / ".skillc-fixture-campaign" / "step6_actor.py")}
+
+
+def _turn(h: dict[str, Any], *tail: str) -> Any:
+    import subprocess
+    return subprocess.run([sys.executable, h["script"], *h["argv"][2:], *tail], cwd=h["work"], env=h["env"],
+                          capture_output=True, text=True, timeout=120, check=False)
+
+
+_PROMPT = "/flow:auto 1\nWrite the exact text 'touched:ab12' to a file named 'canary.txt' in the working directory."
+
+
+def test_red_518_the_step6_actor_is_covered_by_the_real_credential_steward(tmp_path: Path) -> None:
+    """#279 sizing-3 preflight: after #518 a scripted turn that never read the
+    credential, and ended in seconds, left the steward ARMED; the resume was
+    refused and the rehearsal stopped ("arms 1/2"). The actor now reads it as
+    the client does and ends a turn once it is withdrawn - proven here against
+    the REAL steward script on host inotify, through a resume."""
+    from test_credential_steward_daemon import DUMMY, Steward
+    h = _step6_on_host(tmp_path)
+    steward = Steward(tmp_path / "s")
+    steward.home = h["home"] / ".codex"  # watch the actor's own home
+    steward.home.mkdir(parents=True, exist_ok=True)
+    (steward.home / "auth.json").write_bytes(DUMMY)
+    steward.thread = __import__("threading").Thread(target=steward.mod.run, daemon=True,
+                                                    args=(str(steward.home), str(steward.vault), 0.3, 30.0))
+    steward.thread.start()
+    assert steward.wait("armed")
+    first = _turn(h, _PROMPT)
+    assert first.returncode == 0, first.stderr
+    assert steward.names() == ["armed", "withdrawn"], steward.events  # withdrawn BEFORE the turn returned
+    assert steward.events[1][1]["opens"] >= 4
+    steward.rearm()
+    assert steward.wait("armed", 2)
+    second = _turn(h, "resume", fl.TURN_ACTOR_SESSION_ID, "approved")
+    assert second.returncode == 0, second.stderr
+    assert steward.names() == ["armed", "withdrawn", "armed", "withdrawn"], steward.events
+    steward.stop()
+
+
+def test_the_nested_rehearsal_launches_under_a_codex_process_and_is_scanned(tmp_path: Path) -> None:
+    """`actor-nested`: turn 1's one top-level launch is `codex sandbox`, whose
+    child is the nested `codex exec` in a login shell; the transcript records
+    it as the agent's tool call, so the live scan detects it."""
+    h = _step6_on_host(tmp_path, nested=True)
+    first = _turn(h, _PROMPT)
+    assert first.returncode == 0, first.stderr
+    calls = h["log"].read_text().splitlines()
+    assert calls[0] == ("codex sandbox -c sandbox_mode=\"danger-full-access\" -- bash -lc timeout 20 "
+                        f"{fl.NESTED_REHEARSAL_COMMAND} </dev/null")
+    assert "codex --version" not in calls  # still ONE top-level launch in turn 1
+    hits = ag.scan_transcript_text(h["transcript"].read_text())
+    assert hits is not None and [(x["program"], x["guarded"]) for x in hits] == [("codex", True)]
+    plain = _step6_on_host(tmp_path / "plain")
+    assert _turn(plain, _PROMPT).returncode == 0
+    assert ag.scan_transcript_text(plain["transcript"].read_text()) == []  # the control: nothing to detect
+
+
+def test_the_nested_rehearsal_is_the_step6_actors_only() -> None:
+    assert "actor-nested" in fl.REHEARSALS and set(fl.ACTOR_REHEARSALS) == {"actor", "actor-nested"}
+    with pytest.raises(fl.LiveRefused, match="nested-launch rehearsal"):
+        fl.rehearsal_actor(ROOT / fl.TASK_PATH, "twin", turns=True, nested=True)
+    _, home = fl.rehearsal_actor(ROOT / fl.STEP6_TASK_PATH, "twin-gate", turns=True)
+    assert f".skillc-fixture-campaign/{fl.NESTED_REHEARSAL_FILE}" not in home
+
+
 @pytest.mark.parametrize(("planned", "tallied"), [("actor", None), ("dry", None), ("live", "actor")])
 def test_a_tally_never_mixes_rehearsal_and_live_records(tmp_path: Path, planned: str, tallied: str | None) -> None:
     """Orchestrator C4: the mode bound into the ledger at plan time decides; a

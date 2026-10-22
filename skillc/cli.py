@@ -2206,7 +2206,7 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
     finally:
         cc.discard_acquisition(run_dir, str(subject["name"]))
 
-    if rehearse == "actor":
+    if rehearse in fl.ACTOR_REHEARSALS:
         credential: Path | None = lc.dummy_credential(run_dir / "codex-credential.dummy.json")
     else:
         credential = Path(args.credential) if args.credential else None
@@ -3020,9 +3020,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_level3_live.add_argument("--timeout", type=float, default=60, help="per-container-call timeout, seconds")
     p_level3_live.add_argument("--private-dir", help="must equal the declared run_store when given")
     p_level3_live.add_argument(
-        "--rehearse", choices=["dry", "actor"], default=None,
+        "--rehearse", choices=["dry", "actor", "actor-nested"], default=None,
         help="spend nothing: 'dry' starts no container; 'actor' runs the real live path with a scripted actor "
-             "and a dummy credential. Either may run an unapproved declaration (the report says so)",
+             "and a dummy credential; 'actor-nested' (#279) is the Step-6 actor plus one nested codex launch, "
+             "which must read refused and detected. Any may run an unapproved declaration (the report says so)",
     )
     p_level3_live.add_argument(
         "--judge-replay", metavar="RUN_DIR", default=None,
