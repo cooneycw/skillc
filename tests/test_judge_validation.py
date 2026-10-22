@@ -350,3 +350,29 @@ def test_counts_at_another_effort_are_refused_and_the_declaration_pins_it(tmp_pa
                       threshold=2 / 3, effort="high")
     assert data["effort"] == "high" and data["min_answered_calls"] == 9  # ceil(0.9 x 9)
     assert all(r["body"]["output_config"]["effort"] == "high" for r in fake.requests)
+
+
+
+def test_red_empty_verdict_lists_are_not_answered_calls(tmp_path: Path) -> None:
+    """Codex review: nine {"verdicts": []} replies read COMPLETE with perfect
+    agreement, because run_tier fills the gaps with synthesized UNKNOWNs."""
+    with ja.FakeMessagesServer(_always("SATISFIED")).running() as url:
+        root, data, labels = _declared(tmp_path, ja.FakeMessagesServer(_always("SATISFIED")), url)
+    with ja.FakeMessagesServer(lambda b: (200, ja.verdict_reply([]))).running() as url:
+        result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    assert result["status"] == "FAILED" and result["answered_calls"] == 0
+    assert all(c["synthesized"] and all(m.startswith("judge returned no verdict") for m in c["synthesized"].values())
+               for c in result["calls_log"])
+
+
+def test_a_judges_own_unknown_with_a_reason_is_an_answer(tmp_path: Path) -> None:
+    with ja.FakeMessagesServer(_always("SATISFIED")).running() as url:
+        root, data, labels = _declared(tmp_path, ja.FakeMessagesServer(_always("SATISFIED")), url)
+
+    def respond(body: Mapping[str, Any]) -> tuple[int, bytes]:
+        ids = [c["id"] for c in ja.user_document(body)["criteria"]]
+        return 200, ja.verdict_reply([{"id": c, "outcome": "UNKNOWN", "missing": "the gate record is absent"}
+                                      for c in ids])
+    with ja.FakeMessagesServer(respond).running() as url:
+        result = jv.run(root, data, labels, key_provider=lambda: "k", base_url=url)
+    assert result["status"] == "COMPLETE" and result["answered_calls"] == 9

@@ -55,6 +55,9 @@ OBSERVATIONS = "observations.json"
 REPORT = "report.md"
 OUTCOMES = ("SATISFIED", "VIOLATED", "UNKNOWN")
 COUNT_MARGIN = 1.10
+#: The `missing` reasons `judge.run_tier` writes when IT, not the judge,
+#: supplies an UNKNOWN. A call carrying any of them is not an answered call.
+SYNTHESIZED = ("judge returned no verdict", "judge returned more than one response", "malformed judge response")
 CRITERIA: tuple[str, ...] = tuple(json.loads((HERE / "grader.json").read_text(encoding="utf-8"))["criteria"])
 RUBRIC: dict[str, str] = json.loads((HERE / "judge-rubric.json").read_text(encoding="utf-8"))["criteria"]
 GOAL = (HERE / "goal.md").read_text(encoding="utf-8")
@@ -315,12 +318,19 @@ def run(root: Path, declaration: Mapping[str, Any], labels_path: Path, *, key_pr
             calls += 1
             before = len(envelopes)
             tier = judge.run_tier(judge.INDEPENDENT_TIER, j, CRITERIA, GOAL, item_files(item))
+            criteria = [c for c in tier.get("criteria") or [] if isinstance(c, dict)]  # type: ignore[union-attr]
+            # A verdict run_tier SYNTHESIZED (no verdict, a duplicate, a malformed
+            # entry) is not an answer (Codex review): an empty {"verdicts": []}
+            # must not count toward the floor as nine perfect UNKNOWNs.
+            synthesized = {str(c["id"]): str(c.get("missing")) for c in criteria
+                           if str(c.get("missing") or "").startswith(SYNTHESIZED)}
             call_log.append({"item": item.name, "status": tier.get("status"), "reason": tier.get("reason"),
+                             "synthesized": synthesized,
                              "envelope": envelopes[before] if len(envelopes) > before else None})
-            if tier.get("status") == "UNAVAILABLE":
+            if tier.get("status") == "UNAVAILABLE" or synthesized:
                 outcomes[item.name].append(None)
             else:
-                got = {str(c["id"]): str(c["outcome"]) for c in tier.get("criteria") or []}  # type: ignore[union-attr]
+                got = {str(c["id"]): str(c["outcome"]) for c in criteria}
                 outcomes[item.name].append({c: got.get(c, "UNKNOWN") for c in CRITERIA})
             if budget.broken is not None:  # checked after EVERY reply, the last one included
                 stopped = f"budget stop: {budget.broken}"

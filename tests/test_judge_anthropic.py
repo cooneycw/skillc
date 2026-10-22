@@ -433,3 +433,16 @@ def test_the_envelope_sink_records_structure_never_content() -> None:
     assert seen == [{"type": "message", "stop_reason": "end_turn", "block_types": ["thinking", "text"],
                      "usage": {"input_tokens": 5, "output_tokens": 7}}]
     assert "SECRET-CONTENT" not in json.dumps(seen)
+
+
+def test_red_the_envelope_carries_no_content_even_in_malformed_fields() -> None:
+    """Codex review: a block "type" holding text, or a free-form usage field,
+    used to be copied into the envelope verbatim."""
+    raw = json.dumps({"type": {"text": "PRIVATE-1"}, "stop_reason": "PRIVATE-2",
+                      "content": [{"type": {"text": "PRIVATE-3"}}, {"type": "text", "text": "PRIVATE-4"}],
+                      "usage": {"input_tokens": 3, "note": "PRIVATE-5", "output_tokens": "PRIVATE-6",
+                                "output_tokens_details": {"thinking_tokens": 2, "x": "PRIVATE-7"}}}).encode()
+    envelope = ja.reply_envelope(raw)
+    assert "PRIVATE" not in json.dumps(envelope)
+    assert envelope == {"type": "other", "stop_reason": "other", "block_types": ["other", "text"],
+                        "usage": {"input_tokens": 3, "thinking_tokens": 2}}

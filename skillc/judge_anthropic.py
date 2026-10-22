@@ -368,11 +368,32 @@ def reply_envelope(raw: bytes) -> dict[str, Any]:
         return {"parse": "not JSON", "bytes": len(raw)}
     if not isinstance(reply, dict):
         return {"parse": "not an object", "bytes": len(raw)}
+    # Codex review: every value is reduced to a known label or an integer, so
+    # nothing the reply carries - a block "type" holding text, a free-form usage
+    # field - can reach a log.
     content = reply.get("content")
-    return {"type": reply.get("type"), "stop_reason": reply.get("stop_reason"),
-            "block_types": [b.get("type") if isinstance(b, dict) else None for b in content]
-            if isinstance(content, list) else None,
-            "usage": reply.get("usage") if isinstance(reply.get("usage"), dict) else None}
+    raw_usage = reply.get("usage")
+    usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
+    raw_details = usage.get("output_tokens_details")
+    details: dict[str, Any] = raw_details if isinstance(raw_details, dict) else {}
+    counts = {k: v for k, v in usage.items() if k in USAGE_FIELDS and _count(v)}
+    if _count(details.get("thinking_tokens")):
+        counts["thinking_tokens"] = details["thinking_tokens"]
+    return {"type": "message" if reply.get("type") == "message" else "other",
+            "stop_reason": reply.get("stop_reason") if reply.get("stop_reason") in STOP_REASONS else "other",
+            "block_types": [b.get("type") if isinstance(b, dict) and b.get("type") in BLOCK_TYPES else "other"
+                            for b in content] if isinstance(content, list) else None,
+            "usage": counts}
+
+
+STOP_REASONS = ("end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal",
+                "model_context_window_exceeded")
+BLOCK_TYPES = ("text", "thinking", "redacted_thinking", "tool_use", "server_tool_use")
+USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _parse_reply(raw: bytes) -> JudgeAnswer:
