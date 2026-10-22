@@ -184,6 +184,12 @@ class AnthropicJudge:
     timeout: float = DEFAULT_TIMEOUT
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+    #: #513 validation: sees the exact body before the key is read, and may
+    #: refuse it by raising (a changed body, a budget that cannot take the call).
+    before_send: Callable[[bytes], None] | None = None
+    #: #513 validation: receives each reply's `usage` (the billed tokens),
+    #: whether or not the reply then parses - the call was billed either way.
+    usage_sink: Callable[[Mapping[str, int]], None] | None = None
 
     def describe(self) -> JudgeDescription:
         return JudgeDescription(name=JUDGE_NAME, model=self.model, version=API_VERSION)
@@ -227,6 +233,8 @@ class AnthropicJudge:
         if len(body) > self.max_request_bytes:
             raise JudgeUnavailable(f"judge request is {len(body)} bytes, over the {self.max_request_bytes}-byte "
                                    "cap; refused, not truncated")
+        if self.before_send is not None:
+            self.before_send(body)
         key = self.key_provider()
         request = urllib.request.Request(
             self.base_url.rstrip("/") + "/v1/messages", data=body, method="POST",
@@ -245,7 +253,38 @@ class AnthropicJudge:
             raise JudgeUnavailable(f"Messages API reply is malformed HTTP ({type(exc).__name__})") from None
         if len(raw) > self.max_response_bytes:
             raise JudgeUnavailable(f"Messages API reply exceeds {self.max_response_bytes} bytes")
+        if self.usage_sink is not None:
+            self.usage_sink(reply_usage(raw))
         return _parse_reply(raw)
+
+    def count_tokens(self, body: bytes) -> int:
+        """The input tokens of `body`, a Messages request, from the free
+        `/v1/messages/count_tokens` endpoint (#513 validation sizing). The body
+        is counted as sent, less `max_tokens`, which that endpoint does not
+        take. Same opener, timeout and error handling as `evaluate`."""
+        request_body = {k: v for k, v in json.loads(body).items() if k != "max_tokens"}
+        request = urllib.request.Request(
+            self.base_url.rstrip("/") + "/v1/messages/count_tokens",
+            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"), method="POST",
+            headers={"content-type": "application/json", "anthropic-version": API_VERSION,
+                     "x-api-key": self.key_provider()})
+        try:
+            with _OPENER.open(request, timeout=self.timeout) as response:
+                raw = response.read(65_537)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            raise JudgeUnavailable(f"count_tokens answered HTTP {exc.code}") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise JudgeUnavailable(f"count_tokens unreachable ({type(exc).__name__})") from None
+        except (http.client.HTTPException, ValueError) as exc:
+            raise JudgeUnavailable(f"count_tokens reply is malformed HTTP ({type(exc).__name__})") from None
+        try:
+            tokens = json.loads(raw.decode("utf-8")).get("input_tokens")
+        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+            tokens = None
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 1:
+            raise JudgeUnavailable("count_tokens reply carries no positive input_tokens")
+        return tokens
 
 
     def _check_definitions(self, criteria: Sequence[str]) -> None:
@@ -271,6 +310,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def reply_usage(raw: bytes) -> dict[str, int]:
+    """The billed tokens a reply reports. A reply that reports none is
+    UNKNOWN usage, which a budget must treat as the worst case, so every
+    missing or malformed field is returned as -1, never as 0."""
+    try:
+        usage = json.loads(raw.decode("utf-8")).get("usage")
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        usage = None
+    out = {}
+    for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+        value = usage.get(key) if isinstance(usage, dict) else None
+        out[key] = value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else -1
+    return out
 
 
 def _parse_reply(raw: bytes) -> JudgeAnswer:
@@ -304,14 +358,22 @@ def _parse_reply(raw: bytes) -> JudgeAnswer:
 Responder = Callable[[dict[str, Any]], tuple[int, bytes]]
 
 
-def verdict_reply(verdicts: Sequence[Mapping[str, object]], *, model: str = DEFAULT_MODEL) -> bytes:
+def _quarter_count(body: dict[str, Any]) -> tuple[int, bytes]:
+    return 200, json.dumps({"input_tokens": max(1, len(json.dumps(body)) // 4)}).encode("utf-8")
+
+
+def verdict_reply(verdicts: Sequence[Mapping[str, object]], *, model: str = DEFAULT_MODEL,
+                  usage: Mapping[str, int] | None = None) -> bytes:
     """A well-formed structured-output reply carrying `verdicts`: one text block
-    holding `{"verdicts": [...]}`, `stop_reason` `end_turn`."""
-    return json.dumps({
+    holding `{"verdicts": [...]}`, `stop_reason` `end_turn` (and `usage`, when given)."""
+    reply: dict[str, Any] = {
         "id": "msg_fake", "type": "message", "role": "assistant", "model": model,
         "stop_reason": "end_turn",
         "content": [{"type": "text", "text": json.dumps({"verdicts": list(verdicts)})}],
-    }).encode("utf-8")
+    }
+    if usage is not None:
+        reply["usage"] = dict(usage)
+    return json.dumps(reply).encode("utf-8")
 
 
 #: Models that refuse a forced `tool_choice` with HTTP 400 (#519; "Forcing tool
@@ -332,7 +394,9 @@ def refuses_forced_tool(body: Mapping[str, Any]) -> bytes | None:
 
 @dataclass
 class FakeMessagesServer:
-    """A stdlib HTTP server answering `POST /v1/messages` with `responder`.
+    """A stdlib HTTP server answering `POST /v1/messages` with `responder`,
+    and `POST /v1/messages/count_tokens` with `count_responder` (by default a
+    deterministic count of a quarter of the body's bytes).
 
     Every request is recorded (`requests`: headers and parsed body) so a test
     or qualify can check exactly what reached the judge. No network, no key:
@@ -341,6 +405,7 @@ class FakeMessagesServer:
     responder: Responder
     requests: list[dict[str, Any]] = field(default_factory=list)
     delay: float = 0.0
+    count_responder: Responder | None = None
 
     @contextmanager
     def running(self) -> Iterator[str]:
@@ -354,7 +419,12 @@ class FakeMessagesServer:
                 if fake.delay:
                     threading.Event().wait(fake.delay)
                 refusal = refuses_forced_tool(body)
-                status, payload = (400, refusal) if refusal is not None else fake.responder(body)
+                if refusal is not None:
+                    status, payload = 400, refusal
+                elif self.path.endswith("/count_tokens"):
+                    status, payload = (fake.count_responder or _quarter_count)(body)
+                else:
+                    status, payload = fake.responder(body)
                 try:
                     self.send_response(status)
                     self.send_header("content-type", "application/json")
