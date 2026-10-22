@@ -57,7 +57,8 @@ def test_a_structured_reply_is_a_judge_verdict_with_the_answering_model() -> Non
     assert sent["path"] == "/v1/messages"
     body = sent["body"]
     assert body["model"] == "claude-opus-5-5" and "tool_choice" not in body and "tools" not in body
-    assert body["output_config"] == {"format": {"type": "json_schema", "schema": ja.VERDICTS_SCHEMA}}
+    assert body["output_config"] == {"format": {"type": "json_schema", "schema": ja.VERDICTS_SCHEMA},
+                                     "effort": "medium"}
     document = ja.user_document(body)
     assert document["observed_facts"] == [{"name": "observations.json", "content": '{"gate": "exit 0"}'}]
     assert document["agent_claims"] == [{"name": "report.md", "content": "Verdict: No longer needed. Tests pass."}]
@@ -394,3 +395,54 @@ def test_red_519_a_forced_tool_request_through_the_fake_is_unavailable() -> None
                                 observation_files=frozenset({"observations.json"}), base_url=url, timeout=5.0),
                                 CRITERIA, "/flow:auto 1", FILES)
     assert result["status"] == "UNAVAILABLE" and "HTTP 400" in str(result["reason"])
+
+
+
+# --- #513 run 1: the real reply is [thinking, text] ------------------------
+
+def test_red_513_the_observed_reply_shape_is_a_verdict() -> None:
+    """claude-opus-5-5 always thinks, so a real reply is [thinking (empty), text]
+    (observed 2026-10-22). #519's 'exactly one text block' refused every one of
+    run 1's 60 replies; the fake now returns that shape by default."""
+    reply = json.loads(ja.verdict_reply([{"id": "verdict", "outcome": "SATISFIED", "evidence": ["x"]}]))
+    assert [b["type"] for b in reply["content"]] == ["thinking", "text"] and reply["content"][0]["thinking"] == ""
+    result, _ = _run(_ok)
+    assert result["status"] != "UNAVAILABLE"
+
+
+@pytest.mark.parametrize(("content", "stop", "why"), [
+    ([{"type": "thinking", "thinking": ""}, {"type": "text", "text": '{"verdicts": []}'},
+      {"type": "text", "text": '{"verdicts": []}'}], "end_turn", "exactly one text block besides thinking"),
+    ([{"type": "thinking", "thinking": ""}], "end_turn", "exactly one text block besides thinking"),
+    ([{"type": "thinking", "thinking": ""}, {"type": "text", "text": '{"verdicts": [{"id"'}], "max_tokens",
+     "'max_tokens'"),
+])
+def test_red_513_thinking_never_excuses_a_wrong_answer(content: list[dict[str, Any]], stop: str, why: str) -> None:
+    reply = json.dumps({"type": "message", "stop_reason": stop, "content": content}).encode()
+    result, _ = _run(lambda b: (200, reply))
+    assert result["status"] == "UNAVAILABLE" and why in str(result["reason"])
+
+
+def test_the_envelope_sink_records_structure_never_content() -> None:
+    seen: list[Mapping[str, Any]] = []
+    fake = ja.FakeMessagesServer(lambda b: (200, ja.verdict_reply(
+        [{"id": c, "outcome": "SATISFIED", "evidence": ["SECRET-CONTENT"]} for c in CRITERIA],
+        usage={"input_tokens": 5, "output_tokens": 7})))
+    with fake.running() as url:
+        judge.run_tier(judge.INDEPENDENT_TIER, _judge(url, envelope_sink=seen.append), CRITERIA, "/flow:auto 1", FILES)
+    assert seen == [{"type": "message", "stop_reason": "end_turn", "block_types": ["thinking", "text"],
+                     "usage": {"input_tokens": 5, "output_tokens": 7}}]
+    assert "SECRET-CONTENT" not in json.dumps(seen)
+
+
+def test_red_the_envelope_carries_no_content_even_in_malformed_fields() -> None:
+    """Codex review: a block "type" holding text, or a free-form usage field,
+    used to be copied into the envelope verbatim."""
+    raw = json.dumps({"type": {"text": "PRIVATE-1"}, "stop_reason": "PRIVATE-2",
+                      "content": [{"type": {"text": "PRIVATE-3"}}, {"type": "text", "text": "PRIVATE-4"}],
+                      "usage": {"input_tokens": 3, "note": "PRIVATE-5", "output_tokens": "PRIVATE-6",
+                                "output_tokens_details": {"thinking_tokens": 2, "x": "PRIVATE-7"}}}).encode()
+    envelope = ja.reply_envelope(raw)
+    assert "PRIVATE" not in json.dumps(envelope)
+    assert envelope == {"type": "other", "stop_reason": "other", "block_types": ["other", "text"],
+                        "usage": {"input_tokens": 3, "thinking_tokens": 2}}
