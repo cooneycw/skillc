@@ -57,9 +57,9 @@
   "path": "evals/level3/flow-check-route",
   "grader_id": "flow-check-route",
   "grader_revision": "1",
-  "grader_digest": "sha256:3529edba50bc36796ae8f273290ffa6cb086e980cf10d4d381eea7eda465de84",
+  "grader_digest": "sha256:27784c611795ed20417f82b5561f304fe14ae6eee3cfa7ab9db0f6c588f4ae49",
   "goal_sha256": "bf66f6a98176173cb174986df8865023ea103f139f76cd35366ab1ea06cfe203",
-  "builder_sha256": "a264e6c770383bff86b694fd3b2516015f7064074e655bc2341e0de52cc9fa95",
+  "builder_sha256": "7ac4495bc16413d908697cc4986de76a673037426e35103e85ea6bc78ed8db6a",
   "base_trees": {
    "rangekit-green": "2188e3de5804131480cbde095aa8411c6125816b"
   },

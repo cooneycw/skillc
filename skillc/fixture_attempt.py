@@ -87,6 +87,9 @@ class AttemptFixture:
     #: its start (`source_digest.digest_tree`), for a judge that must know
     #: what the run gated, not only what was left at the end.
     source_digest: bool = False
+    #: #530: repository-relative paths of the gate runner's resumable state
+    #: (the task's own fact); see `agent_trial.gate_state_problem`.
+    gate_state_paths: tuple[str, ...] = ()
 
 
 class _FixtureBackend(Protocol):

@@ -70,6 +70,18 @@ def _honest(store: Path, attempt: str) -> str | None:
     return None
 
 
+def report_problems(rehearsal: str, report: dict[str, Any]) -> list[str]:
+    """The run directory must BE the requested rehearsal (counter-model
+    re-review): its controller-recorded mode, and two distinct attempts."""
+    problems = []
+    if report.get("rehearsal") != rehearsal:
+        problems.append(f"{rehearsal}: the run directory records rehearsal {report.get('rehearsal')!r}")
+    ids = [a.get("attempt_id") for a in report.get("attempts", [])]
+    if len(ids) != 2 or len(set(ids)) != 2:
+        problems.append(f"{rehearsal}: attempts {ids} are not two distinct attempts")
+    return problems
+
+
 def attempt_rows(run_dir: Path) -> list[dict[str, Any]]:
     """One row per graded attempt of a rehearsal run directory."""
     report = json.loads((run_dir / "live-report.json").read_text(encoding="utf-8"))
@@ -124,7 +136,13 @@ def main(argv: list[str]) -> int:
         print(f"usage: check_rehearsals.py {' '.join(f'{k}=DIR' for k in EXPECTED)}", file=sys.stderr)
         return 2
     problems: list[str] = []
+    seen: set[Path] = set()
     for rehearsal, run_dir in given.items():
+        path = Path(run_dir).resolve()
+        if path in seen:
+            problems.append(f"{rehearsal}: {run_dir} is another rehearsal's directory")
+        seen.add(path)
+        problems += report_problems(rehearsal, json.loads((path / "live-report.json").read_text(encoding="utf-8")))
         rows = attempt_rows(Path(run_dir))
         for row in rows:
             print(rehearsal, json.dumps(row))

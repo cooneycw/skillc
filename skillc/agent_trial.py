@@ -705,6 +705,18 @@ def _require_bundled_route(bundled: Sequence[str], gate_entrypoint: str | None, 
                                           "it supplies: a prescribed call would be refused by mismatch (#529)")
 
 
+def gate_state_problem(root: Path, paths: Sequence[str]) -> str | None:
+    """#530: why a run starting on `root` may have its stages carried in from
+    resumable state rather than executed - a declared state path that exists
+    and is not an empty directory - or None. The source digest excludes `.git`,
+    where a runner keeps such state, so it cannot see this on its own."""
+    for rel in paths:
+        path = root / rel
+        if (path.is_symlink() or path.exists()) and (path.is_symlink() or not path.is_dir() or any(path.iterdir())):
+            return f"resumable gate state present at {rel}"
+    return None
+
+
 def _register_mirror_variants(session: _WitnessSession, deviations: Sequence[Mapping[str, object]]) -> None:
     """#525: one declared variant per witnessed mirrored copy - #529: of EVERY
     gate in the attempt's map (flow-check's two, or the flow-auto bare call),
@@ -756,6 +768,10 @@ class _WitnessSession:
     #: #530: record each run's SOURCE digest of the gated repository at its
     #: start even without the ordering counter (a fixture that opts in).
     source_digest: bool = False
+    #: #530 (counter-model re-review): repository-relative paths where the
+    #: gate's runner keeps RESUMABLE state; present at a run's start, the run's
+    #: source digest reads unreadable, so its stages are never attributable.
+    gate_state_paths: tuple[str, ...] = ()
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -833,6 +849,9 @@ class _WitnessSession:
                 root = sd.repository_root(Path(directory), rel)
                 if root is None:
                     return "unreadable: no repository contains the gate's working directory"
+                state = gate_state_problem(root, self.gate_state_paths)
+                if state is not None:
+                    return f"unreadable: {state}"
                 return sd.digest_tree(root)
 
         if self.witness is not None:
@@ -2587,6 +2606,7 @@ def run_one_attempt(
         witness_session.order = attempt_order
         witness_session.require_via = gate_entrypoint in bundled_gate_entrypoints
         witness_session.source_digest = bool(fixture is not None and fixture.source_digest)
+        witness_session.gate_state_paths = tuple(fixture.gate_state_paths) if fixture is not None else ()
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
         if not isinstance(backend, DockerBackend):

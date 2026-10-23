@@ -226,6 +226,10 @@ class GateRunRecord:
             data["order_requested"] = self.order_requested
             data["order_completed"] = self.order_completed
             data["source_digest_at_start"] = self.source_digest_at_start
+        elif self.source_digest_at_start is not None:
+            # #530: an unordered run whose fixture opted into the source digest;
+            # every other unordered record is byte-identical.
+            data["source_digest_at_start"] = self.source_digest_at_start
         if self.via is not None:
             # Only a run through a declared variant carries it (#525), so
             # every other record is byte-identical.

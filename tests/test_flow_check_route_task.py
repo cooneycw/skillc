@@ -284,3 +284,46 @@ def test_red_the_checker_fails_a_wrong_route_or_a_missing_nested_launch() -> Non
     assert C.check("actor", _rows(**ok)) == []
     assert C.check("actor-checkout", _rows(**ok))  # bundled where the checkout route was rehearsed
     assert C.check("actor-nested", _rows(**ok))  # no nested launch confirmed
+
+
+def test_red_an_unordered_run_s_source_digest_is_serialized_and_others_unchanged() -> None:
+    """The rehearsals caught it: the source digest was computed and DROPPED for
+    an unordered run, so every witnessed route read UNKNOWN."""
+    from skillc.gate_witness import GateRunRecord
+    def record(source: str | None) -> GateRunRecord:
+        return GateRunRecord(requested_at=1.0, completed_at=2.0, exit_code=0, reason="exited",
+                             tree_digest_at_start="sha256:" + "0" * 64, stop_confirmed=True,
+                             source_digest_at_start=source)
+    assert record("sha256:" + "1" * 64).to_json()["source_digest_at_start"] == "sha256:" + "1" * 64
+    assert "source_digest_at_start" not in record(None).to_json()
+
+
+def test_red_a_neighbouring_report_does_not_stand_in_for_the_repository_s(tmp_path: Path) -> None:
+    """Counter-model re-review: with a repo/ directory, only repo/report.json
+    counts - a /work/report.json beside it reads as no report at all."""
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "report.json").write_text(json.dumps(_report("PASS", "PASS", "PASS")))
+    assert json.loads(J.run_probe(tmp_path)["observations"])["report"]["present"] is False
+
+
+def test_red_resumable_gate_state_makes_a_run_unattributable(tmp_path: Path) -> None:
+    """Counter-model re-review (HIGH): runner state seeded where the source
+    digest cannot see it (.git/cpp-runs) makes the run's source digest
+    unreadable - so its stages are never attributed."""
+    from skillc import agent_trial as at
+    paths = tuple(B.GATE_STATE_PATHS)
+    (tmp_path / ".git").mkdir()
+    assert at.gate_state_problem(tmp_path, paths) is None
+    (tmp_path / ".git" / "cpp-runs").mkdir()
+    assert at.gate_state_problem(tmp_path, paths) is None  # an empty directory carries nothing
+    (tmp_path / ".git" / "cpp-runs" / "check-forged.json").write_text('{"current_index": 3}')
+    assert "resumable gate state" in str(at.gate_state_problem(tmp_path, paths))
+
+
+def test_red_the_checker_refuses_a_reused_or_mislabelled_run_directory() -> None:
+    """Counter-model re-review: the actor directory passed as actor-bundled, or
+    a duplicated attempt, is not the rehearsal it claims."""
+    ids = [{"attempt_id": "a-1"}, {"attempt_id": "a-2"}]
+    assert C.report_problems("actor-bundled", {"rehearsal": "actor-bundled", "attempts": ids}) == []
+    assert C.report_problems("actor-bundled", {"rehearsal": "actor", "attempts": ids})
+    assert C.report_problems("actor", {"rehearsal": "actor", "attempts": [{"attempt_id": "a-1"}] * 2})

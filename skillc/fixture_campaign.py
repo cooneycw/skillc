@@ -407,6 +407,8 @@ def build_case(task_root: Path, case: str, where: Path) -> tuple[dict[str, objec
         witness["gate_shim_source"] = Path(build.GATE_SHIM)
     if getattr(build, "LAUNCH_EVIDENCE", False) is True:
         witness["launch_evidence"] = True
+    if hasattr(build, "GATE_STATE_PATHS"):
+        witness["gate_state_paths"] = tuple(str(p) for p in build.GATE_STATE_PATHS)
     if getattr(build, "SOURCE_DIGEST", False) is True:
         witness["source_digest"] = True
     if hasattr(build, "STAGE_PLANS"):

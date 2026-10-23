@@ -21,7 +21,11 @@ def main(argv: list[str]) -> int:
     sys.stdin.read()
     root = Path(argv[1])
     report: dict[str, object] = {"present": False, "path": None}
-    for rel in CANDIDATES:
+    # A live attempt's frozen workspace has the repository at repo/: only its
+    # report counts there - never a neighbouring /work/report.json (counter-model
+    # re-review). The root-level form is a committed candidate's layout.
+    candidates = (CANDIDATES[0],) if (root / "repo").is_dir() else (CANDIDATES[1],)
+    for rel in candidates:
         path = root / rel
         if path.is_symlink():
             report = {"present": True, "path": rel, "error": "report.json is a symlink"}

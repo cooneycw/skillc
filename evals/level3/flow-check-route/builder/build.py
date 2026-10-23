@@ -144,3 +144,9 @@ STAGE_PLANS = {"flow-check-plan": "check"}
 #: the gated repository at its start, so a modify-run-restore cannot pass as a
 #: run of the pristine fixture.
 SOURCE_DIGEST = True
+
+#: #530 (counter-model re-review): the pinned CPP runner RESUMES a plan from
+#: state it keeps under `.git/cpp-runs/` (deleted on success). Seeded by the
+#: agent, it could carry stage outcomes no stage produced; present at a run's
+#: start, that run's stages are never attributed.
+GATE_STATE_PATHS = (".git/cpp-runs",)
