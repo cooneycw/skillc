@@ -76,8 +76,32 @@ _PROFILE_KEYS = {
     "profile_schema", "name", "subject", "select", "treatment_question",
     "allowed_destinations", "reference_patterns", "dependencies", "unsupported",
     "mirrors", "generated_from", "declared_empty_kinds", "client_profiles", "notes",
-    "gate_entrypoint", "gate_witness",
+    "gate_entrypoint", "gate_witness", "bundled_gate_entrypoints", "checksum_consumers",
 }
+
+#: #525: a CPP skill from #1408 on runs its BUNDLED gate (`scripts/<gate>`
+#: inside its own skill directory), not the installed `gate_entrypoint`. Such a
+#: path must be witnessed too, so a profile whose closure installs a skill that
+#: invokes its bundled gate bare, in a fenced command block, must declare that
+#: path in `bundled_gate_entrypoints` - else the profile is REFUSED (a gate the
+#: harness cannot see reads `not-observed`, never a pass). Which shim witnesses
+#: it is the harness's choice (`agent_trial`); only the flow-auto shim supports
+#: a bundled gate so far - the flow-check one is deferred (#525), and an attempt
+#: that would need it is refused there.
+#: #525 (orchestrator): a bundled-gate shim changes one checksummed file of the
+#: subject. Every installed file that could VERIFY those checksums must be
+#: declared in `checksum_consumers` with the measured reason it does not run on
+#: the witnessed path - re-measured per pinned subject, never assumed.
+#: The generic checksum-verification tools; the subject's own manifest NAME is
+#: added per subject (`checksum_signature`), never a literal here.
+_CHECKSUM_TOOLS = rb"sha256sum\s+(?:-c|--check)\b|shasum\b[^\n]*\s-c\b"
+
+
+def checksum_signature(manifest_name: str) -> re.Pattern[bytes]:
+    """#525: what may verify a skill's checksums - a verification tool, or any
+    mention of the subject's declared checksum manifest by name."""
+    return re.compile(_CHECKSUM_TOOLS + b"|" + re.escape(manifest_name.encode("utf-8")))
+_FENCE = re.compile(r"^\s*```")
 
 #: #287 auto6: which harness witness a declared `gate_entrypoint` gets. The
 #: profile names a KIND, never a shim path or an argv (those stay harness
@@ -208,7 +232,16 @@ class Profile:
     #: #287 auto6: `None` (absent) means the default `flow-check` witness;
     #: only ever set alongside a `gate_entrypoint`.
     gate_witness: str | None
-    raw: dict[str, object] = field(compare=False, repr=False)
+    #: #525: home-relative paths of skill-BUNDLED gate copies, also witnessed.
+    #: Empty (absent) for every profile before #525.
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: installed path -> the measured reason that file does not verify the
+    #: shimmed skill's checksums on the witnessed path.
+    checksum_consumers: dict[str, str] = field(default_factory=dict)
+    #: #525: the basename of the subject's `checksum_manifest`, the file a
+    #: bundled gate's mirror is proven against; set only with a bundled gate.
+    bundled_checksum_manifest: str | None = None
+    raw: dict[str, object] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def treatment(self) -> str:
@@ -356,6 +389,30 @@ class Profile:
                 raise Refused(f"gate_witness must be one of {GATE_WITNESSES}, got {gate_witness!r}")
             if gate_entrypoint is None:
                 raise Refused("gate_witness names a witness for a gate_entrypoint this profile does not declare")
+        bundled: list[str] = []
+        for raw_path in _list(data, "bundled_gate_entrypoints") if "bundled_gate_entrypoints" in data else []:
+            if not isinstance(raw_path, str) or not raw_path:
+                raise Refused("bundled_gate_entrypoints holds non-empty strings")
+            norm = posixpath.normpath(raw_path)
+            if m._escapes(norm) or norm in ("", "."):
+                raise Refused(f"bundled gate entrypoint {raw_path!r} is not a safe relative path")
+            if gate_entrypoint is None or posixpath.basename(norm) != posixpath.basename(gate_entrypoint):
+                raise Refused(f"bundled gate entrypoint {raw_path!r} is not a copy of the declared gate_entrypoint")
+            if norm == gate_entrypoint or norm in bundled:
+                raise Refused(f"bundled gate entrypoint {raw_path!r} is declared twice")
+            bundled.append(norm)
+        consumers: dict[str, str] = {}
+        for entry in _list(data, "checksum_consumers") if "checksum_consumers" in data else []:
+            if (not isinstance(entry, dict) or set(entry) != {"path", "reason"}
+                    or not all(isinstance(entry[k], str) and entry[k].strip() for k in ("path", "reason"))):
+                raise Refused("each checksum_consumers entry is exactly {path, reason}, both non-empty")
+            consumers[posixpath.normpath(str(entry["path"]))] = str(entry["reason"])
+        if consumers and not bundled:
+            raise Refused("checksum_consumers is declared only for a profile with bundled_gate_entrypoints")
+        manifest = subject.checksum_manifest
+        if bundled and not (isinstance(manifest, str) and manifest):
+            raise Refused("a bundled gate's mirror is proven against the subject's checksum_manifest, which this "
+                          "subject does not declare (#525)")
 
         return cls(
             name=name, subject=subject, subject_path=subject_path, select=select,
@@ -363,7 +420,9 @@ class Profile:
             patterns=tuple(patterns), dependencies=deps, unsupported=unsupported,
             mirrors=mirrors, generated_from=generated_from, declared_empty_kinds=empty,
             client_profiles=profiles, gate_entrypoint=gate_entrypoint,
-            gate_witness=gate_witness if isinstance(gate_witness, str) else None, raw=data,
+            gate_witness=gate_witness if isinstance(gate_witness, str) else None,
+            bundled_gate_entrypoints=tuple(bundled), checksum_consumers=consumers,
+            bundled_checksum_manifest=posixpath.basename(str(manifest)) if bundled else None, raw=data,
         )
 
 
@@ -1044,6 +1103,7 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         if problems is None:
             raise Refused(msg)
         _fail(walk, "gate-entrypoint-not-installed", msg, (), in_path=profile.gate_entrypoint)
+    _check_bundled_gates(walk, profile, tree, installed)
 
     mirrors = []
     for gen, src in sorted(profile.mirrors.items()):
@@ -1123,6 +1183,11 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         # Only when declared, so every existing inventory (and the approvals
         # bound to its digest) is unchanged.
         **({"gate_witness": profile.gate_witness} if profile.gate_witness is not None else {}),
+        # #525, likewise only when declared.
+        **({"bundled_gate_entrypoints": list(profile.bundled_gate_entrypoints),
+            "checksum_consumers": [{"path": k, "reason": v} for k, v in sorted(profile.checksum_consumers.items())],
+           "bundled_checksum_manifest": profile.bundled_checksum_manifest}
+           if profile.bundled_gate_entrypoints else {}),
         "installed_surface": {
             "files": len(installed),
             "digest": m.sha256_bytes("".join(
@@ -1138,6 +1203,92 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         ],
     }
     return inventory_body
+
+
+def _bare_bundled_gate_calls(text: str, relative: str) -> bool:
+    """Whether a skill document invokes its bundled gate (`relative` to the
+    skill directory) bare in a fenced block - the shape CPP #1408 gives every
+    generated Codex skill. Prose that merely names the file is not a call."""
+    call = re.compile(rf"^\s*(?:(?:bash|sh)\s+)?{re.escape(relative)}(?:\s|$)")
+    inside = False
+    for line in text.splitlines():
+        if _FENCE.match(line):
+            inside = not inside
+        elif inside and call.match(line):
+            return True
+    return False
+
+
+def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | None, bundled: Sequence[str],
+                          consumers: Mapping[str, str], *, manifest_name: str | None,
+                          require_consumers_installed: bool) -> list[tuple[str, str, str]]:
+    """#525: the (category, message, path) problems of an installed population
+    (destination -> effective bytes). Run on the profile's closure at
+    validation AND on the treatment's whole delivered home at assembly (a
+    subject selecting more skills than the profile installs them all).
+    Subject facts are derived, never named: a BUNDLED copy is any other
+    installed file with the gate's basename, its skill directory the parent of
+    its parent, and the skill's documents that directory's `.md` files.
+    (1) every declared bundled gate is installed; (2) every bundled copy its own
+    skill invokes bare is declared - else the harness could not see the gate it
+    runs; (3) with a bundled gate declared, every installed file matching the
+    checksum signature (synthetic ones included) is a declared
+    `checksum_consumer` - the per-subject preflight."""
+    problems: list[tuple[str, str, str]] = []
+    if gate_entrypoint is None:
+        return problems
+    gate = posixpath.basename(gate_entrypoint)
+    for path in bundled:
+        if path not in files:
+            problems.append(("bundled-gate-not-installed",
+                             f"bundled gate entrypoint {path!r} is not installed by this population", path))
+    for copy in sorted(d for d in files if d != gate_entrypoint and posixpath.basename(d) == gate):
+        skill_dir = posixpath.dirname(posixpath.dirname(copy))
+        if not skill_dir or copy in bundled:
+            continue
+        relative = copy[len(skill_dir) + 1:]
+        docs = [d for d in files if posixpath.dirname(d) == skill_dir and d.endswith(".md")]
+        if any(_bare_bundled_gate_calls(files[d].decode("utf-8", "replace"), relative) for d in docs):
+            problems.append(("bundled-gate-unwitnessed",
+                             (f"{skill_dir} invokes its bundled {relative}, which the harness does not witness: "
+                              f"declare {copy!r} in bundled_gate_entrypoints (#525) - an unwitnessed gate reads "
+                              "not-observed"), copy))
+    if not bundled:
+        return problems
+    signature = checksum_signature(manifest_name or "")
+    for dest, data in sorted(files.items()):
+        if posixpath.basename(dest) != manifest_name and dest not in consumers and signature.search(data):
+            problems.append(("checksum-consumer-undeclared",
+                             (f"{dest} may verify skill checksums and is not a declared checksum_consumer: a bundled "
+                              "gate shim changes a checksummed file, so measure whether it runs on the witnessed path "
+                              "and declare it, or take the deviation back to the orchestrator (#525)"), dest))
+    if require_consumers_installed:
+        problems += [("checksum-consumer-not-installed", f"checksum_consumer {path!r} is not installed", path)
+                     for path in sorted(consumers) if path not in files]
+    return problems
+
+
+def _check_bundled_gates(walk: _Walk, profile: Profile, tree: Tree,
+                         installed: dict[str, dict[str, object]]) -> None:
+    """#525, at validation: `bundled_gate_problems` over the closure's
+    EFFECTIVE bytes - a synthetic file's own content, never skipped. A declared
+    consumer outside the closure (a neighbouring skill the treatment delivers)
+    is checked at treatment assembly, where that population exists."""
+    if profile.gate_entrypoint is None:
+        return
+    files: dict[str, bytes] = {}
+    for dest, record in installed.items():
+        if record.get("origin") == "synthetic" and isinstance(record.get("content"), str):
+            files[dest] = _synthetic_bytes(str(record["content"]))
+        elif isinstance(record.get("source"), str):
+            files[dest] = tree.read(str(record["source"]))
+    for category, msg, path in bundled_gate_problems(files, profile.gate_entrypoint, profile.bundled_gate_entrypoints,
+                                                     profile.checksum_consumers,
+                                                     manifest_name=profile.bundled_checksum_manifest,
+                                                     require_consumers_installed=False):
+        if walk.problems is None:
+            raise Refused(msg)
+        _fail(walk, category, msg, (), in_path=path)
 
 
 def _drain(walk: _Walk, installed: dict[str, dict[str, object]]) -> None:

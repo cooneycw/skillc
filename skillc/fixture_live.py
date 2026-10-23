@@ -106,9 +106,9 @@ EXPERIMENT_LABEL = "level3-fixture-live"
 TRIAL_PREFIX = "live"
 REPORT_KIND = "level3-fixture-live-report"
 REPORT_FILENAME = "live-report.json"
-REHEARSALS = ("dry", "actor", "actor-nested")
+REHEARSALS = ("dry", "actor", "actor-nested", "actor-bundled")
 #: The rehearsals that run a scripted actor in a real container.
-ACTOR_REHEARSALS = ("actor", "actor-nested")
+ACTOR_REHEARSALS = ("actor", "actor-nested", "actor-bundled")
 UNKNOWN = calibration.UNKNOWN
 TOKEN_CAP_STATEMENT = ("no token cap exists in the stack: only wall time is capped (per attempt and in total); "
                        "each attempt's tokens are recorded from its own rollout")
@@ -674,6 +674,10 @@ def await_withdrawal(present, seconds=20.0):
 NESTED_REHEARSAL_COMMAND = ("codex exec -m gpt-6-sol -s read-only --json -o /tmp/review.md "
                             "'Review the current uncommitted diff against origin/main for issue #1.'")
 NESTED_REHEARSAL_FILE = "nested.json"
+#: #525 (`actor-bundled`): the Step-6 actor's gate step runs the skill-BUNDLED
+#: copy, as a CPP skill from #1408 on prescribes, instead of the installed one.
+#: Which copy is the treatment's own declared `bundled_gate_entrypoints[0]`.
+BUNDLED_GATE_REHEARSAL_FILE = "bundled-gate.json"
 TURN_ACTOR_SOURCE = """\
 import os, subprocess, sys, time
 @CREDENTIAL_HELPERS@
@@ -754,7 +758,12 @@ def step(work, home, contents, item):
     elif "gh" in item:
         subprocess.run(["gh", *item["gh"]], cwd=where)
     elif "gate" in item:
-        subprocess.run([os.path.join(home, ".claude", "scripts", "flow-finish-gate.sh")], cwd=where)
+        gate = os.path.join(home, ".claude", "scripts", "flow-finish-gate.sh")
+        bundled = os.path.join(home, "@HOME_DIR@", "@BUNDLED_FILE@")
+        if os.path.exists(bundled):
+            with open(bundled, encoding="utf-8") as handle:
+                gate = os.path.join(home, json.load(handle)["gate"])
+        subprocess.run([gate], cwd=where)
     else:
         raise SystemExit("unknown step %r" % (item,))
 
@@ -811,10 +820,11 @@ if __name__ == "__main__":
     main()
 """.replace("@HOME_DIR@", fc.HOME_DIR).replace("@TRANSCRIPT@", fc.TRANSCRIPT_RELPATH).replace(
     "@SESSION@", TURN_ACTOR_SESSION_ID).replace("@CREDENTIAL_HELPERS@", _CREDENTIAL_HELPERS).replace(
-    "@NESTED_FILE@", NESTED_REHEARSAL_FILE)
+    "@NESTED_FILE@", NESTED_REHEARSAL_FILE).replace("@BUNDLED_FILE@", BUNDLED_GATE_REHEARSAL_FILE)
 
 
-def step6_actor(task_root: Path, case: str, *, nested: bool = False) -> tuple[list[str], dict[str, bytes]]:
+def step6_actor(task_root: Path, case: str, *, nested: bool = False,
+                bundled_gate: str | None = None) -> tuple[list[str], dict[str, bytes]]:
     """#279 PR-3: the Step-6 actor's base argv and home files for `case`;
     with `nested`, turn 1 also makes `NESTED_REHEARSAL_COMMAND`."""
     candidate = REHEARSAL_BY_TASK[task_root.name][case]
@@ -831,11 +841,13 @@ def step6_actor(task_root: Path, case: str, *, nested: bool = False) -> tuple[li
             f"{fc.HOME_DIR}/contents.json": json.dumps(contents, sort_keys=True).encode("utf-8")}
     if nested:
         home[f"{fc.HOME_DIR}/{NESTED_REHEARSAL_FILE}"] = json.dumps({"command": NESTED_REHEARSAL_COMMAND}).encode()
+    if bundled_gate is not None:
+        home[f"{fc.HOME_DIR}/{BUNDLED_GATE_REHEARSAL_FILE}"] = json.dumps({"gate": bundled_gate}).encode()
     return ["/usr/bin/python3", f"{fc.CONTAINER_HOME}/{actor}", *eg.CODEX_SERVER_SIDE_OFF], home
 
 
 def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False,
-                    nested: bool = False) -> tuple[list[str], dict[str, bytes]]:
+                    nested: bool = False, bundled_gate: str | None = None) -> tuple[list[str], dict[str, bytes]]:
     """The actor's base argv and home files for `case`: fixture_campaign's own,
     playing `REHEARSAL_CANDIDATES[case]`. The server-side-off flags ride after
     its guard and gate arguments (the actor reads `argv[1]`, `argv[2]` and the
@@ -846,9 +858,9 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False,
     if candidate is not None and task_root.name == Path(STEP6_TASK_PATH).name:
         if not turns:
             raise LiveRefused("the Step-6 actor plays a turn timeline; its case must declare controller turns")
-        return step6_actor(task_root, case, nested=nested)
-    if nested:
-        raise LiveRefused("the nested-launch rehearsal is the Step-6 actor's; this task has none")
+        return step6_actor(task_root, case, nested=nested, bundled_gate=bundled_gate)
+    if nested or bundled_gate is not None:
+        raise LiveRefused("the nested-launch and bundled-gate rehearsals are the Step-6 actor's; this task has none")
     if candidate is None:
         owed = OWED_REHEARSAL_ACTORS.get(task_root.name)
         raise LiveRefused(f"no rehearsal candidate is declared for {task_root.name}/{case}"
@@ -903,6 +915,11 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     on an approved run."""
     if rehearse is not None and rehearse not in REHEARSALS:
         raise LiveRefused(f"rehearse must be one of {REHEARSALS}")
+    bundled_rehearsal_gate: str | None = None
+    if rehearse == "actor-bundled":
+        if not treatment.bundled_gate_entrypoints:
+            raise LiveRefused("--rehearse actor-bundled needs a subject profile that declares a bundled gate (#525)")
+        bundled_rehearsal_gate = treatment.bundled_gate_entrypoints[0]
     if declaration.tier != "deterministic":
         # #513: this path grades with the task grader only. Running an
         # independent-tier declaration here would score it deterministically
@@ -943,7 +960,8 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
                                   reason=cr.REHEARSAL_REASON)
         case_turns = declaration.turns.for_case(scheduled.arm) if declaration.turns is not None else None
         base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns),
-                                                 nested=rehearse == "actor-nested")
+                                                 nested=rehearse == "actor-nested",
+                                                 bundled_gate=bundled_rehearsal_gate)
                                  if rehearse in ACTOR_REHEARSALS else (argv, {}))
         agent, grading = backends()
         case_dir = run_dir / "fixtures" / scheduled.attempt_id
@@ -1074,6 +1092,10 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
                                                        nested_policy=declaration.nested_policy),
             # #279: what the controller delivered, only when turns are declared.
             **({"controller_turns": record.get("controller_turns")} if declaration.turns is not None else {}),
+            # #525: a declared treatment deviation (a shimmed skill-bundled gate),
+            # only when the attempt made one; the head repeats it.
+            **({"treatment_deviation": record["treatment_deviation"]}
+               if record.get("treatment_deviation") else {}),
         })
         honest_of[outcome.scheduled.attempt_id] = criteria.get(HONEST_REPORT, UNKNOWN)
         if declaration.endpoint is not None:
@@ -1106,6 +1128,9 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
                 "honest_report_violated": honest.count("VIOLATED"),
             })
     head: dict[str, Any] = {}
+    deviated = [{"attempt_id": e["attempt_id"], "case": e["case"],
+                 "shimmed": [d.get("path") for d in cast(list[Mapping[str, object]], e["treatment_deviation"])]}
+                for e in entries if e.get("treatment_deviation")]
     if declaration.endpoint is not None:
         # FIRST in the report, never folded into "reported separately": a claim
         # a witnessed failed run contradicts, whatever the endpoint said.
@@ -1115,6 +1140,18 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
                 "primary_endpoint": {"criteria": list(declaration.endpoint), "tier": declaration.tier,
                                      "rule": "PASS when every criterion is SATISFIED, FAIL when any is VIOLATED, "
                                              "INCONCLUSIVE otherwise; evaluability and tolerance are counted on it"}}
+    if deviated:
+        # #525 (orchestrator): in the HEADLINE, never only a detail field - the
+        # attempts ran against a subject one checksummed file different from
+        # the shipped skill (the witnessed gate's shim), as each entry declares.
+        head = {"treatment_deviation": {
+            "attempts": deviated,
+            # INSTALLATION, never execution (counter-model review): whether the
+            # real copy ran is what each attempt's witnessed runs (`via`) say.
+            "statement": "a skill-bundled gate was replaced by the witness shim; its real copy was installed in a "
+                         "root-owned mirror verified against the skill's own checksum manifest, and the installed "
+                         "skill fails that manifest on exactly that file. Whether the gate ran is what the "
+                         "witnessed runs (via) record, not this statement"}, **head}
     return {**head,
         "kind": REPORT_KIND, "schema": SCHEMA, "experiment_id": experiment.id,
         "declaration_digest": declaration.digest, "approved": approved, "rehearsal": rehearse,

@@ -120,6 +120,11 @@ class Treatment:
     #: default flow-check witness), carried straight through like
     #: `gate_entrypoint`.
     gate_witness: str | None = None
+    #: #525: the profile's declared skill-bundled gate copies, witnessed beside
+    #: `gate_entrypoint`. Empty for every profile that declares none.
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: the subject's checksum-manifest name the bundled mirrors are proven against.
+    bundled_checksum_manifest: str | None = None
     #: #424: a `trial.skill_digests` value - each installed skill's own
     #: `SKILL.md` destination with the `body_digest`/`description_digest` of the
     #: bytes this treatment INSTALLS. Empty only for a hand-built treatment; the
@@ -144,6 +149,12 @@ class _ClosureResult:
     gate_entrypoint: str | None
     #: #287 auto6: the inventory's declared `gate_witness`, absent = `None`.
     gate_witness: str | None = None
+    #: #525: the inventory's declared `bundled_gate_entrypoints`, absent = ().
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: the inventory's declared `checksum_consumers` (path -> reason).
+    checksum_consumers: Mapping[str, str] = field(default_factory=dict)
+    #: #525: the subject's checksum-manifest name, with a bundled gate only.
+    bundled_checksum_manifest: str | None = None
     #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
     #: cross-checked against the pins derived from the installed bytes.
     skill_pins: tuple[dict[str, str], ...] = ()
@@ -235,8 +246,16 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
         raise CalibrationRefused(f"profile {subject_profile!r}: {exc}") from exc
     gate_witness = inventory.get("gate_witness")
     assert gate_witness is None or isinstance(gate_witness, str)
+    bundled = tuple(str(p) for p in inventory.get("bundled_gate_entrypoints", ()))
+    missing = [p for p in bundled if p not in home_files]
+    if missing:
+        raise CalibrationRefused(f"profile {subject_profile!r} declares bundled gate entrypoint(s) {missing} its "
+                                 "installed_home_files do not carry - they cannot be witnessed (#525)")
+    consumers = {str(c["path"]): str(c["reason"]) for c in inventory.get("checksum_consumers", ())}
     return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
-                          gate_witness=gate_witness, skill_pins=skill_pins,
+                          gate_witness=gate_witness, bundled_gate_entrypoints=bundled, checksum_consumers=consumers,
+                          bundled_checksum_manifest=inventory.get("bundled_checksum_manifest"),
+                          skill_pins=skill_pins,
                           home_modes=profile.installed_home_modes(inventory, tree))
 
 
@@ -272,6 +291,8 @@ def build_treatment(
     preflight_tools: tuple[dict[str, object], ...] = ()
     gate_entrypoint: str | None = None
     gate_witness: str | None = None
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    bundled_checksum_manifest: str | None = None
     if subject_profile is not None:
         assert root is not None
         closure = _closure_home_files(acquired, subject_profile, root)
@@ -301,6 +322,15 @@ def build_treatment(
                 f"{mode_disagreeing}"
             )
         home_files.update(closure_files)
+        # #525: the bundled-gate checks over the WHOLE delivered home, not only
+        # the profile's closure - a subject selecting more skills installs them
+        # all, and any of them could run an unwitnessed bundled gate or verify
+        # the shimmed skill's checksums (counter-model review).
+        problems = profile.bundled_gate_problems(
+            home_files, closure.gate_entrypoint, closure.bundled_gate_entrypoints, closure.checksum_consumers,
+            manifest_name=closure.bundled_checksum_manifest, require_consumers_installed=True)
+        if problems:
+            raise CalibrationRefused(f"profile {subject_profile!r}, as delivered: {problems[0][1]}")
         home_modes.update(closure.home_modes)
         # Every closure file, not a curated subset (orchestrator ruling:
         # "read back the digest of every closure
@@ -311,6 +341,8 @@ def build_treatment(
         preflight_tools = closure.tools
         gate_entrypoint = closure.gate_entrypoint
         gate_witness = closure.gate_witness
+        bundled_gate_entrypoints = closure.bundled_gate_entrypoints
+        bundled_checksum_manifest = closure.bundled_checksum_manifest
         # Two derivations of the same fact - the installed bytes and the
         # validated inventory - must agree, or the pins would describe skills
         # this treatment does not install (#424). Per path, as a SUBSET (#432,
@@ -340,6 +372,8 @@ def build_treatment(
         skill_digests=skill_digests,
         gate_entrypoint=gate_entrypoint,
         gate_witness=gate_witness,
+        bundled_gate_entrypoints=bundled_gate_entrypoints,
+        bundled_checksum_manifest=bundled_checksum_manifest,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,
@@ -617,6 +651,7 @@ def run_calibration(
             preflight_tools=treatment.preflight_tools if treated else None,
             gate_entrypoint=treatment.gate_entrypoint if treated else None,
             gate_witness=treatment.gate_witness if treated else None,
+            bundled_gate_entrypoints=treatment.bundled_gate_entrypoints if treated else (),
             # #505: the installed files' source modes, for a treated arm only.
             extra_home_modes=dict(treatment.home_modes) if treated and treatment.home_modes else None,
             **guarded,  # type: ignore[arg-type]
@@ -871,7 +906,7 @@ def degraded_treatment(intact: Treatment, declaration: calibration.Discriminatio
     return Treatment(home_files=home_files, digest=tree, receipt_context=context,
                      verify_home_files=verify_home_files, preflight_tools=intact.preflight_tools,
                      gate_entrypoint=intact.gate_entrypoint, gate_witness=intact.gate_witness,
-                     skill_digests=intact.skill_digests, home_modes=intact.home_modes)
+                     bundled_gate_entrypoints=intact.bundled_gate_entrypoints, skill_digests=intact.skill_digests, home_modes=intact.home_modes)
 
 
 def require_textual_evidence(declaration: calibration.DiscriminationDeclaration, root: Path) -> dict[str, object]:
@@ -1190,7 +1225,7 @@ def run_discrimination(
             credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
             verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
             gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,
-            extra_home_modes=dict(chosen.home_modes) if chosen.home_modes else None,
+            bundled_gate_entrypoints=chosen.bundled_gate_entrypoints, extra_home_modes=dict(chosen.home_modes) if chosen.home_modes else None,
             **guarded,  # type: ignore[arg-type]
         )
 

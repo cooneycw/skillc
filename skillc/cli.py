@@ -2233,6 +2233,10 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
               "run_store": {"declared": declaration.data["run_store"], "resolved": str(private_root)}}
     report_path = run_dir / fl.REPORT_FILENAME
     report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    if "treatment_deviation" in report:  # #525: first, in the headline
+        shimmed = sorted({p for a in report["treatment_deviation"]["attempts"] for p in a["shimmed"]})
+        print(f"skillc: TREATMENT DEVIATION (declared): {len(report['treatment_deviation']['attempts'])} attempt(s) "
+              f"were set up with the witness shim in place of {shimmed}", file=sys.stderr)
     for case, counts in report["cases"].items():
         print(f"skillc: {case}: {counts}", file=sys.stderr)
     if stop.trigger is not None:
@@ -3020,10 +3024,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_level3_live.add_argument("--timeout", type=float, default=60, help="per-container-call timeout, seconds")
     p_level3_live.add_argument("--private-dir", help="must equal the declared run_store when given")
     p_level3_live.add_argument(
-        "--rehearse", choices=["dry", "actor", "actor-nested"], default=None,
+        "--rehearse", choices=["dry", "actor", "actor-nested", "actor-bundled"], default=None,
         help="spend nothing: 'dry' starts no container; 'actor' runs the real live path with a scripted actor "
              "and a dummy credential; 'actor-nested' (#279) is the Step-6 actor plus one nested codex launch, "
-             "which must read refused and detected. Any may run an unapproved declaration (the report says so)",
+             "which must read refused and detected; 'actor-bundled' (#525) runs the skill-bundled gate copy. Any may "
+             "run an unapproved declaration (the report says so)",
     )
     p_level3_live.add_argument(
         "--judge-replay", metavar="RUN_DIR", default=None,

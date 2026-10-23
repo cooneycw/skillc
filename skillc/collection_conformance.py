@@ -705,6 +705,8 @@ def run_level1_agent_attempt(
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
+    bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
     codex_guard: bool = False,
     nested_codex_policy: str | None = None,
     declared_model: str | None = None,
@@ -768,6 +770,8 @@ def run_level1_agent_attempt(
         preflight_tools=preflight_tools,
         gate_entrypoint=gate_entrypoint,
         gate_witness=gate_witness,
+        bundled_gate_entrypoints=bundled_gate_entrypoints,
+        bundled_checksum_manifest=bundled_checksum_manifest,
         **guard_kwargs,  # type: ignore[arg-type]
     )
 

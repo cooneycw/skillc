@@ -440,6 +440,8 @@ def attempt_kwargs(*, experiment: trial.Experiment, attempt_id: str, backend: Do
         "extra_home_files": extra_home_files, "receipt_context": treatment.receipt_context,
         "verify_home_files": treatment.verify_home_files, "preflight_tools": treatment.preflight_tools,
         "gate_entrypoint": treatment.gate_entrypoint, "fixture": fixture,
+        "bundled_gate_entrypoints": treatment.bundled_gate_entrypoints,
+        "bundled_checksum_manifest": treatment.bundled_checksum_manifest,
         # #287 auto6: the fixture route keeps its own gate map; a non-default
         # gate_witness is refused alongside a fixture.
         "gate_witness": None,

@@ -79,6 +79,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import posixpath
 import re
 import secrets
 import shlex
@@ -508,6 +509,86 @@ _FLOW_AUTO_GATE_SHIM_SOURCE = (
 )
 _FLOW_FINISH_GATE = "flow-auto-finish"
 _FLOW_FINISH_PLAN = "finish"
+#: #525: the shim line a bundled-gate copy sets (`docker/fixture-service/
+#: flow-auto-gate-shim.py`); a shim without it cannot witness a bundled gate,
+#: which is why the flow-check witness of one is deferred and refused.
+_SHIM_VIA_LINE = b"_VIA: str | None = None\n"
+#: #525: each witnessed bundled gate's root-owned mirror of its skill's whole
+#: `scripts/` directory, so the real script's BASH_SOURCE-relative siblings
+#: (`gate-lib.sh`, `counter-model-receipt.py`) are the skill's own.
+_BUNDLED_GATE_HARNESS_ROOT = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/bundled"
+
+
+def bundled_gate_shim(shim_source: bytes, via: str) -> bytes:
+    """#525: the flow-auto shim with its one `_VIA` line set to `via`."""
+    if shim_source.count(_SHIM_VIA_LINE) != 1:
+        raise HomeFileVerificationRefused("this gate shim cannot witness a bundled gate (no _VIA line): the "
+                                          "flow-check witness of a bundled gate is deferred (#525)")
+    return shim_source.replace(_SHIM_VIA_LINE, f"_VIA: str | None = {via!r}\n".encode())
+
+
+def _bundled_via(path: str) -> str:
+    """`<skills root>/<skill>/<dir>/<gate>` -> `bundled:<skill>` - derived from
+    the declared path's own shape, never a subject's layout named here."""
+    parts = path.split("/")
+    if len(parts) < 3 or not all(parts[-3:]):
+        raise HomeFileVerificationRefused(f"bundled gate entrypoint {path!r} has no <skill>/<dir>/<gate> shape")
+    return f"bundled:{parts[-3]}"
+
+
+def _overlay_bundled_gates(
+    backend: DockerBackend, handle: object, bundled: Sequence[str], verify_home_files: Mapping[str, str],
+    home_files: Mapping[str, bytes], home_modes: Mapping[str, str] | None, shim_source: bytes, manifest: str,
+) -> list[dict[str, object]]:
+    """#525: witness each skill-bundled gate copy. Mirror the skill's whole
+    `scripts/` directory root-owned, move the real gate into the mirror with
+    the shim in its place (`gate_overlay`, unchanged), then PROVE the mirror is
+    the shipped skill: it must pass `sha256sum -c` against the skill's own
+    `SHA256SUMS`, and the in-place directory must fail on exactly the shimmed
+    file. Returns the declared treatment deviations; refuses on any doubt."""
+    deviations: list[dict[str, object]] = []
+    for path in bundled:
+        via = _bundled_via(path)
+        scripts_dir = posixpath.dirname(path)
+        gate_name = posixpath.basename(path)
+        mirror = f"{_BUNDLED_GATE_HARNESS_ROOT}/{via.split(':', 1)[1]}/{posixpath.basename(scripts_dir)}"
+        real_digest = verify_home_files.get(path)
+        if real_digest is None:
+            raise HomeFileVerificationRefused(f"bundled gate entrypoint {path!r} is not in the verified closure")
+        siblings = {dest[len(scripts_dir) + 1:]: data for dest, data in home_files.items()
+                    if dest.startswith(scripts_dir + "/") and dest != path}
+        if manifest not in siblings:
+            raise HomeFileVerificationRefused(f"{scripts_dir} ships no {manifest}: the bundled-gate mirror "
+                                              "cannot be proven to be the shipped skill (#525)")
+        for rel, data in sorted(siblings.items()):
+            dest = f"{scripts_dir}/{rel}"
+            if verify_home_files.get(dest) != "sha256:" + hashlib.sha256(data).hexdigest():
+                raise HomeFileVerificationRefused(f"{dest} is not a verified closure file; refusing to mirror it")
+            mode = 0o755 if (home_modes or {}).get(dest) == "100755" else 0o644
+            if not backend.write_root_owned_file_in_attempt(handle, f"{mirror}/{rel}", data, mode=mode):
+                raise HomeFileVerificationRefused(f"could not write the root-owned mirror of {dest}")
+        shim = bundled_gate_shim(shim_source, via)
+        gate_overlay.apply_flow_check_gate_overlay(
+            backend, handle, subject_root=CONTAINER_HOME, harness_root=mirror, subject_path=path,
+            harness_path=gate_name, expected_real_digest=real_digest[len("sha256:"):],
+            expected_shim_digest=hashlib.sha256(shim).hexdigest(), shim_content=shim,
+        )
+        check = 'cd -- "$1" && sha256sum -c --quiet -- "$2"'
+        if backend.root_output_in_attempt(handle, ["sh", "-c", check, "sh", mirror, manifest]) is None:
+            raise HomeFileVerificationRefused(f"the mirror of {scripts_dir} does not verify against the skill's own "
+                                              f"{manifest}: it is not byte-identical to the shipped skill (#525)")
+        in_place = backend.root_output_in_attempt(
+            handle, ["sh", "-c", 'cd -- "$1" && { sha256sum -c -- "$2" 2>/dev/null; true; }', "sh",
+                     f"{CONTAINER_HOME}/{scripts_dir}", manifest])
+        failures = sorted(line.rsplit(":", 1)[0] for line in (in_place or b"").decode("utf-8", "replace").splitlines()
+                          if not line.endswith(": OK"))
+        if in_place is None or failures != [gate_name]:
+            raise HomeFileVerificationRefused(f"the installed {scripts_dir} differs from its {manifest} on {failures}, "
+                                              f"not on exactly the declared shim {gate_name!r} (#525)")
+        deviations.append({"path": path, "via": via, "real_digest": real_digest,
+                           "shim_digest": "sha256:" + hashlib.sha256(shim).hexdigest(), "mirror": mirror,
+                           "mirror_verified": True, "in_place_checksum_failures": failures})
+    return deviations
 
 
 
@@ -532,6 +613,30 @@ def _gate_witness_choice(
     if fixture is not None:
         return fixture.gates, None, fixture.gate_shim_source
     return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
+
+
+def _require_bundled_route(bundled: Sequence[str], gate_entrypoint: str | None, fixture: AttemptFixture | None,
+                           shim_source: Path, gate_args: Mapping[str, Sequence[str]] | None,
+                           manifest: str | None = None) -> None:
+    """#525: where a bundled gate may be witnessed at all; refuses otherwise."""
+    if not bundled:
+        return
+    if not manifest:
+        raise HomeFileVerificationRefused("a bundled gate's mirror needs the subject's checksum manifest to be proven")
+    if gate_entrypoint is None:
+        raise HomeFileVerificationRefused("bundled gate entrypoints need the declared gate_entrypoint they copy")
+    if fixture is None:
+        # Counter-model review: only the fixture-live report surfaces the
+        # declared deviation (record AND head); a calibration or
+        # discrimination report would drop it, so those routes refuse.
+        raise HomeFileVerificationRefused("a bundled gate is witnessed only on the fixture-live route, whose "
+                                          "report declares the treatment deviation (#525)")
+    if shim_source.read_bytes().count(_SHIM_VIA_LINE) != 1:
+        raise HomeFileVerificationRefused("this attempt's gate witness cannot see a skill-bundled gate: the "
+                                          "flow-check witness of a bundled gate is deferred (#525)")
+    if gate_args is None or tuple(gate_args.get(_FLOW_FINISH_GATE, ("missing",))) != ():
+        raise HomeFileVerificationRefused(f"a bundled gate is witnessed as {_FLOW_FINISH_GATE!r}, which this "
+                                          "attempt does not declare as a bare call (#525)")
 
 
 @dataclass
@@ -560,6 +665,9 @@ class _WitnessSession:
     #: make, as the SHIM reported them. Subject-reported, never evidence: kept
     #: out of the gate-witness record and of everything grading reads.
     passthrough_log: list[dict[str, object]] = field(default_factory=list, repr=False)
+    #: #525: gate -> {via: argv} for each witnessed skill-bundled gate copy,
+    #: set by the overlay before `bind_and_check`; empty keeps the witness as it was.
+    variants: dict[str, dict[str, list[str]]] = field(default_factory=dict, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -649,7 +757,7 @@ class _WitnessSession:
                 gate: functools.partial(stage_capture.capture_stages, plan=plan)
                 for gate, plan in (self.stage_plans or {}).items()},
             order=self.order, source_digest_fn=source_snapshot if self.order is not None else None,
-            staged=staged or None,
+            staged=staged or None, declared_variants=self.variants or None,
         )
         script = (
             "import json,socket,sys; "
@@ -972,6 +1080,9 @@ def _make_before_execute(
     runtime_ready: Callable[[DockerBackend, object], None] | None = None,
     gate_shim_source: Path = _FLOW_CHECK_GATE_SHIM_SOURCE,
     extra_home_modes: Mapping[str, str] | None = None,
+    bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
+    treatment_deviation: list[dict[str, object]] | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -1080,6 +1191,15 @@ def _make_before_execute(
                 expected_shim_digest=hashlib.sha256(shim_content).hexdigest(),
                 shim_content=shim_content,
             )
+            # #525: then each declared skill-bundled copy - the last setup step,
+            # after the installed gate, for the same re-read reason. Its
+            # deviations are an OUT-parameter, like `delivered_credential_bytes`.
+            if bundled_gate_entrypoints:
+                deviations = _overlay_bundled_gates(
+                    backend, handle, bundled_gate_entrypoints, resolved_verify_home_files, extra_home_files,
+                    extra_home_modes, shim_content, str(bundled_checksum_manifest))
+                if treatment_deviation is not None:
+                    treatment_deviation.extend(deviations)
 
     return hook
 
@@ -2181,6 +2301,8 @@ def run_one_attempt(
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
+    bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
     project_gate: pg.ProjectGate | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
@@ -2315,6 +2437,10 @@ def run_one_attempt(
                 f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
             )
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
+    #: #525: the declared treatment deviations the bundled-gate overlay makes.
+    treatment_deviation: list[dict[str, object]] = []
+    _require_bundled_route(bundled_gate_entrypoints, gate_entrypoint, fixture, gate_shim_source, gate_args,
+                           bundled_checksum_manifest)
     if project_gate is not None:
         if fixture is not None:
             raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; project_gate cannot also be set")
@@ -2331,7 +2457,9 @@ def run_one_attempt(
         if "PATH" not in agent_env:
             raise HomeFileVerificationRefused("the project-gate shim was not placed before the agent launch")
         return dict(agent_env)
-    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args", "make_env") if project_gate is not None else ())})
+    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args", "make_env") if project_gate is not None else ()),
+                               # #525: a bundled-gate shim names its copy; only then.
+                               *(("via",) if bundled_gate_entrypoints else ())})
     passthrough_route = ({pg.PASSTHROUGH_OP: (witness_session.decide,
                                               frozenset({"op", "argv", "cwd", "exit_code", "why"}))}
                          if project_gate is not None and witness_session is not None else {})
@@ -2484,6 +2612,8 @@ def run_one_attempt(
         runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
         gate_shim_source=gate_shim_source,
         extra_home_modes=extra_home_modes,
+        bundled_gate_entrypoints=tuple(bundled_gate_entrypoints), bundled_checksum_manifest=bundled_checksum_manifest,
+        treatment_deviation=treatment_deviation,
     )
     if witness_session is not None:
         install_and_verify = before_execute
@@ -2491,6 +2621,9 @@ def run_one_attempt(
         def before_execute(ready_backend: ExecutionBackend, handle: object) -> None:
             install_and_verify(ready_backend, handle)
             assert isinstance(ready_backend, DockerBackend)
+            for deviation in treatment_deviation:  # #525: one declared variant per witnessed bundled copy
+                witness_session.variants.setdefault(_FLOW_FINISH_GATE, {})[str(deviation["via"])] = [
+                    "bash", f"{deviation['mirror']}/{posixpath.basename(str(deviation['path']))}"]
             witness_session.bind_and_check(ready_backend, handle)
             if fixture_session is not None:
                 fixture_session.bind(ready_backend, handle, witness_session.environment)
@@ -2757,6 +2890,10 @@ def run_one_attempt(
                              "evidence_digest": fixture_evidence}
     if attempt_guard is not None:
         result["codex_guard"] = attempt_guard.report(observation, declared_model)
+    if treatment_deviation:
+        # #525 (orchestrator): a declared deviation is part of the attempt's own
+        # record, never only a detail field; the report's head repeats it.
+        result["treatment_deviation"] = [dict(d) for d in treatment_deviation]
     if declared_turns:
         result["controller_turns"] = {
             "declared": len(declared_turns), "delivered": delivered,
