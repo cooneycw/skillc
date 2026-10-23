@@ -113,6 +113,8 @@ EXCLUDED_PREFIXES = (
     # CPP's own flow-plan-record text cites a worker by its fleet name, and the
     # snapshot cannot be edited without breaking its closure digests.
     "tests/fixtures/profile-cpp-codex-flow-auto-86641e8/",
+    # #279: its re-pin to ca3030d, the same kind of byte-for-byte snapshot.
+    "tests/fixtures/profile-cpp-codex-flow-auto-ca3030d/",
 )
 
 #: This repository holds several hundred files today. A count far below this
@@ -395,6 +397,7 @@ def test_the_upstream_snapshot_exemption_is_exact() -> None:
     """#434: only the one snapshot directory is exempt - a sibling sharing its
     prefix, and this repository's own tests beside it, are still scanned."""
     assert _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-86641e8/scripts/flow-plan-record.py")
+    assert _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-ca3030d/scripts/flow-plan-record.py")
     assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-86641e8x/scripts/flow-plan-record.py")
     assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-check-86641e8/scripts/flow-plan-record.py")
     assert not _is_excluded("tests/test_cpp_codex_flow_auto_86641e8.py")

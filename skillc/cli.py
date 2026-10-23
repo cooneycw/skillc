@@ -1831,7 +1831,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         else:
             supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
         if supply is not None:
-            rs.require_kind(supply, selected)
+            rs.require_kind(supply, selected, revision=acquired.subject.revision)
         if supply is not None and supply.image_id != image_digest:
             raise rs.Refused("runtime receipt image differs from the approved resolved image")
     except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
@@ -1989,7 +1989,7 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
         if selected != rs.PROFILE_RUNTIME:
             raise harness.CampaignRefused("the frozen subject does not select the supported pinned runtime")
         supply = rs.RuntimeSupply.from_path(Path(args.runtime_supply_receipt))
-        rs.require_kind(supply, selected)
+        rs.require_kind(supply, selected, revision=acquired.subject.revision)
     except (lc.CampaignRefused, fc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused,
             rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
@@ -2196,7 +2196,7 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
         supply: rs.RuntimeSupply | None = None
         if bound_receipt is not None:  # the bytes the binding checked, never a second read
             supply = rs.RuntimeSupply(bound_receipt)
-            rs.require_kind(supply, selected)
+            rs.require_kind(supply, selected, revision=acquired.subject.revision)
             if supply.image_id != image_digest:
                 raise rs.Refused("runtime receipt image differs from the declared resolved image")
     except (fl.LiveRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused, OSError,
@@ -2233,6 +2233,11 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
               "run_store": {"declared": declaration.data["run_store"], "resolved": str(private_root)}}
     report_path = run_dir / fl.REPORT_FILENAME
     report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    refused_calls = sum(int(a["witness_refused_calls"]["count"]) for a in report["attempts"]
+                        if isinstance(a.get("witness_refused_calls"), dict))
+    print(f"skillc: witness-refused calls: {refused_calls}"
+          + (" - S2/S3 of the flagged attempts are possibly shaped by the harness; see the report head"
+             if refused_calls else ""), file=sys.stderr)
     if "treatment_deviation" in report:  # #525: first, in the headline
         shimmed = sorted({p for a in report["treatment_deviation"]["attempts"] for p in a["shimmed"]})
         print(f"skillc: TREATMENT DEVIATION (declared): {len(report['treatment_deviation']['attempts'])} attempt(s) "

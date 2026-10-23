@@ -382,3 +382,33 @@ def test_a_bundled_gate_without_a_checksum_manifest_is_refused() -> None:
     with pytest.raises(at.HomeFileVerificationRefused, match="checksum manifest"):
         at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(), SHIM,  # type: ignore[arg-type]
                                   {"flow-auto-finish": ()}, None)
+
+
+# ------------------------------------------------------------------ #279: refusals are counted
+
+def _ready_session() -> Any:
+    session = at._WitnessSession("a-1", Limits(timeout=60))
+    session.witness = object()  # type: ignore[assignment]
+    session.ready = True
+    return session
+
+
+def test_279_the_controller_counts_each_reported_refusal() -> None:
+    session = _ready_session()
+    session.decide({"op": "gate_refused", "argv": ["--check-summary"], "cwd": "/work/repo", "via": "bundled:flow-check"})
+    session.decide({"op": "gate_refused", "argv": ["--plan", "check"], "cwd": "/work/repo"})
+    assert [(r["argv"], r["via"]) for r in session.refusals] == [(["--check-summary"], "bundled:flow-check"),
+                                                                 (["--plan", "check"], None)]
+
+
+@pytest.mark.parametrize("request_", [
+    {"op": "gate_refused", "argv": "not-a-list", "cwd": "/w"},
+    {"op": "gate_refused", "argv": ["x" * 600], "cwd": "/w"},
+    {"op": "gate_refused", "argv": [], "cwd": 3},
+    {"op": "gate_refused", "argv": [], "cwd": "/w", "via": 7},
+])
+def test_279_a_malformed_refusal_report_is_refused(request_: dict[str, Any]) -> None:
+    session = _ready_session()
+    with pytest.raises(ChannelRefusal, match="malformed"):
+        session.decide(request_)
+    assert session.refusals == []

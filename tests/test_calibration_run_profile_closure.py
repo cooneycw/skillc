@@ -375,6 +375,12 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
                 return real_selector(**kwargs)
 
         monkeypatch.setattr(runtime_supply, "requires_supply", select_fixture)
+        # #279 policy B: the synthetic subject can never be a supported pin, so
+        # selection is stubbed; the receipt's own pin check is waived with it -
+        # only the kind is checked here (the pin check's reds: test_runtime_policy_b).
+        real_require_kind = runtime_supply.require_kind
+        monkeypatch.setattr(runtime_supply, "require_kind",
+                            lambda supply, selected, revision=None: real_require_kind(supply, selected))
     _write_declaration(root / profile_name, revision, gate_entrypoint=entrypoint, dependencies=dependencies)
     inventory = p.validate(p.Profile.load(root / profile_name / "profile.json"),
                            p.GitTree(content_repo, revision))

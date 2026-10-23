@@ -70,7 +70,9 @@ def test_any_other_argv_is_refused_before_the_channel(controller: tuple[_Control
     ctl, sock = controller
     proc = _run(args, sock, tmp_path)
     assert proc.returncode == 125 and proc.stdout == ""
-    assert ctl.requests == []
+    # Never asked to RUN: the only request is the refusal's own report, which
+    # the controller counts (#279, orchestrator).
+    assert ctl.requests == [{"op": "gate_refused", "argv": args, "cwd": str(tmp_path)}]
 
 
 def test_an_unreachable_channel_is_125(tmp_path: Path) -> None:
@@ -88,3 +90,24 @@ def test_a_refusal_or_a_result_with_no_real_exit_is_125(tmp_path: Path, reply: d
     finally:
         ctl.server.close()
     assert proc.returncode == 125 and proc.stdout == ""
+
+
+def test_red_279_a_flow_check_call_through_the_bundled_flow_check_copy_is_125_and_reported(
+        controller: tuple[_Controller, Path], tmp_path: Path) -> None:
+    """The 125 parity deviation (orchestrator, #279): the flow-auto shim placed
+    over flow-check's bundled gate refuses flow-check's own call - and REPORTS
+    it, naming its copy, so it is counted rather than silent."""
+    from skillc import agent_trial as at
+    shim = tmp_path / "flow-finish-gate.sh"
+    shim.write_bytes(at.bundled_gate_shim(SHIM.read_bytes(), "bundled:flow-check"))
+    ctl, sock = controller
+    args = ["--plan", "check", "--evidence", "flow-check"]
+    proc = subprocess.run([sys.executable, str(shim), *args], env={"SKILLC_TRIGGER_SOCKET": str(sock)}, cwd=tmp_path,
+                          capture_output=True, text=True, timeout=30, check=False)
+    assert proc.returncode == 125
+    assert ctl.requests == [{"op": "gate_refused", "argv": args, "cwd": str(tmp_path), "via": "bundled:flow-check"}]
+
+
+def test_a_refusal_with_no_channel_is_still_125(tmp_path: Path) -> None:
+    proc = _run(["--check-summary"], tmp_path / "no-such.sock", tmp_path)
+    assert proc.returncode == 125

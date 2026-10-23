@@ -1772,7 +1772,7 @@ class DockerBackend:
              "platform=sys.platform,machine=platform.machine())))")]))
         if measured_python != declared["python"]:
             raise rs.Refused("actual Python identity differs from selected runtime")
-        policy = rs.supported_policy()
+        policy = self.runtime_supply.policy  # #279 policy B: the receipt's own pin
         uv = read(["uv", "--version"]).decode("utf-8", errors="strict").split()
         if len(uv) < 2 or uv[:2] != ["uv", policy["uv_version"]]:
             raise rs.Refused("actual uv version differs from selected runtime")
