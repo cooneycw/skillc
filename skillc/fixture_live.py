@@ -255,6 +255,9 @@ def parse_declaration(data: Mapping[str, Any]) -> LiveDeclaration:
     if isinstance(tolerance, bool) or not isinstance(tolerance, int) or tolerance < 1:
         raise LiveRefused("tolerance.non_evaluable_per_case must be a positive integer, fixed before any attempt")
     shared = data["shared"]
+    pause = shared.get("token_pause_per_attempt")
+    if pause is not None and (isinstance(pause, bool) or not isinstance(pause, int) or pause < 1):
+        raise LiveRefused("shared.token_pause_per_attempt must be a positive integer when declared")
     client = _need(shared.get("client"), dict, "shared.client")
     if client.get("name") != CLIENT:
         raise LiveRefused(f"shared.client.name must be {CLIENT!r}: the fixture path runs the codex profile")
@@ -556,6 +559,26 @@ def _within_allowlist(target: str) -> bool:
     listed host. A port other than 443, or no port, is outside it."""
     host, sep, port = target.rpartition(":")
     return bool(sep) and port == "443" and host.lower().rstrip(".") in eg.ALLOWED_HOSTS
+
+
+def token_pause_trigger(record: Mapping[str, Any], threshold: int | None) -> str | None:
+    """#530 (the owner's D3 bound on #529): with `shared.token_pause_per_attempt`
+    declared, a DISPATCHED attempt whose recorded token total exceeds it - or
+    whose total is unknown, which cannot be shown to be under it - pauses the
+    schedule: every later attempt is finalized `not-run`, and the next waits for
+    the orchestrator's GO (a new run). There is no token CAP in the stack; this
+    reads the attempt's own rollout total after it ends."""
+    if threshold is None or record.get("disposition") in (None, "not-run", "unavailable"):
+        return None
+    usage = mp._run_metadata(record).get("token_usage")
+    total = usage.get("total_tokens") if isinstance(usage, Mapping) else None
+    if isinstance(total, bool) or not isinstance(total, int):
+        return (f"token pause: the attempt's token total is unknown, so it cannot be shown to be under the declared "
+                f"{threshold}; the next attempt waits for the orchestrator's GO")
+    if total > threshold:
+        return (f"token pause: the attempt used {total} tokens, above the declared {threshold}; the next attempt "
+                "waits for the orchestrator's GO")
+    return None
 
 
 def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
@@ -1135,8 +1158,9 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     def record_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
         if stop.trigger is None:
-            trigger = containment_trigger(outcome.record, allowlist_digest=allowlist,
-                                          nested_policy=declaration.nested_policy)
+            trigger = (containment_trigger(outcome.record, allowlist_digest=allowlist,
+                                           nested_policy=declaration.nested_policy)
+                       or token_pause_trigger(outcome.record, declaration.shared.get("token_pause_per_attempt")))
             if trigger is not None:
                 stop.trigger, stop.at_attempt = trigger, outcome.scheduled.attempt_id
         if on_outcome is not None:
