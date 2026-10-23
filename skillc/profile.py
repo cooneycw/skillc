@@ -1261,9 +1261,13 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
 
 def _bare_bundled_gate_calls(text: str, relative: str) -> bool:
     """Whether a skill document invokes its bundled gate (`relative` to the
-    skill directory) bare in a fenced block - the shape CPP #1408 gives every
-    generated Codex skill. Prose that merely names the file is not a call."""
-    call = re.compile(rf"^\s*(?:(?:bash|sh)\s+)?{re.escape(relative)}(?:\s|$)")
+    skill directory) in a fenced block - bare, the shape CPP #1408 gives every
+    generated Codex skill, or anchored to the skill directory through a shell
+    variable, CPP #1546's `"${VAR:-default}"/scripts/<gate>` (#529: missing it
+    would let a later pin's undeclared bundled gate validate). Prose that
+    merely names the file is not a call."""
+    anchor = r'(?:"?\$\{?[A-Za-z_][A-Za-z0-9_]*(?::-[^}"\s]*)?\}?"?/)?'
+    call = re.compile(rf"^\s*(?:(?:bash|sh)\s+)?{anchor}{re.escape(relative)}(?:\s|$)")
     inside = False
     for line in text.splitlines():
         if _FENCE.match(line):

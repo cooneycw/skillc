@@ -422,3 +422,77 @@ def test_review_two_copies_on_one_route_are_refused_before_any_write() -> None:
                                   checkout={CHECKOUT: "flow-check", "Projects/other/scripts/flow-finish-gate.sh":
                                             "flow-check"})
     assert set(backend.files) == {f"/home/candidate/{k}" for k in home}
+
+
+# ------------------------------------------------------------------ CPP #1546: the skill-anchored call
+
+#: claude-power-pack `f857754d` (CPP PR #1546, the #1542 fix; MIT,
+#: https://github.com/cooneycw/claude-power-pack, codex/skills/flow-check/
+#: reference.md:53-55): the gate call anchored to the skill directory.
+F857754D_STEP2 = ('an allowlist rule, issue #613):\n\n```bash\n'
+                  '"${CPP_SKILL_DIR:-/dev/null}"/scripts/flow-finish-gate.sh --plan check --evidence flow-check\n```\n')
+ANCHORED = '"${CPP_SKILL_DIR:-/dev/null}"/scripts/flow-finish-gate.sh'
+
+
+def test_1546_the_anchored_call_is_still_the_skill_invoking_its_bundled_gate() -> None:
+    """The detector behind `bundled-gate-unwitnessed` must see the anchored
+    form, or a pin past #1546 with an undeclared bundled gate validates."""
+    from skillc import profile as p
+    assert p._bare_bundled_gate_calls(F857754D_STEP2, "scripts/flow-finish-gate.sh")
+    files = {".codex/skills/flow-check/reference.md": F857754D_STEP2.encode(), BUNDLED: b"#!/usr/bin/env bash\n",
+             ".claude/scripts/flow-finish-gate.sh": b"#!/usr/bin/env bash\n"}
+    problems = p.bundled_gate_problems(files, ".claude/scripts/flow-finish-gate.sh", (), {}, manifest_name=None,
+                                       require_consumers_installed=False)
+    assert [(c, path) for c, _m, path in problems] == [("bundled-gate-unwitnessed", BUNDLED)]
+
+
+@pytest.mark.parametrize("line", ["echo scripts/flow-finish-gate.sh", '"$X"/other/flow-finish-gate.sh',
+                                  "/usr/bin/scripts/flow-finish-gate.sh"])
+def test_1546_a_mention_or_another_path_is_not_a_call(line: str) -> None:
+    from skillc import profile as p
+    assert not p._bare_bundled_gate_calls(f"```bash\n{line}\n```\n", "scripts/flow-finish-gate.sh")
+
+
+def _home_with_placed_shim(tmp_path: Path) -> Path:
+    """A home whose bundled gate is the placed shim, as the overlay leaves it."""
+    skill = tmp_path / "home" / ".codex" / "skills" / "flow-check"
+    (skill / "scripts").mkdir(parents=True)
+    gate = skill / "scripts" / "flow-finish-gate.sh"
+    gate.write_bytes(b"#!" + sys.executable.encode() + b"\n" + at.bundled_gate_shim(SHIM.read_bytes(),
+                                                                                       "bundled:flow-check"))
+    gate.chmod(0o755)
+    return skill
+
+
+def _anchored(cwd: Path, sock: Path, skill_dir: Path | None) -> subprocess.CompletedProcess[str]:
+    env = {"PATH": "/usr/bin:/bin", "SKILLC_TRIGGER_SOCKET": str(sock)}
+    if skill_dir is not None:
+        env["CPP_SKILL_DIR"] = str(skill_dir)
+    return subprocess.run(["bash", "-c", f"{ANCHORED} --plan check --evidence flow-check"], cwd=cwd, env=env,
+                          capture_output=True, text=True, timeout=30, check=False)
+
+
+def test_1546_measured_the_anchored_call_from_a_target_reaches_the_placed_shim(
+        controller: tuple[_Controller, Path], tmp_path: Path) -> None:
+    """MEASURED with real bash and the real placed shim: the anchored call,
+    run from a target worktree, reaches the bundled copy - so the mirror via
+    `bundled:flow-check` - and forwards the real result."""
+    ctl, sock = controller
+    skill = _home_with_placed_shim(tmp_path)
+    proc = _anchored(_git_repo(tmp_path / "target"), sock, skill)
+    assert (proc.returncode, proc.stdout) == (1, "FLOW_FINISH_GATE: fail\n")
+    assert ctl.requests == [{"op": "run_gate", "gate": "flow-check-plan", "cwd": str(tmp_path / "target"),
+                             "via": "bundled:flow-check"}]
+
+
+def test_1546_red_with_cpp_skill_dir_unset_the_call_is_126_and_not_observed(
+        controller: tuple[_Controller, Path], tmp_path: Path) -> None:
+    """Unset, it fails CLOSED at `/dev/null/scripts/...` (Not a directory):
+    nothing reaches the shim, so the witness records no run."""
+    ctl, sock = controller
+    _home_with_placed_shim(tmp_path)
+    proc = _anchored(_git_repo(tmp_path / "target"), sock, None)
+    assert proc.returncode == 126 and "Not a directory" in proc.stderr
+    assert ctl.requests == []
+    record = json.loads(_witness(_Backend(), _session().variants).finalize("a-1").to_json_bytes())["gates"]
+    assert record["flow-check-plan"]["coverage"] == "not-observed"
