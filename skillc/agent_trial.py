@@ -528,16 +528,17 @@ def bundled_gate_shim(shim_source: bytes, via: str) -> bytes:
 
 
 def _bundled_via(path: str) -> str:
-    """`.codex/skills/<skill>/scripts/<gate>` -> `bundled:<skill>`."""
+    """`<skills root>/<skill>/<dir>/<gate>` -> `bundled:<skill>` - derived from
+    the declared path's own shape, never a subject's layout named here."""
     parts = path.split("/")
-    if len(parts) != 5 or parts[:2] != [".codex", "skills"] or parts[3] != "scripts":
-        raise HomeFileVerificationRefused(f"bundled gate entrypoint {path!r} is not .codex/skills/<skill>/scripts/<gate>")
-    return f"bundled:{parts[2]}"
+    if len(parts) < 3 or not all(parts[-3:]):
+        raise HomeFileVerificationRefused(f"bundled gate entrypoint {path!r} has no <skill>/<dir>/<gate> shape")
+    return f"bundled:{parts[-3]}"
 
 
 def _overlay_bundled_gates(
     backend: DockerBackend, handle: object, bundled: Sequence[str], verify_home_files: Mapping[str, str],
-    home_files: Mapping[str, bytes], home_modes: Mapping[str, str] | None, shim_source: bytes,
+    home_files: Mapping[str, bytes], home_modes: Mapping[str, str] | None, shim_source: bytes, manifest: str,
 ) -> list[dict[str, object]]:
     """#525: witness each skill-bundled gate copy. Mirror the skill's whole
     `scripts/` directory root-owned, move the real gate into the mirror with
@@ -550,14 +551,14 @@ def _overlay_bundled_gates(
         via = _bundled_via(path)
         scripts_dir = posixpath.dirname(path)
         gate_name = posixpath.basename(path)
-        mirror = f"{_BUNDLED_GATE_HARNESS_ROOT}/{via.split(':', 1)[1]}/scripts"
+        mirror = f"{_BUNDLED_GATE_HARNESS_ROOT}/{via.split(':', 1)[1]}/{posixpath.basename(scripts_dir)}"
         real_digest = verify_home_files.get(path)
         if real_digest is None:
             raise HomeFileVerificationRefused(f"bundled gate entrypoint {path!r} is not in the verified closure")
         siblings = {dest[len(scripts_dir) + 1:]: data for dest, data in home_files.items()
                     if dest.startswith(scripts_dir + "/") and dest != path}
-        if "SHA256SUMS" not in siblings:
-            raise HomeFileVerificationRefused(f"{scripts_dir} ships no SHA256SUMS: the bundled-gate mirror "
+        if manifest not in siblings:
+            raise HomeFileVerificationRefused(f"{scripts_dir} ships no {manifest}: the bundled-gate mirror "
                                               "cannot be proven to be the shipped skill (#525)")
         for rel, data in sorted(siblings.items()):
             dest = f"{scripts_dir}/{rel}"
@@ -572,17 +573,17 @@ def _overlay_bundled_gates(
             harness_path=gate_name, expected_real_digest=real_digest[len("sha256:"):],
             expected_shim_digest=hashlib.sha256(shim).hexdigest(), shim_content=shim,
         )
-        check = 'cd -- "$1" && sha256sum -c --quiet -- SHA256SUMS'
-        if backend.root_output_in_attempt(handle, ["sh", "-c", check, "sh", mirror]) is None:
+        check = 'cd -- "$1" && sha256sum -c --quiet -- "$2"'
+        if backend.root_output_in_attempt(handle, ["sh", "-c", check, "sh", mirror, manifest]) is None:
             raise HomeFileVerificationRefused(f"the mirror of {scripts_dir} does not verify against the skill's own "
-                                              "SHA256SUMS: it is not byte-identical to the shipped skill (#525)")
+                                              f"{manifest}: it is not byte-identical to the shipped skill (#525)")
         in_place = backend.root_output_in_attempt(
-            handle, ["sh", "-c", 'cd -- "$1" && { sha256sum -c -- SHA256SUMS 2>/dev/null; true; }', "sh",
-                     f"{CONTAINER_HOME}/{scripts_dir}"])
+            handle, ["sh", "-c", 'cd -- "$1" && { sha256sum -c -- "$2" 2>/dev/null; true; }', "sh",
+                     f"{CONTAINER_HOME}/{scripts_dir}", manifest])
         failures = sorted(line.rsplit(":", 1)[0] for line in (in_place or b"").decode("utf-8", "replace").splitlines()
                           if not line.endswith(": OK"))
         if in_place is None or failures != [gate_name]:
-            raise HomeFileVerificationRefused(f"the installed {scripts_dir} differs from its SHA256SUMS on {failures}, "
+            raise HomeFileVerificationRefused(f"the installed {scripts_dir} differs from its {manifest} on {failures}, "
                                               f"not on exactly the declared shim {gate_name!r} (#525)")
         deviations.append({"path": path, "via": via, "real_digest": real_digest,
                            "shim_digest": "sha256:" + hashlib.sha256(shim).hexdigest(), "mirror": mirror,
@@ -615,10 +616,13 @@ def _gate_witness_choice(
 
 
 def _require_bundled_route(bundled: Sequence[str], gate_entrypoint: str | None, fixture: AttemptFixture | None,
-                           shim_source: Path, gate_args: Mapping[str, Sequence[str]] | None) -> None:
+                           shim_source: Path, gate_args: Mapping[str, Sequence[str]] | None,
+                           manifest: str | None = None) -> None:
     """#525: where a bundled gate may be witnessed at all; refuses otherwise."""
     if not bundled:
         return
+    if not manifest:
+        raise HomeFileVerificationRefused("a bundled gate's mirror needs the subject's checksum manifest to be proven")
     if gate_entrypoint is None:
         raise HomeFileVerificationRefused("bundled gate entrypoints need the declared gate_entrypoint they copy")
     if fixture is None:
@@ -1077,6 +1081,7 @@ def _make_before_execute(
     gate_shim_source: Path = _FLOW_CHECK_GATE_SHIM_SOURCE,
     extra_home_modes: Mapping[str, str] | None = None,
     bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
     treatment_deviation: list[dict[str, object]] | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
@@ -1192,7 +1197,7 @@ def _make_before_execute(
             if bundled_gate_entrypoints:
                 deviations = _overlay_bundled_gates(
                     backend, handle, bundled_gate_entrypoints, resolved_verify_home_files, extra_home_files,
-                    extra_home_modes, shim_content)
+                    extra_home_modes, shim_content, str(bundled_checksum_manifest))
                 if treatment_deviation is not None:
                     treatment_deviation.extend(deviations)
 
@@ -2297,6 +2302,7 @@ def run_one_attempt(
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
     bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
     project_gate: pg.ProjectGate | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
@@ -2433,7 +2439,8 @@ def run_one_attempt(
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
     #: #525: the declared treatment deviations the bundled-gate overlay makes.
     treatment_deviation: list[dict[str, object]] = []
-    _require_bundled_route(bundled_gate_entrypoints, gate_entrypoint, fixture, gate_shim_source, gate_args)
+    _require_bundled_route(bundled_gate_entrypoints, gate_entrypoint, fixture, gate_shim_source, gate_args,
+                           bundled_checksum_manifest)
     if project_gate is not None:
         if fixture is not None:
             raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; project_gate cannot also be set")
@@ -2605,7 +2612,8 @@ def run_one_attempt(
         runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
         gate_shim_source=gate_shim_source,
         extra_home_modes=extra_home_modes,
-        bundled_gate_entrypoints=tuple(bundled_gate_entrypoints), treatment_deviation=treatment_deviation,
+        bundled_gate_entrypoints=tuple(bundled_gate_entrypoints), bundled_checksum_manifest=bundled_checksum_manifest,
+        treatment_deviation=treatment_deviation,
     )
     if witness_session is not None:
         install_and_verify = before_execute

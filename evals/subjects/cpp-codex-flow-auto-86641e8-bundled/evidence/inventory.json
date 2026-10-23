@@ -2816,6 +2816,7 @@
    "reason": "byte-identical to flow-doctor's copy at CPP 86641e8 (measured #525); same reason: verifies its own bundle, not flow-auto's"
   }
  ],
+ "bundled_checksum_manifest": "SHA256SUMS",
  "installed_surface": {
   "files": 118,
   "digest": "sha256:6800dc6620289873674f1d2228d7866b51184e4581790ef0544035c2a5059cfc"

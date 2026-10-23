@@ -676,8 +676,8 @@ NESTED_REHEARSAL_COMMAND = ("codex exec -m gpt-6-sol -s read-only --json -o /tmp
 NESTED_REHEARSAL_FILE = "nested.json"
 #: #525 (`actor-bundled`): the Step-6 actor's gate step runs the skill-BUNDLED
 #: copy, as a CPP skill from #1408 on prescribes, instead of the installed one.
+#: Which copy is the treatment's own declared `bundled_gate_entrypoints[0]`.
 BUNDLED_GATE_REHEARSAL_FILE = "bundled-gate.json"
-BUNDLED_GATE_REHEARSAL_PATH = ".codex/skills/flow-auto/scripts/flow-finish-gate.sh"
 TURN_ACTOR_SOURCE = """\
 import os, subprocess, sys, time
 @CREDENTIAL_HELPERS@
@@ -824,7 +824,7 @@ if __name__ == "__main__":
 
 
 def step6_actor(task_root: Path, case: str, *, nested: bool = False,
-                bundled: bool = False) -> tuple[list[str], dict[str, bytes]]:
+                bundled_gate: str | None = None) -> tuple[list[str], dict[str, bytes]]:
     """#279 PR-3: the Step-6 actor's base argv and home files for `case`;
     with `nested`, turn 1 also makes `NESTED_REHEARSAL_COMMAND`."""
     candidate = REHEARSAL_BY_TASK[task_root.name][case]
@@ -841,13 +841,13 @@ def step6_actor(task_root: Path, case: str, *, nested: bool = False,
             f"{fc.HOME_DIR}/contents.json": json.dumps(contents, sort_keys=True).encode("utf-8")}
     if nested:
         home[f"{fc.HOME_DIR}/{NESTED_REHEARSAL_FILE}"] = json.dumps({"command": NESTED_REHEARSAL_COMMAND}).encode()
-    if bundled:
-        home[f"{fc.HOME_DIR}/{BUNDLED_GATE_REHEARSAL_FILE}"] = json.dumps({"gate": BUNDLED_GATE_REHEARSAL_PATH}).encode()
+    if bundled_gate is not None:
+        home[f"{fc.HOME_DIR}/{BUNDLED_GATE_REHEARSAL_FILE}"] = json.dumps({"gate": bundled_gate}).encode()
     return ["/usr/bin/python3", f"{fc.CONTAINER_HOME}/{actor}", *eg.CODEX_SERVER_SIDE_OFF], home
 
 
 def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False,
-                    nested: bool = False, bundled: bool = False) -> tuple[list[str], dict[str, bytes]]:
+                    nested: bool = False, bundled_gate: str | None = None) -> tuple[list[str], dict[str, bytes]]:
     """The actor's base argv and home files for `case`: fixture_campaign's own,
     playing `REHEARSAL_CANDIDATES[case]`. The server-side-off flags ride after
     its guard and gate arguments (the actor reads `argv[1]`, `argv[2]` and the
@@ -858,8 +858,8 @@ def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False,
     if candidate is not None and task_root.name == Path(STEP6_TASK_PATH).name:
         if not turns:
             raise LiveRefused("the Step-6 actor plays a turn timeline; its case must declare controller turns")
-        return step6_actor(task_root, case, nested=nested, bundled=bundled)
-    if nested or bundled:
+        return step6_actor(task_root, case, nested=nested, bundled_gate=bundled_gate)
+    if nested or bundled_gate is not None:
         raise LiveRefused("the nested-launch and bundled-gate rehearsals are the Step-6 actor's; this task has none")
     if candidate is None:
         owed = OWED_REHEARSAL_ACTORS.get(task_root.name)
@@ -915,6 +915,11 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     on an approved run."""
     if rehearse is not None and rehearse not in REHEARSALS:
         raise LiveRefused(f"rehearse must be one of {REHEARSALS}")
+    bundled_rehearsal_gate: str | None = None
+    if rehearse == "actor-bundled":
+        if not treatment.bundled_gate_entrypoints:
+            raise LiveRefused("--rehearse actor-bundled needs a subject profile that declares a bundled gate (#525)")
+        bundled_rehearsal_gate = treatment.bundled_gate_entrypoints[0]
     if declaration.tier != "deterministic":
         # #513: this path grades with the task grader only. Running an
         # independent-tier declaration here would score it deterministically
@@ -956,7 +961,7 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
         case_turns = declaration.turns.for_case(scheduled.arm) if declaration.turns is not None else None
         base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns),
                                                  nested=rehearse == "actor-nested",
-                                                 bundled=rehearse == "actor-bundled")
+                                                 bundled_gate=bundled_rehearsal_gate)
                                  if rehearse in ACTOR_REHEARSALS else (argv, {}))
         agent, grading = backends()
         case_dir = run_dir / "fixtures" / scheduled.attempt_id
@@ -1144,9 +1149,9 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
             # INSTALLATION, never execution (counter-model review): whether the
             # real copy ran is what each attempt's witnessed runs (`via`) say.
             "statement": "a skill-bundled gate was replaced by the witness shim; its real copy was installed in a "
-                         "root-owned mirror verified against the skill's own SHA256SUMS, and the installed skill "
-                         "fails its checksum on exactly that file. Whether the gate ran is what the witnessed runs "
-                         "(via) record, not this statement"}, **head}
+                         "root-owned mirror verified against the skill's own checksum manifest, and the installed "
+                         "skill fails that manifest on exactly that file. Whether the gate ran is what the "
+                         "witnessed runs (via) record, not this statement"}, **head}
     return {**head,
         "kind": REPORT_KIND, "schema": SCHEMA, "experiment_id": experiment.id,
         "declaration_digest": declaration.digest, "approved": approved, "rehearsal": rehearse,

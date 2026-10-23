@@ -172,8 +172,8 @@ class _OverlayBackend:
 
     def root_output_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None,
                                max_bytes: int = 1 << 20) -> bytes | None:
-        directory = argv[-1]
-        listed = [line.split("  ", 1) for line in self.files[f"{directory}/SHA256SUMS"].decode().splitlines()]
+        directory, manifest = argv[-2], argv[-1]
+        listed = [line.split("  ", 1) for line in self.files[f"{directory}/{manifest}"].decode().splitlines()]
         out = [f"{n}: {'OK' if hashlib.sha256(self.files.get(f'{directory}/{n}', b'')).hexdigest() == h else 'FAILED'}"
                for h, n in listed]
         failed = any(line.endswith("FAILED") for line in out)
@@ -193,7 +193,7 @@ def _overlay(monkeypatch: pytest.MonkeyPatch, backend: _OverlayBackend, home: Ma
         b.files[f"{subject_root}/{subject_path}"] = shim_content
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
     return at._overlay_bundled_gates(backend, object(), [GATE], verified or _verified(home), home,  # type: ignore[arg-type]
-                                     None, SHIM.read_bytes())
+                                     None, SHIM.read_bytes(), "SHA256SUMS")
 
 
 def test_red_4_5_6_the_mirror_is_the_shipped_skill_and_the_deviation_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -239,14 +239,15 @@ def test_red_5_an_in_place_mismatch_beyond_the_shim_is_refused(monkeypatch: pyte
 
 
 def test_a_bundled_path_outside_a_skills_scripts_dir_is_refused() -> None:
-    with pytest.raises(at.HomeFileVerificationRefused, match="is not .codex/skills"):
-        at._bundled_via(".claude/scripts/flow-finish-gate.sh")
+    with pytest.raises(at.HomeFileVerificationRefused, match="no <skill>/<dir>/<gate> shape"):
+        at._bundled_via("scripts/flow-finish-gate.sh")
+    assert at._bundled_via(GATE) == "bundled:flow-auto"
 
 
 # ------------------------------------------------------------------ profile side
 
 def test_a_bare_bundled_call_is_detected_and_prose_or_the_installed_path_is_not() -> None:
-    gate = "flow-finish-gate.sh"
+    gate = "scripts/flow-finish-gate.sh"  # relative to the skill directory
     assert p._bare_bundled_gate_calls(CA3030D_STEP6, gate)
     assert p._bare_bundled_gate_calls("```bash\nbash scripts/flow-finish-gate.sh --plan check\n```\n", gate)
     assert not p._bare_bundled_gate_calls("```bash\n~/.claude/scripts/flow-finish-gate.sh\n```\n", gate)
@@ -258,7 +259,7 @@ def test_the_86641e8_skill_does_not_invoke_its_bundled_gate() -> None:
     """The negative half on a real pin: 86641e8's flow-auto reference invokes
     the INSTALLED gate, so its profiles need no bundled witness."""
     text = (SNAPSHOT / "codex" / "skills" / "flow-auto" / "reference.md").read_text(encoding="utf-8")
-    assert not p._bare_bundled_gate_calls(text, "flow-finish-gate.sh")
+    assert not p._bare_bundled_gate_calls(text, "scripts/flow-finish-gate.sh")
 
 
 class _Tree:
@@ -278,6 +279,7 @@ def _gate_profile(bundled: tuple[str, ...] = (), consumers: Mapping[str, str] | 
     object.__setattr__(prof, "gate_entrypoint", ".claude/scripts/flow-finish-gate.sh")
     object.__setattr__(prof, "bundled_gate_entrypoints", bundled)
     object.__setattr__(prof, "checksum_consumers", dict(consumers or {}))
+    object.__setattr__(prof, "bundled_checksum_manifest", "SHA256SUMS" if bundled else None)
     return prof
 
 
@@ -335,18 +337,19 @@ def test_review_the_treatment_check_sees_a_delivered_neighbour_the_profile_closu
             ".codex/skills/flow-check/reference.md": CA3030D_STEP6.encode(),
             ".codex/skills/flow-check/scripts/flow-finish-gate.sh": b"#!/usr/bin/env bash\n"}
     problems = p.bundled_gate_problems(home, ".claude/scripts/flow-finish-gate.sh", (GATE,), {},
-                                       require_consumers_installed=True)
+                                       manifest_name="SHA256SUMS", require_consumers_installed=True)
     assert [c for c, _m, _p in problems] == ["bundled-gate-unwitnessed"]
     assert problems[0][2] == ".codex/skills/flow-check/scripts/flow-finish-gate.sh"
     neighbour = {**_SKILL, ".codex/skills/flow-doctor/scripts/install.sh": b"sha256sum -c SHA256SUMS\n"}
     assert [c for c, _m, _p in p.bundled_gate_problems(neighbour, ".claude/scripts/flow-finish-gate.sh", (GATE,), {},
-                                                        require_consumers_installed=True)] == [
+                                                        manifest_name="SHA256SUMS", require_consumers_installed=True)] == [
         "checksum-consumer-undeclared"]
 
 
 def test_review_a_stale_consumer_declaration_is_refused_where_the_population_exists() -> None:
     problems = p.bundled_gate_problems(_SKILL, ".claude/scripts/flow-finish-gate.sh", (GATE,),
-                                       {".codex/skills/gone/scripts/x.sh": "measured"}, require_consumers_installed=True)
+                                       {".codex/skills/gone/scripts/x.sh": "measured"}, manifest_name="SHA256SUMS",
+                                       require_consumers_installed=True)
     assert [c for c, _m, _p in problems] == ["checksum-consumer-not-installed"]
 
 
@@ -366,8 +369,16 @@ def test_review_a_bundled_gate_off_the_fixture_live_route_is_refused() -> None:
     calibration or discrimination attempt with a bundled gate is refused."""
     gates = {"flow-auto-finish": ()}
     with pytest.raises(at.HomeFileVerificationRefused, match="only on the fixture-live route"):
-        at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", None, SHIM, gates)
-    at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(), SHIM, gates)  # type: ignore[arg-type]
+        at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", None, SHIM, gates, "SHA256SUMS")
+    at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(), SHIM, gates,  # type: ignore[arg-type]
+                              "SHA256SUMS")
     with pytest.raises(at.HomeFileVerificationRefused, match="deferred"):
         at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(),  # type: ignore[arg-type]
-                                  at._FLOW_CHECK_GATE_SHIM_SOURCE, gates)
+                                  at._FLOW_CHECK_GATE_SHIM_SOURCE, gates, "SHA256SUMS")
+
+
+def test_a_bundled_gate_without_a_checksum_manifest_is_refused() -> None:
+    """The mirror is proven against the subject's own manifest; none, no proof."""
+    with pytest.raises(at.HomeFileVerificationRefused, match="checksum manifest"):
+        at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(), SHIM,  # type: ignore[arg-type]
+                                  {"flow-auto-finish": ()}, None)

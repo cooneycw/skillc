@@ -123,6 +123,8 @@ class Treatment:
     #: #525: the profile's declared skill-bundled gate copies, witnessed beside
     #: `gate_entrypoint`. Empty for every profile that declares none.
     bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: the subject's checksum-manifest name the bundled mirrors are proven against.
+    bundled_checksum_manifest: str | None = None
     #: #424: a `trial.skill_digests` value - each installed skill's own
     #: `SKILL.md` destination with the `body_digest`/`description_digest` of the
     #: bytes this treatment INSTALLS. Empty only for a hand-built treatment; the
@@ -151,6 +153,8 @@ class _ClosureResult:
     bundled_gate_entrypoints: tuple[str, ...] = ()
     #: #525: the inventory's declared `checksum_consumers` (path -> reason).
     checksum_consumers: Mapping[str, str] = field(default_factory=dict)
+    #: #525: the subject's checksum-manifest name, with a bundled gate only.
+    bundled_checksum_manifest: str | None = None
     #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
     #: cross-checked against the pins derived from the installed bytes.
     skill_pins: tuple[dict[str, str], ...] = ()
@@ -250,6 +254,7 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
     consumers = {str(c["path"]): str(c["reason"]) for c in inventory.get("checksum_consumers", ())}
     return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
                           gate_witness=gate_witness, bundled_gate_entrypoints=bundled, checksum_consumers=consumers,
+                          bundled_checksum_manifest=inventory.get("bundled_checksum_manifest"),
                           skill_pins=skill_pins,
                           home_modes=profile.installed_home_modes(inventory, tree))
 
@@ -287,6 +292,7 @@ def build_treatment(
     gate_entrypoint: str | None = None
     gate_witness: str | None = None
     bundled_gate_entrypoints: tuple[str, ...] = ()
+    bundled_checksum_manifest: str | None = None
     if subject_profile is not None:
         assert root is not None
         closure = _closure_home_files(acquired, subject_profile, root)
@@ -322,7 +328,7 @@ def build_treatment(
         # the shimmed skill's checksums (counter-model review).
         problems = profile.bundled_gate_problems(
             home_files, closure.gate_entrypoint, closure.bundled_gate_entrypoints, closure.checksum_consumers,
-            require_consumers_installed=True)
+            manifest_name=closure.bundled_checksum_manifest, require_consumers_installed=True)
         if problems:
             raise CalibrationRefused(f"profile {subject_profile!r}, as delivered: {problems[0][1]}")
         home_modes.update(closure.home_modes)
@@ -336,6 +342,7 @@ def build_treatment(
         gate_entrypoint = closure.gate_entrypoint
         gate_witness = closure.gate_witness
         bundled_gate_entrypoints = closure.bundled_gate_entrypoints
+        bundled_checksum_manifest = closure.bundled_checksum_manifest
         # Two derivations of the same fact - the installed bytes and the
         # validated inventory - must agree, or the pins would describe skills
         # this treatment does not install (#424). Per path, as a SUBSET (#432,
@@ -366,6 +373,7 @@ def build_treatment(
         gate_entrypoint=gate_entrypoint,
         gate_witness=gate_witness,
         bundled_gate_entrypoints=bundled_gate_entrypoints,
+        bundled_checksum_manifest=bundled_checksum_manifest,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,
