@@ -74,7 +74,7 @@ import posixpath
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
@@ -105,6 +105,19 @@ STEP6_TASK_PATH = "evals/level3/flow-auto-step6-gate"
 FLOW_CHECK_TASK_PATH = "evals/level3/flow-check-route"
 TASKS: dict[str, tuple[str, ...]] = {TASK_PATH: CASES, STEP6_TASK_PATH: ("twin-gate",),
                                      FLOW_CHECK_TASK_PATH: ("rangekit-green",)}
+#: #529 D3 (orchestrator ruling): the criterion that holds the HONEST-REPORT
+#: role in each task's grader, or `None` for a task whose grader has none. The
+#: summary's `honest_report` counts and the head's `flagged_honest_report_violated`
+#: key on this role, never on one spelling: #530's grader names it
+#: `report-honest`, and a fixed `honest-report` lookup read every D3 attempt
+#: UNKNOWN while its own criteria said SATISFIED. The role lives here, beside
+#: the closed task registry, and not in each `grader.json`, because those bytes
+#: are pinned in approved declarations' grader digests. `honesty_criterion`
+#: refuses a task without an entry, a mapped id its grader lacks, and an
+#: honesty-shaped criterion the role does not name, so a rename is loud.
+HONESTY_CRITERIA: dict[str, str | None] = {TASK_PATH: "honest-report", STEP6_TASK_PATH: None,
+                                           FLOW_CHECK_TASK_PATH: "report-honest"}
+_HONESTY_SHAPED = re.compile(r"hones|truth")
 CLIENT = "codex"
 EXPERIMENT_LABEL = "level3-fixture-live"
 TRIAL_PREFIX = "live"
@@ -164,13 +177,29 @@ def required_identities(task_path: str) -> tuple[tuple[str, ...], ...]:
 #: Where C1's placeholder scan looks (calibration's own scanner).
 IDENTITY_ROOTS = ("shared", "subject", "task", "cases", "attempts_per_case", "case_order", "tolerance", "run_store",
                   "primary_endpoint")
-#: The criterion a declared primary endpoint can leave out and still never
-#: lose: a VIOLATED one is flagged at the top of the report (#434 campaign).
-HONEST_REPORT = "honest-report"
 
 
 class LiveRefused(ValueError):
     """The declaration is malformed or unapproved, or the run cannot be bound to it."""
+
+
+def honesty_criterion(task_path: str, criteria: Iterable[str], *, complete: bool = True) -> str | None:
+    """The criterion holding the honest-report role for `task_path`, or `None`
+    where the task declares none, checked against `criteria`: a grader's own or
+    an attempt's graded set (`complete`, which must contain the role), or a
+    subset such as a declared endpoint (which may leave it out). Refuses
+    whenever the role cannot be mapped (#529 D3)."""
+    if task_path not in HONESTY_CRITERIA:
+        raise LiveRefused(f"no honest-report role is recorded for task {task_path!r}")
+    role, ids = HONESTY_CRITERIA[task_path], [str(c) for c in criteria]
+    if complete and role is not None and role not in ids:
+        raise LiveRefused(f"task {task_path!r} maps its honest-report role to {role!r}, which its criteria "
+                          f"{ids} do not contain")
+    unmapped = [c for c in ids if _HONESTY_SHAPED.search(c) and c != role]
+    if unmapped:
+        raise LiveRefused(f"honesty-shaped criteria {unmapped} of task {task_path!r} are not its mapped "
+                          f"honest-report role ({role!r}); record the role before summarizing")
+    return role
 
 
 @dataclass(frozen=True)
@@ -476,6 +505,8 @@ def require_approved(declaration: LiveDeclaration, root: Path, *, approval_requi
     if moved:
         raise LiveRefused(f"declared task identities differ from the repository: {moved} "
                           f"(on disk {({k: on_disk[k] for k in moved})})")
+    honesty_criterion(declaration.task_path,
+                      [str(c) for c in verify.GraderDef.load(root / declaration.task_path).criteria])
     if declaration.endpoint is not None:
         known = [str(c) for c in verify.GraderDef.load(root / declaration.task_path).criteria]
         unknown = [c for c in declaration.endpoint if c not in known]
@@ -1253,6 +1284,7 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
     allowlist = str(declaration.shared["agent_network"]["allowlist_digest"])
     entries: list[dict[str, object]] = []
     honest_of: dict[str, str] = {}
+    honesty = honesty_criterion(declaration.task_path, declaration.endpoint or (), complete=False)
     for outcome in outcomes:
         record = outcome.record
         meta = mp._run_metadata(record)
@@ -1287,7 +1319,11 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
             **({"witness_refused_calls": record["witness_refusals"]}
                if isinstance(record.get("witness_refusals"), Mapping) else {}),
         })
-        honest_of[outcome.scheduled.attempt_id] = criteria.get(HONEST_REPORT, UNKNOWN)
+        # #529 D3: by the task's honest-report ROLE. An honesty-shaped criterion
+        # this attempt's grader produced under another id refuses, never reads
+        # UNKNOWN; the role's presence in the grader is checked before any run.
+        honesty_criterion(declaration.task_path, criteria, complete=False)
+        honest_of[outcome.scheduled.attempt_id] = UNKNOWN if honesty is None else criteria.get(honesty, UNKNOWN)
         if declaration.endpoint is not None:
             entries[-1]["endpoint_status"] = endpoint_status(record, declaration.endpoint)
     by_case: dict[str, dict[str, object]] = {}
@@ -1313,6 +1349,8 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
             by_case[case].update({
                 "evaluability_basis": "primary_endpoint", "endpoint_passed": scored.count("PASS"),
                 "endpoint_failed": scored.count("FAIL"),
+                # Which criterion was counted; `None` when the task has no honest-report role.
+                "honest_report_criterion": honesty,
                 "honest_report": {**{o: honest.count(o) for o in ("SATISFIED", "VIOLATED", "UNKNOWN")},
                                   "not_graded": len(mine) - len(graded_ones)},
                 "honest_report_violated": honest.count("VIOLATED"),
