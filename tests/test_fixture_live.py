@@ -768,6 +768,29 @@ def test_525_a_declared_deviation_heads_the_report_without_claiming_the_gate_ran
     assert all("treatment_deviation" not in a for a in report["attempts"][1:])
 
 
+def test_279_witness_refusals_are_counted_and_flag_the_attempt_in_the_head(tmp_path: Path) -> None:
+    """Orchestrator (#279): a refused call is behaviour the subject would not
+    meet in real use, so each attempt counts it and the head flags S2/S3."""
+    declaration = fl.parse_declaration(json.loads(CAMPAIGN.read_text()))
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None)
+    calls = [{"argv": ["--check-summary"], "via": "bundled:flow-check", "cwd": "/work/repo"}]
+    outcomes = [mp.AttemptOutcome(s, {**_clean_record(graded=LIVE_SHAPE), "witness_refusals":
+                                      {"count": 1 if i == 0 else 0, "calls": calls if i == 0 else []}}, 10.0)
+                for i, s in enumerate(schedule)]
+    report = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
+    assert next(iter(report)) == "witness_refused_calls"
+    head = report["witness_refused_calls"]
+    assert head["total"] == 1 and [a["attempt_id"] for a in head["attempts"]] == [report["attempts"][0]["attempt_id"]]
+    assert head["attempts"][0]["calls"] == [{"argv": ["--check-summary"], "via": "bundled:flow-check"}]
+    assert "possibly shaped by the harness" in head["flag"] and "hand-read" in head["flag"]
+    assert report["attempts"][1]["witness_refused_calls"]["count"] == 0  # counted, zero included
+    quiet = [mp.AttemptOutcome(s, {**_clean_record(graded=LIVE_SHAPE),
+                                   "witness_refusals": {"count": 0, "calls": []}}, 10.0) for s in schedule]
+    assert "witness_refused_calls" not in fl.build_report(declaration, experiment, quiet, fl.Stop(), rehearse=None,
+                                                          approved=True)
+
+
 # --------------------------------------------------- #486: the judge replay
 
 _TASK = ROOT / "evals" / "level3" / "flow-auto-necessity"
