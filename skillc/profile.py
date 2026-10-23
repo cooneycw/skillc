@@ -77,6 +77,7 @@ _PROFILE_KEYS = {
     "allowed_destinations", "reference_patterns", "dependencies", "unsupported",
     "mirrors", "generated_from", "declared_empty_kinds", "client_profiles", "notes",
     "gate_entrypoint", "gate_witness", "bundled_gate_entrypoints", "checksum_consumers",
+    "checkout_gate_entrypoints",
 }
 
 #: #525: a CPP skill from #1408 on runs its BUNDLED gate (`scripts/<gate>`
@@ -85,9 +86,17 @@ _PROFILE_KEYS = {
 #: invokes its bundled gate bare, in a fenced command block, must declare that
 #: path in `bundled_gate_entrypoints` - else the profile is REFUSED (a gate the
 #: harness cannot see reads `not-observed`, never a pass). Which shim witnesses
-#: it is the harness's choice (`agent_trial`); only the flow-auto shim supports
-#: a bundled gate so far - the flow-check one is deferred (#525), and an attempt
-#: that would need it is refused there.
+#: it is the harness's choice (`agent_trial`): the flow-auto shim for the
+#: `flow-finish` map, the flow-check bundled shim for the `flow-check` map (#529).
+#: #529: `gate_entrypoint` may itself be one of those copies - a subject whose
+#: skill invokes ONLY its bundled gate, so no installed copy is supplied (CPP
+#: #1542). A skill-bundled `gate_entrypoint` its skill invokes bare must then be
+#: declared bundled too: the installed-gate overlay moves the script away from
+#: its `BASH_SOURCE`-relative siblings, and only the mirror keeps them.
+#: #529: `checkout_gate_entrypoints` maps a gate copy OUTSIDE any skill (a
+#: subject checkout the procedure's fallback names) to the selected skill whose
+#: route it is; it is mirrored and witnessed as `checkout:<skill>`, proven
+#: against the verified closure digests (a checkout ships no skill manifest).
 #: #525 (orchestrator): a bundled-gate shim changes one checksummed file of the
 #: subject. Every installed file that could VERIFY those checksums must be
 #: declared in `checksum_consumers` with the measured reason it does not run on
@@ -241,6 +250,9 @@ class Profile:
     #: #525: the basename of the subject's `checksum_manifest`, the file a
     #: bundled gate's mirror is proven against; set only with a bundled gate.
     bundled_checksum_manifest: str | None = None
+    #: #529: installed path of a checkout gate copy -> the selected skill whose
+    #: fallback names it. Empty (absent) for every profile before #529.
+    checkout_gate_entrypoints: dict[str, str] = field(default_factory=dict)
     raw: dict[str, object] = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -398,9 +410,24 @@ class Profile:
                 raise Refused(f"bundled gate entrypoint {raw_path!r} is not a safe relative path")
             if gate_entrypoint is None or posixpath.basename(norm) != posixpath.basename(gate_entrypoint):
                 raise Refused(f"bundled gate entrypoint {raw_path!r} is not a copy of the declared gate_entrypoint")
-            if norm == gate_entrypoint or norm in bundled:
+            if norm in bundled:
                 raise Refused(f"bundled gate entrypoint {raw_path!r} is declared twice")
             bundled.append(norm)
+        checkout: dict[str, str] = {}
+        raw_checkout = data.get("checkout_gate_entrypoints", {})
+        if not isinstance(raw_checkout, dict):
+            raise Refused("checkout_gate_entrypoints maps an installed path to a selected skill")
+        for raw_path, skill in raw_checkout.items():
+            norm = posixpath.normpath(str(raw_path))
+            if not raw_path or m._escapes(norm) or norm in ("", "."):
+                raise Refused(f"checkout gate entrypoint {raw_path!r} is not a safe relative path")
+            if gate_entrypoint is None or posixpath.basename(norm) != posixpath.basename(gate_entrypoint):
+                raise Refused(f"checkout gate entrypoint {raw_path!r} is not a copy of the declared gate_entrypoint")
+            if not isinstance(skill, str) or not skill or (select is not None and skill not in select):
+                raise Refused(f"checkout gate entrypoint {raw_path!r} names {skill!r}, not a selected skill")
+            if norm in bundled or norm in checkout:
+                raise Refused(f"checkout gate entrypoint {raw_path!r} is declared twice")
+            checkout[norm] = skill
         consumers: dict[str, str] = {}
         for entry in _list(data, "checksum_consumers") if "checksum_consumers" in data else []:
             if (not isinstance(entry, dict) or set(entry) != {"path", "reason"}
@@ -409,6 +436,8 @@ class Profile:
             consumers[posixpath.normpath(str(entry["path"]))] = str(entry["reason"])
         if consumers and not bundled:
             raise Refused("checksum_consumers is declared only for a profile with bundled_gate_entrypoints")
+        if gate_entrypoint is not None and gate_entrypoint in checkout:
+            raise Refused("gate_entrypoint may be a declared bundled copy, never a checkout copy (#529)")
         manifest = subject.checksum_manifest
         if bundled and not (isinstance(manifest, str) and manifest):
             raise Refused("a bundled gate's mirror is proven against the subject's checksum_manifest, which this "
@@ -422,7 +451,8 @@ class Profile:
             client_profiles=profiles, gate_entrypoint=gate_entrypoint,
             gate_witness=gate_witness if isinstance(gate_witness, str) else None,
             bundled_gate_entrypoints=tuple(bundled), checksum_consumers=consumers,
-            bundled_checksum_manifest=posixpath.basename(str(manifest)) if bundled else None, raw=data,
+            bundled_checksum_manifest=posixpath.basename(str(manifest)) if bundled else None,
+            checkout_gate_entrypoints=checkout, raw=data,
         )
 
 
@@ -1188,6 +1218,9 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
             "checksum_consumers": [{"path": k, "reason": v} for k, v in sorted(profile.checksum_consumers.items())],
            "bundled_checksum_manifest": profile.bundled_checksum_manifest}
            if profile.bundled_gate_entrypoints else {}),
+        # #529, likewise only when declared.
+        **({"checkout_gate_entrypoints": dict(sorted(profile.checkout_gate_entrypoints.items()))}
+           if profile.checkout_gate_entrypoints else {}),
         "installed_surface": {
             "files": len(installed),
             "digest": m.sha256_bytes("".join(
@@ -1221,7 +1254,8 @@ def _bare_bundled_gate_calls(text: str, relative: str) -> bool:
 
 def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | None, bundled: Sequence[str],
                           consumers: Mapping[str, str], *, manifest_name: str | None,
-                          require_consumers_installed: bool) -> list[tuple[str, str, str]]:
+                          require_consumers_installed: bool,
+                          checkout: Mapping[str, str] | None = None) -> list[tuple[str, str, str]]:
     """#525: the (category, message, path) problems of an installed population
     (destination -> effective bytes). Run on the profile's closure at
     validation AND on the treatment's whole delivered home at assembly (a
@@ -1233,7 +1267,11 @@ def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | Non
     skill invokes bare is declared - else the harness could not see the gate it
     runs; (3) with a bundled gate declared, every installed file matching the
     checksum signature (synthetic ones included) is a declared
-    `checksum_consumer` - the per-subject preflight."""
+    `checksum_consumer` - the per-subject preflight.
+    #529: the `gate_entrypoint` is scanned like any copy - a skill-bundled
+    entrypoint its skill invokes bare, left undeclared, would be witnessed by
+    the installed-gate overlay, which strips its siblings - and a declared
+    `checkout` copy must be installed like a bundled one."""
     problems: list[tuple[str, str, str]] = []
     if gate_entrypoint is None:
         return problems
@@ -1245,7 +1283,21 @@ def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | Non
         if path not in files:
             problems.append(("bundled-gate-not-installed",
                              f"bundled gate entrypoint {path!r} is not installed by this population", path))
-    for copy in sorted(d for d in files if d != gate_entrypoint and posixpath.basename(d) == gate):
+    for path in sorted(checkout or {}):
+        if path not in files:
+            problems.append(("checkout-gate-not-installed",
+                             f"checkout gate entrypoint {path!r} is not installed by this population", path))
+    if gate_entrypoint in bundled:
+        # #529: a profile whose entrypoint is a mirrored copy installs no
+        # installed gate by design; any OTHER copy it installs is a route an
+        # agent can take, so it must be witnessed (bundled or checkout).
+        for copy in sorted(d for d in files if posixpath.basename(d) == gate
+                           and d not in bundled and d not in (checkout or {})):
+            problems.append(("gate-copy-unwitnessed",
+                             (f"{copy} is an installed copy of the gate that no route witnesses: declare it in "
+                              "bundled_gate_entrypoints or checkout_gate_entrypoints, or do not install it (#529)"),
+                             copy))
+    for copy in sorted(d for d in files if posixpath.basename(d) == gate and d not in (checkout or {})):
         skill_dir = posixpath.dirname(posixpath.dirname(copy))
         if not skill_dir or copy in bundled:
             continue
@@ -1288,7 +1340,8 @@ def _check_bundled_gates(walk: _Walk, profile: Profile, tree: Tree,
     for category, msg, path in bundled_gate_problems(files, profile.gate_entrypoint, profile.bundled_gate_entrypoints,
                                                      profile.checksum_consumers,
                                                      manifest_name=profile.bundled_checksum_manifest,
-                                                     require_consumers_installed=False):
+                                                     require_consumers_installed=False,
+                                                     checkout=profile.checkout_gate_entrypoints):
         if walk.problems is None:
             raise Refused(msg)
         _fail(walk, category, msg, (), in_path=path)

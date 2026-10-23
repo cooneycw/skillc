@@ -128,11 +128,14 @@ def test_the_installed_shim_request_is_unchanged_and_the_bundled_one_names_its_v
     assert bundled.replace(b"'bundled:flow-auto'", b"None") == source  # one line differs
 
 
-def test_the_flow_check_shim_cannot_witness_a_bundled_gate() -> None:
-    """Deferred (#525): the flow-check shim has no `_VIA` line, so a bundled gate
-    through it is refused, never silently witnessed as the installed one."""
-    with pytest.raises(at.HomeFileVerificationRefused, match="deferred"):
+def test_the_installed_flow_check_shim_cannot_witness_a_bundled_gate() -> None:
+    """The installed-path flow-check shim (`docker/trial/`, unchanged by #529)
+    has no `_VIA` line, so a mirrored copy through it is refused, never
+    silently witnessed as the installed one; #529's own shim is the one that can."""
+    with pytest.raises(at.HomeFileVerificationRefused, match="no _VIA line"):
         at.bundled_gate_shim(at._FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes(), "bundled:flow-check")
+    assert b"_VIA: str | None = 'bundled:flow-check'\n" in at.bundled_gate_shim(
+        at.FLOW_CHECK_BUNDLED_GATE_SHIM_SOURCE.read_bytes(), "bundled:flow-check")
 
 
 # ------------------------------------------------------------------ overlay (reds 4-6)
@@ -280,6 +283,7 @@ def _gate_profile(bundled: tuple[str, ...] = (), consumers: Mapping[str, str] | 
     object.__setattr__(prof, "bundled_gate_entrypoints", bundled)
     object.__setattr__(prof, "checksum_consumers", dict(consumers or {}))
     object.__setattr__(prof, "bundled_checksum_manifest", "SHA256SUMS" if bundled else None)
+    object.__setattr__(prof, "checkout_gate_entrypoints", {})
     return prof
 
 
@@ -372,7 +376,7 @@ def test_review_a_bundled_gate_off_the_fixture_live_route_is_refused() -> None:
         at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", None, SHIM, gates, "SHA256SUMS")
     at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(), SHIM, gates,  # type: ignore[arg-type]
                               "SHA256SUMS")
-    with pytest.raises(at.HomeFileVerificationRefused, match="deferred"):
+    with pytest.raises(at.HomeFileVerificationRefused, match="no _VIA line"):
         at._require_bundled_route((GATE,), ".claude/scripts/flow-finish-gate.sh", object(),  # type: ignore[arg-type]
                                   at._FLOW_CHECK_GATE_SHIM_SOURCE, gates, "SHA256SUMS")
 

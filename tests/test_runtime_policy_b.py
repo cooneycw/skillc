@@ -46,12 +46,18 @@ def _ca3030d_descriptor() -> bytes:
 
 def test_two_profile_runtimes_load_the_primary_unchanged() -> None:
     policies = rs.profile_policies()
-    assert [p["runtime_id"] for p in policies] == ["cpp-codex-flow-check-86641e8", "cpp-codex-flow-auto-ca3030d"]
+    assert [p["runtime_id"] for p in policies] == ["cpp-codex-flow-check-86641e8", "cpp-codex-flow-auto-ca3030d",
+                                                   "cpp-codex-flow-check-b318a14b"]  # #529
     assert policies[0] == rs.supported_policy()
     assert policies[1]["subject_revision"] == CA3030D
     # The same dependency layer: only the pin differs.
     assert {k: v for k, v in policies[1].items() if k not in ("runtime_id", "subject_revision")} == \
         {k: v for k, v in policies[0].items() if k not in ("runtime_id", "subject_revision")}
+    # #529: b318a14b moves the dependency layer and the gate copy, nothing else.
+    moved = ("runtime_id", "subject_revision", "pyproject_sha256", "lock_sha256", "gate_entrypoint")
+    assert {k: v for k, v in policies[2].items() if k not in moved} == \
+        {k: v for k, v in policies[0].items() if k not in moved}
+    assert all(policies[2][k] != policies[0][k] for k in moved)
 
 
 def test_each_pin_selects_its_own_runtime_and_an_unknown_pin_selects_none() -> None:

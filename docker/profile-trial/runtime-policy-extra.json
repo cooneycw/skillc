@@ -19,6 +19,26 @@
       "subject_locator": "github.com/cooneycw/claude-power-pack",
       "subject_revision": "ca3030dbeba4a145166b61d714861f56e92cd034",
       "uv_version": "0.9.7"
+    },
+    {
+      "gate_entrypoint": ".codex/skills/flow-check/scripts/flow-finish-gate.sh",
+      "lock_sha256": "0d7606bfd0efa1f58d5fa38386bde45cd63d75812c03cd0324bcd6f422ba6c32",
+      "project": "Projects/claude-power-pack",
+      "pyproject_sha256": "fe4b57ddb90f92793e0a1e45092d51bc28a7cfc048ae73ec00905cfed9ab00ed",
+      "required_env": {
+        "HOME": "/home/candidate",
+        "UV_CACHE_DIR": "/home/candidate/.cache/uv",
+        "UV_LINK_MODE": "copy",
+        "UV_LOCKED": "1",
+        "UV_OFFLINE": "1",
+        "UV_PYTHON": "/usr/bin/python3",
+        "UV_PYTHON_DOWNLOADS": "never"
+      },
+      "runtime_id": "cpp-codex-flow-check-b318a14b",
+      "schema_version": 1,
+      "subject_locator": "github.com/cooneycw/claude-power-pack",
+      "subject_revision": "b318a14b9e7935f2c50c0940144a5ff0ff9389ed",
+      "uv_version": "0.9.7"
     }
   ]
 }
