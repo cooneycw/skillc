@@ -59,7 +59,7 @@
   "grader_revision": "1",
   "grader_digest": "sha256:b4f8f63bc82ba3fe0b103dd1b73df0569b5581babe4f5b4274a1bb0d0a8fd6c2",
   "goal_sha256": "bf66f6a98176173cb174986df8865023ea103f139f76cd35366ab1ea06cfe203",
-  "builder_sha256": "79f4185f748b01559c02db5c68dafea6c96c56a27eebbe21d2ec2d02d4484e0c",
+  "builder_sha256": "96d95c7b98ea76201263e1cef4e6bc72c60978fb6b2269db90f5571d52c37086",
   "base_trees": {
    "rangekit-green": "2188e3de5804131480cbde095aa8411c6125816b"
   },
