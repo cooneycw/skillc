@@ -46,12 +46,18 @@ def _ca3030d_descriptor() -> bytes:
 
 def test_two_profile_runtimes_load_the_primary_unchanged() -> None:
     policies = rs.profile_policies()
-    assert [p["runtime_id"] for p in policies] == ["cpp-codex-flow-check-86641e8", "cpp-codex-flow-auto-ca3030d"]
+    assert [p["runtime_id"] for p in policies] == ["cpp-codex-flow-check-86641e8", "cpp-codex-flow-auto-ca3030d",
+                                                   "cpp-codex-flow-check-652c0118"]  # #529
     assert policies[0] == rs.supported_policy()
     assert policies[1]["subject_revision"] == CA3030D
     # The same dependency layer: only the pin differs.
     assert {k: v for k, v in policies[1].items() if k not in ("runtime_id", "subject_revision")} == \
         {k: v for k, v in policies[0].items() if k not in ("runtime_id", "subject_revision")}
+    # #529: 652c0118 moves the dependency layer and the gate copy, nothing else.
+    moved = ("runtime_id", "subject_revision", "pyproject_sha256", "lock_sha256", "gate_entrypoint")
+    assert {k: v for k, v in policies[2].items() if k not in moved} == \
+        {k: v for k, v in policies[0].items() if k not in moved}
+    assert all(policies[2][k] != policies[0][k] for k in moved)
 
 
 def test_each_pin_selects_its_own_runtime_and_an_unknown_pin_selects_none() -> None:
@@ -145,6 +151,45 @@ def test_the_primary_builder_is_untouched_and_the_extra_one_differs_only_in_iden
                if a != b]
     assert changed == [('RUNTIME_ID = "cpp-codex-flow-check-86641e8"', 'RUNTIME_ID = "cpp-codex-flow-auto-ca3030d"'),
                        ('REVISION = "86641e817711d8a7746270745a5dfa7cacf04b0c"', f'REVISION = "{CA3030D}"')]
+
+
+PIN_652C0118 = "652c01185bc73adf18df49f5b9d1d5ad77a038c7"
+
+
+def test_529_the_652c0118_builder_rebinds_its_dependency_layer_and_nothing_else() -> None:
+    """652c0118's pyproject.toml and uv.lock differ from the primary's, so its
+    builder rebinds those two identity lines as well - four in all."""
+    entry = build_runtime.extra_runtimes()["cpp-codex-flow-check-652c0118"]
+    primary = (ROOT / "docker/profile-trial/build.py").read_bytes()
+    generated = build_runtime.builder_source("cpp-codex-flow-check-652c0118", PIN_652C0118,
+                                             entry["pyproject_sha256"], entry["lock_sha256"])
+    changed = [(a, b) for a, b in zip(primary.decode().splitlines(), generated.decode().splitlines(), strict=True)
+               if a != b]
+    assert [b for _a, b in changed] == [
+        'RUNTIME_ID = "cpp-codex-flow-check-652c0118"', f'REVISION = "{PIN_652C0118}"',
+        f'PYPROJECT = "{entry["pyproject_sha256"]}"', f'LOCK = "{entry["lock_sha256"]}"']
+
+
+def test_529_the_builder_prepares_the_652c0118_runtime_from_its_own_profile(tmp_path: Path) -> None:
+    (tmp_path / "builder").mkdir()
+    build, policy = build_runtime.load_builder("cpp-codex-flow-check-652c0118", tmp_path / "builder")
+    prepared = build.prepare(ROOT, tmp_path / "context", policy_bytes=policy)
+    assert (prepared["policy"]["runtime_id"], prepared["policy"]["subject_revision"]) == (
+        "cpp-codex-flow-check-652c0118", PIN_652C0118)
+
+
+def test_529_red_the_ca3030d_builder_alone_cannot_supply_652c0118(tmp_path: Path) -> None:
+    """The refusal the first build hit: a builder that rebinds only the pin
+    still carries the primary's dependency layer, which 652c0118's policy is not."""
+    path = tmp_path / "build.py"
+    path.write_bytes(build_runtime.builder_source("cpp-codex-flow-check-652c0118", PIN_652C0118))
+    spec = importlib.util.spec_from_file_location("profile_runtime_build_red", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    entry = build_runtime.extra_runtimes()["cpp-codex-flow-check-652c0118"]
+    with pytest.raises(module.SupplyError, match="unsupported pinned identity"):
+        module.validate_policy({key: entry[key] for key in module.POLICY_KEYS})
 
 
 def test_the_builder_prepares_the_ca3030d_runtime_from_its_own_profile(tmp_path: Path) -> None:

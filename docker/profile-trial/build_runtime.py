@@ -4,8 +4,8 @@
 `build.py` builds the PRIMARY runtime, and its own bytes are that runtime's
 build context (it is copied in as `runtime-build.py`), so it is never edited to
 support another pin. For a runtime listed in `runtime-policy-extra.json`, this
-generates `build.py` with exactly its two identity lines (RUNTIME_ID, REVISION)
-rebound, places it beside a copy of `Dockerfile.fragment` in a private
+generates `build.py` with exactly its identity lines (RUNTIME_ID, REVISION,
+and - #529 - the dependency layer's PYPROJECT and LOCK) rebound, places it beside a copy of `Dockerfile.fragment` in a private
 directory, and runs THAT builder: its identity checks, inside and outside the
 image, are the selected runtime's, and its context is deterministic.
 
@@ -26,7 +26,9 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 PRIMARY_LINES = ('RUNTIME_ID = "cpp-codex-flow-check-86641e8"\n',
-                 'REVISION = "86641e817711d8a7746270745a5dfa7cacf04b0c"\n')
+                 'REVISION = "86641e817711d8a7746270745a5dfa7cacf04b0c"\n',
+                 'PYPROJECT = "bc42953d69269328dbe5041d3b7ef6423804492db20b8cf8a59a94c0ee9f3774"\n',
+                 'LOCK = "b8edbdd3e0036bc09c849cedee3c1231c468f0f0f9425090c8f2ec914108f3cf"\n')
 
 
 class RuntimeRefused(ValueError):
@@ -47,14 +49,21 @@ def extra_runtimes() -> dict[str, dict[str, Any]]:
     return found
 
 
-def builder_source(runtime_id: str, revision: str) -> bytes:
-    """`build.py` with its identity rebound - and nothing else changed."""
+def builder_source(runtime_id: str, revision: str, pyproject: str | None = None, lock: str | None = None) -> bytes:
+    """`build.py` with its identity rebound - and nothing else changed. #529:
+    the dependency-layer identity too, for a pin whose `pyproject.toml` and
+    `uv.lock` differ from the primary's; left unset, those lines are the
+    primary's own, so a same-layer pin's builder (ca3030d) is unchanged."""
     text = (HERE / "build.py").read_text(encoding="utf-8")
     for line in PRIMARY_LINES:
         if text.count(line) != 1:
             raise RuntimeRefused("build.py's identity lines changed; this generator must be revisited")
-    text = text.replace(PRIMARY_LINES[0], f"RUNTIME_ID = {json.dumps(runtime_id)}\n")
-    return text.replace(PRIMARY_LINES[1], f"REVISION = {json.dumps(revision)}\n").encode("utf-8")
+    rebound = [f"RUNTIME_ID = {json.dumps(runtime_id)}\n", f"REVISION = {json.dumps(revision)}\n",
+               *(f"{name} = {json.dumps(value)}\n" if value is not None else line
+                 for name, value, line in (("PYPROJECT", pyproject, PRIMARY_LINES[2]), ("LOCK", lock, PRIMARY_LINES[3])))]
+    for old, new in zip(PRIMARY_LINES, rebound, strict=True):
+        text = text.replace(old, new)
+    return text.encode("utf-8")
 
 
 def load_builder(runtime_id: str, workdir: Path) -> tuple[ModuleType, bytes]:
@@ -65,7 +74,8 @@ def load_builder(runtime_id: str, workdir: Path) -> tuple[ModuleType, bytes]:
                              "(the primary is built by build.py itself)")
     entry = runtimes[runtime_id]
     path = workdir / "build.py"
-    path.write_bytes(builder_source(runtime_id, str(entry["subject_revision"])))
+    path.write_bytes(builder_source(runtime_id, str(entry["subject_revision"]),
+                                    str(entry["pyproject_sha256"]), str(entry["lock_sha256"])))
     (workdir / "Dockerfile.fragment").write_bytes((HERE / "Dockerfile.fragment").read_bytes())
     spec = importlib.util.spec_from_file_location(f"profile_runtime_build_{runtime_id.replace('-', '_')}", path)
     assert spec is not None and spec.loader is not None

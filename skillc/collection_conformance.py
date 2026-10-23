@@ -707,6 +707,7 @@ def run_level1_agent_attempt(
     gate_witness: str | None = None,
     bundled_gate_entrypoints: Sequence[str] = (),
     bundled_checksum_manifest: str | None = None,
+    checkout_gate_entrypoints: Mapping[str, str] | None = None,
     codex_guard: bool = False,
     nested_codex_policy: str | None = None,
     declared_model: str | None = None,
@@ -772,6 +773,7 @@ def run_level1_agent_attempt(
         gate_witness=gate_witness,
         bundled_gate_entrypoints=bundled_gate_entrypoints,
         bundled_checksum_manifest=bundled_checksum_manifest,
+        checkout_gate_entrypoints=dict(checkout_gate_entrypoints or {}),
         **guard_kwargs,  # type: ignore[arg-type]
     )
 

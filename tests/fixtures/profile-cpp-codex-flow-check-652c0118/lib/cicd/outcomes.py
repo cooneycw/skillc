@@ -1,0 +1,587 @@
+"""Test-runner outcome parsing for the deterministic CI/CD runner.
+
+A test step's success is decided by its process exit code, and every mainstream
+test runner exits 0 when it ran nothing at all - pytest exits 0 when all of its
+tests skipped. So the ``finish`` gate, whose whole contract is answering "is this
+safe to merge?", reported an unqualified SUCCESS for a suite that executed none
+of the tests that could have said no (issue #621, observed on flow:auto #65 in
+agentic-poker: ``312 passed, 66 skipped`` where the 66 were the acceptance
+tests).
+
+This module turns a runner's summary line back into counts so the step result can
+carry them. It is deliberately read-only and advisory: it changes what a step
+REPORTS, never whether it passed. A summary it cannot recognize yields ``None``
+and behaviour is unchanged.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, replace
+from typing import Any, Optional
+
+
+@dataclass(frozen=True)
+class SuiteOutcome:
+    """Counts parsed from a test runner's summary line."""
+
+    passed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    errors: int = 0
+    # Expected failures and unexpected passes, kept apart from `failed` and
+    # `passed` (issue #1362). #621 folded them in because both EXECUTED, and
+    # `executed` still counts them - but the summary then printed an xfail as
+    # "1 failed" beside a SUCCESS verdict, which is read as evidence by
+    # sessions that never see the raw runner output.
+    xfailed: int = 0
+    xpassed: int = 0
+    framework: str = "unknown"
+    # How many summaries were aggregated into these counts, and how many of
+    # them executed nothing (kyle issue #838). A step whose command runs the
+    # runner more than once - `make test` invoking pytest for two disjoint
+    # suites - produces one summary per invocation, and the TOTAL can look
+    # healthy while one invocation collected zero. Summing without these would
+    # report an honest number and leave #621's guard exactly as blind as the
+    # last-wins behaviour did.
+    invocations: int = 1
+    empty_invocations: int = 0
+    # WHICH streams carried a summary (issue #939/#952). A verdict
+    # without its denominator cannot be audited: `3 passed` read from stdout
+    # alone and `3 passed` read from both streams are different claims, and
+    # before #939 the parser could not tell them apart because it stopped at
+    # the first stream that said anything.
+    #
+    # Deliberately NOT the same question as `invocations`, which counts how
+    # many times the RUNNER ran. One invocation echoed to both streams sums to
+    # `invocations=2` with `summary_streams=("stdout", "stderr")`; two genuinely
+    # disjoint invocations split across the streams produce the same pair. The
+    # counts alone cannot separate those, so recording the streams is what
+    # leaves the shape legible to a reader instead of merely trusted.
+    #
+    # NAMED FOR WHAT IT HOLDS. `_parse_tests` always EXAMINES both streams, so
+    # a stream missing here was read and carried no recognizable summary - it
+    # was not skipped. An earlier name, `streams_read`, said the other thing
+    # and would have let a reader conclude the parser had gone back to
+    # examining one stream, which is the exact misreading #939 exists to end.
+    # The denominator is therefore "both, always"; this field is which of them
+    # spoke, and the pair is what separates "nothing there" from "did not
+    # look" (#952).
+    summary_streams: tuple[str, ...] = ()
+
+    # Fenced evidence is labelled separately from the real suite.
+    control_invocations: int = 0
+    control_passed: int = 0
+    control_failed: int = 0
+    control_skipped: int = 0
+    control_errors: int = 0
+    control_xfailed: int = 0
+    control_xpassed: int = 0
+    control_unexpected: tuple[str, ...] = ()
+
+    @property
+    def executed(self) -> int:
+        """Tests that actually ran (passed + failed + errored + xfail/xpass).
+
+        xfailed and xpassed tests ran: dropping them here would make an
+        xfail-only suite read as #621's "executed nothing" (issue #1362).
+        """
+        return self.passed + self.failed + self.errors + self.xfailed + self.xpassed
+
+    @property
+    def nothing_ran(self) -> bool:
+        """True when the suite reported a result without executing any test.
+
+        This is the #621 case: a green exit code that proves nothing. It covers
+        both "everything skipped" and pytest's "no tests ran" (which collects
+        nothing at all, so even the skip count is zero).
+        """
+        return self.executed == 0
+
+    @property
+    def any_invocation_empty(self) -> bool:
+        """True when some invocation executed nothing, even if others did.
+
+        ``nothing_ran`` asks about the total, which is the right question for
+        a single invocation and the wrong one for several: two suites where
+        the first collects zero and the second passes 102 total 102, so the
+        total ran something and the #621 warning stays silent about a half of
+        the gate that proved nothing (kyle issue #838).
+        """
+        return self.empty_invocations > 0
+
+    def summary(self) -> str:
+        """Human-readable count summary, e.g. ``312 passed, 66 skipped``."""
+        parts = [f"{self.passed} passed"]
+        if self.failed:
+            parts.append(f"{self.failed} failed")
+        if self.errors:
+            parts.append(f"{self.errors} errors")
+        if self.xfailed:
+            parts.append(f"{self.xfailed} xfailed")
+        if self.xpassed:
+            parts.append(f"{self.xpassed} xpassed")
+        parts.append(f"{self.skipped} skipped")
+        return ", ".join(parts)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "control_invocations": self.control_invocations,
+            "control_passed": self.control_passed,
+            "control_failed": self.control_failed,
+            "control_skipped": self.control_skipped,
+            "control_errors": self.control_errors,
+            "control_xfailed": self.control_xfailed,
+            "control_xpassed": self.control_xpassed,
+            "control_unexpected": list(self.control_unexpected),
+            "passed": self.passed,
+            "failed": self.failed,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "xfailed": self.xfailed,
+            "xpassed": self.xpassed,
+            "executed": self.executed,
+            "framework": self.framework,
+            "invocations": self.invocations,
+            "empty_invocations": self.empty_invocations,
+            "summary_streams": list(self.summary_streams),
+        }
+
+
+# pytest tail line: "==== 312 passed, 66 skipped, 1 warning in 55.69s ====",
+# "= 5 failed, 3 passed in 1.20s =", "==== no tests ran in 0.01s ====". The
+# duration suffix is what makes it a summary rather than an incidental line of
+# test output that happens to contain the word "passed".
+_PYTEST_TAIL = re.compile(r"\bin \d+(?:\.\d+)?\s*s(?:econds)?\b")
+_PYTEST_NO_TESTS = re.compile(r"\bno tests ran\b", re.IGNORECASE)
+_PYTEST_COUNT = re.compile(
+    r"(\d+)\s+(passed|failed|skipped|error|errors|xfailed|xpassed)\b"
+)
+# "2 deselected in 0.00s" - distinct from "no tests ran": pytest DID collect
+# items, a selector (`-k`, or `--last-failed --last-failed-no-failures none`
+# finding nothing in ITS OWN cache) excluded every one of them (issue #1409).
+# Matched only when `_PYTEST_COUNT` found no OTHER count word on the same
+# line, so "1 passed, 3 deselected in 0.00s" keeps its real `passed` count
+# instead of being read as nothing_ran.
+_PYTEST_ALL_DESELECTED = re.compile(r"\b\d+\s+deselected\b")
+
+# jest / vitest: "Tests:       2 skipped, 10 passed, 12 total".
+_JEST_LINE = re.compile(r"^\s*Tests:\s+(?P<counts>.+?)\s*$")
+_JEST_COUNT = re.compile(r"(\d+)\s+(passed|failed|skipped|todo|pending)\b")
+
+# stdlib unittest: "Ran 12 tests in 0.01s" then "OK (skipped=3)" / "FAILED
+# (failures=2, skipped=1)". Counts are derived, since only the non-passing ones
+# are itemized.
+_UNITTEST_RAN = re.compile(r"^Ran (\d+) tests? in ")
+_UNITTEST_VERDICT = re.compile(r"^(OK|FAILED)\b(?:\s*\((?P<detail>[^)]*)\))?")
+_UNITTEST_DETAIL = re.compile(
+    r"(failures|errors|skipped|expected failures|unexpected successes)=(\d+)"
+)
+
+_PYTEST_SESSION_START = re.compile(r"^=+\s*test session starts\s*=+\s*$")
+
+# Pytest's short-summary ids make a first-attempt flake nameable and countable
+# in the #769 report. They are NOT the selection mechanism: ``--last-failed``
+# narrows the re-run from pytest's own cache, so this best-effort parse is never
+# load-bearing for whether the gate is correct.
+# The node id runs to the ` - <reason>` separator pytest prints in its short
+# summary, NOT to the first whitespace: a parametrized id may contain spaces
+# (`test_v[hello world]`), and `\S+` cut it at the space, so two DIFFERENT
+# parametrized failures collapsed onto one truncated id. That was cosmetic while
+# ids only labelled a re-run; it became a wrong verdict once the #915 retry
+# compares failed sets by membership - a false "reproduced" with no newly
+# appeared failure recorded. Lazy up to the FIRST ` - `; an id whose own
+# parameter text contains ` - ` is re-joined by the bracket check below.
+_PYTEST_FAILED_NODE_ID = re.compile(
+    r"^\s*(?:FAILED|ERROR)\s+(.+?)(?:\s+-\s.*)?$", re.MULTILINE
+)
+
+
+def parse_failed_node_ids(text: str) -> list[str]:
+    """Return pytest FAILED/ERROR node ids in first-seen order."""
+    if not text:
+        return []
+
+    ids: list[str] = []
+    seen: set[str] = set()
+    for match in _PYTEST_FAILED_NODE_ID.finditer(text):
+        node_id = match.group(1).strip()
+        # A parameter id containing ` - ` was split by the lazy separator match;
+        # an unclosed `[` says so, and the rest of the line up to its `]` is the
+        # remainder of the id, not the reason.
+        if "[" in node_id and "]" not in node_id:
+            rest = match.group(0)[match.end(1) - match.start(0):]
+            close = rest.find("]")
+            if close != -1:
+                node_id = (node_id + rest[: close + 1]).strip()
+        if ("::" not in node_id and not node_id.endswith(".py")) or node_id in seen:
+            continue
+        seen.add(node_id)
+        ids.append(node_id)
+    return ids
+
+
+# Only whole-line named pairs opt into control accounting. This is framing,
+# not authentication: producers must reserve these exact protocol lines.
+_CONTROL_MARKER = re.compile(
+    r"^::cicd-negative-control:(BEGIN|END):(BAD|GOOD):([^:\r\n]+)::[^\S\r\n]*$",
+    re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class ControlSegment:
+    """A declaration with independently parsed evidence of its behaviour."""
+
+    name: str
+    declared_verdict: str
+    outcome: Optional[SuiteOutcome]
+    unexpected: bool
+
+
+def _derive_unexpected(verdict: str, outcome: Optional[SuiteOutcome]) -> bool:
+    """Do not trust a closed fence as proof that the harness checked its child.
+
+    Unknown output warns too: an unreadable summary cannot establish that a
+    control behaved correctly, regardless of the harness's own exit status.
+    """
+    if outcome is None:
+        return True
+    if verdict == "BAD":
+        return outcome.failed == 0 and outcome.errors == 0
+    return outcome.failed > 0 or outcome.errors > 0
+
+
+def _extract_control_segments(text: str) -> tuple[str, list[ControlSegment]]:
+    """Strip balanced pairs, handing any ambiguous remainder back untouched.
+
+    The next marker must close the same name and verdict. Missing ends,
+    nesting and mismatches stop extraction: continuing past them could label
+    real failures inside a malformed fence. Ordinary control vocabulary and
+    isolated markers cannot opt output into this protocol.
+    """
+    pieces: list[str] = []
+    segments: list[ControlSegment] = []
+    cursor = 0
+    markers = iter(_CONTROL_MARKER.finditer(text))
+    for begin in markers:
+        if begin[1] != "BEGIN":
+            continue
+        end = next(markers, None)
+        if (end is None or end[1] != "END"
+                or end[2] != begin[2] or end[3] != begin[3]):
+            break
+        outcome = parse_suite_outcome(text[begin.end():end.start()])
+        segments.append(ControlSegment(
+            begin[3], begin[2], outcome, _derive_unexpected(begin[2], outcome),
+        ))
+        pieces.append(text[cursor:begin.start()])
+        cursor = end.end()
+    pieces.append(text[cursor:])
+    return "".join(pieces), segments
+
+
+def parse_suite_outcome(text: str, stream: str = "") -> Optional[SuiteOutcome]:
+    """Parse a test runner's summary out of captured step output.
+
+    Returns None when neither a recognizable summary nor a balanced control
+    segment is present. Control-only output retains its labelled evidence,
+    even when its summary is unknown, without inventing a real-suite run.
+
+    Every top-level summary is aggregated, not just the last one. This used
+    to keep the last, reasoning that a target running several suites should
+    report its final one "rather than an early partial" - which is right for a
+    partial or a re-run of a subset, and wrong for two DISJOINT suites, a
+    shape that reasoning did not cover. kyle's ``make test`` runs pytest twice
+    (non-Playwright, then Playwright), so a gate over 4,153 executed tests
+    reported 103 and discarded 97.5% of the run (kyle issue #838).
+
+    The #769 failed-id re-run is unaffected: it runs as a SEPARATE
+    ``step.execute`` with its own captured output, so it is never in the same
+    text as the run it re-runs and cannot be double-counted here.
+    """
+    if not text:
+        return None
+    text, controls = _extract_control_segments(text)
+    lines = text.splitlines()
+    # Each parser scans independently; per line the last recognized summary
+    # wins, which preserves the previous precedence for a single summary.
+    # FAILURES, short-summary and test-header banners are reproduced byte-for-byte
+    # by nested sessions. Pair the fixed, once-per-session start marker with
+    # each pytest tail instead, so those ambiguous banners cannot change depth.
+    candidates: list[tuple[SuiteOutcome, bool]] = []
+    depth = 0
+    for idx, line in enumerate(lines):
+        if _PYTEST_SESSION_START.match(line):
+            depth += 1
+            continue
+        pytest_outcome = _parse_pytest_line(line)
+        pytest_depth = depth
+        if pytest_outcome is not None:
+            depth = max(0, depth - 1)
+        found: Optional[SuiteOutcome] = None
+        for candidate in (
+            pytest_outcome,
+            _parse_jest_line(line),
+            _parse_unittest_line(line, lines, idx),
+        ):
+            if candidate is not None:
+                found = candidate
+        if found is not None:
+            candidates.append((found, found is not pytest_outcome or pytest_depth == 1))
+    # Fail open: the final candidate survives missing or unbalanced start markers.
+    # Under -s/--capture=no, or when an inner run suppresses its start banner,
+    # nesting is invisible: its tail can be counted at depth 1 or by this fallback.
+    parsed = [
+        outcome for idx, (outcome, included) in enumerate(candidates)
+        if included or idx == len(candidates) - 1
+    ]
+    if not parsed and not controls:
+        return None
+    # Control-only evidence must remain visible without inventing a real run.
+    outcome = _aggregate(parsed) if parsed else SuiteOutcome(invocations=0)
+    outcome = replace(
+        outcome,
+        control_invocations=len(controls),
+        control_passed=sum(c.outcome.passed for c in controls if c.outcome is not None),
+        control_failed=sum(c.outcome.failed for c in controls if c.outcome is not None),
+        control_skipped=sum(c.outcome.skipped for c in controls if c.outcome is not None),
+        control_errors=sum(c.outcome.errors for c in controls if c.outcome is not None),
+        control_xfailed=sum(c.outcome.xfailed for c in controls if c.outcome is not None),
+        control_xpassed=sum(c.outcome.xpassed for c in controls if c.outcome is not None),
+        control_unexpected=tuple(c.name for c in controls if c.unexpected),
+    )
+    # Attribution happens here rather than inside `_aggregate` because this is
+    # the only layer that knows which stream the text came from; everything
+    # `_aggregate` sees is already from one stream.
+    return replace(outcome, summary_streams=(stream,)) if stream else outcome
+
+
+def _aggregate(outcomes: list[SuiteOutcome]) -> SuiteOutcome:
+    """Sum several summaries into one, keeping how many ran nothing.
+
+    A single summary passes through with its counts untouched; it simply
+    reports ``invocations=1``, and ``empty_invocations=1`` when it is #621's
+    original "exited 0 having executed nothing" case.
+    """
+    frameworks = {outcome.framework for outcome in outcomes}
+    return SuiteOutcome(
+        control_invocations=sum(outcome.control_invocations for outcome in outcomes),
+        control_passed=sum(outcome.control_passed for outcome in outcomes),
+        control_failed=sum(outcome.control_failed for outcome in outcomes),
+        control_skipped=sum(outcome.control_skipped for outcome in outcomes),
+        control_errors=sum(outcome.control_errors for outcome in outcomes),
+        control_xfailed=sum(outcome.control_xfailed for outcome in outcomes),
+        control_xpassed=sum(outcome.control_xpassed for outcome in outcomes),
+        control_unexpected=tuple(n for o in outcomes for n in o.control_unexpected),
+        passed=sum(outcome.passed for outcome in outcomes),
+        failed=sum(outcome.failed for outcome in outcomes),
+        skipped=sum(outcome.skipped for outcome in outcomes),
+        errors=sum(outcome.errors for outcome in outcomes),
+        xfailed=sum(outcome.xfailed for outcome in outcomes),
+        xpassed=sum(outcome.xpassed for outcome in outcomes),
+        # One framework per step is the norm; "mixed" is honest rather than
+        # silently attributing a jest run's tests to pytest.
+        framework=outcomes[-1].framework if len(frameworks) == 1 else "mixed",
+        invocations=len(outcomes),
+        empty_invocations=sum(1 for outcome in outcomes if outcome.nothing_ran),
+    )
+
+
+def merge_stream_outcomes(
+    outcomes: list[Optional[SuiteOutcome]],
+) -> Optional[SuiteOutcome]:
+    """Merge summaries parsed from the DIFFERENT streams of one step (issue #939).
+
+    The rule is the one `_aggregate` already applies within a stream: sum. The
+    parser used to read ``parse(output) or parse(error)``, which scanned the
+    second stream only when the first returned ``None`` - so whichever stream
+    spoke first silently won, and a passing or empty stdout summary hid the
+    failures reported on stderr. Answering "several summaries in one stream"
+    and "several summaries across two streams" by different rules would leave
+    a caller unable to predict which it was getting.
+
+    The rejected alternative was "prefer whichever stream reports failures".
+    It makes precedence depend on the VALUE parsed rather than on provenance,
+    so it cannot be stated as a rule about streams at all - only about
+    outcomes - and it silently discards the other stream's passed count. A
+    gate that wants pessimism should apply it at the gate, where it is visible
+    and reviewable, not inside the thing reporting the facts.
+
+    `invocations` is SUMMED rather than recomputed: each input has already
+    aggregated its own stream, so it carries a real count of runner
+    invocations. Recounting here (``len(present)``) would silently replace
+    "how many times the runner ran" with "how many streams spoke" and discard
+    kyle #838's field, which #621's guard reads.
+    """
+    present = [outcome for outcome in outcomes if outcome is not None]
+    if not present:
+        return None
+    if len(present) == 1:
+        return present[0]
+
+    streams: list[str] = []
+    for outcome in present:
+        for name in outcome.summary_streams:
+            if name not in streams:
+                streams.append(name)
+
+    frameworks = {outcome.framework for outcome in present}
+    return SuiteOutcome(
+        control_invocations=sum(outcome.control_invocations for outcome in present),
+        control_passed=sum(outcome.control_passed for outcome in present),
+        control_failed=sum(outcome.control_failed for outcome in present),
+        control_skipped=sum(outcome.control_skipped for outcome in present),
+        control_errors=sum(outcome.control_errors for outcome in present),
+        control_xfailed=sum(outcome.control_xfailed for outcome in present),
+        control_xpassed=sum(outcome.control_xpassed for outcome in present),
+        control_unexpected=tuple(n for o in present for n in o.control_unexpected),
+        passed=sum(outcome.passed for outcome in present),
+        failed=sum(outcome.failed for outcome in present),
+        skipped=sum(outcome.skipped for outcome in present),
+        errors=sum(outcome.errors for outcome in present),
+        xfailed=sum(outcome.xfailed for outcome in present),
+        xpassed=sum(outcome.xpassed for outcome in present),
+        framework=present[-1].framework if len(frameworks) == 1 else "mixed",
+        invocations=sum(outcome.invocations for outcome in present),
+        empty_invocations=sum(outcome.empty_invocations for outcome in present),
+        summary_streams=tuple(streams),
+    )
+
+
+# Signatures of a SUPPORTED runner that are not its summary (issue #977). They
+# answer one narrow question for output that yielded no summary: "did a runner
+# CPP parses produce this?" A yes is the per-run alarm - a supported parser was
+# pointed at its own runner's output and came back empty. A no is NOT "this
+# runner is unsupported": that is a declared decision (`unsupported_runner`),
+# and output matching none of these is only UNCLASSIFIABLE, an unmeasured fact.
+#
+# Kept deliberately narrow, because recognising a runner is itself parsing.
+# Undeclared, both causes are UNKNOWN and both warn, so a misclassification
+# there changes the DETAIL wording and never the verdict.
+#
+# Against a DECLARATION it is not wording: a signature overrides the declaration
+# and turns a quiet run into a warning. So each signature says whether it is
+# CORROBORATED - a line that runner's own framing prints and a foreign harness
+# has no reason to - and only those may override. `PASS src/app.test.ts` is
+# jest's per-file line, but any shell harness can print exactly that, so it
+# names jest in DETAIL and never out-votes a declaration (counter-model review).
+_RUNNER_SIGNATURES: tuple[tuple[str, re.Pattern[str], bool], ...] = (
+    ("pytest", re.compile(r"^=+ test session starts =+\s*$"), True),
+    # The WHOLE line, end-anchored: pytest prints `collected 3 items` or
+    # `collected 5 items / 2 deselected / 3 selected` and nothing after it, so a
+    # prefix match let application output such as `collected 3 items from
+    # queue` out-vote a declaration (counter-model review, pass 2).
+    (
+        "pytest",
+        re.compile(
+            r"^collected \d+ items?(?: / \d+ (?:deselected|selected|errors?|skipped))*\s*$"
+        ),
+        True,
+    ),
+    ("jest", re.compile(r"^\s*Test Suites:\s+\d+"), True),
+    ("jest", re.compile(r"^\s*(?:PASS|FAIL)\s+\S+\.(?:[cm]?[jt]sx?)\b"), False),
+    ("unittest", _UNITTEST_RAN, True),
+)
+
+
+def classify_unparsed(
+    text: str, corroborated_only: bool = False
+) -> Optional[tuple[str, str]]:
+    """Name the supported runner whose output this is, when no summary parsed.
+
+    Returns ``(framework, evidence_line)`` for the first line carrying a
+    supported runner's signature, or ``None`` when the output matches none -
+    which means UNCLASSIFIABLE, never "unsupported" (issue #977's ruling:
+    unsupported is declared, not inferred).
+
+    ``corroborated_only`` restricts the match to signatures strong enough to
+    override a declaration; see ``_RUNNER_SIGNATURES``.
+
+    Only meaningful for text ``parse_suite_outcome`` already returned ``None``
+    for; on parseable text it would name a runner whose summary WAS read.
+    """
+    if not text:
+        return None
+    for line in text.splitlines():
+        for framework, pattern, corroborated in _RUNNER_SIGNATURES:
+            if corroborated_only and not corroborated:
+                continue
+            if pattern.search(line):
+                return framework, line.strip()
+    return None
+
+
+def _parse_pytest_line(line: str) -> Optional[SuiteOutcome]:
+    if not _PYTEST_TAIL.search(line):
+        return None
+    if _PYTEST_NO_TESTS.search(line):
+        return SuiteOutcome(framework="pytest")
+    counts = {name: int(num) for num, name in _PYTEST_COUNT.findall(line)}
+    if not counts:
+        if _PYTEST_ALL_DESELECTED.search(line):
+            return SuiteOutcome(framework="pytest")
+        return None
+    errors = counts.get("error", 0) + counts.get("errors", 0)
+    return SuiteOutcome(
+        # Both ran, which is what #621 cares about, and `executed` counts them;
+        # neither is a failure or a plain pass, so each keeps its own count
+        # (issue #1362).
+        passed=counts.get("passed", 0),
+        failed=counts.get("failed", 0),
+        skipped=counts.get("skipped", 0),
+        errors=errors,
+        xfailed=counts.get("xfailed", 0),
+        xpassed=counts.get("xpassed", 0),
+        framework="pytest",
+    )
+
+
+def _parse_jest_line(line: str) -> Optional[SuiteOutcome]:
+    match = _JEST_LINE.match(line)
+    if not match:
+        return None
+    counts = {name: int(num) for num, name in _JEST_COUNT.findall(match.group("counts"))}
+    if not counts:
+        return None
+    return SuiteOutcome(
+        passed=counts.get("passed", 0),
+        failed=counts.get("failed", 0),
+        # jest reports never-run tests as "skipped" (describe.skip) and "todo";
+        # both are unexecuted, which is the count that matters here.
+        skipped=counts.get("skipped", 0) + counts.get("todo", 0) + counts.get("pending", 0),
+        framework="jest",
+    )
+
+
+def _parse_unittest_line(line: str, lines: list[str], idx: int) -> Optional[SuiteOutcome]:
+    """Parse an ``OK``/``FAILED`` verdict against the preceding ``Ran N tests``."""
+    verdict = _UNITTEST_VERDICT.match(line)
+    if not verdict:
+        return None
+    total = None
+    for prev in reversed(lines[max(0, idx - 5): idx]):
+        ran = _UNITTEST_RAN.match(prev)
+        if ran:
+            total = int(ran.group(1))
+            break
+    if total is None:
+        return None
+    detail = dict(
+        (name, int(num))
+        for name, num in _UNITTEST_DETAIL.findall(verdict.group("detail") or "")
+    )
+    failed = detail.get("failures", 0)
+    xfailed = detail.get("expected failures", 0)
+    xpassed = detail.get("unexpected successes", 0)
+    errors = detail.get("errors", 0)
+    skipped = detail.get("skipped", 0)
+    return SuiteOutcome(
+        passed=max(total - failed - xfailed - xpassed - errors - skipped, 0),
+        failed=failed,
+        skipped=skipped,
+        errors=errors,
+        xfailed=xfailed,
+        xpassed=xpassed,
+        framework="unittest",
+    )
