@@ -137,7 +137,7 @@ REHEARSAL_BY_TASK: dict[str, dict[str, str]] = {
 FLOW_CHECK_REHEARSAL_CANDIDATES = {
     "actor": "pass/anchored-bundled-faithful", "actor-nested": "pass/anchored-bundled-faithful",
     "actor-bundled": "pass/absolute-bundled-faithful", "actor-checkout": "pass/checkout-faithful",
-    "actor-unset": "pass/unset-did-not-run"}
+    "actor-unset": "inconclusive/unset-did-not-run"}
 #: #279 PR-2b (orchestrator ruling): a task whose rehearsal is OWED, and what it
 #: needs. The Step-6 task's credited path acts IN the approval turn (fix,
 #: repair, gate green, then ship), which `fixture_campaign.ACTOR_SOURCE` cannot
@@ -572,7 +572,7 @@ def token_pause_trigger(record: Mapping[str, Any], threshold: int | None) -> str
         return None
     usage = mp._run_metadata(record).get("token_usage")
     total = usage.get("total_tokens") if isinstance(usage, Mapping) else None
-    if isinstance(total, bool) or not isinstance(total, int):
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
         return (f"token pause: the attempt's token total is unknown, so it cannot be shown to be under the declared "
                 f"{threshold}; the next attempt waits for the orchestrator's GO")
     if total > threshold:

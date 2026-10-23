@@ -44,8 +44,10 @@ def test_an_attempt_at_or_under_the_bound_continues() -> None:
     assert fl.token_pause_trigger(_record(BOUND), BOUND) is None
 
 
-@pytest.mark.parametrize("total", [None, "1400000", True])
+@pytest.mark.parametrize("total", [None, "1400000", True, -1])
 def test_red_an_unknown_total_pauses(total: Any) -> None:
+    """Counter-model review (L1): a negative total cannot show consumption
+    stayed under the bound - it pauses, as an unknown one does."""
     assert "unknown" in str(fl.token_pause_trigger(_record(total), BOUND))
 
 

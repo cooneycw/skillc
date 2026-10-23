@@ -11,8 +11,9 @@ Where it comes from. codex-cli 0.157.1 runs the agent's shell commands as
 `exec_command` calls whose results come back to the model as
 `custom_tool_call_output` items; each result chunk is a JSON object carrying
 its own `exit_code` and `output` (measured on #279's campaign transcripts).
-A chunk is evidence when it EXITED 126 or 127 and its output names the gate
-script with a launch-failure phrase - `Not a directory` (the anchored call
+A result is evidence when it EXITED 126 or 127 and ONE line of its output is
+a diagnostic naming a path that ends in the gate script, with a launch-failure
+phrase - `Not a directory` (the anchored call
 with `CPP_SKILL_DIR` unset resolves `/dev/null/scripts/<gate>`), `No such file
 or directory`, or `command not found` (a bare call from a target without the
 script). A chunk is read on its own, so batched calls need no mapping back to
@@ -38,7 +39,9 @@ LAUNCH_FAILURE_PHRASES = ("Not a directory", "No such file or directory", "comma
 #: Bounds: a transcript is the agent's to shape, so nothing here is unbounded.
 MAX_FAILURES = 32
 MAX_EXCERPT = 240
-_CHUNK = re.compile(r'"exit_code":(-?\d+),(?:"original_token_count":\d+,)?"output":("(?:[^"\\]|\\.)*")')
+#: A native `exec_command` result's exit, read from its HEADER only (#486): the
+#: command's own stdout follows `Output:` and can print any text.
+_HEADER_EXIT = re.compile(r"^Process exited with code (-?\d+)\s*$", re.MULTILINE)
 
 
 def _texts(item: Any) -> list[str]:
@@ -48,6 +51,67 @@ def _texts(item: Any) -> list[str]:
     if isinstance(item, list):
         return [p["text"] for p in item if isinstance(p, dict) and isinstance(p.get("text"), str)]
     return []
+
+
+def _chunks(node: Any, found: list[tuple[int, str]]) -> None:
+    """Every `{"exit_code": <int>, "output": <str>}` object at any depth."""
+    if isinstance(node, dict):
+        code, output = node.get("exit_code"), node.get("output")
+        if isinstance(code, int) and not isinstance(code, bool) and isinstance(output, str):
+            found.append((code, output))
+        for value in node.values():
+            _chunks(value, found)
+    elif isinstance(node, list):
+        for value in node:
+            _chunks(value, found)
+
+
+def _script_results(text: str) -> list[tuple[int, str]]:
+    """A script runner's printed results, read STRUCTURALLY (counter-model
+    review, M2): every JSON value in the text - one per line, or one spanning
+    lines with any whitespace or key order - walked for result objects."""
+    found: list[tuple[int, str]] = []
+    decoder = json.JSONDecoder()
+    i = 0
+    while i < len(text):
+        start = min((j for j in (text.find("{", i), text.find("[", i)) if j != -1), default=-1)
+        if start == -1:
+            break
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            i = start + 1
+            continue
+        _chunks(value, found)
+        i = end
+    return found
+
+
+def _native_result(output: Any) -> list[tuple[int, str]]:
+    """A native `exec_command` `function_call_output` (codex 0.157.1): a string
+    whose HEADER carries `Process exited with code N` and whose text after
+    `Output:` is the command's own (#486)."""
+    if not isinstance(output, str):
+        return []
+    header, sep, stdout = output.partition("\nOutput:\n")
+    if not sep:
+        return []
+    codes = [int(c) for c in _HEADER_EXIT.findall(header)]
+    return [(codes[0], stdout)] if len(codes) == 1 else []
+
+
+def _launch_line(output: str, gate_name: str) -> str | None:
+    """The launch-failure phrase on ONE diagnostic line that names a path
+    ending in the gate (counter-model review, M1: the name and the phrase
+    anywhere in one output were enough, so an unrelated command's failure beside
+    a mention of the gate read as a failed gate launch)."""
+    line = re.compile(r"(?:^|[\s:])(?:\S*/)?" + re.escape(gate_name) + r": (" +
+                      "|".join(re.escape(p) for p in LAUNCH_FAILURE_PHRASES) + r")\s*$")
+    for text in output.splitlines():
+        match = line.search(text)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 def scan(transcript: str | None, gate_name: str) -> dict[str, Any]:
@@ -67,24 +131,22 @@ def scan(transcript: str | None, gate_name: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         payload = event.get("payload") if isinstance(event, dict) else None
-        if not isinstance(payload, dict) or payload.get("type") != "custom_tool_call_output":
+        if not isinstance(payload, dict):
             continue
-        for text in _texts(payload.get("output")):
-            for match in _CHUNK.finditer(text):
-                code = int(match.group(1))
-                if code not in LAUNCH_FAILURE_EXITS:
-                    continue
-                try:
-                    output = json.loads(match.group(2))
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(output, str) or gate_name not in output:
-                    continue
-                phrase = next((p for p in LAUNCH_FAILURE_PHRASES if p in output), None)
-                if phrase is None:
-                    continue
-                if len(failures) >= MAX_FAILURES:
-                    truncated = True
-                    break
-                failures.append({"exit_code": code, "phrase": phrase, "excerpt": output[:MAX_EXCERPT]})
+        if payload.get("type") == "custom_tool_call_output":
+            results = [r for text in _texts(payload.get("output")) for r in _script_results(text)]
+        elif payload.get("type") == "function_call_output":
+            results = _native_result(payload.get("output"))
+        else:
+            continue
+        for code, output in results:
+            if code not in LAUNCH_FAILURE_EXITS:
+                continue
+            phrase = _launch_line(output, gate_name)
+            if phrase is None:
+                continue
+            if len(failures) >= MAX_FAILURES:
+                truncated = True
+                break
+            failures.append({"exit_code": code, "phrase": phrase, "excerpt": output[:MAX_EXCERPT]})
     return {"scanned": True, "gate": gate_name, "failures": failures, "truncated": truncated}

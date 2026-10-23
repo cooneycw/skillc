@@ -753,6 +753,9 @@ class _WitnessSession:
     #: copy exists and every genuine run names its `via`; one that does not is
     #: refused, never run against an absent harness path.
     require_via: bool = False
+    #: #530: record each run's SOURCE digest of the gated repository at its
+    #: start even without the ordering counter (a fixture that opts in).
+    source_digest: bool = False
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -857,7 +860,8 @@ class _WitnessSession:
             stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {
                 gate: functools.partial(stage_capture.capture_stages, plan=plan)
                 for gate, plan in (self.stage_plans or {}).items()},
-            order=self.order, source_digest_fn=source_snapshot if self.order is not None else None,
+            order=self.order,
+            source_digest_fn=source_snapshot if self.order is not None or self.source_digest else None,
             staged=staged or None, declared_variants=self.variants or None,
         )
         script = (
@@ -2582,6 +2586,7 @@ def run_one_attempt(
     if witness_session is not None:
         witness_session.order = attempt_order
         witness_session.require_via = gate_entrypoint in bundled_gate_entrypoints
+        witness_session.source_digest = bool(fixture is not None and fixture.source_digest)
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
         if not isinstance(backend, DockerBackend):

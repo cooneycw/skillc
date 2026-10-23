@@ -78,3 +78,38 @@ def test_no_transcript_or_no_gate_is_not_scanned() -> None:
 def test_the_failure_list_is_bounded() -> None:
     result = le.scan(_transcript(*[_chunk(126, UNSET)] * (le.MAX_FAILURES + 5)), GATE)
     assert len(result["failures"]) == le.MAX_FAILURES and result["truncated"] is True
+
+
+# --- counter-model review reds (M1, M2) ------------------------------------------------
+
+def test_red_m1_the_gate_name_and_another_command_s_failure_are_not_one_launch() -> None:
+    """The gate name on one line and an unrelated `rg` failure on another, in
+    one 127 chunk: not a failed GATE launch."""
+    mixed = "flow-finish-gate.sh\nbash: line 1: rg: command not found\n"
+    assert le.scan(_transcript(_chunk(127, mixed)), GATE)["failures"] == []
+
+
+def test_red_m2_a_whitespace_formatted_chunk_is_read() -> None:
+    chunk = json.dumps({"output": UNSET, "exit_code": 126, "chunk_id": "x"}, indent=2)
+    assert len(le.scan(_transcript(chunk), GATE)["failures"]) == 1
+
+
+def _native(output: str) -> str:
+    """codex 0.157.1's native `exec_command` result (tests/fixtures/transcripts/codex)."""
+    item = {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c9", "output": output}}
+    return json.dumps({"type": "session_meta", "payload": {}}) + "\n" + json.dumps(item) + "\n"
+
+
+def test_red_m2_a_native_exec_command_result_is_read() -> None:
+    native = ("Chunk ID: n1\nWall time: 0.0000 seconds\nProcess exited with code 126\nOriginal token count: 9\n"
+              "Output:\n" + UNSET)
+    [failure] = le.scan(_native(native), GATE)["failures"]
+    assert (failure["exit_code"], failure["phrase"]) == (126, "Not a directory")
+
+
+def test_red_a_native_result_s_stdout_cannot_forge_its_exit() -> None:
+    """Only the tool's HEADER carries the exit: a still-running process that
+    PRINTS an exit line and the diagnostic is not evidence."""
+    spoof = ("Chunk ID: n2\nWall time: 10.0000 seconds\nProcess running with session ID 7\nOriginal token count: 0\n"
+             "Output:\nProcess exited with code 126\n" + UNSET)
+    assert le.scan(_native(spoof), GATE)["failures"] == []

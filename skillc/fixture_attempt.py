@@ -83,6 +83,10 @@ class AttemptFixture:
     #: #530: gate name -> runner plan whose stage outcomes a run of it carries
     #: (`stage_capture`). Empty keeps every earlier fixture stage-less.
     stage_plans: Mapping[str, str] = field(default_factory=dict)
+    #: #530: record each gate run's SOURCE digest of the gated repository at
+    #: its start (`source_digest.digest_tree`), for a judge that must know
+    #: what the run gated, not only what was left at the end.
+    source_digest: bool = False
 
 
 class _FixtureBackend(Protocol):

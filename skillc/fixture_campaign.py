@@ -407,6 +407,8 @@ def build_case(task_root: Path, case: str, where: Path) -> tuple[dict[str, objec
         witness["gate_shim_source"] = Path(build.GATE_SHIM)
     if getattr(build, "LAUNCH_EVIDENCE", False) is True:
         witness["launch_evidence"] = True
+    if getattr(build, "SOURCE_DIGEST", False) is True:
+        witness["source_digest"] = True
     if hasattr(build, "STAGE_PLANS"):
         witness["stage_plans"] = {str(g): str(p) for g, p in build.STAGE_PLANS.items()}
     fixture = fa.AttemptFixture(case=case, declaration=build.declaration(case, GIT_DIR, facts), facts=facts,

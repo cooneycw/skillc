@@ -139,3 +139,8 @@ ANCHOR_VARIABLE = "CPP_SKILL_DIR"
 #: #530: a `flow-check-plan` run carries the runner's `check` plan stages
 #: (lint, test, typecheck), which `report-honest` reconciles the report against.
 STAGE_PLANS = {"flow-check-plan": "check"}
+
+#: #530 (counter-model review, H1): each gate run records the SOURCE digest of
+#: the gated repository at its start, so a modify-run-restore cannot pass as a
+#: run of the pristine fixture.
+SOURCE_DIGEST = True

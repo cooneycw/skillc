@@ -553,7 +553,10 @@ class GateWitness:
                 # not measure the tree that existed when its request arrived.
                 tree_digest = self._tree_digest_fn()
                 source: str | None = None
-                if self._order is not None:
+                # #530: a source digest without the ordering counter, for a
+                # fixture that opts in (every earlier caller passes the
+                # function only together with an order, so nothing changes).
+                if self._order is not None or self._source_digest_fn is not None:
                     try:
                         source = (self._source_digest_fn(gate_cwd) if self._source_digest_fn is not None
                                   else "unreadable: no source-digest function")
