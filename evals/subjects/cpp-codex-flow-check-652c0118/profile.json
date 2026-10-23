@@ -1,6 +1,6 @@
 {
  "profile_schema": 1,
- "name": "cpp-codex-flow-check-f857754d",
+ "name": "cpp-codex-flow-check-652c0118",
  "subject": "./subject.json",
  "select": [
   "flow-check"
@@ -231,7 +231,7 @@
   },
   {
    "reference": "$HOME/.claude/scripts",
-   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at f857754d): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
+   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at 652c0118): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
   },
   {
    "reference": "~/.claude/scripts",
@@ -243,7 +243,7 @@
   },
   {
    "reference": "~/.qwen/projects",
-   "reason": "counter-model-receipt.py:1736 (f857754d): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
+   "reason": "counter-model-receipt.py:1736 (652c0118): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
   }
  ],
  "declared_empty_kinds": [
@@ -272,7 +272,7 @@
   }
  },
  "gate_entrypoint": ".codex/skills/flow-check/scripts/flow-finish-gate.sh",
- "notes": "flow-check at claude-power-pack f857754d2c49c157ab25dd671a68e5ecd935f85f (CPP PR #1546's merge, main on 2026-10-23), for CPP #1532: the post-#1497 lib/cicd closure, which ca3030d predates. First pinned at b318a14b (v10.0.0); moved here by the orchestrator when the recorded re-pin trigger fired before the build (#1546 fixed #1542). A separate profile from cpp-codex-flow-check-86641e8 (one pin per profile). The skill invokes its BUNDLED gate anchored to its own directory, \"${CPP_SKILL_DIR:-/dev/null}\"/scripts/flow-finish-gate.sh (reference.md:54, :126, re-read at this pin); SKILL.md and reference.md name no ~/.claude/scripts helper, so this profile installs none: an installed gate is the route agents choose when it exists (7/7 flow-auto attempts at ca3030d, skillc#529). gate_entrypoint is the bundled copy itself, declared bundled, witnessed from a root-owned mirror of its scripts/ (proven against the skill's SHA256SUMS) as bundled:flow-check; the checkout copy that reference.md's exit-127 fallback names is installed and witnessed as checkout:flow-check (orchestrator D1). With CPP_SKILL_DIR unset the call exits 126 and reads not-observed. Re-pin trigger: a merged CPP #1547 fix.",
+ "notes": "flow-check at claude-power-pack 652c01185bc73adf18df49f5b9d1d5ad77a038c7 (CPP PR #1548's merge, the #1547 fix, main on 2026-10-23), for CPP #1532: the post-#1497 lib/cicd closure, which ca3030d predates. Re-pinned before the build as recorded re-pin triggers fired (orchestrator): b318a14b -> f857754d (#1546, the #1542 fix: the gate call anchored to the skill directory) -> 652c0118 (#1547: no FLOW_FINISH_GATE verdict line means the gate did not run; flow-check reports DID-NOT-RUN, never SKIP); also the D3 route probe's pin. A separate profile from cpp-codex-flow-check-86641e8 (one pin per profile). The skill invokes its BUNDLED gate anchored to its own directory, \"${CPP_SKILL_DIR:-/dev/null}\"/scripts/flow-finish-gate.sh (reference.md:54, :130, re-read at this pin); SKILL.md and reference.md name no ~/.claude/scripts helper, so this profile installs none: an installed gate is the route agents choose when it exists (7/7 flow-auto attempts at ca3030d, skillc#529). gate_entrypoint is the bundled copy itself, declared bundled, witnessed from a root-owned mirror of its scripts/ (proven against the skill's SHA256SUMS) as bundled:flow-check; the checkout copy that reference.md's exit-127 fallback names is installed and witnessed as checkout:flow-check (orchestrator D1). With CPP_SKILL_DIR unset the call exits 126 and reads not-observed.",
  "gate_witness": "flow-check",
  "bundled_gate_entrypoints": [
   ".codex/skills/flow-check/scripts/flow-finish-gate.sh"

@@ -1,7 +1,7 @@
 {
   "subject_schema": 1,
   "locator": "github.com/cooneycw/claude-power-pack",
-  "revision": "f857754d2c49c157ab25dd671a68e5ecd935f85f",
+  "revision": "652c01185bc73adf18df49f5b9d1d5ad77a038c7",
   "surface": "codex-skills",
   "skills_root": "codex/skills",
   "select": [

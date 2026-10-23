@@ -510,7 +510,7 @@ _FLOW_AUTO_GATE_SHIM_SOURCE = (
 _FLOW_FINISH_GATE = "flow-auto-finish"
 _FLOW_FINISH_PLAN = "finish"
 #: #332: flow-check's two prescribed calls (`reference.md` Step 2 and Step 5),
-#: re-read at CPP f857754d (#529): gate name -> argv after the gate script.
+#: re-read at CPP 652c0118 (#529): gate name -> argv after the gate script.
 FLOW_CHECK_GATE_ARGS: dict[str, tuple[str, ...]] = {
     "flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
     "flow-check-summary": ("--check-summary",),

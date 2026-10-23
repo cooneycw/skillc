@@ -1,4 +1,4 @@
-"""`cpp-codex-flow-check` at claude-power-pack `f857754d` (#529): the profile
+"""`cpp-codex-flow-check` at claude-power-pack `652c0118` (#529): the profile
 CPP #1532 needs - flow-check's content after CPP #1497 - with its gate
 witnessed on the routes the population offers once CPP #1542 has removed the
 installed one: the skill-bundled copy (the `gate_entrypoint`, declared
@@ -33,8 +33,8 @@ from skillc import profile as p
 from skillc import runtime_supply as rs
 
 ROOT = Path(__file__).resolve().parent.parent
-PIN = "f857754d2c49c157ab25dd671a68e5ecd935f85f"
-RUNTIME_ID = "cpp-codex-flow-check-f857754d"
+PIN = "652c01185bc73adf18df49f5b9d1d5ad77a038c7"
+RUNTIME_ID = "cpp-codex-flow-check-652c0118"
 SUBJECT_DIR = ROOT / "evals" / "subjects" / RUNTIME_ID
 SNAPSHOT = ROOT / "tests" / "fixtures" / f"profile-{RUNTIME_ID}"
 OLD_SUBJECT_DIR = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8"
@@ -327,3 +327,12 @@ def test_review_a_checkout_only_inventory_keeps_its_checksum_metadata(monkeypatc
     problems = p.bundled_gate_problems(files, BUNDLED, (), {}, manifest_name=inventory["bundled_checksum_manifest"],
                                        require_consumers_installed=True, checkout=prof.checkout_gate_entrypoints)
     assert ("checksum-consumer-undeclared", "Projects/x/reader.py") in [(c, path) for c, _m, path in problems]
+
+
+def test_the_pin_carries_1547s_did_not_run_contract() -> None:
+    """Why 652c0118: a run with no `FLOW_FINISH_GATE:` verdict line did not run
+    the gate, and flow-check reports it DID-NOT-RUN - never SKIP, which is the
+    gate's own printed verdict (CPP #1547). The D2 grader scores against it."""
+    reference = (SNAPSHOT / "codex" / "skills" / "flow-check" / "reference.md").read_text(encoding="utf-8")
+    assert "**DID-NOT-RUN**" in reference and "never SKIP" in reference
+    assert "SKIP\nis the gate's own `skipped` verdict" in reference

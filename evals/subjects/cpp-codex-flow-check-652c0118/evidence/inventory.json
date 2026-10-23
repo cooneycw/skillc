@@ -1,11 +1,11 @@
 {
  "inventory_schema": 1,
- "profile": "cpp-codex-flow-check-f857754d",
- "profile_digest": "sha256:95cb657a30b940779047605faa81a3d1c02b8e0f0e6332db19679204eced9538",
+ "profile": "cpp-codex-flow-check-652c0118",
+ "profile_digest": "sha256:2b33ccf927557e43f005fbac72899b7e1db6464e83c54b63bcf7f41b66f1b465",
  "subject": {
-  "declaration_digest": "sha256:01419823bf38f5ded0824414494d5b7bee3ecbd9817074cb57850df162469bb1",
+  "declaration_digest": "sha256:b244eff05c955d4193dad422626dfef0261f0cdf87f62bbba12856ca33e83130",
   "locator": "github.com/cooneycw/claude-power-pack",
-  "revision": "f857754d2c49c157ab25dd671a68e5ecd935f85f",
+  "revision": "652c01185bc73adf18df49f5b9d1d5ad77a038c7",
   "source_kind": "git",
   "surface": "codex-skills",
   "client": {
@@ -23,7 +23,7 @@
    "name": "flow-check",
    "directory": "flow-check",
    "description_digest": "sha256:55531e9c8e5c083130cb4edcb03a88cbc43698286ce4d89c0120540ebbc04be6",
-   "body_digest": "sha256:c753f08c05c5447680376688dcb5d16d1008913819a98384731958c9eeb3c423",
+   "body_digest": "sha256:e870f5c9ff13f993f094e060d5a47d2c9e9df141b38b4c9dac345719eacf7e12",
    "required_references": [
     "reference.md"
    ],
@@ -46,9 +46,9 @@
      "source": "codex/skills/flow-check/SKILL.md",
      "destination": ".codex/skills/flow-check/SKILL.md",
      "mode": "100644",
-     "size": 1860,
-     "digest": "sha256:26a189bd95bbf5a10bec7dd531087685c42a12672421282ba5bc402a15f438ce",
-     "git_blob": "3ba2e0a1114063353ff22d0c5ea1d78133b6dcc3",
+     "size": 2230,
+     "digest": "sha256:324996a33274896d6436cc8f4a924c2c57c08b3576e24829050f7758ab1595b7",
+     "git_blob": "f02312e57adc0fbfb8305023d6b2992e3df12080",
      "owner": "skill:flow-check"
     },
     {
@@ -90,9 +90,9 @@
      "source": "codex/skills/flow-check/reference.md",
      "destination": ".codex/skills/flow-check/reference.md",
      "mode": "100644",
-     "size": 11274,
-     "digest": "sha256:cf17f850867e4e2b97ea8a1cde5eff2e2f60e24598eb3321f96edbd05ece8dd5",
-     "git_blob": "4c5874a7e40db9a3e69f539a45a574bcf43eb909",
+     "size": 11887,
+     "digest": "sha256:47ffce93a9fc10648b1df943e47f3d77daeb4cf412a7e4b1ba9009e6f3412289",
+     "git_blob": "0a9950cb6c8949b4e3abb8d205dcad9523b0ba0e",
      "owner": "skill:flow-check"
     },
     {
@@ -1076,7 +1076,7 @@
    "pattern": "home-path",
    "class": "home-relative",
    "status": "unsupported",
-   "reason": "counter-model-receipt.py:1736 (f857754d): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
+   "reason": "counter-model-receipt.py:1736 (652c0118): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
   },
   {
    "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
@@ -1109,7 +1109,7 @@
    "pattern": "home-path",
    "class": "home-relative",
    "status": "unsupported",
-   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at f857754d): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
+   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at 652c0118): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
   },
   {
    "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
@@ -1182,7 +1182,7 @@
    "pattern": "home-path",
    "class": "home-relative",
    "status": "unsupported",
-   "reason": "counter-model-receipt.py:1736 (f857754d): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
+   "reason": "counter-model-receipt.py:1736 (652c0118): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
   },
   {
    "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
@@ -1215,7 +1215,7 @@
    "pattern": "home-path",
    "class": "home-relative",
    "status": "unsupported",
-   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at f857754d): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
+   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at 652c0118): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
   },
   {
    "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
@@ -1278,7 +1278,7 @@
   },
   {
    "reference": "$HOME/.claude/scripts",
-   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at f857754d): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
+   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at 652c0118): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
   },
   {
    "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
@@ -1318,7 +1318,7 @@
   },
   {
    "reference": "~/.qwen/projects",
-   "reason": "counter-model-receipt.py:1736 (f857754d): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
+   "reason": "counter-model-receipt.py:1736 (652c0118): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
   }
  ],
  "mirrors": [
@@ -1382,16 +1382,16 @@
  "generated_from": [
   {
    "generated": "codex/skills/flow-check/SKILL.md",
-   "generated_digest": "sha256:26a189bd95bbf5a10bec7dd531087685c42a12672421282ba5bc402a15f438ce",
+   "generated_digest": "sha256:324996a33274896d6436cc8f4a924c2c57c08b3576e24829050f7758ab1595b7",
    "source": ".claude/commands/flow/check.md",
-   "source_digest": "sha256:0a87490b4440aaef4a6a841593b1f61bc34a99e52c9be17f360c6149949112fd",
+   "source_digest": "sha256:fc9213e57fab20992ec59094bfa3c4938066862e633b6676a9b964e56697410f",
    "status": "transform-not-verified"
   },
   {
    "generated": "codex/skills/flow-check/reference.md",
-   "generated_digest": "sha256:cf17f850867e4e2b97ea8a1cde5eff2e2f60e24598eb3321f96edbd05ece8dd5",
+   "generated_digest": "sha256:47ffce93a9fc10648b1df943e47f3d77daeb4cf412a7e4b1ba9009e6f3412289",
    "source": ".claude/commands/flow/check.md",
-   "source_digest": "sha256:0a87490b4440aaef4a6a841593b1f61bc34a99e52c9be17f360c6149949112fd",
+   "source_digest": "sha256:fc9213e57fab20992ec59094bfa3c4938066862e633b6676a9b964e56697410f",
    "status": "transform-not-verified"
   }
  ],
@@ -1483,7 +1483,7 @@
  },
  "installed_surface": {
   "files": 71,
-  "digest": "sha256:980fc004c30cdd58395b447b81d6235a0dbbe3bf8bcccef02167439fdf3032a6"
+  "digest": "sha256:34e210e0ebb40733b171a81239a9bc0f3172fc9eb11b0bfc3895d3970f03c94f"
  },
  "establishes": "a declared, closed dependency inventory at this source revision",
  "does_not_establish": [
