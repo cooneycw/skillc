@@ -96,9 +96,30 @@ def _ask(gate: str) -> dict[str, object]:
     return result
 
 
+def _report_refusal(argv: list[str]) -> None:
+    """#279 (orchestrator): a refused call is a behaviour the subject would not
+    meet in real use, so it is COUNTED - reported to the controller before the
+    125. Best effort: a report that cannot be sent changes nothing here, and
+    the attempt's dropped-connection count says so."""
+    body: dict[str, object] = {"op": "gate_refused", "argv": [a[:512] for a in argv[:64]], "cwd": os.getcwd()}
+    if _VIA is not None:
+        body["via"] = _VIA
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(10.0)
+            sock.connect(TRIGGER_SOCKET_PATH)
+            sock.sendall((json.dumps(body) + "\n").encode("utf-8"))
+            sock.shutdown(socket.SHUT_WR)
+            while sock.recv(65536):
+                pass
+    except OSError:
+        pass
+
+
 def main(argv: list[str]) -> int:
     gate = _DECLARED_INVOCATIONS.get(tuple(argv[1:]))
     if gate is None:
+        _report_refusal(argv[1:])
         print("flow-auto-gate-shim: this invocation is not the prescribed flow-auto gate call - "
               "refusing rather than guessing", file=sys.stderr)
         return EXIT_CHANNEL_FAILURE

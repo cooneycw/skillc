@@ -246,11 +246,9 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
         raise CalibrationRefused(f"profile {subject_profile!r}: {exc}") from exc
     gate_witness = inventory.get("gate_witness")
     assert gate_witness is None or isinstance(gate_witness, str)
+    # Whether each declared bundled copy is DELIVERED is decided at assembly,
+    # over the whole home (a neighbour skill's copy is outside this closure).
     bundled = tuple(str(p) for p in inventory.get("bundled_gate_entrypoints", ()))
-    missing = [p for p in bundled if p not in home_files]
-    if missing:
-        raise CalibrationRefused(f"profile {subject_profile!r} declares bundled gate entrypoint(s) {missing} its "
-                                 "installed_home_files do not carry - they cannot be witnessed (#525)")
     consumers = {str(c["path"]): str(c["reason"]) for c in inventory.get("checksum_consumers", ())}
     return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
                           gate_witness=gate_witness, bundled_gate_entrypoints=bundled, checksum_consumers=consumers,
@@ -338,6 +336,13 @@ def build_treatment(
         # the inventory inside `installed_home_files`, so this is simply
         # that same digest, carried forward for the in-container re-check.
         verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
+        # #279 ca3030d: a neighbour's bundled copy and its siblings are delivered
+        # from the acquired subject, not the closure - read back in the container
+        # like every closure file, so the overlay mirrors only verified bytes.
+        for path in closure.bundled_gate_entrypoints:
+            prefix = path.rsplit("/", 1)[0] + "/"
+            verify_home_files.update({dest: m.sha256_bytes(data) for dest, data in home_files.items()
+                                      if dest.startswith(prefix) and dest not in verify_home_files})
         preflight_tools = closure.tools
         gate_entrypoint = closure.gate_entrypoint
         gate_witness = closure.gate_witness

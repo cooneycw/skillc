@@ -81,12 +81,58 @@ def supported_policy() -> dict[str, Any]:
 
     Loaded on runtime use, not module import, so absent package data cannot
     break unrelated static commands or backends that select no runtime.
+    This is the PRIMARY policy: the only one the cicd runtimes serve.
     """
     try:
         with resources.files(__package__).joinpath("runtime-policy.json").open("rb") as stream:
             value = load_json(stream.read(MAX_JSON + 1))
     except (OSError, ValueError) as exc:
         raise Refused("controller runtime policy is missing or malformed") from exc
+    return _validated_policy(value)
+
+
+#: #279 ca3030d (orchestrator policy B): further PROFILE runtimes, each a whole
+#: policy for one more subject pin. The primary stays exactly as it was.
+EXTRA_POLICIES_RESOURCE = "runtime-policy-extra.json"
+
+
+def profile_policies() -> list[dict[str, Any]]:
+    """Every supported profile runtime: the primary, then each extra one.
+    Selection is a FUNCTION (orchestrator condition 1): two runtimes on one
+    (locator, revision, gate) key, or one runtime_id twice, refuse at LOAD -
+    never first-match."""
+    policies = [supported_policy()]
+    try:
+        with resources.files(__package__).joinpath(EXTRA_POLICIES_RESOURCE).open("rb") as stream:
+            raw = stream.read(MAX_JSON + 1)
+    except FileNotFoundError:
+        raw = b'{"profile_runtimes": []}'
+    except OSError as exc:
+        raise Refused("extra runtime policy is unreadable") from exc
+    try:
+        extra = load_json(raw)
+    except ValueError as exc:
+        raise Refused("extra runtime policy is malformed") from exc
+    _keys(extra, {"profile_runtimes"}, "extra policy")
+    if not isinstance(extra["profile_runtimes"], list):
+        raise Refused("extra runtime policy lists no profile runtimes")
+    policies += [_validated_policy(value) for value in extra["profile_runtimes"]]
+    keys = [(p["subject_locator"], p["subject_revision"], p["gate_entrypoint"]) for p in policies]
+    ids = [p["runtime_id"] for p in policies]
+    if len(set(keys)) != len(keys) or len(set(ids)) != len(ids):
+        raise Refused("two profile runtimes share a (locator, revision, gate) key or a runtime_id")
+    return policies
+
+
+def policy_for_runtime(runtime_id: object) -> dict[str, Any]:
+    """The profile runtime a receipt or descriptor names, or Refused."""
+    for policy in profile_policies():
+        if policy["runtime_id"] == runtime_id:
+            return policy
+    raise Refused("unsupported runtime runtime_id")
+
+
+def _validated_policy(value: dict[str, Any]) -> dict[str, Any]:
     _keys(value, POLICY_KEYS, "controller policy")
     if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         raise Refused("unsupported controller policy schema")
@@ -122,7 +168,7 @@ def _receipt(raw: bytes) -> dict[str, Any]:
 
 def _profile_receipt(value: dict[str, Any]) -> dict[str, Any]:
     _keys(value, RECEIPT_KEYS, "receipt")
-    _identity(value, supported_policy())
+    _identity(value, policy_for_runtime(value.get("runtime_id")))
     if value["target"] != "profile-runtime":
         raise Refused("runtime receipt target is not the normal runtime")
     if not isinstance(value["image_id"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"]):
@@ -150,6 +196,7 @@ def _cicd_receipt(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(base, dict):
         raise Refused("cicd receipt base is not a receipt object")
     base = _profile_receipt(base)
+    _identity(base, supported_policy())  # the cicd runtimes stay on the primary pin (#279 policy B)
     if value["base_image_id"] != base["image_id"]:
         raise Refused("cicd receipt base image differs from its embedded base receipt")
     if not isinstance(value["image_id"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"]):
@@ -237,6 +284,15 @@ class RuntimeSupply:
         return str(_any_receipt(self.receipt_bytes)["image_id"])
 
     @property
+    def policy(self) -> dict[str, Any]:
+        """The supported policy this receipt's runtime_id names (#279 policy B)."""
+        return policy_for_runtime(_any_receipt(self.receipt_bytes)["runtime_id"])
+
+    @property
+    def subject_revision(self) -> str:
+        return str(_any_receipt(self.receipt_bytes)["subject_revision"])
+
+    @property
     def kind(self) -> str:
         """`profile-runtime` or `cicd-runtime`: which named runtime this is."""
         return str(_any_receipt(self.receipt_bytes)["target"])
@@ -249,7 +305,7 @@ class RuntimeSupply:
             raise Refused("runtime descriptor bytes differ from selected receipt")
         value = load_json(raw)
         _keys(value, DESCRIPTOR_KEYS, "descriptor")
-        policy = supported_policy()
+        policy = policy_for_runtime(receipt["runtime_id"])
         _identity(value, policy)
         if value["uv_version"] != policy["uv_version"]:
             raise Refused("runtime uv version differs from supported policy")
@@ -309,9 +365,10 @@ def requires_supply(*, locator: str, revision: str, gate_entrypoint: str | None,
     """
     if gate_entrypoint is None:
         return False
-    policy = supported_policy()
-    selected = (locator == policy["subject_locator"] and revision == policy["subject_revision"]
-                and gate_entrypoint == policy["gate_entrypoint"])
+    matching = [p for p in profile_policies() if (p["subject_locator"], p["subject_revision"], p["gate_entrypoint"])
+                == (locator, revision, gate_entrypoint)]
+    selected = bool(matching)
+    policy = matching[0] if matching else supported_policy()
     project_probe = any(probe.get("kind") == "python-import" and probe.get("uv_project") == policy["project"]
                         for tool in tools for probe in tool.get("probes", ()))
     if selected and not project_probe:
@@ -354,9 +411,14 @@ def selected_runtime(*, locator: str, revision: str, gate_entrypoint: str | None
     return CICD_RUNTIME
 
 
-def require_kind(supply: RuntimeSupply, selected: str | None) -> None:
-    """A receipt serves only the runtime its closure selected (#280)."""
+def require_kind(supply: RuntimeSupply, selected: str | None, *, revision: str | None = None) -> None:
+    """A receipt serves only the runtime its closure selected (#280) - and,
+    given the closure's subject `revision`, only that pin's runtime (#279
+    policy B: a receipt for one supported pin never serves another)."""
     if selected is None:
         raise Refused("runtime receipt supplied for an unrelated or absent profile")
     if supply.kind != selected:
         raise Refused(f"runtime receipt is a {supply.kind} receipt, but the closure selects {selected}")
+    if revision is not None and supply.subject_revision != revision:
+        raise Refused(f"runtime receipt serves subject {supply.subject_revision[:12]}, not the closure's "
+                      f"{revision[:12]}")

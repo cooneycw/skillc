@@ -513,6 +513,8 @@ _FLOW_FINISH_PLAN = "finish"
 #: flow-auto-gate-shim.py`); a shim without it cannot witness a bundled gate,
 #: which is why the flow-check witness of one is deferred and refused.
 _SHIM_VIA_LINE = b"_VIA: str | None = None\n"
+#: #279: the most shim refusals one attempt records before saying the log is full.
+MAX_GATE_REFUSALS = 256
 #: #525: each witnessed bundled gate's root-owned mirror of its skill's whole
 #: `scripts/` directory, so the real script's BASH_SOURCE-relative siblings
 #: (`gate-lib.sh`, `counter-model-receipt.py`) are the skill's own.
@@ -668,6 +670,10 @@ class _WitnessSession:
     #: #525: gate -> {via: argv} for each witnessed skill-bundled gate copy,
     #: set by the overlay before `bind_and_check`; empty keeps the witness as it was.
     variants: dict[str, dict[str, list[str]]] = field(default_factory=dict, repr=False)
+    #: #279 (orchestrator): calls a gate shim REFUSED (exit 125) - behaviour the
+    #: subject would not meet in real use - as the shim reported them. Counted,
+    #: never silent: the attempt record and the report's headline carry them.
+    refusals: list[dict[str, object]] = field(default_factory=list, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -686,7 +692,22 @@ class _WitnessSession:
             raise ChannelRefusal("witness session is not ready for gates")
         if request.get("op") == pg.PASSTHROUGH_OP:
             return self._log_passthrough(request)
+        if request.get("op") == "gate_refused":
+            return self._log_refusal(request)
         return self.witness.decide(request)
+
+    def _log_refusal(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        """Record one shim refusal, bounded. A refusal the agent forges only
+        RAISES the count (a more conservative reading), never lowers it."""
+        if len(self.refusals) >= MAX_GATE_REFUSALS:
+            return {"logged": False, "reason": "the refusal log is full"}
+        argv, cwd, via = request.get("argv"), request.get("cwd"), request.get("via")
+        if (not isinstance(argv, list) or len(argv) > 64 or not all(isinstance(a, str) and len(a) <= 512 for a in argv)
+                or not isinstance(cwd, str) or len(cwd) > 4096 or (via is not None and not isinstance(via, str))):
+            raise ChannelRefusal("gate_refused fields are malformed or oversized")
+        self.refusals.append({"argv": list(argv), "cwd": cwd, "via": via, "at": time.time(),
+                              "shim_reported": True})
+        return {"logged": True}
 
     def _log_passthrough(self, request: Mapping[str, object]) -> Mapping[str, object]:
         """Record one shim pass-through, bounded; never a gate run."""
@@ -2479,6 +2500,7 @@ def run_one_attempt(
             trigger = fixture_session.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
                 "run_gate": (witness_session.decide, run_gate_keys),
+                "gate_refused": (witness_session.decide, frozenset({"op", "argv", "cwd", "via"})),
                 **passthrough_route,
                 **fixture_session.routes(),
             }))
@@ -2487,6 +2509,7 @@ def run_one_attempt(
             trigger = attempt_guard.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
                 "run_gate": (witness_session.decide, run_gate_keys),
+                "gate_refused": (witness_session.decide, frozenset({"op", "argv", "cwd", "via"})),
                 **passthrough_route,
                 **attempt_guard.routes(),
             }))
@@ -2890,6 +2913,10 @@ def run_one_attempt(
                              "evidence_digest": fixture_evidence}
     if attempt_guard is not None:
         result["codex_guard"] = attempt_guard.report(observation, declared_model)
+    if witness_session is not None and fixture_session is not None:
+        # #279 (orchestrator): counted on every witnessed fixture attempt, zero included.
+        result["witness_refusals"] = {"count": len(witness_session.refusals),
+                                      "calls": [dict(r) for r in witness_session.refusals]}
     if treatment_deviation:
         # #525 (orchestrator): a declared deviation is part of the attempt's own
         # record, never only a detail field; the report's head repeats it.

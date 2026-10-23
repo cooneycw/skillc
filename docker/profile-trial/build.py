@@ -57,6 +57,40 @@ RECEIPT_KEYS = set(IDENTITY) | {
 SUBJECT = f"evals/subjects/{RUNTIME_ID}"
 FIXTURE = f"tests/fixtures/profile-{RUNTIME_ID}"
 MAX_JSON = 64 * 1024
+#: #279 ca3030d (orchestrator policy B): the runtimes this builder supplies,
+#: runtime_id -> subject revision. The primary is the default; another is
+#: chosen with `--runtime`, and inside the image by the context policy's own
+#: runtime_id. Each one's policy is `runtime-policy.json` (the primary) or an
+#: entry of `runtime-policy-extra.json`, byte-identical to skillc's copies.
+PRIMARY_RUNTIME = RUNTIME_ID
+KNOWN_RUNTIMES = {
+    "cpp-codex-flow-check-86641e8": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+    "cpp-codex-flow-auto-ca3030d": "ca3030dbeba4a145166b61d714861f56e92cd034",
+}
+
+
+def select_runtime(runtime_id: str) -> None:
+    """Rebind the pinned identity to one known runtime (never an arbitrary one)."""
+    global RUNTIME_ID, REVISION, SUBJECT, FIXTURE
+    if runtime_id not in KNOWN_RUNTIMES:
+        raise SupplyError(f"runtime {runtime_id!r} is not a supported runtime of this builder")
+    RUNTIME_ID, REVISION = runtime_id, KNOWN_RUNTIMES[runtime_id]
+    IDENTITY.update(runtime_id=RUNTIME_ID, subject_revision=REVISION)
+    SUBJECT = f"evals/subjects/{RUNTIME_ID}"
+    FIXTURE = f"tests/fixtures/profile-{RUNTIME_ID}"
+
+
+def runtime_policy_bytes(here: Path) -> bytes:
+    """The selected runtime's policy, as the bytes the context will carry."""
+    if RUNTIME_ID == PRIMARY_RUNTIME:
+        return (here / "runtime-policy.json").read_bytes()
+    extra = load_json((here / "runtime-policy-extra.json").read_bytes())
+    found = [p for p in extra.get("profile_runtimes", []) if p.get("runtime_id") == RUNTIME_ID]
+    if len(found) != 1:
+        raise SupplyError(f"runtime {RUNTIME_ID!r}: exactly one extra policy entry required")
+    # The controller's policy also names the subject's locator, project and
+    # gate; the image carries only this builder's own policy fields.
+    return json_bytes({key: found[0].get(key) for key in sorted(POLICY_KEYS)})
 
 
 class SupplyError(ValueError):
@@ -344,9 +378,7 @@ def prepare(
 ) -> dict[str, Any]:
     """Validate everything before writing the isolated context or invoking Docker."""
     here = Path(__file__).resolve().parent
-    policy = load_json(
-        policy_bytes if policy_bytes is not None else (here / "runtime-policy.json").read_bytes()
-    )
+    policy = load_json(policy_bytes if policy_bytes is not None else runtime_policy_bytes(here))
     validate_policy(policy)
     if inputs is None:
         source_commit, inputs = source_inputs(repo)
@@ -407,6 +439,7 @@ def prepare(
 def write_descriptor(root: Path) -> None:
     """Run only in the cache builder, under its actual trial interpreter."""
     policy = load_json((root / "runtime-policy.json").read_bytes())
+    select_runtime(str(policy.get("runtime_id")))  # the context's runtime, if this builder knows it
     validate_policy(policy)
     validate_metadata(
         {n: (root / "metadata" / n).read_bytes() for n in ("pyproject.toml", "uv.lock")}
@@ -579,8 +612,10 @@ def main() -> int:
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--target", choices=TARGETS, default="profile-runtime")
     parser.add_argument("--write-descriptor", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--runtime", default=PRIMARY_RUNTIME, help="which supported runtime to build (#279)")
     args = parser.parse_args()
     try:
+        select_runtime(args.runtime)
         if args.write_descriptor is not None:
             write_descriptor(args.write_descriptor)
         elif args.receipt is None:

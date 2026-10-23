@@ -1238,7 +1238,10 @@ def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | Non
     if gate_entrypoint is None:
         return problems
     gate = posixpath.basename(gate_entrypoint)
-    for path in bundled:
+    # A declared copy, or consumer, outside the profile's closure is a delivered
+    # neighbour (the subject selects more skills than the profile walks): it is
+    # checked where that population exists - the treatment's whole home.
+    for path in bundled if require_consumers_installed else ():
         if path not in files:
             problems.append(("bundled-gate-not-installed",
                              f"bundled gate entrypoint {path!r} is not installed by this population", path))
