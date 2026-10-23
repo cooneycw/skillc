@@ -153,6 +153,45 @@ def test_the_primary_builder_is_untouched_and_the_extra_one_differs_only_in_iden
                        ('REVISION = "86641e817711d8a7746270745a5dfa7cacf04b0c"', f'REVISION = "{CA3030D}"')]
 
 
+B318A14B = "b318a14b9e7935f2c50c0940144a5ff0ff9389ed"
+
+
+def test_529_the_b318a14b_builder_rebinds_its_dependency_layer_and_nothing_else() -> None:
+    """b318a14b's pyproject.toml and uv.lock differ from the primary's, so its
+    builder rebinds those two identity lines as well - four in all."""
+    entry = build_runtime.extra_runtimes()["cpp-codex-flow-check-b318a14b"]
+    primary = (ROOT / "docker/profile-trial/build.py").read_bytes()
+    generated = build_runtime.builder_source("cpp-codex-flow-check-b318a14b", B318A14B,
+                                             entry["pyproject_sha256"], entry["lock_sha256"])
+    changed = [(a, b) for a, b in zip(primary.decode().splitlines(), generated.decode().splitlines(), strict=True)
+               if a != b]
+    assert [b for _a, b in changed] == [
+        'RUNTIME_ID = "cpp-codex-flow-check-b318a14b"', f'REVISION = "{B318A14B}"',
+        f'PYPROJECT = "{entry["pyproject_sha256"]}"', f'LOCK = "{entry["lock_sha256"]}"']
+
+
+def test_529_the_builder_prepares_the_b318a14b_runtime_from_its_own_profile(tmp_path: Path) -> None:
+    (tmp_path / "builder").mkdir()
+    build, policy = build_runtime.load_builder("cpp-codex-flow-check-b318a14b", tmp_path / "builder")
+    prepared = build.prepare(ROOT, tmp_path / "context", policy_bytes=policy)
+    assert (prepared["policy"]["runtime_id"], prepared["policy"]["subject_revision"]) == (
+        "cpp-codex-flow-check-b318a14b", B318A14B)
+
+
+def test_529_red_the_ca3030d_builder_alone_cannot_supply_b318a14b(tmp_path: Path) -> None:
+    """The refusal the first build hit: a builder that rebinds only the pin
+    still carries the primary's dependency layer, which b318a14b's policy is not."""
+    path = tmp_path / "build.py"
+    path.write_bytes(build_runtime.builder_source("cpp-codex-flow-check-b318a14b", B318A14B))
+    spec = importlib.util.spec_from_file_location("profile_runtime_build_red", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    entry = build_runtime.extra_runtimes()["cpp-codex-flow-check-b318a14b"]
+    with pytest.raises(module.SupplyError, match="unsupported pinned identity"):
+        module.validate_policy({key: entry[key] for key in module.POLICY_KEYS})
+
+
 def test_the_builder_prepares_the_ca3030d_runtime_from_its_own_profile(tmp_path: Path) -> None:
     (tmp_path / "builder").mkdir()
     build, policy = build_runtime.load_builder("cpp-codex-flow-auto-ca3030d", tmp_path / "builder")
