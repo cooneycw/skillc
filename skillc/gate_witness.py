@@ -226,6 +226,10 @@ class GateRunRecord:
             data["order_requested"] = self.order_requested
             data["order_completed"] = self.order_completed
             data["source_digest_at_start"] = self.source_digest_at_start
+        elif self.source_digest_at_start is not None:
+            # #530: an unordered run whose fixture opted into the source digest;
+            # every other unordered record is byte-identical.
+            data["source_digest_at_start"] = self.source_digest_at_start
         if self.via is not None:
             # Only a run through a declared variant carries it (#525), so
             # every other record is byte-identical.
@@ -553,7 +557,10 @@ class GateWitness:
                 # not measure the tree that existed when its request arrived.
                 tree_digest = self._tree_digest_fn()
                 source: str | None = None
-                if self._order is not None:
+                # #530: a source digest without the ordering counter, for a
+                # fixture that opts in (every earlier caller passes the
+                # function only together with an order, so nothing changes).
+                if self._order is not None or self._source_digest_fn is not None:
                     try:
                         source = (self._source_digest_fn(gate_cwd) if self._source_digest_fn is not None
                                   else "unreadable: no source-digest function")

@@ -98,6 +98,7 @@ from . import (
     credential,
     demo,
     gate_overlay,
+    launch_evidence,
     leak,
     profile,
     records,
@@ -664,7 +665,8 @@ def _gate_witness_choice(
             raise HomeFileVerificationRefused("gate_witness 'flow-finish' needs a declared gate_entrypoint to witness")
         return {_FLOW_FINISH_GATE: ()}, {_FLOW_FINISH_GATE: _FLOW_FINISH_PLAN}, _FLOW_AUTO_GATE_SHIM_SOURCE
     if fixture is not None:
-        return fixture.gates, None, fixture.gate_shim_source
+        # #530: a fixture may declare which gate carries which plan's stages.
+        return fixture.gates, (dict(getattr(fixture, "stage_plans", None) or {}) or None), fixture.gate_shim_source
     return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
 
 
@@ -701,6 +703,18 @@ def _require_bundled_route(bundled: Sequence[str], gate_entrypoint: str | None, 
     if shim_source.read_bytes() != expected.read_bytes():
         raise HomeFileVerificationRefused(f"this attempt's gate map is witnessed by {expected.name}, not by the shim "
                                           "it supplies: a prescribed call would be refused by mismatch (#529)")
+
+
+def gate_state_problem(root: Path, paths: Sequence[str]) -> str | None:
+    """#530: why a run starting on `root` may have its stages carried in from
+    resumable state rather than executed - a declared state path that exists
+    and is not an empty directory - or None. The source digest excludes `.git`,
+    where a runner keeps such state, so it cannot see this on its own."""
+    for rel in paths:
+        path = root / rel
+        if (path.is_symlink() or path.exists()) and (path.is_symlink() or not path.is_dir() or any(path.iterdir())):
+            return f"resumable gate state present at {rel}"
+    return None
 
 
 def _register_mirror_variants(session: _WitnessSession, deviations: Sequence[Mapping[str, object]]) -> None:
@@ -751,6 +765,13 @@ class _WitnessSession:
     #: copy exists and every genuine run names its `via`; one that does not is
     #: refused, never run against an absent harness path.
     require_via: bool = False
+    #: #530: record each run's SOURCE digest of the gated repository at its
+    #: start even without the ordering counter (a fixture that opts in).
+    source_digest: bool = False
+    #: #530 (counter-model re-review): repository-relative paths where the
+    #: gate's runner keeps RESUMABLE state; present at a run's start, the run's
+    #: source digest reads unreadable, so its stages are never attributable.
+    gate_state_paths: tuple[str, ...] = ()
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -828,6 +849,9 @@ class _WitnessSession:
                 root = sd.repository_root(Path(directory), rel)
                 if root is None:
                     return "unreadable: no repository contains the gate's working directory"
+                state = gate_state_problem(root, self.gate_state_paths)
+                if state is not None:
+                    return f"unreadable: {state}"
                 return sd.digest_tree(root)
 
         if self.witness is not None:
@@ -855,7 +879,8 @@ class _WitnessSession:
             stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {
                 gate: functools.partial(stage_capture.capture_stages, plan=plan)
                 for gate, plan in (self.stage_plans or {}).items()},
-            order=self.order, source_digest_fn=source_snapshot if self.order is not None else None,
+            order=self.order,
+            source_digest_fn=source_snapshot if self.order is not None or self.source_digest else None,
             staged=staged or None, declared_variants=self.variants or None,
         )
         script = (
@@ -2368,17 +2393,26 @@ def _fixture_credit_block(session: FixtureSession, observation: object = None) -
 
 
 def _fixture_extras(session: FixtureSession | None,
-                    stored_transcript: Mapping[str, trial.TranscriptEvidence]) -> dict[str, object] | None:
+                    stored_transcript: Mapping[str, trial.TranscriptEvidence],
+                    gate_entrypoint: str | None = None) -> dict[str, object] | None:
     """The controller-held evidence beside the gate witness: the final report
-    is the agent's last message as the stored transcript recorded it."""
+    is the agent's last message as the stored transcript recorded it. #530: a
+    fixture that opts in also gets the transcript's positive evidence of a
+    failed gate LAUNCH (`launch_evidence.scan`), for the gate's own name."""
     if session is None:
         return None
     evidence = stored_transcript.get("evidence")
     report: str | None = None
+    text: str | None = None
     if evidence is not None and evidence.data is not None:
-        message = ta.codex_run_metadata(evidence.data.decode("utf-8", errors="replace")).get("final_agent_message")
+        text = evidence.data.decode("utf-8", errors="replace")
+        message = ta.codex_run_metadata(text).get("final_agent_message")
         report = message if isinstance(message, str) else None
-    return session.extras(report)
+    extras = session.extras(report)
+    if session.fixture.launch_evidence:
+        extras["gate_launch_evidence"] = launch_evidence.scan(
+            text, posixpath.basename(gate_entrypoint) if gate_entrypoint else "")
+    return extras
 
 
 def run_one_attempt(
@@ -2571,6 +2605,8 @@ def run_one_attempt(
     if witness_session is not None:
         witness_session.order = attempt_order
         witness_session.require_via = gate_entrypoint in bundled_gate_entrypoints
+        witness_session.source_digest = bool(fixture is not None and fixture.source_digest)
+        witness_session.gate_state_paths = tuple(fixture.gate_state_paths) if fixture is not None else ()
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
         if not isinstance(backend, DockerBackend):
@@ -2876,7 +2912,7 @@ def run_one_attempt(
     # stored separately, and only when grading runs.
     fixture_evidence: str | None = None
     if fixture_session is not None:
-        extras = _fixture_extras(fixture_session, stored_transcript)
+        extras = _fixture_extras(fixture_session, stored_transcript, gate_entrypoint)
         fixture_evidence = trial.put_object(experiment, trial.canonical(extras)) if extras is not None else None
 
     graded: dict[str, object] | None = None
@@ -2945,7 +2981,7 @@ def run_one_attempt(
                     stored, graded_result = verify._grade_and_store(
                         experiment, attempt_id, grader, base, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
-                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
                     )
                 else:
                     # The observation stands in for the installation receipt
@@ -2955,7 +2991,7 @@ def run_one_attempt(
                     stored, graded_result = verify.grade_agent_attempt(
                         experiment, attempt_id, grader, base, observation, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
-                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
                     )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
