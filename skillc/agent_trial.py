@@ -666,7 +666,7 @@ def _gate_witness_choice(
         return {_FLOW_FINISH_GATE: ()}, {_FLOW_FINISH_GATE: _FLOW_FINISH_PLAN}, _FLOW_AUTO_GATE_SHIM_SOURCE
     if fixture is not None:
         # #530: a fixture may declare which gate carries which plan's stages.
-        return fixture.gates, (dict(fixture.stage_plans) or None), fixture.gate_shim_source
+        return fixture.gates, (dict(getattr(fixture, "stage_plans", None) or {}) or None), fixture.gate_shim_source
     return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
 
 
