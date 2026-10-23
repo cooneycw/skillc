@@ -303,3 +303,23 @@ def test_review_a_skill_copy_relabelled_checkout_is_refused_and_consumers_still_
         checkout={BUNDLED: "flow-check"})]
     assert ("checkout-gate-in-skill", BUNDLED) in problems
     assert ("checksum-consumer-undeclared", ".codex/skills/flow-check/scripts/verify.sh") in problems
+
+
+def test_review_a_checkout_only_inventory_keeps_its_checksum_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MEDIUM (Codex re-review): the consumers and the manifest name ride the
+    inventory with ANY mirrored copy, so a treatment rebuilt from it keeps the
+    delivery-time consumer scan - an undeclared `load_manifest("SHA256SUMS")`
+    reader is still caught."""
+    import dataclasses
+    prof = dataclasses.replace(p.Profile.load(SUBJECT_DIR / "profile.json"), bundled_gate_entrypoints=())
+    # This snapshot's bundled copy is bare-called, so no checkout-only variant
+    # of it validates; the copy checks are stubbed to reach the serializer.
+    monkeypatch.setattr(p, "bundled_gate_problems", lambda *_a, **_k: [])
+    inventory = p.validate(prof, p.load_tree(prof, None, SNAPSHOT))
+    assert "bundled_gate_entrypoints" not in inventory
+    assert inventory["bundled_checksum_manifest"] == "SHA256SUMS" and inventory["checksum_consumers"] == []
+    files = {CHECKOUT: b"#!/usr/bin/env bash\n", "Projects/x/reader.py": b'load_manifest("SHA256SUMS")\n'}
+    monkeypatch.undo()
+    problems = p.bundled_gate_problems(files, BUNDLED, (), {}, manifest_name=inventory["bundled_checksum_manifest"],
+                                       require_consumers_installed=True, checkout=prof.checkout_gate_entrypoints)
+    assert ("checksum-consumer-undeclared", "Projects/x/reader.py") in [(c, path) for c, _m, path in problems]

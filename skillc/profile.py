@@ -1230,11 +1230,15 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         # Only when declared, so every existing inventory (and the approvals
         # bound to its digest) is unchanged.
         **({"gate_witness": profile.gate_witness} if profile.gate_witness is not None else {}),
-        # #525, likewise only when declared.
-        **({"bundled_gate_entrypoints": list(profile.bundled_gate_entrypoints),
-            "checksum_consumers": [{"path": k, "reason": v} for k, v in sorted(profile.checksum_consumers.items())],
-           "bundled_checksum_manifest": profile.bundled_checksum_manifest}
+        # #525, likewise only when declared. #529 (counter-model re-review): the
+        # consumers and the manifest name with ANY mirrored copy, so a treatment
+        # rebuilt from this inventory keeps its delivery-time consumer scan;
+        # key order unchanged, so every bundled inventory is byte-identical.
+        **({"bundled_gate_entrypoints": list(profile.bundled_gate_entrypoints)}
            if profile.bundled_gate_entrypoints else {}),
+        **({"checksum_consumers": [{"path": k, "reason": v} for k, v in sorted(profile.checksum_consumers.items())],
+            "bundled_checksum_manifest": profile.bundled_checksum_manifest}
+           if profile.bundled_gate_entrypoints or profile.checkout_gate_entrypoints else {}),
         # #529, likewise only when declared.
         **({"checkout_gate_entrypoints": dict(sorted(profile.checkout_gate_entrypoints.items()))}
            if profile.checkout_gate_entrypoints else {}),
