@@ -148,7 +148,7 @@ def _recorded(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def _inputs(tmp_path: Path) -> dict[str, Any]:
     treatment = types.SimpleNamespace(receipt_context="RC", verify_home_files={"a": "sha256:0"},
                                       preflight_tools=[{"id": "t"}], gate_entrypoint=".claude/scripts/g.sh",
-                                      bundled_gate_entrypoints=())
+                                      bundled_gate_entrypoints=(), bundled_checksum_manifest=None)
     return {"experiment": "EXP", "attempt_id": "A1", "backend": "AGENT", "grading_backend": "GRADING",
             "base": tmp_path, "base_argv": ["python3", "actor.py"], "extra_home_files": {"x": b"y"},
             "cli_version": "0.157.1", "task_root": TASK_ROOT, "surface": {"repo": "R"},
