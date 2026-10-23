@@ -566,6 +566,12 @@ def test_cli_runs_with_the_receipt_bytes_it_checked_not_a_second_read(
     monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
     monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
     monkeypatch.setattr(rs, "selected_runtime", lambda **_: rs.PROFILE_RUNTIME)
+    # #279 policy B: the synthetic subject can never be a supported pin, so
+    # selection is stubbed; the receipt's own pin check is waived with it -
+    # only the kind is checked here (the pin check's reds: test_runtime_policy_b).
+    real_require_kind = rs.require_kind
+    monkeypatch.setattr(rs, "require_kind",
+                        lambda supply, selected, revision=None: real_require_kind(supply, selected))
     monkeypatch.setattr(cr, "private_root", lambda *_: tmp_path / "private")
     monkeypatch.setattr(cc, "agent_backends", lambda **kw: seen.append(kw["runtime_supply"]))
 

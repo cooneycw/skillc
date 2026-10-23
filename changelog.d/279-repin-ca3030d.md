@@ -2,7 +2,7 @@
   - **A second supported profile runtime:** `cpp-codex-flow-auto-ca3030d` in `skillc/runtime-policy-extra.json` (with a byte-identical builder copy). It sits beside the unchanged primary, which still serves the cicd runtimes.
     - Selection is a function: two runtimes on one (locator, revision, gate) key, or one runtime_id twice, refuse at load.
     - A profile receipt and its descriptor are checked against the policy their own runtime_id names, and `require_kind(..., revision=)` refuses a receipt for another pin.
-    - `docker/profile-trial/build.py --runtime` supplies only a runtime it knows.
+    - `docker/profile-trial/build_runtime.py --runtime` builds an extra runtime from a generated copy of `build.py`, with only its two identity lines rebound, and supplies only a runtime listed there. `build.py` itself is untouched, because its bytes are the primary runtime's build context (`test_the_flow_check_build_context_and_recipe_are_unchanged`).
     - No floor file, runner pin or EXPECT_TOTAL changes.
   - **New profile** `cpp-codex-flow-auto-ca3030d`, with its snapshot fixture. It declares the bundled gates of flow-auto and of the delivered `flow-check`, `flow-finish` and `flow-merge` (the subject selects `all`), with measured `checksum_consumers`.
     - A neighbour's bundled copy is checked, and read back in the container, from the delivered home.

@@ -25,10 +25,10 @@ from skillc import runtime_supply as rs
 
 ROOT = Path(__file__).resolve().parent.parent
 CA3030D = "ca3030dbeba4a145166b61d714861f56e92cd034"
-spec = importlib.util.spec_from_file_location("profile_trial_build_b", ROOT / "docker/profile-trial/build.py")
+spec = importlib.util.spec_from_file_location("profile_trial_build_runtime", ROOT / "docker/profile-trial/build_runtime.py")
 assert spec and spec.loader
-build: Any = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(build)
+build_runtime: Any = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(build_runtime)
 
 
 def _ca3030d_receipt(descriptor: bytes) -> bytes:
@@ -132,23 +132,35 @@ def test_an_unknown_runtime_id_in_a_receipt_is_refused() -> None:
 def test_the_builders_extra_policy_is_skillcs_byte_for_byte() -> None:
     assert (ROOT / "docker/profile-trial/runtime-policy-extra.json").read_bytes() == \
         (ROOT / "skillc/runtime-policy-extra.json").read_bytes()
-    assert set(build.KNOWN_RUNTIMES) == {p["runtime_id"] for p in rs.profile_policies()}
-    assert all(build.KNOWN_RUNTIMES[p["runtime_id"]] == p["subject_revision"] for p in rs.profile_policies())
+    assert {i: e["subject_revision"] for i, e in build_runtime.extra_runtimes().items()} == \
+        {p["runtime_id"]: p["subject_revision"] for p in rs.profile_policies()[1:]}
+
+
+def test_the_primary_builder_is_untouched_and_the_extra_one_differs_only_in_identity() -> None:
+    """build.py's bytes are the PRIMARY runtime's build context, so it is never
+    edited for another pin; the generated builder rebinds two lines, no more."""
+    primary = (ROOT / "docker/profile-trial/build.py").read_bytes()
+    generated = build_runtime.builder_source("cpp-codex-flow-auto-ca3030d", CA3030D)
+    changed = [(a, b) for a, b in zip(primary.decode().splitlines(), generated.decode().splitlines(), strict=True)
+               if a != b]
+    assert changed == [('RUNTIME_ID = "cpp-codex-flow-check-86641e8"', 'RUNTIME_ID = "cpp-codex-flow-auto-ca3030d"'),
+                       ('REVISION = "86641e817711d8a7746270745a5dfa7cacf04b0c"', f'REVISION = "{CA3030D}"')]
 
 
 def test_the_builder_prepares_the_ca3030d_runtime_from_its_own_profile(tmp_path: Path) -> None:
-    try:
-        build.select_runtime("cpp-codex-flow-auto-ca3030d")
-        prepared = build.prepare(ROOT, tmp_path / "context")
-        assert prepared["policy"]["runtime_id"] == "cpp-codex-flow-auto-ca3030d"
-        assert prepared["policy"]["subject_revision"] == CA3030D
-        assert json.loads((tmp_path / "context" / "runtime-policy.json").read_bytes())["runtime_id"] == \
-            "cpp-codex-flow-auto-ca3030d"
-    finally:
-        build.select_runtime(build.PRIMARY_RUNTIME)
+    (tmp_path / "builder").mkdir()
+    build, policy = build_runtime.load_builder("cpp-codex-flow-auto-ca3030d", tmp_path / "builder")
+    prepared = build.prepare(ROOT, tmp_path / "context", policy_bytes=policy)
+    assert prepared["policy"]["runtime_id"] == "cpp-codex-flow-auto-ca3030d"
+    assert prepared["policy"]["subject_revision"] == CA3030D
+    # The image's own descriptor writer is the generated builder, so its
+    # in-image identity check is this runtime's.
+    assert (tmp_path / "context" / "runtime-build.py").read_bytes() == \
+        build_runtime.builder_source("cpp-codex-flow-auto-ca3030d", CA3030D)
 
 
-def test_red_the_builder_supplies_only_a_runtime_it_knows() -> None:
-    with pytest.raises(build.SupplyError, match="not a supported runtime"):
-        build.select_runtime("cpp-codex-flow-check-ca3030d")  # deferred: no such runtime (#525)
-    assert build.RUNTIME_ID == build.PRIMARY_RUNTIME
+@pytest.mark.parametrize("runtime_id", ["cpp-codex-flow-check-ca3030d", "cpp-codex-flow-check-86641e8"])
+def test_red_the_extra_builder_supplies_only_an_extra_runtime_it_knows(tmp_path: Path, runtime_id: str) -> None:
+    """A deferred flow-check pin (#525) is no runtime; the primary is build.py's own."""
+    with pytest.raises(build_runtime.RuntimeRefused, match="not an extra runtime"):
+        build_runtime.load_builder(runtime_id, tmp_path)

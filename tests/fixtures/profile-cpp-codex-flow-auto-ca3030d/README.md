@@ -13,7 +13,7 @@ The closure of `evals/subjects/cpp-codex-flow-auto-ca3030d/profile.json`, copied
 | What is copied | the files the profile's closure reaches, unmodified, at their upstream paths. Nothing else from the repository is included |
 | Upstream paths | `codex/skills/flow-auto/`, `codex/skills/flow-eli5/`, `scripts/` (the installed helpers), `lib/`, `pyproject.toml`, `uv.lock`, `.claude/commands/flow/{auto,eli5}.md` (the generated skills' sources), `CLAUDE.md` (the file the synthetic checkout marker replaces) |
 
-`README.md` and `LICENSE` are the only files here that the profile does not reach. `pyproject.toml` and `uv.lock` are also the runtime image builder's metadata inputs (`docker/profile-trial/build.py --runtime cpp-codex-flow-auto-ca3030d`). They are byte-identical to `86641e8`'s.
+`README.md` and `LICENSE` are the only files here that the profile does not reach. `pyproject.toml` and `uv.lock` are also the runtime image builder's metadata inputs (`docker/profile-trial/build_runtime.py --runtime cpp-codex-flow-auto-ca3030d`). They are byte-identical to `86641e8`'s.
 
 ## Regenerate
 
