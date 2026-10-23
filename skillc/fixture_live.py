@@ -581,6 +581,25 @@ def token_pause_trigger(record: Mapping[str, Any], threshold: int | None) -> str
     return None
 
 
+def schedule_trigger(record: Mapping[str, Any], *, allowlist_digest: str, nested_policy: str | None,
+                     token_pause: int | None, rehearse: str | None) -> str | None:
+    """What stops the schedule after one attempt: the containment stop, then
+    the owner's token pause (#530).
+
+    WHAT DECIDES "LIVE" (orchestrator condition): only `rehearse`, the run
+    mode the CONTROLLER was invoked with (`run_live(rehearse=...)`, from the
+    operator's `--rehearse`; `None` is live, and a live run is the one that
+    must carry the owner's approval, `require_approved(approval_required=
+    rehearse is None)`). Nothing the attempt or the agent writes is read to
+    classify it, and absent tokens are never evidence of a rehearsal: on a
+    live run they are exactly the pause case. A rehearsal skips the pause
+    because a scripted actor records no tokens by construction."""
+    trigger = containment_trigger(record, allowlist_digest=allowlist_digest, nested_policy=nested_policy)
+    if trigger is None and rehearse is None:
+        trigger = token_pause_trigger(record, token_pause)
+    return trigger
+
+
 def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
                         nested_policy: str | None = None) -> str | None:
     """Why this attempt stops the schedule, or `None`. Only a DISPATCHED
@@ -1158,12 +1177,10 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     def record_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
         if stop.trigger is None:
-            # The token pause reads the client's own rollout total, which only
-            # a LIVE attempt has: a scripted actor records none by construction.
-            trigger = (containment_trigger(outcome.record, allowlist_digest=allowlist,
-                                           nested_policy=declaration.nested_policy)
-                       or (token_pause_trigger(outcome.record, declaration.shared.get("token_pause_per_attempt"))
-                           if rehearse is None else None))
+            trigger = schedule_trigger(outcome.record, allowlist_digest=allowlist,
+                                       nested_policy=declaration.nested_policy,
+                                       token_pause=declaration.shared.get("token_pause_per_attempt"),
+                                       rehearse=rehearse)
             if trigger is not None:
                 stop.trigger, stop.at_attempt = trigger, outcome.scheduled.attempt_id
         if on_outcome is not None:

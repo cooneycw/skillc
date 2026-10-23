@@ -68,3 +68,43 @@ def test_a_declared_bound_is_inside_the_digest() -> None:
     before = fl.parse_declaration(data).digest
     data["shared"]["token_pause_per_attempt"] = BOUND
     assert fl.parse_declaration(data).digest != before
+
+
+# --- what decides "live" (orchestrator condition, #530) ------------------------------
+
+def _clean(record: dict[str, Any]) -> dict[str, Any]:
+    """A record no containment trigger stops, so only the pause can."""
+    return record
+
+
+@pytest.fixture
+def no_containment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fl, "containment_trigger", lambda record, **_kw: None)
+
+
+@pytest.mark.parametrize("total", [None, 1_600_000])
+def test_red_a_live_attempt_with_unknown_or_excess_tokens_pauses(no_containment: None, total: Any) -> None:
+    trigger = fl.schedule_trigger(_record(total), allowlist_digest="x", nested_policy=None,
+                                  token_pause=BOUND, rehearse=None)
+    assert trigger is not None and trigger.startswith("token pause")
+
+
+def test_red_absent_tokens_on_a_live_run_are_the_pause_never_a_rehearsal(no_containment: None) -> None:
+    """A record exactly like a scripted actor's (no token usage at all) on a
+    LIVE run: the classifier has only the controller's run mode to go on, so it
+    cannot read the missing tokens as a rehearsal - it pauses."""
+    actor_like = {"disposition": "captured", "observation": {"run_metadata": {}}}
+    assert fl.schedule_trigger(actor_like, allowlist_digest="x", nested_policy=None, token_pause=BOUND,
+                               rehearse=None) is not None
+    assert fl.schedule_trigger(actor_like, allowlist_digest="x", nested_policy=None, token_pause=BOUND,
+                               rehearse="actor") is None  # only the declared run mode skips it
+
+
+def test_the_live_classifier_reads_no_attempt_field() -> None:
+    """The mode is a parameter, never derived inside: the function's inputs are
+    the record, the declaration's bound and the controller's `rehearse`."""
+    import inspect
+    params = list(inspect.signature(fl.schedule_trigger).parameters)
+    assert params == ["record", "allowlist_digest", "nested_policy", "token_pause", "rehearse"]
+    source = inspect.getsource(fl.schedule_trigger)
+    assert "rehearse is None" in source and 'record.get("rehearse' not in source
