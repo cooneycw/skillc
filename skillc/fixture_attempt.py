@@ -76,6 +76,10 @@ class AttemptFixture:
     #: oracle in a throwaway container of the attempt's measured image here).
     #: None leaves the capture exactly as before.
     post_capture: Callable[[dict[str, Any], Any, object], dict[str, Any]] | None = None
+    #: #530: opt in to `gate_launch_evidence` in the trusted extras (the
+    #: flow-check-route task's `report-honest`). Off keeps every earlier
+    #: fixture's record byte-identical.
+    launch_evidence: bool = False
 
 
 class _FixtureBackend(Protocol):

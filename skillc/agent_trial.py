@@ -98,6 +98,7 @@ from . import (
     credential,
     demo,
     gate_overlay,
+    launch_evidence,
     leak,
     profile,
     records,
@@ -2368,17 +2369,26 @@ def _fixture_credit_block(session: FixtureSession, observation: object = None) -
 
 
 def _fixture_extras(session: FixtureSession | None,
-                    stored_transcript: Mapping[str, trial.TranscriptEvidence]) -> dict[str, object] | None:
+                    stored_transcript: Mapping[str, trial.TranscriptEvidence],
+                    gate_entrypoint: str | None = None) -> dict[str, object] | None:
     """The controller-held evidence beside the gate witness: the final report
-    is the agent's last message as the stored transcript recorded it."""
+    is the agent's last message as the stored transcript recorded it. #530: a
+    fixture that opts in also gets the transcript's positive evidence of a
+    failed gate LAUNCH (`launch_evidence.scan`), for the gate's own name."""
     if session is None:
         return None
     evidence = stored_transcript.get("evidence")
     report: str | None = None
+    text: str | None = None
     if evidence is not None and evidence.data is not None:
-        message = ta.codex_run_metadata(evidence.data.decode("utf-8", errors="replace")).get("final_agent_message")
+        text = evidence.data.decode("utf-8", errors="replace")
+        message = ta.codex_run_metadata(text).get("final_agent_message")
         report = message if isinstance(message, str) else None
-    return session.extras(report)
+    extras = session.extras(report)
+    if session.fixture.launch_evidence:
+        extras["gate_launch_evidence"] = launch_evidence.scan(
+            text, posixpath.basename(gate_entrypoint) if gate_entrypoint else "")
+    return extras
 
 
 def run_one_attempt(
@@ -2876,7 +2886,7 @@ def run_one_attempt(
     # stored separately, and only when grading runs.
     fixture_evidence: str | None = None
     if fixture_session is not None:
-        extras = _fixture_extras(fixture_session, stored_transcript)
+        extras = _fixture_extras(fixture_session, stored_transcript, gate_entrypoint)
         fixture_evidence = trial.put_object(experiment, trial.canonical(extras)) if extras is not None else None
 
     graded: dict[str, object] | None = None
@@ -2945,7 +2955,7 @@ def run_one_attempt(
                     stored, graded_result = verify._grade_and_store(
                         experiment, attempt_id, grader, base, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
-                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
                     )
                 else:
                     # The observation stands in for the installation receipt
@@ -2955,7 +2965,7 @@ def run_one_attempt(
                     stored, graded_result = verify.grade_agent_attempt(
                         experiment, attempt_id, grader, base, observation, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
-                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
                     )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a

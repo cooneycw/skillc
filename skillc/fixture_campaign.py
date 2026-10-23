@@ -397,9 +397,19 @@ def build_case(task_root: Path, case: str, where: Path) -> tuple[dict[str, objec
     facts = build.build(where, case, remote_url=GIT_DIR)
     (where / ".remote").mkdir()
     (where / "remote.git").rename(where / ".remote" / "widget.git")
+    # #530: a task's builder may declare its own gate map and shim (the
+    # flow-check task: both prescribed calls, the mirrored-copy shim); one
+    # that declares none keeps the flow-auto default, byte for byte.
+    witness: dict[str, Any] = {}
+    if hasattr(build, "GATES"):
+        witness["gates"] = {str(g): tuple(a) for g, a in build.GATES.items()}
+    if hasattr(build, "GATE_SHIM"):
+        witness["gate_shim_source"] = Path(build.GATE_SHIM)
+    if getattr(build, "LAUNCH_EVIDENCE", False) is True:
+        witness["launch_evidence"] = True
     fixture = fa.AttemptFixture(case=case, declaration=build.declaration(case, GIT_DIR, facts), facts=facts,
                                 capture=lambda export, held: build.capture_snapshot(export, dict(held)),
-                                post_capture=getattr(build, "post_capture", None))
+                                post_capture=getattr(build, "post_capture", None), **witness)
     return {"repo": where / "repo", ".remote": where / ".remote"}, fixture
 
 
