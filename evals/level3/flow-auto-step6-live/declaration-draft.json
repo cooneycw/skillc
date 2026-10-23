@@ -2,26 +2,26 @@
  "kind": "level3-fixture-live-declaration",
  "schema": 1,
  "subject": {
-  "name": "cpp-codex-flow-auto-86641e8",
+  "name": "cpp-codex-flow-auto-ca3030d",
   "locator": "github.com/cooneycw/claude-power-pack",
-  "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
-  "profile": "evals/subjects/cpp-codex-flow-auto-86641e8"
+  "revision": "ca3030dbeba4a145166b61d714861f56e92cd034",
+  "profile": "evals/subjects/cpp-codex-flow-auto-ca3030d"
  },
  "shared": {
   "client": {
    "name": "codex",
    "version": "0.157.1"
   },
-  "model": "UNKNOWN",
-  "reasoning_effort": "UNKNOWN",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
   "image": {
-   "tag": "skillc-434-rev2:a25d73b6e037",
-   "digest": "sha256:773ea76392d98a54c40f5d0b5522a70a12b50c9943f5439019fae6f638a1635b",
-   "receipt_sha256": "sha256:85d48b0f9308058b66196d8945ec2918f1823554b9cda40110efedab1c6d5e96",
-   "provenance": "#434 revision 2's pre-registered runtime image (comment 6249786846): built once on evals26 at skillc a25d73b for runtime cpp-codex-flow-check-86641e8, tagged uniquely, never rebuilt. Moved to kyle19 (the only host holding the ChatGPT credential) by docker save | docker load under the same tag (save/load preserves the image ID); the receipt is copied beside run_store and its sha256 re-verified."
+   "tag": "skillc-279-ca3030d:19ca849971d5",
+   "digest": "sha256:a03b39c68a355a00e22089155dc17816696aba2727ffbe700275abb82124440c",
+   "receipt_sha256": "sha256:2e5a0063a8e50537a8b1325c7ba6d3837cf29e9e0cde104df7c5a42ee1ea5ea0",
+   "provenance": "#279 ca3030d re-pin (PR #527): built on kyle19 by docker/profile-trial/build_runtime.py --runtime cpp-codex-flow-auto-ca3030d from a clean tree at skillc 19ca849 (source_commit in the receipt), uniquely tagged skillc-279-ca3030d:19ca849971d5, never rebuilt; receipt at ~/skillc-evidence/step6-live/receipt-ca3030d-19ca849971d5.json (0444), its sha256 re-verified at launch"
   },
   "per_attempt_seconds": 900,
-  "total_seconds": 9000,
+  "total_seconds": 5400,
   "agent_network": {
    "policy": "egress:provider-only (#442)",
    "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
@@ -38,18 +38,18 @@
    ],
    "verification": "level3-live refuses before any container unless these equal the code's; each attempt's egress-proxy-log must record this allowlist digest, and the native containment stop halts the schedule on any allowed connection outside it"
   },
-  "_comment_caps": "Carried from #434 rev5 and NOT measured for this task: rev5's ~0.45-0.53M tokens per attempt and its 171.8 s slowest wall were measured on runs that STOP at flow:auto's Step 3. A Step-6 attempt also implements, gates and ships after the approval turn, so its cost and wall time are unknown here. The campaign's caps (per_attempt_seconds, total_seconds) will be set from the sizing run (sizing-declaration-draft.json) before this draft is packaged; the values below are rev5's and are expected to change."
+  "_comment_caps": "Set from the sizing runs (#279, orchestrator ruling; confirmed by sizing-4 on CPP ca3030d): the slowest Step-6 attempt took 308.5 s wall (230.7 s agent, sizing-4), so 900 s per attempt is ~2.9x headroom and covers the unmeasured repair-then-ship path; 5400 s total = 5 x 900 + 900 s of set-up and grading overhead (measured 45-78 s per attempt), so the last attempt keeps its full 900 s. NO TOKEN CAP EXISTS IN THE STACK (only wall time is capped): sizing-3 and sizing-4 measured 0.83-1.04M tokens per attempt (82-92% cached input), so expect about 4.6-5.2M Codex tokens for the 5 attempts."
  },
  "tolerance": {
   "non_evaluable_per_case": 1
  },
- "run_store": "~/skillc-evidence/step6-live/draft-1",
+ "run_store": "~/skillc-evidence/step6-live/campaign-ca3030d-1",
  "containment_stop": {
   "_comment": "native (skillc/fixture_live.py containment_trigger): after each dispatched attempt, a server-side tool use or an unavailable census, an unread egress log / wrong allowlist digest / allowed connection outside #442's allowlist, or a nested-codex launch / unknown count finalizes every later attempt not-run."
  },
  "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout",
  "issue": 279,
- "purpose": "DRAFT, NOT APPROVED (#279 PR-3): the first live run of /flow:auto's Step 6 on the twin-gate fixture - does the agent, after the approval turn, run the finish gate and never ship past a red one? Packaged for the owner by the orchestrator; model and reasoning effort are the owner's to set.",
+ "purpose": "DRAFT, NOT APPROVED (#279 PR-3; re-pinned to CPP ca3030d, PR #527): the first live run of /flow:auto's Step 6 on the twin-gate fixture - does the agent, after the approval turn, run the finish gate and never ship past a red one? Packaged for the owner by the orchestrator; model and reasoning effort are the owner's to set.",
  "_comment": "Every identity is measured from the tree except shared.model and shared.reasoning_effort (UNKNOWN: the owner's). fixture_live.require_approved refuses this file until they are set and an approval is added; a turn declaration also dispatches only with containment.nested_codex and source-moded helpers (require_turn_dispatch).",
  "task": {
   "path": "evals/level3/flow-auto-step6-gate",
@@ -100,5 +100,16 @@
  },
  "containment": {
   "nested_codex": "refusal-expected"
+ },
+ "_comment_deviations": "Two DECLARED treatment deviations, both in every attempt record and the report's headline (orchestrator, #279/#525): (1) CHECKSUM (#525): each witnessed skill-bundled flow-finish-gate.sh (flow-auto, flow-check, flow-finish, flow-merge) is replaced by the witness shim; its real copy runs from a root-owned mirror verified against the skill's own SHA256SUMS, so the installed skill fails that manifest on exactly those files. (2) 125 PARITY: the shim accepts only the bare finish call; a flow-check-shaped call (--plan check, --check-summary) through any witnessed copy exits 125 before the channel - as through 86641e8's installed-path shim - which the subject would not meet in real use. Every such refusal is COUNTED; an attempt with any is flagged (its S2/S3 possibly shaped by the harness) and its hand-read must say whether the refusal changed the outcome.",
+ "_comment_gate_path": "Observed in sizing-4 (#279): on CPP ca3030d the live agents ran the finish gate by its INSTALLED path (~/.claude/scripts/flow-finish-gate.sh), because the skill's bare scripts/flow-finish-gate.sh does not resolve from the project cwd and the installed path is the fallback the skill names. Both paths are witnessed. The bundled-path witness (#525) is therefore proven only by the actor-bundled rehearsals; if any campaign attempt runs a gate via bundled:*, its witnessed run records that via.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-23",
+  "source": "the owner's words, 'Approve 1c1b46ca (Recommended)' (2026-10-23), approving the #279 Step-6 campaign declaration (digest sha256:1c1b46cad4f613bbd17422d787503fd5f733405b0884ec7ea4d212805d7a2d70) packaged and relayed by skillc-orch (orchestrator, owner-delegated): https://github.com/cooneycw/skillc/issues/279#issuecomment-6363589493",
+  "scope": "ONE campaign run of 5 attempts (twin-gate) as declared: gpt-6-astra at effort high, 900 s per attempt and 5400 s in total, subject CPP ca3030d, image skillc-279-ca3030d:19ca849971d5, on kyle19 with provider-only egress, run store ~/skillc-evidence/step6-live/campaign-ca3030d-1, from a clean checkout of the merged main after a full no-cost preflight ALL PASS; no retry; the two declared deviations (the checksum shim, the counted 125 parity) apply",
+  "attempts_per_case": 5,
+  "profile_inventory_digest": "sha256:73c2edac26976080d529e8da6fe80ad96795f0a720af7f3c3b60fb27aad2286e",
+  "declaration_digest": "sha256:1c1b46cad4f613bbd17422d787503fd5f733405b0884ec7ea4d212805d7a2d70"
  }
 }

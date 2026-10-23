@@ -1957,15 +1957,55 @@ STEP6_LIVE = ROOT / "evals" / "level3" / "flow-auto-step6-live"
 STEP6_SIZING_DIGEST = "sha256:093eefaf530ea47fe614956f6458e3ed41361b7dc249cd81e40a3cd6641b1268"
 
 
-@pytest.mark.parametrize("name", ["declaration-draft.json"])
-def test_the_step6_drafts_parse_and_are_refused_until_approved(name: str) -> None:
-    data = json.loads((STEP6_LIVE / name).read_text())
+STEP6_CAMPAIGN_DIGEST = "sha256:1c1b46cad4f613bbd17422d787503fd5f733405b0884ec7ea4d212805d7a2d70"
+
+
+def test_the_campaign_declaration_carries_the_owners_approval_and_is_pinned() -> None:
+    """The owner approved the campaign on 2026-10-23 ("Approve 1c1b46ca
+    (Recommended)", relayed by skillc-orch). The stamp changed nothing the
+    owner approved: the content digest is the packaged one, and it authorizes
+    as committed."""
+    data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
     declaration = fl.parse_declaration(data)
-    assert "approval" not in data
-    assert declaration.digest in (STEP6_LIVE / "README.md").read_text()  # the stated digest is this file's
-    with pytest.raises(fl.LiveRefused):
-        fl.require_approved(declaration, ROOT)
+    assert declaration.digest == STEP6_CAMPAIGN_DIGEST
+    assert declaration.digest in (STEP6_LIVE / "README.md").read_text()
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
+    assert "'Approve 1c1b46ca (Recommended)'" in approval["source"] and STEP6_CAMPAIGN_DIGEST in approval["source"]
+    assert approval["declaration_digest"] == STEP6_CAMPAIGN_DIGEST
+    fl.require_approved(declaration, ROOT)
     fl.require_turn_dispatch(declaration, _treatment())  # containment declared (#500)
+    shared = declaration.shared
+    assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (5, 900, 5400)
+    assert (shared["model"], shared["reasoning_effort"]) == ("gpt-6-astra", "high")
+    assert data["subject"]["revision"] == "ca3030dbeba4a145166b61d714861f56e92cd034"
+
+
+@pytest.mark.parametrize("path,value", [
+    (("shared", "per_attempt_seconds"), 901),
+    (("shared", "total_seconds"), 9000),
+    (("shared", "model"), "gpt-6-astra-mini"),
+    (("shared", "reasoning_effort"), "medium"),
+    (("run_store",), "~/skillc-evidence/step6-live/campaign-ca3030d-2"),
+    (("_comment_deviations",), "none"),
+])
+def test_the_step6_campaign_approval_does_not_survive_a_changed_field(path: tuple[str, ...], value: object) -> None:
+    data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
+    target = data
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+        fl.require_approved(fl.parse_declaration(data), ROOT)
+
+
+def test_the_campaign_declaration_without_its_approval_is_refused() -> None:
+    data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
+    del data["approval"]
+    declaration = fl.parse_declaration(data)
+    assert declaration.digest == STEP6_CAMPAIGN_DIGEST  # the stamp is outside the digest
+    with pytest.raises(fl.LiveRefused, match="no approval record"):
+        fl.require_approved(declaration, ROOT)
 
 
 def test_the_sizing_declaration_carries_the_owners_approval_and_is_pinned() -> None:
@@ -1986,12 +2026,6 @@ def test_the_sizing_declaration_carries_the_owners_approval_and_is_pinned() -> N
     shared = declaration.shared
     assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (2, 1800, 4500)
     assert (shared["model"], shared["reasoning_effort"]) == ("gpt-6-astra", "high")
-
-
-def test_the_campaign_draft_still_waits_for_the_owner_s_model() -> None:
-    declaration = fl.parse_declaration(json.loads((STEP6_LIVE / "declaration-draft.json").read_text()))
-    with pytest.raises(fl.LiveRefused, match="shared.model"):
-        fl.require_approved(declaration, ROOT, approval_required=False)
 
 
 # ---------------- #279: the owner's sizing approval binds 093eefaf and nothing else
@@ -2027,12 +2061,13 @@ def test_the_sizing_approval_does_not_stretch_to_more_attempts() -> None:
 
 
 def test_the_sizing_approval_does_not_reach_the_campaign_draft() -> None:
-    """The owner approved the sizing draft only. Its approval block, copied
-    onto the campaign draft with a model filled in, is still refused."""
+    """The owner approved the sizing declaration only. Its approval block,
+    copied onto the campaign with every field but the declaration digest made
+    to match, is still refused: the digest is what binds it."""
     data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
-    data["shared"]["model"], data["shared"]["reasoning_effort"] = "gpt-6-astra", "high"
     approval = dict(_sizing_data()["approval"])
     approval["attempts_per_case"] = data["attempts_per_case"]
+    approval["profile_inventory_digest"] = data["approval"]["profile_inventory_digest"]
     data["approval"] = approval
     with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
         fl.require_approved(fl.parse_declaration(data), ROOT)
