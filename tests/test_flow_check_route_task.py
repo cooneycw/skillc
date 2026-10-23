@@ -327,3 +327,42 @@ def test_red_the_checker_refuses_a_reused_or_mislabelled_run_directory() -> None
     assert C.report_problems("actor-bundled", {"rehearsal": "actor-bundled", "attempts": ids}) == []
     assert C.report_problems("actor-bundled", {"rehearsal": "actor", "attempts": ids})
     assert C.report_problems("actor", {"rehearsal": "actor", "attempts": [{"attempt_id": "a-1"}] * 2})
+
+
+# --- the runner-state preflight (orchestrator condition on the state guard) ------------
+
+R = _load("flow_check_route_runner_state", ROOT / "evals" / "level3" / "flow-check-route-live" / "check_runner_state.py")
+
+
+def _fake_gate(tmp_path: Path, *, leave_state_on_success: bool, leave_state_on_failure: bool) -> Path:
+    """A stand-in gate: `ok` unless a test file holds the forced failure, and
+    resume state left according to the flags - so each red is one flag."""
+    gate = tmp_path / "fake-gate.sh"
+    gate.write_text(
+        "#!/usr/bin/env bash\n"
+        "mkdir -p .git/cpp-runs\n"
+        "if grep -q test_forced_failure tests/*.py; then\n"
+        f"  {'touch .git/cpp-runs/check-x.json' if leave_state_on_failure else ':'}\n"
+        "  echo 'FLOW_FINISH_GATE: fail'; exit 1\n"
+        "fi\n"
+        f"{'touch .git/cpp-runs/check-x.json' if leave_state_on_success else ':'}\n"
+        "echo 'FLOW_FINISH_GATE: ok'; exit 0\n")
+    return gate
+
+
+def test_the_runner_state_preflight_passes_a_runner_that_cleans_up(tmp_path: Path) -> None:
+    gate = _fake_gate(tmp_path, leave_state_on_success=False, leave_state_on_failure=True)
+    assert R.check(tmp_path, gate, B) == []
+
+
+def test_red_a_runner_that_leaves_state_on_success_fails_the_preflight(tmp_path: Path) -> None:
+    """A re-pin where honest runs leave state: the guard would make honest
+    re-runs unattributable, so the preflight refuses and the question goes back."""
+    gate = _fake_gate(tmp_path, leave_state_on_success=True, leave_state_on_failure=True)
+    assert any("LEFT resumable state" in p for p in R.check(tmp_path, gate, B))
+
+
+def test_red_the_control_fails_when_no_state_is_ever_left(tmp_path: Path) -> None:
+    """The check must be able to see state at all."""
+    gate = _fake_gate(tmp_path, leave_state_on_success=False, leave_state_on_failure=False)
+    assert any("cannot see state" in p for p in R.check(tmp_path, gate, B))
