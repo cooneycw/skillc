@@ -1,7 +1,7 @@
 {
  "inventory_schema": 1,
  "profile": "cpp-codex-flow-check-f857754d",
- "profile_digest": "sha256:f5b1cd88867d4b049bc3347f3100503c3f46cc47102c7585d1828dee26f07de2",
+ "profile_digest": "sha256:95cb657a30b940779047605faa81a3d1c02b8e0f0e6332db19679204eced9538",
  "subject": {
   "declaration_digest": "sha256:01419823bf38f5ded0824414494d5b7bee3ecbd9817074cb57850df162469bb1",
   "locator": "github.com/cooneycw/claude-power-pack",
