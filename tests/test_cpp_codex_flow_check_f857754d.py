@@ -1,4 +1,4 @@
-"""`cpp-codex-flow-check` at claude-power-pack `b318a14b` (#529): the profile
+"""`cpp-codex-flow-check` at claude-power-pack `f857754d` (#529): the profile
 CPP #1532 needs - flow-check's content after CPP #1497 - with its gate
 witnessed on the routes the population offers once CPP #1542 has removed the
 installed one: the skill-bundled copy (the `gate_entrypoint`, declared
@@ -33,8 +33,8 @@ from skillc import profile as p
 from skillc import runtime_supply as rs
 
 ROOT = Path(__file__).resolve().parent.parent
-PIN = "b318a14b9e7935f2c50c0940144a5ff0ff9389ed"
-RUNTIME_ID = "cpp-codex-flow-check-b318a14b"
+PIN = "f857754d2c49c157ab25dd671a68e5ecd935f85f"
+RUNTIME_ID = "cpp-codex-flow-check-f857754d"
 SUBJECT_DIR = ROOT / "evals" / "subjects" / RUNTIME_ID
 SNAPSHOT = ROOT / "tests" / "fixtures" / f"profile-{RUNTIME_ID}"
 OLD_SUBJECT_DIR = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8"
@@ -104,10 +104,14 @@ def test_the_snapshot_records_its_provenance_and_carries_the_upstream_licence() 
 
 
 def test_the_gate_map_is_re_read_at_this_pin() -> None:
-    """Not carried over from 86641e8: both prescribed calls, BARE, at this pin."""
+    """Not carried over from 86641e8 or b318a14b: both prescribed calls,
+    ANCHORED to the skill directory (CPP #1546), at this pin."""
     reference = (SNAPSHOT / "codex" / "skills" / "flow-check" / "reference.md").read_text(encoding="utf-8")
-    assert "```bash\nscripts/flow-finish-gate.sh --plan check --evidence flow-check\n```" in reference
-    assert "```bash\nscripts/flow-finish-gate.sh --check-summary\n```" in reference
+    anchored = '"${CPP_SKILL_DIR:-/dev/null}"/scripts/flow-finish-gate.sh'
+    assert f"```bash\n{anchored} --plan check --evidence flow-check\n```" in reference
+    assert f"```bash\n{anchored} --check-summary\n```" in reference
+    assert "```bash\nscripts/flow-finish-gate.sh" not in reference  # the #1542 bare call is gone
+    assert "CPP_SKILL_DIR" in (SNAPSHOT / "codex" / "skills" / "flow-check" / "SKILL.md").read_text(encoding="utf-8")
     assert "the CPP-checkout copy" in reference  # the fallback route D1 witnesses
     for doc in ("SKILL.md", "reference.md"):
         assert ".claude/scripts" not in (SNAPSHOT / "codex" / "skills" / "flow-check" / doc).read_text(encoding="utf-8")

@@ -14,7 +14,7 @@ the real script's `BASH_SOURCE`-relative siblings are its own, and this
 script writes back the real stdout, stderr and exit code.
 
 TWO INVOCATIONS ARE WITNESSED, because flow-check's `reference.md`
-prescribes exactly two (Step 2 and Step 5), re-read at CPP b318a14b:
+prescribes exactly two (Step 2 and Step 5), re-read at CPP f857754d:
 
     flow-finish-gate.sh --plan check --evidence flow-check  -> "flow-check-plan"
     flow-finish-gate.sh --check-summary                     -> "flow-check-summary"
@@ -23,9 +23,13 @@ The same map as `docker/trial/flow-check-gate-shim.py` (#332), which stays
 unchanged: every file there moves the pinned flow-check runtime's
 `build_context_sha256`. Any other argv - including the documented pre-#1366
 retry without `--evidence` - is refused with exit 125 before the channel is
-reached, and the refusal is REPORTED and counted (#279). A bare
-`scripts/flow-finish-gate.sh` from a target worktree never reaches this
-script (the shell exits 127) and reads `not-observed`.
+reached, and the refusal is REPORTED and counted (#279). The call reaches
+this script only through a path that names the copy: at CPP f857754d the
+skill anchors it, `"${CPP_SKILL_DIR:-/dev/null}"/scripts/flow-finish-gate.sh`
+(CPP #1546). With `CPP_SKILL_DIR` unset the shell fails at `/dev/null/...`
+(126), and a bare `scripts/flow-finish-gate.sh` from a target worktree exits
+127 or runs the target's own script; neither reaches this script, and both
+read `not-observed`.
 
 EXIT 125 ON ANY CHANNEL FAILURE, never a value the real helper uses
 (0, 1, 2, 3, 4, 127).

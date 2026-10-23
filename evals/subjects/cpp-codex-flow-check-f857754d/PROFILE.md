@@ -1,33 +1,33 @@
-# Profile: CPP Codex `flow-check`, at `b318a14b` (#529)
+# Profile: CPP Codex `flow-check`, at `f857754d` (#529)
 
 - Declaration: [profile.json](profile.json), the machine form; this page explains it
 - Subject: [subject.json](subject.json), this profile's own pin
 - Validator: `skillc profile validate` ([profiles spec](../../../docs/specs/evaluation-facility/profiles.md))
 - Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-23 (#529)
-- Snapshot: [`tests/fixtures/profile-cpp-codex-flow-check-b318a14b/`](../../../tests/fixtures/profile-cpp-codex-flow-check-b318a14b/README.md), with provenance and the upstream licence
+- Snapshot: [`tests/fixtures/profile-cpp-codex-flow-check-f857754d/`](../../../tests/fixtures/profile-cpp-codex-flow-check-f857754d/README.md), with provenance and the upstream licence
 
 Regenerate the evidence with:
 
 ```bash
-skillc profile validate evals/subjects/cpp-codex-flow-check-b318a14b/profile.json \
-  --repo <claude-power-pack checkout at b318a14b> \
-  --out evals/subjects/cpp-codex-flow-check-b318a14b/evidence/inventory.json --overwrite
+skillc profile validate evals/subjects/cpp-codex-flow-check-f857754d/profile.json \
+  --repo <claude-power-pack checkout at f857754d> \
+  --out evals/subjects/cpp-codex-flow-check-f857754d/evidence/inventory.json --overwrite
 ```
 
 ## Pin
 
 | Identity | Value |
 |---|---|
-| Source | `github.com/cooneycw/claude-power-pack` at `b318a14b9e7935f2c50c0940144a5ff0ff9389ed` (v10.0.0, `main` on 2026-10-23), MIT |
-| Why this revision | CPP #1532 needs flow-check's content after #1497 (the lib/cicd closure, `c8d9ba94`). `c8d9ba94` is an ancestor of `b318a14b` and not of `ca3030d`. The one flow-check change after it is `e53132f3` (#1529). Accepted by the orchestrator (#529, Step 3) |
-| Re-pin trigger | a merged CPP #1542 fix changes flow-check's gate call text, so it needs a NEW profile directory |
+| Source | `github.com/cooneycw/claude-power-pack` at `f857754d2c49c157ab25dd671a68e5ecd935f85f` (CPP PR #1546's merge, `main` on 2026-10-23), MIT |
+| Why this revision | CPP #1532 needs flow-check's content after #1497 (the lib/cicd closure, `c8d9ba94`), an ancestor of `f857754d` and not of `ca3030d`. The first pin, `b318a14b` (v10.0.0), was moved here by the orchestrator when its recorded re-pin trigger fired before the build: CPP #1546 fixed #1542, so the gate call CPP users run is the anchored one. `f857754d` also carries #1543 (`ff0bbdf9`). Since `b318a14b`, only flow-check's `SKILL.md` and `reference.md` changed; the scripts, `lib/`, `pyproject.toml` and `uv.lock` are identical |
+| Re-pin trigger | a merged CPP #1547 fix (an unset `CPP_SKILL_DIR` exits 126 with no gate marker, which Step 6's launch-failure rule does not name); recorded, not waited for |
 | Treatment | **targeted** (`flow-check`), **product** question |
-| Runtime | `cpp-codex-flow-check-b318a14b`, an extra profile runtime under policy B (`skillc/runtime-policy-extra.json`). `pyproject.toml` and `uv.lock` changed since `ca3030d`, so it is not shared. The primary, cicd and `ca3030d` runtimes are unchanged |
+| Runtime | `cpp-codex-flow-check-f857754d`, an extra profile runtime under policy B (`skillc/runtime-policy-extra.json`). Its `pyproject.toml` and `uv.lock` differ from the primary's and `ca3030d`'s, so `build_runtime.py` rebinds them. The primary, cicd and `ca3030d` runtimes are unchanged |
 | Client | `codex` 0.157.1 |
 
 ## The gate map, re-read at this pin
 
-`reference.md` prescribes two calls, both BARE and cwd-relative (CPP #1408):
+`reference.md` prescribes two calls, both ANCHORED to the skill directory, `"${CPP_SKILL_DIR:-/dev/null}"/scripts/flow-finish-gate.sh` (CPP #1546). `SKILL.md` defines `CPP_SKILL_DIR` as the skill's absolute directory, which the AGENT substitutes or sets in each command; nothing in the harness sets it (cpp-orch, against `f857754d`):
 
 | reference.md | argv after the gate | witnessed gate |
 |---|---|---|
@@ -39,7 +39,9 @@ The exit-127 fallback (`:57-58`) names `${CLAUDE_PLUGIN_ROOT}/scripts/flow-finis
 **Routes the population offers, and how each is witnessed.**
 - **The bundled copy** `.codex/skills/flow-check/scripts/flow-finish-gate.sh` is the `gate_entrypoint`, declared bundled. It runs from a root-owned mirror of the skill's `scripts/`, proven against the skill's own `SHA256SUMS`, and is witnessed as `bundled:flow-check` by `docker/fixture-service/flow-check-bundled-gate-shim.py`.
 - **The checkout copy** `Projects/claude-power-pack/scripts/flow-finish-gate.sh` is declared in `checkout_gate_entrypoints` (orchestrator D1). It runs from a mirror proven against the verified closure digests, because a checkout ships no skill manifest. It is witnessed as `checkout:flow-check`.
-- **The bare call from a target worktree** never reaches a shim: the shell exits 127 (measured in the pinned image, #529). It reads `not-observed`.
+- **The anchored call with `CPP_SKILL_DIR` set** reaches the bundled copy, and so the shim (measured with real bash and the placed shim, #529).
+- **The anchored call with `CPP_SKILL_DIR` unset** fails closed at `/dev/null/scripts/...` with exit 126 and no `FLOW_FINISH_GATE` marker. It never reaches a shim, and reads `not-observed`; the Step-6 grader reads a following ship as VIOLATED (CPP #1547, #529).
+- **A bare `scripts/flow-finish-gate.sh` from a target worktree**, the pre-#1546 call, never reaches a shim either: the shell exits 127 (measured in the image, #529), or runs the target's own script.
 - **Any other argv** through a witnessed copy is refused with exit 125 and counted (#279).
 - **No `~/.claude/scripts`.** At this pin `SKILL.md` and `reference.md` name no installed helper. Agents choose the installed gate when it exists (7/7 flow-auto attempts at `ca3030d`, #529), so supplying one would hide CPP #1542.
 

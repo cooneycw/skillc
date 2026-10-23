@@ -34,10 +34,10 @@
         "UV_PYTHON": "/usr/bin/python3",
         "UV_PYTHON_DOWNLOADS": "never"
       },
-      "runtime_id": "cpp-codex-flow-check-b318a14b",
+      "runtime_id": "cpp-codex-flow-check-f857754d",
       "schema_version": 1,
       "subject_locator": "github.com/cooneycw/claude-power-pack",
-      "subject_revision": "b318a14b9e7935f2c50c0940144a5ff0ff9389ed",
+      "subject_revision": "f857754d2c49c157ab25dd671a68e5ecd935f85f",
       "uv_version": "0.9.7"
     }
   ]
