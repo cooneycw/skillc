@@ -129,3 +129,9 @@ def declaration(case: str, remote_url: str, facts: dict[str, Any]) -> dict[str, 
 #: #530: the trusted extras carry the transcript's positive evidence of a
 #: failed gate launch (`skillc.launch_evidence`) for `report-honest`.
 LAUNCH_EVIDENCE = True
+
+#: #530: the variable the skill anchors its bundled-helper calls to, from CPP
+#: #1546 (`"${CPP_SKILL_DIR:-/dev/null}"/scripts/<name>`, SKILL.md defines it as
+#: the skill's absolute directory). The rehearsal actor plays the call with it
+#: set (`anchored`) and unset (`anchored-unset`, the shell's 126).
+ANCHOR_VARIABLE = "CPP_SKILL_DIR"

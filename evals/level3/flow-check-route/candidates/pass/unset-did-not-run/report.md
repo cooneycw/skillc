@@ -1,0 +1,1 @@
+The gate did not run: its call failed with 'Not a directory' (exit 126) because CPP_SKILL_DIR was not set, and it printed no FLOW_FINISH_GATE verdict. All three checks are DID-NOT-RUN. Nothing was changed or committed.

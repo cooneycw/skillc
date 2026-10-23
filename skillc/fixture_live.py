@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
 import shutil
 import tempfile
@@ -100,15 +101,21 @@ CASES = ("clean", "twin")
 #: and rehearsal candidates. #434's declarations carry their path already, so
 #: they parse, digest and authorize exactly as before.
 STEP6_TASK_PATH = "evals/level3/flow-auto-step6-gate"
-TASKS: dict[str, tuple[str, ...]] = {TASK_PATH: CASES, STEP6_TASK_PATH: ("twin-gate",)}
+#: #530: the flow-check route task (one turn, the green rangekit case).
+FLOW_CHECK_TASK_PATH = "evals/level3/flow-check-route"
+TASKS: dict[str, tuple[str, ...]] = {TASK_PATH: CASES, STEP6_TASK_PATH: ("twin-gate",),
+                                     FLOW_CHECK_TASK_PATH: ("rangekit-green",)}
 CLIENT = "codex"
 EXPERIMENT_LABEL = "level3-fixture-live"
 TRIAL_PREFIX = "live"
 REPORT_KIND = "level3-fixture-live-report"
 REPORT_FILENAME = "live-report.json"
-REHEARSALS = ("dry", "actor", "actor-nested", "actor-bundled")
+REHEARSALS = ("dry", "actor", "actor-nested", "actor-bundled", "actor-checkout", "actor-unset")
 #: The rehearsals that run a scripted actor in a real container.
-ACTOR_REHEARSALS = ("actor", "actor-nested", "actor-bundled")
+ACTOR_REHEARSALS = ("actor", "actor-nested", "actor-bundled", "actor-checkout", "actor-unset")
+#: #530: rehearsals only the flow-check route task plays - its checkout route,
+#: and the anchored call with `CPP_SKILL_DIR` unset (a real 126).
+FLOW_CHECK_ONLY_REHEARSALS = ("actor-checkout", "actor-unset")
 UNKNOWN = calibration.UNKNOWN
 TOKEN_CAP_STATEMENT = ("no token cap exists in the stack: only wall time is capped (per attempt and in total); "
                        "each attempt's tokens are recorded from its own rollout")
@@ -121,7 +128,16 @@ REHEARSAL_CANDIDATES = {"clean": "pass/clean-cites-commit-only", "twin": "pass/t
 REHEARSAL_BY_TASK: dict[str, dict[str, str]] = {
     Path(TASK_PATH).name: REHEARSAL_CANDIDATES,
     # #279 PR-3: the credited Step-6 path, played by `STEP6_ACTOR_SOURCE`.
-    Path(STEP6_TASK_PATH).name: {"twin-gate": "pass/repair-gate-green-then-ship"}}
+    Path(STEP6_TASK_PATH).name: {"twin-gate": "pass/repair-gate-green-then-ship"},
+    # #530: the flow-check route task's default; `FLOW_CHECK_REHEARSAL_CANDIDATES`
+    # picks per rehearsal.
+    Path(FLOW_CHECK_TASK_PATH).name: {"rangekit-green": "pass/anchored-bundled-faithful"}}
+#: #530: which committed candidate each rehearsal plays on the flow-check task -
+#: one gate ROUTE each, so every route the population offers is rehearsed.
+FLOW_CHECK_REHEARSAL_CANDIDATES = {
+    "actor": "pass/anchored-bundled-faithful", "actor-nested": "pass/anchored-bundled-faithful",
+    "actor-bundled": "pass/absolute-bundled-faithful", "actor-checkout": "pass/checkout-faithful",
+    "actor-unset": "pass/unset-did-not-run"}
 #: #279 PR-2b (orchestrator ruling): a task whose rehearsal is OWED, and what it
 #: needs. The Step-6 task's credited path acts IN the approval turn (fix,
 #: repair, gate green, then ship), which `fixture_campaign.ACTOR_SOURCE` cannot
@@ -846,6 +862,127 @@ def step6_actor(task_root: Path, case: str, *, nested: bool = False,
     return ["/usr/bin/python3", f"{fc.CONTAINER_HOME}/{actor}", *eg.CODEX_SERVER_SIDE_OFF], home
 
 
+#: #530: the flow-check route task's actor (one turn). It plays a candidate's
+#: gate STEPS by ROUTE, for real in the container: `anchored` runs the skill's
+#: own call `"${CPP_SKILL_DIR:-/dev/null}"/scripts/<gate>` with `CPP_SKILL_DIR`
+#: set to the skill directory; `anchored-unset` runs it with the variable
+#: unset (the shell's real 126); `absolute` runs the bundled copy by path;
+#: `checkout` the checkout copy. Each step's real exit and output are appended
+#: to the transcript as the pinned client's `custom_tool_call_output` chunk -
+#: the shape `launch_evidence.scan` reads. Then it writes the candidate's
+#: `report.json` into the repository, and its final message. A new actor, never
+#: `fixture_campaign.ACTOR_SOURCE` (pinned bytes) or the Step-6 one.
+FLOW_CHECK_ACTOR_SOURCE = """\
+import json, os, subprocess, sys, time
+@CREDENTIAL_HELPERS@
+ARGS = {"plan": ["--plan", "check", "--evidence", "flow-check"], "summary": ["--check-summary"]}
+
+
+def write(path, text, append=False):
+    with open(path, "a" if append else "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def run_step(routes, repo, item):
+    args = ARGS[item["gate"]]
+    var = routes["anchor_variable"]
+    env = {k: v for k, v in os.environ.items() if k != var}
+    route = item["route"]
+    if route in ("anchored", "anchored-unset"):
+        if route == "anchored":
+            env[var] = routes["skill_dir"]
+        anchored = '"${%s:-/dev/null}"/scripts/%s' % (var, routes["gate"])
+        argv = ["bash", "-c", anchored + " " + " ".join(args)]
+    elif route == "absolute":
+        argv = [routes["bundled"], *args]
+    elif route == "checkout":
+        argv = [routes["checkout"], *args]
+    else:
+        raise SystemExit("unknown route %r" % route)
+    done = subprocess.run(argv, cwd=repo, env=env, capture_output=True, timeout=900)
+    return done.returncode, (done.stdout + done.stderr).decode("utf-8", errors="replace")
+
+
+def main():
+    home = os.environ["HOME"]
+    here = os.path.join(home, "@HOME_DIR@")
+    work = os.getcwd()
+    repo = os.path.join(work, "repo")
+    with open(os.path.join(here, "actions.json"), encoding="utf-8") as handle:
+        actions = json.load(handle)
+    with open(os.path.join(here, "@ROUTES_FILE@"), encoding="utf-8") as handle:
+        routes = json.load(handle)
+    present = client_reads()
+    nested = os.path.join(here, "@NESTED_FILE@")
+    if os.path.exists(nested):
+        with open(nested, encoding="utf-8") as handle:
+            command = json.load(handle)["command"]
+        subprocess.run(["codex", "sandbox", "-c", 'sandbox_mode="danger-full-access"', "--", "bash", "-lc",
+                        "timeout 20 %s </dev/null" % command])
+    else:
+        subprocess.run(["codex", "--version"])
+    results = [run_step(routes, repo, item) for item in actions["steps"]]
+    write(os.path.join(repo, "report.json"), json.dumps(actions["report"], indent=1) + "\\n")
+    transcript = os.path.join(home, "@TRANSCRIPT@")
+    subprocess.run([sys.executable, os.path.join(here, "fake_agent_client.py"), "--format", "codex-fake",
+                    "--home", home, "--transcript-relpath", "@TRANSCRIPT@", sys.argv[-1]], check=True)
+    for i, (code, output) in enumerate(results):
+        chunk = json.dumps({"chunk_id": "fc%04d" % i, "wall_time_seconds": 0.1, "exit_code": code,
+                            "original_token_count": len(output) // 4, "output": output}, separators=(",", ":"))
+        item = {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "gate-%d" % i,
+                "output": [{"type": "input_text", "text": "Script completed\\nOutput:\\n"},
+                           {"type": "input_text", "text": chunk}]}}
+        write(transcript, json.dumps(item) + "\\n", append=True)
+    with open(os.path.join(here, "report.md"), encoding="utf-8") as handle:
+        report = handle.read()
+    line = {"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                                                  "content": [{"type": "output_text", "text": report}]}}
+    write(transcript, json.dumps(line) + "\\n", append=True)
+    await_withdrawal(present)
+
+
+if __name__ == "__main__":
+    main()
+""".replace("@HOME_DIR@", fc.HOME_DIR).replace("@TRANSCRIPT@", fc.TRANSCRIPT_RELPATH).replace(
+    "@CREDENTIAL_HELPERS@", _CREDENTIAL_HELPERS).replace("@NESTED_FILE@", NESTED_REHEARSAL_FILE).replace(
+    "@ROUTES_FILE@", "flow-check-routes.json")
+
+
+def flow_check_actor(task_root: Path, case: str, rehearse: str,
+                     treatment: cr.Treatment) -> tuple[list[str], dict[str, bytes]]:
+    """#530: the flow-check route actor's base argv and home files for the
+    rehearsal `rehearse`; the routes come from the treatment's own declared
+    gate copies, never a path named here."""
+    candidate = FLOW_CHECK_REHEARSAL_CANDIDATES.get(rehearse)
+    if candidate is None or case not in TASKS[FLOW_CHECK_TASK_PATH]:
+        raise LiveRefused(f"no flow-check rehearsal candidate for {case}/{rehearse}")
+    bundled = treatment.bundled_gate_entrypoints
+    checkout = sorted(treatment.checkout_gate_entrypoints)
+    if not bundled:
+        raise LiveRefused("the flow-check route rehearsals need a profile that declares its bundled gate (#529)")
+    if rehearse == "actor-checkout" and not checkout:
+        raise LiveRefused("--rehearse actor-checkout needs a profile that declares a checkout gate copy (#529)")
+    # The skill's own anchoring variable is the TASK's declared fact (its
+    # builder), never a subject name in this module.
+    variable = getattr(fc._builder(task_root), "ANCHOR_VARIABLE", None)
+    if not isinstance(variable, str) or not variable:
+        raise LiveRefused("the flow-check route task declares no ANCHOR_VARIABLE for the anchored call")
+    routes = {"skill_dir": f"{fc.CONTAINER_HOME}/{posixpath.dirname(posixpath.dirname(bundled[0]))}",
+              "bundled": f"{fc.CONTAINER_HOME}/{bundled[0]}",
+              "checkout": f"{fc.CONTAINER_HOME}/{checkout[0]}" if checkout else "",
+              "gate": posixpath.basename(bundled[0]), "anchor_variable": variable}
+    files = fc.candidate_files(task_root, fc.Row(f"rehearsal-{case}", "scored", candidate, "top-level", "", None,
+                                                 {}, None))
+    actor = f"{fc.HOME_DIR}/flow_check_actor.py"
+    home = {actor: FLOW_CHECK_ACTOR_SOURCE.encode("utf-8"),
+            f"{fc.HOME_DIR}/fake_agent_client.py": fc.lc.FAKE_CLIENT.read_bytes(),
+            f"{fc.HOME_DIR}/actions.json": files["actions.json"], f"{fc.HOME_DIR}/report.md": files["report.md"],
+            f"{fc.HOME_DIR}/flow-check-routes.json": json.dumps(routes, sort_keys=True).encode("utf-8")}
+    if rehearse == "actor-nested":
+        home[f"{fc.HOME_DIR}/{NESTED_REHEARSAL_FILE}"] = json.dumps({"command": NESTED_REHEARSAL_COMMAND}).encode()
+    return ["/usr/bin/python3", f"{fc.CONTAINER_HOME}/{actor}", *eg.CODEX_SERVER_SIDE_OFF], home
+
+
 def rehearsal_actor(task_root: Path, case: str, *, turns: bool = False,
                     nested: bool = False, bundled_gate: str | None = None) -> tuple[list[str], dict[str, bytes]]:
     """The actor's base argv and home files for `case`: fixture_campaign's own,
@@ -916,7 +1053,10 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     if rehearse is not None and rehearse not in REHEARSALS:
         raise LiveRefused(f"rehearse must be one of {REHEARSALS}")
     bundled_rehearsal_gate: str | None = None
-    if rehearse == "actor-bundled":
+    flow_check_task = declaration.task_path == FLOW_CHECK_TASK_PATH
+    if rehearse in FLOW_CHECK_ONLY_REHEARSALS and not flow_check_task:
+        raise LiveRefused(f"--rehearse {rehearse} is the flow-check route task's rehearsal (#530)")
+    if rehearse == "actor-bundled" and not flow_check_task:
         if not treatment.bundled_gate_entrypoints:
             raise LiveRefused("--rehearse actor-bundled needs a subject profile that declares a bundled gate (#525)")
         bundled_rehearsal_gate = treatment.bundled_gate_entrypoints[0]
@@ -959,10 +1099,13 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable",
                                   reason=cr.REHEARSAL_REASON)
         case_turns = declaration.turns.for_case(scheduled.arm) if declaration.turns is not None else None
-        base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns),
-                                                 nested=rehearse == "actor-nested",
-                                                 bundled_gate=bundled_rehearsal_gate)
-                                 if rehearse in ACTOR_REHEARSALS else (argv, {}))
+        if rehearse in ACTOR_REHEARSALS and flow_check_task:
+            base_argv, home_extra = flow_check_actor(task_root, scheduled.arm, str(rehearse), treatment)
+        else:
+            base_argv, home_extra = (rehearsal_actor(task_root, scheduled.arm, turns=bool(case_turns),
+                                                     nested=rehearse == "actor-nested",
+                                                     bundled_gate=bundled_rehearsal_gate)
+                                     if rehearse in ACTOR_REHEARSALS else (argv, {}))
         agent, grading = backends()
         case_dir = run_dir / "fixtures" / scheduled.attempt_id
         surface, fixture = fc.build_case(task_root, scheduled.arm, case_dir)
