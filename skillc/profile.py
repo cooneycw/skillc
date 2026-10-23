@@ -108,8 +108,16 @@ _CHECKSUM_TOOLS = rb"sha256sum\s+(?:-c|--check)\b|shasum\b[^\n]*\s-c\b"
 
 def checksum_signature(manifest_name: str) -> re.Pattern[bytes]:
     """#525: what may verify a skill's checksums - a verification tool, or any
-    mention of the subject's declared checksum manifest by name."""
+    mention of the subject's declared checksum manifest by name. With no
+    manifest name, the tools alone (an empty alternative would match every file)."""
+    if not manifest_name:
+        return re.compile(_CHECKSUM_TOOLS)
     return re.compile(_CHECKSUM_TOOLS + b"|" + re.escape(manifest_name.encode("utf-8")))
+
+
+#: #529: a skill name that names a root-owned mirror directory - one path
+#: component, never `.`/`..` or hidden.
+_SAFE_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _FENCE = re.compile(r"^\s*```")
 
 #: #287 auto6: which harness witness a declared `gate_entrypoint` gets. The
@@ -423,10 +431,18 @@ class Profile:
                 raise Refused(f"checkout gate entrypoint {raw_path!r} is not a safe relative path")
             if gate_entrypoint is None or posixpath.basename(norm) != posixpath.basename(gate_entrypoint):
                 raise Refused(f"checkout gate entrypoint {raw_path!r} is not a copy of the declared gate_entrypoint")
-            if not isinstance(skill, str) or not skill or (select is not None and skill not in select):
+            # Counter-model review (#529): the skill names a root-owned mirror
+            # directory, so it is one safe path component AND a skill the
+            # profile selects by name - `select: all` names none to check.
+            if select is None:
+                raise Refused("checkout_gate_entrypoints needs an explicit select naming the skill of each copy")
+            if not isinstance(skill, str) or not _SAFE_COMPONENT.fullmatch(skill) or skill not in select:
                 raise Refused(f"checkout gate entrypoint {raw_path!r} names {skill!r}, not a selected skill")
             if norm in bundled or norm in checkout:
                 raise Refused(f"checkout gate entrypoint {raw_path!r} is declared twice")
+            if skill in checkout.values():
+                raise Refused(f"checkout gate entrypoint {raw_path!r}: one checkout copy per skill, since the route "
+                              f"checkout:{skill} and its mirror name exactly one copy (#529)")
             checkout[norm] = skill
         consumers: dict[str, str] = {}
         for entry in _list(data, "checksum_consumers") if "checksum_consumers" in data else []:
@@ -434,8 +450,8 @@ class Profile:
                     or not all(isinstance(entry[k], str) and entry[k].strip() for k in ("path", "reason"))):
                 raise Refused("each checksum_consumers entry is exactly {path, reason}, both non-empty")
             consumers[posixpath.normpath(str(entry["path"]))] = str(entry["reason"])
-        if consumers and not bundled:
-            raise Refused("checksum_consumers is declared only for a profile with bundled_gate_entrypoints")
+        if consumers and not bundled and not checkout:
+            raise Refused("checksum_consumers is declared only for a profile with a mirrored gate copy")
         if gate_entrypoint is not None and gate_entrypoint in checkout:
             raise Refused("gate_entrypoint may be a declared bundled copy, never a checkout copy (#529)")
         manifest = subject.checksum_manifest
@@ -451,7 +467,8 @@ class Profile:
             client_profiles=profiles, gate_entrypoint=gate_entrypoint,
             gate_witness=gate_witness if isinstance(gate_witness, str) else None,
             bundled_gate_entrypoints=tuple(bundled), checksum_consumers=consumers,
-            bundled_checksum_manifest=posixpath.basename(str(manifest)) if bundled else None,
+            bundled_checksum_manifest=(posixpath.basename(str(manifest))
+                                       if (bundled or checkout) and isinstance(manifest, str) and manifest else None),
             checkout_gate_entrypoints=checkout, raw=data,
         )
 
@@ -1287,6 +1304,12 @@ def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | Non
         if path not in files:
             problems.append(("checkout-gate-not-installed",
                              f"checkout gate entrypoint {path!r} is not installed by this population", path))
+        # Counter-model review (#529): the label never decides coverage. A
+        # copy beside the subject's skill manifest is a bundled copy.
+        if manifest_name and f"{posixpath.dirname(path)}/{manifest_name}" in files:
+            problems.append(("checkout-gate-in-skill",
+                             (f"checkout gate entrypoint {path!r} sits beside the skill manifest {manifest_name}: it "
+                              "is a bundled copy - declare it in bundled_gate_entrypoints (#529)"), path))
     if gate_entrypoint in bundled:
         # #529: a profile whose entrypoint is a mirrored copy installs no
         # installed gate by design; any OTHER copy it installs is a route an
@@ -1308,7 +1331,7 @@ def bundled_gate_problems(files: Mapping[str, bytes], gate_entrypoint: str | Non
                              (f"{skill_dir} invokes its bundled {relative}, which the harness does not witness: "
                               f"declare {copy!r} in bundled_gate_entrypoints (#525) - an unwitnessed gate reads "
                               "not-observed"), copy))
-    if not bundled:
+    if not bundled and not checkout:
         return problems
     signature = checksum_signature(manifest_name or "")
     for dest, data in sorted(files.items()):

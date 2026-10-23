@@ -257,3 +257,49 @@ def test_red_a_delivered_neighbour_skills_gate_is_refused() -> None:
     files[neighbour] = files[BUNDLED]
     files[".codex/skills/flow-auto/reference.md"] = b"```bash\nscripts/flow-finish-gate.sh\n```\n"
     assert ("gate-copy-unwitnessed", neighbour) in _assembly_problems(files)
+
+
+# --- counter-model review reds (Codex, #529) ------------------------------------------
+
+@pytest.mark.parametrize("skill", ["../../../../home/candidate/redirect", "..", ".hidden", "a/b", ""])
+def test_review_an_unsafe_checkout_skill_name_is_refused(tmp_path: Path, skill: str) -> None:
+    """HIGH: the skill names the root-owned mirror directory, so it must be a
+    single safe path component - never a traversal into the candidate's home."""
+    data = _json(SUBJECT_DIR / "profile.json")
+    data["checkout_gate_entrypoints"] = {CHECKOUT: skill}
+    with pytest.raises(p.Refused):
+        _diagnose(data, tmp_path)
+
+
+def test_review_a_checkout_copy_needs_an_explicit_select(tmp_path: Path) -> None:
+    """HIGH (Codex): under `select: all` the skill name went unchecked, so a
+    traversal value reached the root-owned mirror path. The real red for it,
+    with the controller guard; the parametrized case above is caught by
+    membership in this profile's explicit select."""
+    data = _json(SUBJECT_DIR / "profile.json")
+    data["select"] = "all"
+    with pytest.raises(p.Refused, match="explicit select"):
+        _diagnose(data, tmp_path)
+
+
+def test_review_one_checkout_copy_per_skill(tmp_path: Path) -> None:
+    """MEDIUM: two copies on one `checkout:<skill>` route would share a variant
+    and a mirror, so one would run while both read witnessed."""
+    data = _json(SUBJECT_DIR / "profile.json")
+    data["checkout_gate_entrypoints"] = {CHECKOUT: "flow-check",
+                                         "Projects/other-checkout/scripts/flow-finish-gate.sh": "flow-check"}
+    with pytest.raises(p.Refused, match="one checkout copy per skill"):
+        _diagnose(data, tmp_path)
+
+
+def test_review_a_skill_copy_relabelled_checkout_is_refused_and_consumers_still_scanned() -> None:
+    """MEDIUM: the label must not decide the coverage. A copy beside the
+    skill's own manifest is a bundled copy; and with ANY mirrored copy the
+    checksum-consumer preflight runs."""
+    files = {BUNDLED: b"#!/usr/bin/env bash\n", ".codex/skills/flow-check/scripts/SHA256SUMS": b"",
+             ".codex/skills/flow-check/scripts/verify.sh": b"sha256sum -c SHA256SUMS\n"}
+    problems = [(c, path) for c, _m, path in p.bundled_gate_problems(
+        files, CHECKOUT, (), {}, manifest_name="SHA256SUMS", require_consumers_installed=False,
+        checkout={BUNDLED: "flow-check"})]
+    assert ("checkout-gate-in-skill", BUNDLED) in problems
+    assert ("checksum-consumer-undeclared", ".codex/skills/flow-check/scripts/verify.sh") in problems

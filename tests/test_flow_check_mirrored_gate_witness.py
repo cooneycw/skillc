@@ -396,3 +396,29 @@ def test_red_6_where_the_target_has_its_own_script_the_bare_call_runs_that(tmp_p
     own.chmod(0o755)
     proc = _bare(repo)
     assert (proc.returncode, proc.stdout) == (0, "THE-TARGETS-OWN-SCRIPT\n")
+
+
+# ------------------------------------------------------------------ counter-model review reds
+
+@pytest.mark.parametrize("skill", ["../../../../home/candidate/redirect", "..", "a/b"])
+def test_review_the_controller_refuses_an_unsafe_mirror_name(monkeypatch: pytest.MonkeyPatch, skill: str) -> None:
+    """HIGH, defence in depth: whatever a profile says, no privileged write
+    lands outside the harness root."""
+    home = _home()
+    backend = _OverlayBackend(home)
+    with pytest.raises(at.HomeFileVerificationRefused, match="unsafe"):
+        at._overlay_bundled_gates(backend, object(), (), _verified(home), home,  # type: ignore[arg-type]
+                                  None, SHIM.read_bytes(), None, checkout={CHECKOUT: skill})
+    assert not [k for k in backend.files if not k.startswith("/home/candidate/Projects/")]  # nothing written
+
+
+def test_review_two_copies_on_one_route_are_refused_before_any_write() -> None:
+    """MEDIUM: a route and a mirror name exactly one copy."""
+    home = {**_home(), "Projects/other/scripts/flow-finish-gate.sh": REAL_GATE}
+    backend = _OverlayBackend(home)
+    with pytest.raises(at.HomeFileVerificationRefused, match="one route"):
+        at._overlay_bundled_gates(backend, object(), (), _verified(home), home,  # type: ignore[arg-type]
+                                  None, SHIM.read_bytes(), None,
+                                  checkout={CHECKOUT: "flow-check", "Projects/other/scripts/flow-finish-gate.sh":
+                                            "flow-check"})
+    assert set(backend.files) == {f"/home/candidate/{k}" for k in home}

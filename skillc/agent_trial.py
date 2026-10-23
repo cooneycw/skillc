@@ -535,6 +535,8 @@ _BUNDLED_GATE_HARNESS_ROOT = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/bundled"
 #: #529: each witnessed CHECKOUT gate copy's mirror, and the controller-written
 #: manifest that proves it (a checkout ships no skill manifest).
 _CHECKOUT_GATE_HARNESS_ROOT = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/checkout"
+#: #529 (counter-model review): a mirror path component - one safe name.
+_SAFE_MIRROR_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def bundled_gate_shim(shim_source: bytes, via: str) -> bytes:
@@ -571,13 +573,24 @@ def _overlay_bundled_gates(
     deviations: list[dict[str, object]] = []
     copies: list[tuple[str, str, str | None]] = [(path, _bundled_via(path), None) for path in bundled]
     copies += [(path, f"checkout:{skill}", skill) for path, skill in sorted((checkout or {}).items())]
+    planned: list[tuple[str, str, str | None, str]] = []
     for path, via, checkout_skill in copies:
+        # Counter-model review (#529): every name a mirror path is built from
+        # is one safe component, so no privileged write leaves the harness
+        # root; and a route and a mirror name exactly one copy. Checked for
+        # ALL copies before the first write.
+        owner = via.split(":", 1)[1]
+        dir_name = posixpath.basename(posixpath.dirname(path))
+        if not (_SAFE_MIRROR_COMPONENT.fullmatch(owner) and _SAFE_MIRROR_COMPONENT.fullmatch(dir_name)):
+            raise HomeFileVerificationRefused(f"gate copy {path!r} names an unsafe mirror ({owner!r}, {dir_name!r})")
+        root = _BUNDLED_GATE_HARNESS_ROOT if checkout_skill is None else _CHECKOUT_GATE_HARNESS_ROOT
+        planned.append((path, via, checkout_skill, f"{root}/{owner}/{dir_name}"))
+    if len({v for _p, v, _s, _m in planned}) != len(planned) or len({m for *_x, m in planned}) != len(planned):
+        raise HomeFileVerificationRefused("two gate copies would share one route or one mirror: a route names exactly "
+                                          "one copy (#529)")
+    for path, via, checkout_skill, mirror in planned:
         scripts_dir = posixpath.dirname(path)
         gate_name = posixpath.basename(path)
-        if checkout_skill is None:
-            mirror = f"{_BUNDLED_GATE_HARNESS_ROOT}/{via.split(':', 1)[1]}/{posixpath.basename(scripts_dir)}"
-        else:
-            mirror = f"{_CHECKOUT_GATE_HARNESS_ROOT}/{checkout_skill}/{posixpath.basename(scripts_dir)}"
         real_digest = verify_home_files.get(path)
         if real_digest is None:
             raise HomeFileVerificationRefused(f"gate copy {path!r} is not in the verified closure")
