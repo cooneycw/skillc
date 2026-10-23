@@ -1158,9 +1158,12 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     def record_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
         if stop.trigger is None:
+            # The token pause reads the client's own rollout total, which only
+            # a LIVE attempt has: a scripted actor records none by construction.
             trigger = (containment_trigger(outcome.record, allowlist_digest=allowlist,
                                            nested_policy=declaration.nested_policy)
-                       or token_pause_trigger(outcome.record, declaration.shared.get("token_pause_per_attempt")))
+                       or (token_pause_trigger(outcome.record, declaration.shared.get("token_pause_per_attempt"))
+                           if rehearse is None else None))
             if trigger is not None:
                 stop.trigger, stop.at_attempt = trigger, outcome.scheduled.attempt_id
         if on_outcome is not None:

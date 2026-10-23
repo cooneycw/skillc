@@ -80,6 +80,9 @@ class AttemptFixture:
     #: flow-check-route task's `report-honest`). Off keeps every earlier
     #: fixture's record byte-identical.
     launch_evidence: bool = False
+    #: #530: gate name -> runner plan whose stage outcomes a run of it carries
+    #: (`stage_capture`). Empty keeps every earlier fixture stage-less.
+    stage_plans: Mapping[str, str] = field(default_factory=dict)
 
 
 class _FixtureBackend(Protocol):

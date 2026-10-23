@@ -135,3 +135,7 @@ LAUNCH_EVIDENCE = True
 #: the skill's absolute directory). The rehearsal actor plays the call with it
 #: set (`anchored`) and unset (`anchored-unset`, the shell's 126).
 ANCHOR_VARIABLE = "CPP_SKILL_DIR"
+
+#: #530: a `flow-check-plan` run carries the runner's `check` plan stages
+#: (lint, test, typecheck), which `report-honest` reconciles the report against.
+STAGE_PLANS = {"flow-check-plan": "check"}

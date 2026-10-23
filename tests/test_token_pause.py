@@ -17,6 +17,18 @@ from skillc import fixture_live as fl
 BOUND = 1_500_000
 
 
+def _draft() -> dict[str, Any]:
+    """`test_fixture_live._draft()`, loaded by path (one module name for mypy)."""
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent / "test_fixture_live.py"
+    spec = importlib.util.spec_from_file_location("fixture_live_tests_for_token_pause", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._draft()  # type: ignore[no-any-return]
+
+
 def _record(total: Any, disposition: str = "captured") -> dict[str, Any]:
     usage = {"total_tokens": total} if total is not None else None
     return {"disposition": disposition, "observation": {"run_metadata": {"token_usage": usage}}}
@@ -44,7 +56,6 @@ def test_no_declared_bound_or_no_dispatch_never_pauses() -> None:
 
 @pytest.mark.parametrize("value", [0, -1, True, 1.5e6, "1500000"])
 def test_red_a_malformed_declared_bound_is_refused(value: Any) -> None:
-    from tests.test_fixture_live import _draft
     data = _draft()
     fl.parse_declaration(data)  # the draft parses as is
     data["shared"]["token_pause_per_attempt"] = value
@@ -53,7 +64,6 @@ def test_red_a_malformed_declared_bound_is_refused(value: Any) -> None:
 
 
 def test_a_declared_bound_is_inside_the_digest() -> None:
-    from tests.test_fixture_live import _draft
     data = _draft()
     before = fl.parse_declaration(data).digest
     data["shared"]["token_pause_per_attempt"] = BOUND

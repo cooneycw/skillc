@@ -665,7 +665,8 @@ def _gate_witness_choice(
             raise HomeFileVerificationRefused("gate_witness 'flow-finish' needs a declared gate_entrypoint to witness")
         return {_FLOW_FINISH_GATE: ()}, {_FLOW_FINISH_GATE: _FLOW_FINISH_PLAN}, _FLOW_AUTO_GATE_SHIM_SOURCE
     if fixture is not None:
-        return fixture.gates, None, fixture.gate_shim_source
+        # #530: a fixture may declare which gate carries which plan's stages.
+        return fixture.gates, (dict(fixture.stage_plans) or None), fixture.gate_shim_source
     return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
 
 
