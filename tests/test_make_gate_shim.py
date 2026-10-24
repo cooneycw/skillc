@@ -316,7 +316,8 @@ def test_a_gate_invocation_writes_back_the_controllers_reply(
         "stdout_b64": base64.b64encode(b"python3 ci/lint.py\n\xff").decode(),
         "stderr_b64": base64.b64encode(b"make: *** boom\n").decode()}})
     shim = _load_shim(monkeypatch, tmp_path / "s", real_make)
-    monkeypatch.delenv("MAKEFLAGS", raising=False)
+    for name in pg.MAKE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
     assert shim.main(["make", "check"]) == 2
     out = capsysbinary.readouterr()
     # Exact bytes, a non-UTF-8 one included: the reply is never decoded.
@@ -620,3 +621,13 @@ def test_an_unconfirmed_stage_stop_is_never_erased_by_a_later_probe(probe_stop: 
     assert result.stop_confirmed is False
     assert backend.calls[-1] == [pg.REAL_MAKE, "test"]  # nothing ran after the unconfirmed stage
     assert isinstance(capture["stages"], dict) and capture["stages"]["test"]["outcome"] is None
+
+
+def test_roundtrip_is_hermetic_under_make_environment() -> None:
+    test_env = {**os.environ, "MAKEFLAGS": "", "MFLAGS": "", "MAKELEVEL": "1"}
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(Path(__file__).resolve())
+         + "::test_a_gate_invocation_writes_back_the_controllers_reply"],
+        cwd=ROOT, env=test_env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
