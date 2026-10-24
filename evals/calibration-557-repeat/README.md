@@ -1,10 +1,11 @@
 # #557: fresh historical B/N/P repeat
 
-Approval checkpoint (2026-10-24): **launch authorized; trials not yet started
-at this checkpoint**. The owner requested 18 new attempts; the wave
-orchestrator reviewed the exact declaration under delegated authority. Its
-`approval` records that real review at canonical digest
+Status (2026-10-24): **completed and source-audited, 18/18 captured, 0/18
+primary PASS**. See [report.md](report.md) for all outcomes, source references,
+usage and interpretation limits. The exact declaration was approved under the
+owner's 18-attempt delegation at digest
 `sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee`.
+This completed run is not authorization to invoke the launch commands again.
 This directory does not restore `calibration-09960aea` or its missing private
 source. Its original [report](../calibration-203-c3/report.md) remains historical.
 
