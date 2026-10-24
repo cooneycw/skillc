@@ -1,0 +1,1 @@
+{"verdict": "intact", "notes": "The rollback section matches approved.diff exactly and appears directly after Verify health. The separately approved Notify on-call section remains present; no runbook changes were needed."}
