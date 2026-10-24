@@ -2726,6 +2726,32 @@ def cmd_profile_diagnose(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retained_export(args: argparse.Namespace) -> int:
+    """Archive or reproduce retained evidence without executing a trial."""
+    from . import retained_export as retained
+
+    try:
+        if args.reproduce:
+            if any((args.run, args.declaration, args.profile, args.repo, args.snapshot, args.out)):
+                raise retained.ExportRefused("--reproduce cannot be combined with export inputs")
+            report, coverage_report = retained.reproduce(Path(args.reproduce))
+            print(json.dumps({"report": report, "coverage": coverage_report}, indent=2))
+        else:
+            if not all((args.run, args.declaration, args.profile, args.out)):
+                raise retained.ExportRefused("export requires --run, --declaration, --profile and --out")
+            retained.export_retained(
+                Path(args.run), Path(args.declaration), Path(args.profile), Path(args.out),
+                root=Path(__file__).resolve().parent.parent,
+                repo=Path(args.repo) if args.repo else None,
+                snapshot=Path(args.snapshot) if args.snapshot else None,
+            )
+            print("skillc: retained export published; historical results preserved, no trial executed")
+    except (retained.ExportRefused, profile.Refused, OSError, ValueError) as exc:
+        print(f"skillc: retained export REFUSED - {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Separate from `main` so #73's README drift check can introspect the
     real subcommand set (`registered_commands` in `ci/readme_drift.py`)
@@ -2738,6 +2764,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"%(prog)s {__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_retained = sub.add_parser("retained-export", help="export retained fixture-live records without a trial")
+    p_retained.add_argument("--reproduce", metavar="EXPORT", help="reproduce public summaries; no private store needed")
+    p_retained.add_argument("--run", help="retained fixture-live run directory")
+    p_retained.add_argument("--declaration", help="the run's approved declaration")
+    p_retained.add_argument("--profile", help="the declared profile.json")
+    p_retained.add_argument("--out", help="fresh export destination (never replaced)")
+    p_source = p_retained.add_mutually_exclusive_group()
+    p_source.add_argument("--repo", help="local subject git repository; read its pinned revision")
+    p_source.add_argument("--snapshot", help="subject source snapshot (verified against approved inventory)")
+    p_retained.set_defaults(func=cmd_retained_export)
 
     p_check = sub.add_parser("check", help="refuse to build skills the spec rejects")
     p_check.add_argument("path", nargs="?", default=".", help="skill dir, tree, or SKILL.md")
