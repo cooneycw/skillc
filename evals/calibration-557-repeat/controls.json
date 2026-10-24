@@ -1,0 +1,58 @@
+[
+  {
+    "name": "current-task-in-original-declaration",
+    "action": "original-current-task",
+    "refusal": "revision"
+  },
+  {
+    "name": "changed-image-stale-approval",
+    "action": "stale-image",
+    "refusal": "declaration_digest"
+  },
+  {
+    "name": "changed-task-bytes",
+    "action": "task-content",
+    "refusal": "task_content differs"
+  },
+  {
+    "name": "changed-schedule",
+    "action": "schedule",
+    "refusal": "arm_order.sequence"
+  },
+  {
+    "name": "temporary-run-store",
+    "action": "temp-store",
+    "refusal": "not durable"
+  },
+  {
+    "name": "stale-controller-source",
+    "action": "controller",
+    "refusal": "controller source differs"
+  },
+  {
+    "name": "missing-launch-approval",
+    "action": "missing-approval",
+    "refusal": "not approved"
+  },
+  {
+    "name": "actual-controller-byte-drift",
+    "action": "controller-bytes",
+    "path": "skillc/__init__.py",
+    "append": "\n# committed negative-control mutation\n",
+    "refusal": "source bytes or executable mode differs: __init__.py"
+  },
+  {
+    "name": "actual-historical-fixture-byte-drift",
+    "action": "archive-bytes",
+    "path": "fixture/docs/runbook.md",
+    "append": "\ncommitted negative-control mutation\n",
+    "refusal": "source bytes or executable mode differs"
+  },
+  {
+    "name": "loadable-divergent-bytecode",
+    "action": "divergent-bytecode",
+    "source": "VALUE = 'SOURCE'\n",
+    "cached_source": "VALUE = 'CACHE'\n",
+    "refusal": "loadable divergent bytecode excluded by preflight and qualifier; source executed"
+  }
+]

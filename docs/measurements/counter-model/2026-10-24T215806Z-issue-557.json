@@ -1,0 +1,31 @@
+{
+  "branch": "issue-557-repeat-the-18-attempt-helper-different-question-ca",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "5ece908196fc5811293522c30fd3ab20b581a1aa",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-39-48-01a16fdb-0b9d-7133-83ae-fd9718f95524.jsonl",
+    "thread_id": "01a16fdb-0b9d-7133-83ae-fd9718f95524"
+  },
+  "issue": "557",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-24T21:58:06Z",
+  "red_cases": {
+    "already_covered": 1,
+    "proposed": 16
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-56-13-01a16fea-1043-78e1-aca2-39ada3ae7fba.jsonl",
+    "thread_id": "01a16fea-1043-78e1-aca2-39ada3ae7fba"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
