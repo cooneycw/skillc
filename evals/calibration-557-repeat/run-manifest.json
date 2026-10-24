@@ -2,7 +2,7 @@
   "kind": "calibration-declaration",
   "issue": 557,
   "declared_at": "2026-10-24",
-  "_comment": "Fresh owner-requested repeat, not historical evidence restoration. Preparation approved by skillc-complete orchestrator; exact declaration launch approval outstanding.",
+  "_comment": "Fresh owner-requested repeat, not historical evidence restoration. The approval field records the actual exact-declaration launch review under delegated owner authority.",
   "approval": null,
   "task": {
     "path": "evals/calibration-557-repeat/historical-task-v1",

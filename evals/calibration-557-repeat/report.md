@@ -97,9 +97,15 @@ not assert every suggested extension was implemented.
 ## Frozen preparation verification
 
 Canonical unapproved declaration:
-`sha256:1b888ca6a77ada22768c9226a2ff3e8b8302ecaa80db013c600e5e02c3993797`.
-Root independently recomputed and reviewed this digest; actual launch approval
-remains absent until its separate ruling. Source freeze is true, and no later
+`sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee`.
+The prior source-frozen digest
+`sha256:1b888ca6a77ada22768c9226a2ff3e8b8302ecaa80db013c600e5e02c3993797`
+was independently reviewed by root. Root then requested neutral, stable wording
+in the hash-bound manifest comment before launch approval. That prose-only edit
+produced the digest above; its final exact ruling remains pending. The full
+suite does not need repeating for this comment change under root's explicit
+ruling; all runtime/source/schedule identities remain the same. Actual launch
+approval remains absent until the separate ruling. Source freeze is true, and no later
 wave merge may silently replace the reviewed runtime.
 
 `make verify` exited 0 on this frozen source/preparation. Pytest: 6907 passed,
