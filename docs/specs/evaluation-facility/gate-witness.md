@@ -675,3 +675,40 @@ re-read against the code in #508.
 - **The grader that reads these runs across gates** is
   `evals/level3/gate-stops-early-agent-chooses` (`gate-report-honest`'s
   cross-gate rule and its counted UNKNOWN reason codes).
+
+### Retained run output (#547, additive version-3 metadata)
+
+Each newly serialized run has `output.stdout` and `output.stderr`. A controller
+output sink stores the raw bytes as content-addressed objects and returns the
+digest; the run holds metadata only, never an `ExecuteResult` or output buffer:
+
+```json
+{"coverage":"complete","digest":"sha256:...","size":123,"truncated":false,"incomplete":false}
+```
+
+Each stream is bounded by its corresponding execution capture limit. A bounded
+prefix, backend truncation or an incomplete drain is `partial`, with the flags
+set explicitly. `size` is the retained prefix's size, not an assertion about
+bytes the backend did not observe. Actual empty bytes are complete size-zero
+objects. Missing raw output or no controller sink is `missing`; rejected unsafe
+output or a storage error is `refused`. Those states name a reason and carry no
+byte reference. A backend's human error summary is never retained as raw stderr.
+
+The production sink applies the existing identity/credential leak checks before
+storage. Refusal records only the failure class, never the unsafe bytes or
+exception payload. Retention does not change the gate's exit code, reply or
+execution/credit conclusions. A partial or refused output is never presented as
+whole output. The normal channel refusal for incomplete output still applies.
+
+`read_run_output` validates metadata, loads the referenced bytes, and checks both
+size and content digest. Missing/altered bytes and contradictory flags refuse;
+missing/refused/historical output returns no bytes, which is distinct from an
+actual empty stream. Historical version-3 runs without `output` remain readable
+and say nothing about their output. This optional-field extension does not
+change the v2 artifact-manifest or any other v2 record schema.
+
+The live driver retains a diagnostic witness snapshot through a
+`gate-witness-retained` journal detail event even when grading is blocked. If
+channel finalization failed, the retained witness records unavailable coverage;
+retaining that diagnostic snapshot does not authorize grading. Storage refusal
+is explicit rather than a claim that a witness was retained.
