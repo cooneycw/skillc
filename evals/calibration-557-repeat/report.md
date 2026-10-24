@@ -1,7 +1,10 @@
 # #557 repeat: preparation evidence
 
 Status: preparation only. No new subscription model attempt has run. The
-declaration is unapproved and the post-#547 controller freeze is outstanding.
+declaration is unapproved. The post-#547 controller freeze was approved by
+the wave orchestrator on 2026-10-24 at source
+`5f302a0619dfc88a53025bd177489214353eed0f`, with reviewed retention merge
+`c80455538d4412391a375b76202f8c4ec6338be7` in its ancestry.
 This is a new requested experiment, not a reconstruction of historical
 `calibration-09960aea`.
 
@@ -50,8 +53,9 @@ inspection does not establish actual attempt containment, uptake or outcome.
 
 ## Still owed
 
-Freeze and review controller/runtime dependency identities after #547 retention
-merges. Review the final declaration digest under delegated authority, verify
+The reviewed controller/runtime dependency identities are frozen in the
+declaration and the full verification gate passed. Review the final declaration
+digest under delegated authority, verify
 the actual launch boundaries, and execute precisely the 18 planned slots once.
 Retain every attempt and object byte privately, including failures and unknowns.
 No observed client/model/effort, trial outcome, uptake, actual egress/guard
@@ -89,3 +93,30 @@ these are model-free post-review checks, not a claim of a clean third review.
 The receipt's red-case counts enumerate the 16 groups across both review
 reports, with one complete historical-grader group already covered; they do
 not assert every suggested extension was implemented.
+
+## Frozen preparation verification
+
+Canonical unapproved declaration:
+`sha256:1b888ca6a77ada22768c9226a2ff3e8b8302ecaa80db013c600e5e02c3993797`.
+Root independently recomputed and reviewed this digest; actual launch approval
+remains absent until its separate ruling. Source freeze is true, and no later
+wave merge may silently replace the reviewed runtime.
+
+`make verify` exited 0 on this frozen source/preparation. Pytest: 6907 passed,
+5 expected skips, 6912 independently collected identities matched the JUnit
+report. Ruff and mypy passed (316 source files). Selftest and the general,
+typecheck, leak, secret-scan, git-execution and pytest-population negative
+controls passed: the planted type error and secret were detected, the short
+population/missing or skip-corrupted execution reports were refused, and the
+corresponding valid inputs passed. Changelog and README drift checks passed.
+The privacy scan found no matching leaks in 5544 files under its configured
+patterns/exclusions; no hostname deny-list was configured. Raw logs and JUnit
+population evidence are retained privately, not published as trial evidence.
+
+The five skips comprise two diagnosed frontmatter cases, the deliberately
+opt-in timeout negative control, and two real-Docker cleanup tests reserved
+for the separate locked real-Docker runner to avoid affecting neighbours.
+The full model-free prepare after source freeze passed all ten committed
+preflight controls, actual image/client and credential eligibility checks,
+and grader certification (five broken graders refused, 13 validity controls).
+Launch-ready still exited 1 when approval was absent. No model trial has run.

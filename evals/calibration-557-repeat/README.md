@@ -16,7 +16,7 @@ source. Its original [report](../calibration-203-c3/report.md) remains historica
 | Client | Codex `0.157.1` | Replacement image actually reports `codex-cli 0.157.1` |
 | Model/effort | `gpt-6-astra`, `high` | Same declared request; observed facts reported separately |
 | Image | `sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44` (unavailable) | `sha256:b9816879e22d1f62dc6b8614c787e7666c1d9f438437c3d03d3c622513d1a563` |
-| Controller | Historical checkout | Reviewed current source after #547 retention merges; freeze still outstanding |
+| Controller | Historical checkout | Reviewed source `5f302a0619dfc88a53025bd177489214353eed0f` after #547; frozen |
 | Evidence | Historical report; complete source not located | New durable private run store; no old attempt identities reused |
 
 Revision 1 has an interpretation ambiguity: its public goal requests the exact
@@ -75,6 +75,12 @@ descriptor, `pyproject.toml` and `uv.lock`. It compares the actual working
 files, population and executable bits against that source, including untracked
 files (except Python bytecode caches). A changed source is a refusal, even if
 a later source tree would independently pass its tests.
+
+Source freeze approved by the wave orchestrator on 2026-10-24: controller
+`5f302a0619dfc88a53025bd177489214353eed0f`, containing reviewed retention merge
+`c80455538d4412391a375b76202f8c4ec6338be7`. The declaration records its five
+source objects and `retention_547_reviewed: true`; launch approval stays null.
+Later wave merges must not replace this runtime.
 
 The source commit is the reviewed controller base, rather than the commit
 containing this manifest, which would make its identity self-referential. After

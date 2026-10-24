@@ -107,14 +107,14 @@
   ],
   "run_store": "~/.local/share/skillc/calibration-557-repeat",
   "controller": {
-    "source_commit": "5ece908196fc5811293522c30fd3ab20b581a1aa",
-    "retention_547_reviewed": false,
+    "source_commit": "5f302a0619dfc88a53025bd177489214353eed0f",
+    "retention_547_reviewed": true,
     "objects": {
-      "skillc": "d62e03de0cbfc843ee7cfb9ba44eef1e8e97f53b",
+      "skillc": "8cae4875107661a15d07e6407ab7d99482514dd0",
+      "docker": "174555514d98ace2c68153f4d9922a3389c045e3",
       "evals/subjects/cpp-codex": "2f6f16635b5ff30d0815b015d7c8bc339b141cf3",
       "pyproject.toml": "4f1f5d1fda357bcac26d38b25c76c9f6825a2b50",
-      "uv.lock": "646e6922d78f5954d3449814fd26cab2e7dc9a1b",
-      "docker": "174555514d98ace2c68153f4d9922a3389c045e3"
+      "uv.lock": "646e6922d78f5954d3449814fd26cab2e7dc9a1b"
     }
   },
   "historical_source": {
