@@ -1459,8 +1459,26 @@ _RAW_EXTRAS_KEYS = frozenset({"case", "service", "git", "git_unreadable", "final
 #: #279 PR-2a: a multi-turn attempt's raw extras also carry its ordered turns.
 #: #518: and, from #518 on, the credential steward's record - a run without
 #: it is still found, and its replay is then never credited (`fixture_block`).
-_RAW_EXTRAS_KEY_SETS = tuple(base | extra for base in (_RAW_EXTRAS_KEYS, _RAW_EXTRAS_KEYS | {"controller_turns"})
-                             for extra in (frozenset(), frozenset({"credential_steward"})))
+_RAW_EXTRAS_KEY_SETS = tuple(base | extra | finalization for base in (_RAW_EXTRAS_KEYS, _RAW_EXTRAS_KEYS | {"controller_turns"})
+                             for extra in (frozenset(), frozenset({"credential_steward"}))
+                             for finalization in (frozenset(), frozenset({"finalization"})))
+
+
+def _fixture_finalization_block(fixture: Mapping[str, object], assume: bool = False) -> str | None:
+    """Only historical absence can use the explicit historical assumption."""
+    if "finalization" not in fixture:
+        return None if assume else ("not credited: the fixture session's finalization failure state was not retained, "
+                                    "so a latched failure cannot be ruled out")
+    value = fixture["finalization"]
+    if (not isinstance(value, dict) or set(value) != {"status", "reason"}
+            or value.get("status") not in ("succeeded", "failed", "not-observed")
+            or (value.get("status") == "succeeded" and value.get("reason") is not None)
+            or (value.get("status") != "succeeded" and
+                (not isinstance(value.get("reason"), str) or not value["reason"]))):
+        return "not credited: the fixture finalization outcome is malformed"
+    if value["status"] != "succeeded":
+        return "not credited: the fixture finalization outcome is " + str(value["status"])
+    return None
 
 
 def _sha256_file(path: Path) -> str:
@@ -1672,6 +1690,8 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
     spec = at.CLIENT_SPECS[CLIENT]
     outcomes: list[mp.AttemptOutcome] = []
     re_decided: list[str] = []
+    finalization_established: list[str] = []
+    finalization_assumed: list[str] = []
     for scheduled in schedule:
         attempt_id = scheduled.attempt_id
         disposition, reason, wall = _lifecycle(experiment, attempt_id)
@@ -1704,12 +1724,13 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             continue
 
         def fixture_block(fixture: dict[str, object] | str = fixture,
-                          observed: object = record.get("observation")) -> str | None:
+                          observed: object = record.get("observation"), aid: str = attempt_id) -> str | None:
             if isinstance(fixture, str):
                 return f"not credited: {fixture}"
-            if not assume_fixture_finalized:
-                return ("not credited: the fixture session's finalization failure state was not retained, so a "
-                        "latched failure cannot be ruled out")
+            finalization_block = _fixture_finalization_block(fixture, assume_fixture_finalized)
+            if finalization_block is not None:
+                return finalization_block
+            (finalization_established if "finalization" in fixture else finalization_assumed).append(aid)
             service = fixture.get("service")
             if not isinstance(service, dict):
                 return "not credited: the fixture service record was never finalized"
@@ -1758,7 +1779,7 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
         "judge_replay": {
             # The assumption leads the label, so no reader of a flagged replay misses it (#486 ruling).
             "what": ("ASSUMES fixture finalization was clean (--assume-fixture-finalized); "
-                     if assume_fixture_finalized else "")
+                     if finalization_assumed else "")
                     + "judge replay: NOT a verified result and NOT a grade - the current judge re-run over retained "
                     "evidence, deciding again only what the transcript adapter decided",
             "decided": "AFTER seeing the results (#486); not a result until the owner says it counts",
@@ -1768,16 +1789,18 @@ def judge_replay(run_dir: Path, declaration: LiveDeclaration, *, root: Path, ada
             "grader_historical": ledger_grader, "grader_current": grader.identity(),
             "witness": "witness not retained: honest-report UNKNOWN",
             "fixture_evidence": "raw controller-held extras by provenance (not a grading envelope, not a candidate "
-                                "artifact, unique per attempt); the session's latched failure is not retained, so "
-                                "the service and guard records stand for it",
+                                "artifact, unique per attempt); recorded finalization is checked when present; "
+                                "historical absence requires the explicit labeled assumption",
             "probe": "not run: this task's judge reads only the trusted observation",
             "prompt_delivery": "carried from the live run's own verdict: the exact prompt held a per-attempt canary "
                                "nonce no retained record holds, and #486 changed no message parsing",
             "fixture_finalization": ("ASSUMED clean: complete fixture evidence taken as standing for a clean "
                                      "finalization, which no retained record establishes (assume_fixture_finalized)"
-                                     if assume_fixture_finalized else
-                                     "not assumed: an attempt is judged only if its finalization is established; "
-                                     "no retained record establishes it, so none is"),
+                                     if finalization_assumed else
+                                     f"not assumed: {len(finalization_established)} attempt(s) have recorded successful "
+                                     "finalization; historical absence and recorded failures block"),
+            "fixture_finalization_established": finalization_established,
+            "fixture_finalization_assumed": finalization_assumed,
             "re_decided_attempts": len(re_decided),
             "spend": "none - no agent container, no client, no model",
         },

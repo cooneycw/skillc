@@ -1109,3 +1109,59 @@ def test_a_backend_that_reports_no_image_journals_no_identity(store: Path, base:
         FakeBackend(base), experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
     )
     assert _identity_events(experiment, attempt_id) == []
+
+
+@pytest.mark.parametrize("failure", ["export", "liveness", "capture"])
+def test_observed_transcript_survives_failed_capture(
+    store: Path, base: Path, failure: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import agent_trial as at
+
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, export_fails=failure == "export")
+    raw = b'{"type":"retained diagnostic"}\n'
+    if failure == "capture":
+        def refuse(*args: object, **kwargs: object) -> None:
+            experiment.record(attempt_id, "capture-failed", reason="injected capture refusal")
+            raise t.Refused("injected capture refusal")
+        monkeypatch.setattr(t, "capture", refuse)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("noop" if failure == "liveness" else "success"),
+        {"skill": "x"}, Limits(timeout=5), base,
+        observe_before_teardown=lambda *_: {"status": "observed"},
+        transcript_for_capture=lambda: t.TranscriptEvidence(raw),
+    )
+    retained = at.transcript_retention(experiment, attempt_id, record["disposition"])
+    assert retained["coverage"] == "complete"
+    assert t.read_object(experiment, str(retained["digest"])) == raw
+    assert record["disposition"] == "inconclusive"
+    assert attempt_id in backend.destroyed
+    assert not (experiment.root / f"manifest-{attempt_id}.json").exists()
+
+
+@pytest.mark.parametrize("fault", ["callback", "invalid-callback", "storage", "unconfirmed"])
+def test_retention_failure_or_unconfirmed_stop_never_skips_teardown(
+    store: Path, base: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    from skillc import agent_trial as at
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, export_fails=True,
+                          force_confirm_stopped=Confirmation.NOT_CONFIRMED if fault == "unconfirmed" else None)
+    def transcript() -> t.TranscriptEvidence:
+        if fault == "callback":
+            raise RuntimeError("injected hook failure")
+        if fault == "invalid-callback":
+            return None  # type: ignore[return-value]  # deliberately malformed evidence
+        return t.TranscriptEvidence(b"diagnostic")
+    if fault == "storage":
+        def refuse(*args: object) -> str:
+            raise OSError("injected object-storage failure")
+        monkeypatch.setattr(t, "_put_object", refuse)
+    record = lifecycle.run_through_backend(backend, experiment, attempt_id, _argv("success"), {"skill": "x"},
+                                          Limits(timeout=5), base, transcript_for_capture=transcript)
+    assert attempt_id in backend.destroyed
+    assert record["disposition"] == "inconclusive"
+    retained = at.transcript_retention(experiment, attempt_id, record["disposition"])
+    assert retained["coverage"] == ("partial" if fault == "unconfirmed" else "missing")
+    assert retained["reason"]
+    assert (experiment.root / f"lifecycle-{attempt_id}.json").is_file()
