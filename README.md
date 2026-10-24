@@ -98,6 +98,7 @@ still owes:
 skillc check ./skills         # check a collection after validating the rules
 skillc selftest                # prove every rule can still report the other verdict
 skillc check-records <path>    # refuse evaluation records the contract rejects
+skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call

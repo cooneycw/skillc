@@ -1,0 +1,212 @@
+[
+ {
+  "name": "fabricated-positive",
+  "operation": "record",
+  "glob": "result-*.json",
+  "keys": [
+   "status"
+  ],
+  "value": "PASS"
+ },
+ {
+  "name": "missing-required-manifest",
+  "operation": "remove",
+  "glob": "manifest-*.json"
+ },
+ {
+  "name": "missing-required-result",
+  "operation": "remove",
+  "glob": "result-*.json"
+ },
+ {
+  "name": "tampered-cited-object",
+  "operation": "tamper-object"
+ },
+ {
+  "name": "changed-skill",
+  "operation": "change-source",
+  "path": "pack/skills/gate-check/SKILL.md"
+ },
+ {
+  "name": "changed-helper",
+  "operation": "change-source",
+  "path": "tools/common.sh"
+ },
+ {
+  "name": "different-model",
+  "operation": "declaration",
+  "keys": [
+   "shared",
+   "model"
+  ],
+  "value": "different-model"
+ },
+ {
+  "name": "different-task-revision",
+  "operation": "declaration",
+  "keys": [
+   "task",
+   "grader_revision"
+  ],
+  "value": "changed"
+ },
+ {
+  "name": "different-client",
+  "operation": "declaration",
+  "keys": [
+   "shared",
+   "client",
+   "version"
+  ],
+  "value": "changed"
+ },
+ {
+  "name": "different-grader",
+  "operation": "declaration",
+  "keys": [
+   "task",
+   "grader_id"
+  ],
+  "value": "changed"
+ },
+ {
+  "name": "missing-declaration-approval",
+  "operation": "declaration",
+  "keys": [
+   "approval",
+   "declaration_digest"
+  ],
+  "value": "changed"
+ },
+ {
+  "name": "missing-raw-bytes",
+  "operation": "remove",
+  "glob": "objects/*"
+ },
+ {
+  "name": "cross-trial-record",
+  "operation": "record",
+  "glob": "observation-a-a59*.json",
+  "keys": [
+   "trial_id"
+  ],
+  "value": "t2-live_rangekit-green_2"
+ },
+ {
+  "name": "different-reported-model",
+  "operation": "record",
+  "glob": "observation-*.json",
+  "keys": [
+   "transcript",
+   "census",
+   "model"
+  ],
+  "value": "different-model"
+ },
+ {
+  "name": "unknown-not-promoted",
+  "operation": "record",
+  "glob": "result-*.json",
+  "keys": [
+   "criteria",
+   3,
+   "outcome"
+  ],
+  "value": "SATISFIED"
+ },
+ {
+  "name": "wrong-installed-skill",
+  "operation": "record",
+  "glob": "receipt-*.json",
+  "keys": [
+   "installed",
+   0,
+   "path"
+  ],
+  "value": ".codex/skills/other/SKILL.md"
+ },
+ {
+  "name": "privacy-leak",
+  "operation": "record",
+  "glob": "observation-*.json",
+  "keys": [
+   "reason"
+  ],
+  "value": "uid\u003d123456"
+ },
+ {
+  "name": "result-grader-digest",
+  "operation": "record",
+  "glob": "result-*.json",
+  "keys": [
+   "grader",
+   "digest"
+  ],
+  "value": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+ },
+ {
+  "name": "receipt-image",
+  "operation": "record",
+  "glob": "receipt-*.json",
+  "keys": [
+   "image",
+   "digest"
+  ],
+  "value": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+ },
+ {
+  "name": "receipt-locator",
+  "operation": "record",
+  "glob": "receipt-*.json",
+  "keys": [
+   "subject",
+   "locator"
+  ],
+  "value": "example.invalid/other"
+ },
+ {
+  "name": "receipt-revision",
+  "operation": "record",
+  "glob": "receipt-*.json",
+  "keys": [
+   "subject",
+   "revision"
+  ],
+  "value": "other"
+ },
+ {
+  "name": "receipt-cache",
+  "operation": "record",
+  "glob": "receipt-*.json",
+  "keys": [
+   "readiness",
+   "cache_key",
+   "tree_digest"
+  ],
+  "value": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+ },
+ {
+  "name": "config-position",
+  "operation": "config",
+  "key": "position",
+  "value": 1
+ },
+ {
+  "name": "config-case",
+  "operation": "config",
+  "key": "case",
+  "value": "another-case"
+ },
+ {
+  "name": "config-repeat",
+  "operation": "config",
+  "key": "repeat",
+  "value": 1
+ },
+ {
+  "name": "config-mode",
+  "operation": "config",
+  "key": "mode",
+  "value": "dry"
+ }
+]
