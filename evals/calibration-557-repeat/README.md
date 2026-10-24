@@ -1,8 +1,10 @@
 # #557: fresh historical B/N/P repeat
 
-Status: **preparation only; not authorized to launch**. The owner requested
-18 new attempts on 2026-10-24. The wave orchestrator approved preparing this
-declaration, not running its current digest. Its `approval` remains null.
+Approval checkpoint (2026-10-24): **launch authorized; trials not yet started
+at this checkpoint**. The owner requested 18 new attempts; the wave
+orchestrator reviewed the exact declaration under delegated authority. Its
+`approval` records that real review at canonical digest
+`sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee`.
 This directory does not restore `calibration-09960aea` or its missing private
 source. Its original [report](../calibration-203-c3/report.md) remains historical.
 
@@ -79,7 +81,8 @@ a later source tree would independently pass its tests.
 Source freeze approved by the wave orchestrator on 2026-10-24: controller
 `5f302a0619dfc88a53025bd177489214353eed0f`, containing reviewed retention merge
 `c80455538d4412391a375b76202f8c4ec6338be7`. The declaration records its five
-source objects and `retention_547_reviewed: true`; launch approval stays null.
+source objects and `retention_547_reviewed: true`; the separate launch ruling
+is recorded in the approval field.
 Later wave merges must not replace this runtime.
 
 The source commit is the reviewed controller base, rather than the commit

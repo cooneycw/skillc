@@ -3,7 +3,14 @@
   "issue": 557,
   "declared_at": "2026-10-24",
   "_comment": "Fresh owner-requested repeat, not historical evidence restoration. The approval field records the actual exact-declaration launch review under delegated owner authority.",
-  "approval": null,
+  "approval": {
+    "by": "skillc-complete orchestrator under delegated owner authority",
+    "at": "2026-10-24T22:34:01Z",
+    "attempts_per_arm": 6,
+    "declaration_digest": "sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee",
+    "source": "Owner request on 2026-10-24: Repeat the full original 18-attempt baseline/natural/provided calibration. Exact-declaration launch ruling from skillc-complete orchestrator (native thread 01a16fc0-b6a3-7011-9980-717e7c02f426), recorded in gate-557-launch.md; the owner did not personally review this digest.",
+    "scope": "Exactly the 18 slots, original seed/order, identities, 1200-second attempt and 21600-second schedule caps and durable retention declared here; normal local Codex subscription login, deterministic grader only, no API judge calls, automatic retries or replacement attempts."
+  },
   "task": {
     "path": "evals/calibration-557-repeat/historical-task-v1",
     "grader_id": "helper-different-question",

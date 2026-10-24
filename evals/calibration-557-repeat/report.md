@@ -1,7 +1,8 @@
 # #557 repeat: preparation evidence
 
-Status: preparation only. No new subscription model attempt has run. The
-declaration is unapproved. The post-#547 controller freeze was approved by
+Approval-checkpoint status (2026-10-24): no new subscription model attempt has
+run at this checkpoint. The exact declaration is now launch-authorized by the
+wave orchestrator under delegated owner authority. The post-#547 controller freeze was approved by
 the wave orchestrator on 2026-10-24 at source
 `5f302a0619dfc88a53025bd177489214353eed0f`, with reviewed retention merge
 `c80455538d4412391a375b76202f8c4ec6338be7` in its ancestry.
@@ -126,3 +127,16 @@ The full model-free prepare after source freeze passed all ten committed
 preflight controls, actual image/client and credential eligibility checks,
 and grader certification (five broken graders refused, 13 validity controls).
 Launch-ready still exited 1 when approval was absent. No model trial has run.
+
+## Actual exact-declaration launch ruling
+
+The wave orchestrator authorized canonical declaration
+`sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee`
+at preparation commit `d5cdccec19ae97d1b1805cbc342596303249398e` under the
+owner's explicit request for the original 18-attempt repeat. The actual review
+was recorded at `2026-10-24T22:34:01Z` in ONLY the manifest approval field;
+its canonical digest remains unchanged and the production approval validator
+accepts it. The owner was not represented as personally reviewing the digest.
+The frozen run checkout and its actual launch-ready checks are next; this
+approval checkpoint claims no trial observation yet. The missing-approval red
+runs above describe the earlier unapproved preparation, not the current state.
