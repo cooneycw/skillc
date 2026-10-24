@@ -1419,7 +1419,7 @@ def test_an_unreadable_source_is_recorded_never_a_digest() -> None:
     assert str(run["source_digest_at_start"]).startswith("unreadable: ")
 
 
-def test_an_unordered_run_record_is_byte_identical() -> None:
+def test_an_unordered_run_has_no_ordering_fields_beside_retention_metadata() -> None:
     witness = GateWitness(
         declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
         backend=_FakeBackend(results={("lint",): _exited(0)}), handle=None, limits=_limits(),
@@ -1428,4 +1428,76 @@ def test_an_unordered_run_record_is_byte_identical() -> None:
     witness.decide({"op": "run_gate", "gate": "lint"})
     run = witness.finalize("a-1").gates["lint"].runs[0].to_json()
     assert set(run) == {"requested_at", "completed_at", "exit_code", "reason", "tree_digest_at_start",
-                        "stop_confirmed"}
+                        "stop_confirmed", "output"}
+
+
+def test_serialized_runs_explicitly_account_for_unretained_output() -> None:
+    backend = _FakeBackend(results={("lint",): _exited(3)}, stdout={("lint",): "gate failed\n"})
+    witness = GateWitness(declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+                          backend=backend, handle=None, limits=_limits(),
+                          gate_exclusivity=False, exclusivity_basis="")
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    run = json.loads(witness.finalize("attempt").to_json_bytes())["gates"]["lint"]["runs"][0]
+    assert "output" in run, "retention must account for stdout/stderr, including when no sink exists"
+    assert run["output"]["stdout"]["coverage"] == "missing"
+
+
+_RETENTION_CASES = json.loads((Path(__file__).parent / "fixtures/retention/cases.json").read_text())
+
+
+@pytest.mark.parametrize("case", _RETENTION_CASES["gate"], ids=lambda c: c["name"])
+def test_gate_output_reader_controls(case: dict[str, object]) -> None:
+    from skillc.gate_witness import read_run_output
+    raw = _RETENTION_CASES["bytes"].encode()
+    def read(digest: str) -> bytes:
+        if case["object"] == "missing":
+            raise ValueError("object missing")
+        return b"altered" if case["object"] == "altered" else raw
+    run = {"output": {"stdout": case["entry"], "stderr": {"coverage": "missing", "reason": "not captured"}}}
+    if case["accept"]:
+        assert read_run_output(run, "stdout", read) == raw
+    else:
+        with pytest.raises(ValueError):
+            read_run_output(run, "stdout", read)
+
+
+@pytest.mark.parametrize("fault", ["none", "truncated", "incomplete", "bounded", "missing", "unsafe", "storage"])
+def test_run_output_retention_keeps_bytes_or_an_explicit_limit(fault: str) -> None:
+    from skillc import agent_trial as at
+    from skillc import trial
+    from skillc.gate_witness import read_run_output
+    objects: dict[str, bytes] = {}
+    raw = ("".join(_RETENTION_CASES["unsafe_gate_output"]["parts"]).encode() if fault == "unsafe" else b"gate diagnostic\n")
+    def store(data: bytes) -> str:
+        if fault == "storage":
+            raise OSError("storage unavailable")
+        if at.transcript_leak_findings(data):
+            raise trial.Refused("unsafe output")
+        digest = trial.sha256_bytes(data)
+        objects[digest] = data
+        return digest
+    result = ExecuteResult(reason="exited", exit_code=3, stdout=None if fault == "missing" else raw,
+                           stderr=b"", stdout_truncated=fault == "truncated", stdout_incomplete=fault == "incomplete")
+    backend = _FakeBackend(results={("gate",): result}, retain_output=fault != "missing")
+    limits = Limits(timeout=5, max_captured_stdout_bytes=4 if fault == "bounded" else 4096)
+    witness = GateWitness(declared_gates={"gate": ["gate"]}, tree_digest_fn=_fixed_tree_digest,
+                          backend=backend, handle=None, limits=limits, gate_exclusivity=False,
+                          exclusivity_basis="", output_store=store)
+    if fault in ("truncated", "incomplete", "missing"):
+        with pytest.raises(ChannelRefusal):
+            witness.decide({"op": "run_gate", "gate": "gate"})
+    else:
+        assert witness.decide({"op": "run_gate", "gate": "gate"})["exit_code"] == 3
+    run = json.loads(witness.finalize("attempt").to_json_bytes())["gates"]["gate"]["runs"][0]
+    coverage = run["output"]["stdout"]["coverage"]
+    expected = ("refused" if fault in ("unsafe", "storage") else "missing" if fault == "missing" else
+                "partial" if fault in ("truncated", "incomplete", "bounded") else "complete")
+    assert coverage == expected
+    retained = read_run_output(run, "stdout", objects.__getitem__)
+    if expected in ("complete", "partial"):
+        assert retained == (raw[:4] if fault == "bounded" else raw)
+    else:
+        assert retained is None
+        assert trial.sha256_bytes(raw) not in objects
+    # A real empty raw stream is retained; it is not missing or an error summary.
+    assert read_run_output(run, "stderr", objects.__getitem__) == (None if fault == "storage" else b"")
