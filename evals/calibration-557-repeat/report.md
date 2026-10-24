@@ -209,9 +209,12 @@ Receipt: `docs/measurements/counter-model/2026-10-24T215806Z-issue-557.json`.
 
 ## #28 hand-off
 
-One exact retained provided-arm artifact can seed a bounded development replay
-of this historical grader distinction, with source identity preserved and an
-independent known-good counterpart. It must explicitly retain the ambiguity,
+Provided slot 6, trial `t6-calibration_provided_1`, attempt `a-cd2c7a7de61f`,
+is a concrete replay candidate. Its seven non-canary artifacts total 4488 bytes.
+A read-only disposable replay gave FAIL on exactly the two historical criteria;
+the pre-existing, independently qualified `contacts-last` alternative gave PASS.
+This can seed a bounded development replay of the historical grader distinction,
+with source identity preserved and that independent known-good counterpart. It must explicitly retain the ambiguity,
 avoid labeling the case a causal CPP defect, and keep development/held-out
 separation. That concrete fixture needs its own reviewed gate. PR #161 already
 delivered #28's identity-comparison half; it is not duplicated here. No added
