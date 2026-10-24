@@ -91,3 +91,28 @@ assumption setting. Five new live-path cases pass, also covering raw gate stderr
 failed channel drain and unsafe-output refusal. No new paid evaluation ran.
 
 Receipt limitation: https://github.com/cooneycw/claude-power-pack/issues/864#issuecomment-6389865902.
+
+### Validation note - baseline prerequisite and synchronized tree
+
+The first full local finish gate reconciled 6,910 identities: 6,904 passed,
+5 skipped and one unchanged make-shim test failed because `make verify` exports
+`MFLAGS`/`MAKELEVEL` while the test cleared only `MAKEFLAGS`. The exact failure
+was reproduced on clean main and recorded separately in skillc's Nit Store
+comment 6389989656. That failed run is not relabeled green.
+
+The separately reviewed test-only prerequisite landed in PR #558 at
+`237ab8fb6198c61f4dd687ef3179906aca5b6e3f`, after required
+`ci/woodpecker/pr/ci` succeeded on its exact reviewed head
+`1b1ce3fc183b159f74bc6cd348053a32416bd4dc`. Its worktree and branch were
+removed by the guarded helper. This branch then merged that main base normally,
+without stash or conflict.
+
+On the combined tree, both exact polluted-environment controls passed and all
+692 tests in the eight affected suites passed (73.05 seconds, four workers).
+The remaining checks caught and corrected this PR's fragment format: the
+repository requires one bullet per issue, not three. That gate reads committed
+HEAD, so the correction is committed before rerunning the remaining checks.
+Per the orchestrator's validation ruling, the combined tree uses affected local
+suites plus required exact-head full CI instead of repeating the complete local
+suite while the other worker owns that slot. Final check evidence is recorded
+in the PR and the wave ledger; no new paid evaluation was run.
