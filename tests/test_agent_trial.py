@@ -1720,3 +1720,56 @@ def test_the_credit_gate_passes_a_clean_attempt_and_spares_claude_the_codex_cens
     assert at.credit_block(_observed(grading_eligible=False), client="codex", disposition="captured",
                            fixture_block=block) is not None
     assert called == []  # the fixture block is consulted only once everything earlier has passed
+
+
+def test_independently_retained_transcript_is_read_back_and_tampering_refuses(store: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    entry = t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"diagnostic"))
+    retention = at.transcript_retention(experiment, attempt_id, "inconclusive")
+    assert retention["coverage"] == "complete" and retention["digest"] == entry["digest"]
+    path = experiment.object_path(str(entry["digest"]))
+    path.chmod(0o600)
+    path.write_bytes(b"tampered")
+    with pytest.raises(t.Refused, match="modified"):
+        at.transcript_retention(experiment, attempt_id, "inconclusive")
+
+
+def test_independently_retained_partial_transcript_cannot_prove_non_invocation(store: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"diagnostic"), confirmed=False)
+    with pytest.raises(t.Refused, match="partial"):
+        at.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+@pytest.mark.parametrize("fault", [None, "drain", "unsafe"])
+def test_production_gate_output_sink_retains_diagnostics_when_grading_is_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
+    import shlex
+
+    from test_agent_trial_gate_witness import run_case
+
+    from skillc.gate_witness import read_run_output
+
+    controls = json.loads((Path(__file__).parent / "fixtures/retention/cases.json").read_text())
+    raw = ("".join(controls["unsafe_gate_output"]["parts"]).encode() if fault == "unsafe" else b"gate diagnostic\n")
+    script = ("#!/bin/bash\nprintf '%s' " + shlex.quote(raw.decode()) + "\nprintf 'gate stderr\\n' >&2\nexit 3\n").encode()
+    result, _trusted, _backend = run_case(tmp_path, monkeypatch, fault=None if fault == "unsafe" else fault, script=script)
+    [root] = [p for p in (tmp_path / "store").iterdir() if (p / t.LEDGER).is_file()]
+    experiment = t.Experiment.open(root)
+    [event] = [e for e in experiment.events(str(result["attempt_id"])) if e["event"] == "gate-witness-retained"]
+    snapshot = json.loads(t.read_object(experiment, str(event["digest"])))
+    assert snapshot["attempt_id"] == result["attempt_id"]
+    for gate in snapshot["gates"].values():
+        [run] = gate["runs"]
+        assert run["exit_code"] == 3
+        if fault == "unsafe":
+            assert run["output"]["stdout"]["coverage"] == "refused"
+            assert not experiment.object_path(t.sha256_bytes(raw)).exists()
+        else:
+            assert read_run_output(run, "stdout", lambda d: t.read_object(experiment, d)) == raw
+        assert read_run_output(run, "stderr", lambda d: t.read_object(experiment, d)) == b"gate stderr\n"
+        if fault == "drain":
+            assert gate["coverage"] == "channel-unavailable"
+    if fault == "drain":
+        assert result["graded"] is None and result["grading_blocked_reason"]

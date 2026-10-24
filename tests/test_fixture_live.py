@@ -856,7 +856,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
                     extras_copies: int = 1, extras_as_artifact: bool = False,
                     prompt_delivered: bool | None = True, guard_policy: str | None = None,
                     guard_channel_unavailable: bool = False,
-                    steward: dict[str, Any] | None = None, transcript_cmds: tuple[str, ...] = ()) -> str:
+                    steward: dict[str, Any] | None = None, transcript_cmds: tuple[str, ...] = (),
+                    finalization: dict[str, object] | None = None) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -874,6 +875,8 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
                                           nested_policy=guard_policy)}
     if steward != {}:
         extras["credential_steward"] = steward or {"status": "held"}
+    if finalization is not None:
+        extras["finalization"] = finalization
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
@@ -2096,3 +2099,65 @@ def test_red_518_a_second_session_blocks_credit_even_with_the_guard_at_zero() ->
     assert guard["status"] == "zero"
     assert ag.nested_bypass(guard, record["observation"], "refusal-expected") == ["2 transcript sessions in one attempt"]
     assert ag.nested_bypass(guard, _clean_record()["observation"], "refusal-expected") == []
+
+
+_RETENTION_CASES = json.loads((Path(__file__).parent / "fixtures/retention/cases.json").read_text())
+
+
+@pytest.mark.parametrize("case", _RETENTION_CASES["fixture"], ids=lambda c: c["name"])
+@pytest.mark.parametrize("assume", [False, True])
+def test_fixture_finalization_reader_controls(case: dict[str, Any], assume: bool) -> None:
+    block = fl._fixture_finalization_block({"finalization": case["value"]}, assume)
+    assert (block is None) is case["accept"]
+
+
+@pytest.mark.parametrize("status", ["succeeded", "failed", "not-observed", "malformed"])
+@pytest.mark.parametrize("assume", [False, True])
+def test_strict_replay_uses_recorded_finalization_and_never_overrides_failure(
+    tmp_path: Path, status: str, assume: bool,
+) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    finalization: dict[str, object] = {"status": status, "reason": None if status == "succeeded" else "not clean"}
+    attempt_id = _plant_captured(run_dir, declaration, finalization=finalization)
+    _path, report = _replay(run_dir, declaration, assume=assume)
+    [entry] = [a for a in report["attempts"] if a["attempt_id"] == attempt_id]
+    if status == "succeeded":
+        assert entry["replay_blocked_reason"] is None and entry["criteria"]
+    else:
+        assert "finalization" in entry["replay_blocked_reason"]
+        assert not entry["criteria"]
+
+
+@pytest.mark.parametrize("assume", [False, True])
+def test_late_live_fixture_failure_is_persisted_and_blocks_strict_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, assume: bool,
+) -> None:
+    from test_agent_trial_fixture import TASK, TOP_LEVEL, _gh, run_fixture_case
+
+    candidate = TASK / "candidates/pass/clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    live_root = tmp_path / "live"
+    live_root.mkdir()
+    experiments: list[trial.Experiment] = []
+    def fail_late(self: object) -> dict[str, Any]:
+        raise RuntimeError("injected after fixture git/service evidence exists")
+    with monkeypatch.context() as late:
+        late.setattr(cg.CodexGuardSession, "finalize", fail_late)
+        result, trusted = run_fixture_case(live_root, late, case="clean",
+            requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+            report=(candidate / "report.md").read_text(), experiments=experiments)
+    assert result["graded"] is None and not trusted
+    retained = json.loads(trial.read_object(experiments[0], result["fixture"]["evidence_digest"]))
+    assert retained["git"] and retained["service"], "the injected failure must be after evidence production"
+    assert retained["finalization"]["status"] == "failed"
+    # Feed the persisted outcome, not a manufactured failed outcome, through
+    # the real strict replay path with otherwise eligible retained evidence.
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration, finalization=retained["finalization"])
+    def judge_must_not_run(*args: object) -> object:
+        raise AssertionError("a recorded failed finalization authorized the judge")
+    monkeypatch.setattr(fl, "_run_judge", judge_must_not_run)
+    _path, report = _replay(run_dir, declaration, assume=assume)
+    [entry] = [a for a in report["attempts"] if a["attempt_id"] == attempt_id]
+    assert "finalization outcome is failed" in entry["replay_blocked_reason"]
+    assert not entry["criteria"]

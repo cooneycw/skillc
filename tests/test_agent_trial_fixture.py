@@ -319,6 +319,12 @@ def test_a_blocked_attempt_keeps_its_full_fixture_evidence(tmp_path: Path, monke
     assert [d["decision"] for d in evidence["codex_guard"]["decisions"]] == ["passed-top-level", "refused-nested"]
     assert [e["argv"] for e in evidence["service"]["events"]] == actions["gh"]
     assert evidence["final_report"] == (candidate / "report.md").read_text()
+    assert evidence["finalization"] == {"status": "succeeded", "reason": None}
+    [event] = [e for e in experiments[0].events(str(result["attempt_id"]))
+               if e["event"] == "gate-witness-retained"]
+    witness = json.loads(trial.read_object(experiments[0], str(event["digest"])))
+    assert witness["attempt_id"] == result["attempt_id"]
+    assert witness["declared_gates"] == ["flow-auto-finish"]
 
 
 @pytest.mark.parametrize("tamper, integrity, kind", [
@@ -406,3 +412,40 @@ def test_red_518_a_refused_nested_launch_is_not_a_bypass_at_the_fixture_gate() -
     two = {**one, "transcript_codex_invocations": [{"program": "codex", "guarded": True}] * 2}
     assert "2 bare codex invocation(s) in the transcript, 1 refused" in str(
         at._fixture_credit_block(session(["passed-top-level", "refused-nested"]), two))
+
+
+@pytest.mark.parametrize("late_failure", [False, True])
+def test_finalization_outcome_is_retained_after_the_entire_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late_failure: bool,
+) -> None:
+    from skillc.fixture_attempt import FixtureSession
+
+    fixture = AttemptFixture(case="retention", declaration={}, facts={}, capture=lambda *_: {"captured": True})
+    session = FixtureSession(fixture, "attempt")
+
+    class Backend:
+        def trigger_log(self, handle: object) -> list[object]:
+            return []
+        def trigger_dropped(self, handle: object) -> int:
+            return 0
+        def export(self, handle: object, dest: Path, root: str | None = None) -> None:
+            dest.mkdir(parents=True)
+
+    backend: Any = Backend()
+    if late_failure:
+        def fail() -> None:
+            raise RuntimeError("late injected finalization failure")
+        monkeypatch.setattr(session.guard, "finalize", fail)
+        with pytest.raises(RuntimeError, match="late injected"):
+            session.finish(backend, None)
+    else:
+        session.finish(backend, None)
+    assert session.git == {"captured": True}, "failure occurs after the evidence is already produced"
+    extras = session.extras(None)
+    assert "finalization" in extras, "a later reader must be able to establish the finish outcome"
+    outcome = extras["finalization"]
+    assert isinstance(outcome, dict)
+    assert outcome["status"] == ("failed" if late_failure else "succeeded")
+    # A repeated call must not turn a failed first finalization into success.
+    session.finish(backend, None)
+    assert session.extras(None)["finalization"] == extras["finalization"]

@@ -546,6 +546,19 @@ def run_through_backend(
                     except Exception as exc:  # noqa: BLE001 - an observation hook must never block teardown
                         observation = {"status": "unknown", "reason": str(exc)}
 
+                # Freeze the hook's already-observed bytes before any export or
+                # liveness refusal. This is diagnostics, never captured success.
+                transcript_evidence = None
+                if transcript_for_capture is not None:
+                    try:
+                        transcript_evidence = transcript_for_capture()
+                        if not isinstance(transcript_evidence, trial.TranscriptEvidence):
+                            raise TypeError("transcript callback returned no evidence")
+                    except Exception as exc:  # noqa: BLE001 - preserve teardown/accounting
+                        transcript_evidence = trial.TranscriptEvidence(
+                            None, f"transcript callback failed ({type(exc).__name__})")
+                    trial.retain_transcript(experiment, attempt_id, transcript_evidence, confirmed=confirmed)
+
                 if confirmed and result.reason not in ("launch-failed", "attempt-not-running"):
                     try:
                         backend.export(handle, workspace)
@@ -568,7 +581,7 @@ def run_through_backend(
                             try:
                                 trial.capture(
                                     experiment, attempt_id,
-                                    transcript=transcript_for_capture() if transcript_for_capture else None,
+                                    transcript=transcript_evidence,
                                     imports=tuple(imports_for_capture()) if imports_for_capture else (),
                                 )
                             except trial.Refused:

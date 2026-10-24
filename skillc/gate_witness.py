@@ -107,7 +107,9 @@ Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -187,6 +189,7 @@ class _Run:
     #: #525: the declared variant this run executed (which copy of the gate the
     #: subject invoked); None for the gate's own default argv.
     via: str | None = None
+    output: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -208,6 +211,7 @@ class GateRunRecord:
     source_digest_at_start: str | None = None
     #: #525: see `_Run.via`.
     via: str | None = None
+    output: Mapping[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -217,6 +221,9 @@ class GateRunRecord:
             "reason": self.reason,
             "tree_digest_at_start": self.tree_digest_at_start,
             "stop_confirmed": self.stop_confirmed,
+            "output": dict(self.output) if self.output is not None else {
+                stream: {"coverage": "missing", "reason": "no controller output was retained"}
+                for stream in ("stdout", "stderr")},
         }
         if self.stages is not None:
             data["stages"] = dict(self.stages)
@@ -308,6 +315,44 @@ class GateWitnessRecord:
         }).encode("utf-8")
 
 
+def _output_digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def read_run_output(run: Mapping[str, object], stream: str, read_object: Callable[[str], bytes]) -> bytes | None:
+    """Verify one retained stream. Historical/missing/refused is not empty.
+
+    Partial bytes may be read for diagnosis; coverage is never promoted. A
+    reference with absent/altered bytes, wrong size or invalid flags refuses.
+    """
+    if stream not in ("stdout", "stderr"):
+        raise ValueError("unknown output stream")
+    output = run.get("output")
+    if output is None:
+        return None
+    if not isinstance(output, dict) or set(output) != {"stdout", "stderr"}:
+        raise ValueError("invalid output schema")
+    entry = output[stream]
+    if not isinstance(entry, dict):
+        raise TypeError("invalid output entry")
+    coverage = entry.get("coverage")
+    if coverage in ("missing", "refused"):
+        if set(entry) != {"coverage", "reason"} or not isinstance(entry["reason"], str) or not entry["reason"]:
+            raise ValueError("unretained output must give a reason and no bytes")
+        return None
+    if (coverage not in ("complete", "partial")
+            or set(entry) != {"coverage", "digest", "size", "truncated", "incomplete"}
+            or type(entry["size"]) is not int or entry["size"] < 0
+            or type(entry["truncated"]) is not bool or type(entry["incomplete"]) is not bool
+            or (coverage == "partial") != (entry["truncated"] or entry["incomplete"])
+            or not isinstance(entry["digest"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", entry["digest"])):
+        raise ValueError("invalid retained output reference")
+    data = read_object(entry["digest"])
+    if len(data) != entry["size"] or _output_digest(data) != entry["digest"]:
+        raise ValueError("retained output bytes do not match the reference")
+    return data
+
+
 class GateWitness:
     """Owns the per-attempt gate state and supplies `decide` to a
     `DecideReplyChannel` (#183) constructed against this attempt's socket.
@@ -339,6 +384,7 @@ class GateWitness:
         limits: Limits,
         *,
         gate_exclusivity: bool,
+        output_store: Callable[[bytes], str] | None = None,
         exclusivity_basis: str,
         #: None (the default, #404): each stream up to its capture bound in
         #: `limits`, which is never a truncation - a capped capture is refused.
@@ -423,6 +469,8 @@ class GateWitness:
         self._limits = limits
         self._gate_exclusivity = gate_exclusivity
         self._exclusivity_basis = exclusivity_basis
+        self._output_store = output_store
+        self._output_limits = (limits.max_captured_stdout_bytes, limits.max_captured_stderr_bytes)
         self._stdout_reply_cap = limits.max_captured_stdout_bytes if reply_byte_cap is None else reply_byte_cap
         self._stderr_reply_cap = limits.max_captured_stderr_bytes if reply_byte_cap is None else reply_byte_cap
         self._lock = Lock()
@@ -618,6 +666,7 @@ class GateWitness:
                     run.reason = result.reason
                     run.stop_confirmed = result.stop_confirmed
                     run.stages = stages
+                    run.output = self._retain_output(result)
                 if output_bad:
                     raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
                 lossless: dict[str, object] = {}
@@ -642,6 +691,28 @@ class GateWitness:
             # wedge this gate's in-flight claim forever.
             with self._lock:
                 self._in_flight[gate] = False
+
+    def _retain_output(self, result: ExecuteResult) -> dict[str, object]:
+        retained: dict[str, object] = {}
+        streams = (("stdout", result.stdout, result.stdout_truncated, result.stdout_incomplete),
+                   ("stderr", result.stderr, result.stderr_truncated, result.stderr_incomplete))
+        for (stream, raw, truncated, incomplete), cap in zip(streams, self._output_limits, strict=True):
+            if raw is None or self._output_store is None:
+                retained[stream] = {"coverage": "missing", "reason": "no raw output" if raw is None else
+                                    "no controller output store"}
+                continue
+            data = raw[:cap]
+            try:
+                digest = self._output_store(data)
+                if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or digest != _output_digest(data):
+                    raise ValueError("output sink returned the wrong digest")
+            except Exception as exc:  # noqa: BLE001 - retention must not alter the observed gate result
+                retained[stream] = {"coverage": "refused", "reason": f"output retention refused ({type(exc).__name__})"}
+                continue
+            retained[stream] = {"coverage": "partial" if truncated or incomplete or len(raw) > cap else "complete",
+                                "digest": digest, "size": len(data), "truncated": truncated or len(raw) > cap,
+                                "incomplete": incomplete}
+        return retained
 
     def _read_stages(self, gate: str, result: ExecuteResult, output_bad: bool,
                      gate_cwd: str | None) -> Mapping[str, object] | None:
@@ -700,7 +771,7 @@ class GateWitness:
                                 else _stages_unavailable("run never resolved") if gate in self._stage_capture
                                 else None),
                         order_requested=r.order_requested, order_completed=r.order_completed,
-                        source_digest_at_start=r.source_digest_at_start, via=r.via,
+                        source_digest_at_start=r.source_digest_at_start, via=r.via, output=r.output,
                     )
                     for r in runs
                 )

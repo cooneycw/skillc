@@ -139,6 +139,8 @@ class FixtureSession:
     steward_driver: cs.CredentialSteward | None = None
     _steward_record: dict[str, Any] | None = None
     _finishing: bool = False
+    finalization: dict[str, object] = field(default_factory=lambda: {
+        "status": "not-observed", "reason": "fixture finalization was not reached"})
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
@@ -195,13 +197,27 @@ class FixtureSession:
             self.service = service
 
     def finish(self, backend: _FixtureBackend, handle: object) -> None:
-        """After the agent stops: finalize the service against a snapshot of
-        the exported remote, capture the git state, close the guard record."""
+        """Latch the first outcome, including errors after evidence exists."""
         with self._lock:
             if self._finishing:
                 return
             self._finishing = True
-            service = self.service
+            # An interruption can never leave success.
+            self.finalization = {"status": "failed", "reason": "fixture finalization did not complete"}
+        try:
+            self._finish(backend, handle)
+        except Exception as exc:
+            self.failure = self.failure or f"fixture finalization failed ({type(exc).__name__})"
+            self.finalization = {"status": "failed", "reason": f"fixture finalization failed ({type(exc).__name__})"}
+            raise
+        else:
+            self.finalization = ({"status": "succeeded", "reason": None} if self.failure is None else
+                                 {"status": "failed", "reason": "a fixture failure was latched"})
+
+    def _finish(self, backend: _FixtureBackend, handle: object) -> None:
+        """After the agent stops: finalize the service against a snapshot of
+        the exported remote, capture the git state, close the guard record."""
+        service = self.service
         if self.steward_driver is not None:
             self.steward_driver.stop(backend, handle)  # while the channel still listens
         channel_ok = True
@@ -260,7 +276,8 @@ class FixtureSession:
         extras: dict[str, object] = {
             "case": self.fixture.case, "service": self.record, "git": self.git,
             "git_unreadable": self.git_unreadable, "final_report": final_report,
-            "codex_guard": self.guard_record(), "credential_steward": self.steward_record()}
+            "codex_guard": self.guard_record(), "credential_steward": self.steward_record(),
+            "finalization": dict(self.finalization)}
         if self.order is not None:
             # #279 PR-2a: the turns as the controller recorded them, ordered.
             extras["controller_turns"] = list(self.turn_records or [])

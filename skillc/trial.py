@@ -464,7 +464,7 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: picked up as the workspace record and crash with KeyError (confirmed) or, for a
 #: path/nonce-shaped forgery, silently misdirect cleanup.
 _DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
-                  "controller-turn")
+                  "controller-turn", "transcript-retained", "gate-witness-retained")
 
 
 def _read_object(root: Path, digest: str) -> bytes:
@@ -1029,6 +1029,68 @@ def _transcript_observation(
         **entry, "coverage": coverage, "ref": f"{OBJECTS}/{sha256_bytes(data).removeprefix('sha256:')}",
         "digest": _put_object(experiment.root, data), "size": len(data),
     }
+
+
+@_locked
+def retain_transcript(
+    experiment: Experiment, attempt_id: str, transcript: TranscriptEvidence, *,
+    confirmed: bool = True, limits: Limits | None = None,
+) -> dict[str, object]:
+    """Keep already-observed client bytes independently of artifact capture.
+
+    This DETAIL event never satisfies capture or execution. The caller has
+    already leak-checked the bytes. Object-storage failures are retained as
+    missing evidence, so they cannot skip the lifecycle driver's teardown.
+    """
+    events = experiment.events(attempt_id)
+    if any(e.get("event") == "transcript-retained" for e in events):
+        raise Refused("the transcript retention outcome is frozen once")
+    if (experiment.root / _lifecycle_name(attempt_id)).exists():
+        raise Refused("a finalized attempt is closed to transcript retention")
+    try:
+        entry = _transcript_observation(experiment, attempt_id, transcript, limits or Limits(), [])
+    except Exception as exc:  # noqa: BLE001 - storage refusal must not bypass accounting
+        entry = {"stream": records.CLIENT_TRANSCRIPT, "origin": "client-reported", "attempt_id": attempt_id,
+                 "coverage": "missing", "reason": f"transcript storage refused ({type(exc).__name__})"}
+    if not confirmed and entry["coverage"] != "missing":
+        entry = {**entry, "coverage": "partial", "reason": "the attempt's stop was not confirmed"}
+    experiment.record(attempt_id, "transcript-retained", observation=entry)
+    return entry
+
+
+def read_retained_transcript(experiment: Experiment, attempt_id: str) -> dict[str, object] | None:
+    """Read a unique journal-bound reference and verify its identity and bytes.
+
+    None means historical absence. A recorded refusal is missing with a reason;
+    a malformed, misbound or tampered reference raises rather than claiming
+    complete retention. The journal is controller-owned, not authenticated
+    against an operator who can rewrite the entire store.
+    """
+    events = [e for e in experiment.events(attempt_id) if e.get("event") == "transcript-retained"]
+    if not events:
+        return None
+    if len(events) != 1:
+        raise Refused("ambiguous retained transcript: multiple outcomes")
+    entry = events[0].get("observation")
+    if (not isinstance(entry, dict) or entry.get("attempt_id") != attempt_id
+            or entry.get("stream") != records.CLIENT_TRANSCRIPT or entry.get("origin") != "client-reported"
+            or set(entry) - {"attempt_id", "stream", "origin", "coverage", "reason", "ref", "digest", "size"}):
+        raise Refused("retained transcript identity or schema is invalid")
+    if entry.get("coverage") == "missing":
+        if (not isinstance(entry.get("reason"), str) or not entry["reason"]
+                or any(k in entry for k in ("ref", "digest", "size"))):
+            raise Refused("missing retained transcript must name a reason and no bytes")
+    elif entry.get("coverage") in ("complete", "partial"):
+        digest, size = entry.get("digest"), entry.get("size")
+        if (not isinstance(digest, str) or not _OBJECT_DIGEST.fullmatch(digest)
+                or type(size) is not int or size < 0
+                or entry.get("ref") != f"{OBJECTS}/{digest.removeprefix('sha256:')}"):
+            raise Refused("retained transcript reference is invalid")
+        if len(read_object(experiment, digest)) != size:
+            raise Refused("retained transcript size does not match its bytes")
+    else:
+        raise Refused("retained transcript coverage is invalid")
+    return dict(entry)
 
 
 def _claimed_attempts(value: object) -> Iterator[str]:

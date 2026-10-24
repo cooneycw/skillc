@@ -772,6 +772,7 @@ class _WitnessSession:
     #: gate's runner keeps RESUMABLE state; present at a run's start, the run's
     #: source digest reads unreadable, so its stages are never attributable.
     gate_state_paths: tuple[str, ...] = ()
+    output_store: Callable[[bytes], str] | None = field(default=None, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -870,6 +871,7 @@ class _WitnessSession:
             gates[pg.GATE] = [pg.REAL_MAKE, self.project_gate.goal]
             staged[pg.GATE] = pg.StagedRunner(self.project_gate)
         self.witness = GateWitness(
+            output_store=self.output_store,
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
             declared_env={gate: self.gate_environment() for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
@@ -930,6 +932,19 @@ class _WitnessSession:
             if self.witness is not None:
                 self.witness.channel_unavailable = True
             raise
+        finally:
+            # Keep the diagnostic witness even when the credit gate blocks
+            # grading (including a failed channel drain). Its coverage records
+            # that failure; retaining it never makes it eligible for grading.
+            if self.witness is not None:
+                snapshot = self.witness.finalize(self.attempt_id)
+                try:
+                    digest = trial.put_object(experiment, snapshot.to_json_bytes())
+                except Exception as exc:  # noqa: BLE001 - retention cannot bypass teardown
+                    experiment.record(self.attempt_id, "gate-witness-retained", coverage="missing",
+                                      reason=f"witness storage refused ({type(exc).__name__})")
+                else:
+                    experiment.record(self.attempt_id, "gate-witness-retained", coverage="complete", digest=digest)
 
 def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str]:
     """A `{relpath: sha256-hex}` content snapshot of every file currently
@@ -1617,19 +1632,19 @@ def retainable_transcript(raw: bytes) -> trial.TranscriptEvidence:
 def _stored_transcript_entry(experiment: trial.Experiment, attempt_id: str) -> dict[str, object] | None:
     path = experiment.root / f"manifest-{attempt_id}.json"
     if path.is_symlink() or not path.is_file():
-        return None
+        return trial.read_retained_transcript(experiment, attempt_id)
     manifest = json.loads(path.read_bytes())
     for entry in manifest.get("observations") or ():
         if isinstance(entry, dict) and entry.get("stream") == records.CLIENT_TRANSCRIPT:
             return entry
-    return None
+    return trial.read_retained_transcript(experiment, attempt_id)
 
 
 def transcript_retention(experiment: trial.Experiment, attempt_id: str, disposition: object) -> dict[str, object]:
     """What the store holds of this attempt's transcript, read back from its
-    manifest - never from what the hook intended to store. No manifest (the
-    attempt was not captured) and no entry are both `missing`, each with its
-    own reason, never an absent key."""
+    manifest or independent journal-bound retention - never from what the
+    hook intended to store. Historical absence is missing, never inferred
+    from a failed artifact capture when independently retained bytes exist."""
     entry = _stored_transcript_entry(experiment, attempt_id)
     if entry is None:
         reason = (
@@ -2786,6 +2801,13 @@ def run_one_attempt(
             bounded = replace(limits, timeout=min(limits.timeout, 5), max_captured_stdout_bytes=rs.MAX_JSON + 1)
             env = rs.environment(ready_backend.controller_output(handle, ["env", "-0"], bounded))
             attempt_guard.bind(ready_backend, handle, env)
+
+    if witness_session is not None:
+        def output_store(data: bytes) -> str:
+            if transcript_leak_findings(data):
+                raise trial.Refused("gate output failed the identity/credential check")
+            return trial.put_object(experiment, data)
+        witness_session.output_store = output_store
 
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,

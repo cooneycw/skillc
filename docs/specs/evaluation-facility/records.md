@@ -1152,3 +1152,49 @@ This completes #4's contract versioning. What it deliberately does not do:
   names the constraint a controller-authored witness record must satisfy to be
   cited as `CONFIRMED` evidence; it does not define that witness record. #269
   owns it.
+
+### Diagnostic retention independent of artifact capture (#547)
+
+The controller's raw journal now also permits two **detail** events. These are
+not lifecycle transitions, do not satisfy `captured`, and do not change any v2
+ledger, manifest, lifecycle or agent-observation schema:
+
+- `transcript-retained` carries `observation`, using the manifest's existing
+  `client-transcript` observation metadata (`attempt_id`, `origin`, `coverage`,
+  object `ref`/`digest`/`size`, or a missing reason). The caller supplies already
+  leak-checked bytes. Retention runs after observation and before export and
+  liveness checks, so a failed capture can keep its diagnostic transcript while
+  remaining inconclusive. An unconfirmed stop or a bounded prefix is partial.
+  Callback failures and storage refusal name their class without copying
+  exception payloads. A missing outcome carries no byte reference.
+- `gate-witness-retained` names the content-addressed diagnostic witness with
+  `coverage: complete` and `digest`, or records `coverage: missing` with a
+  storage-refusal reason. This snapshot is retained even when channel or credit
+  checks block grading. Complete **retention** does not imply complete witness
+  coverage: each declared gate and each run still records its own status. See
+  [gate-witness.md](gate-witness.md) for per-run output references.
+
+`trial.read_retained_transcript` requires one outcome bound to the requested
+attempt, the expected stream/origin, valid coverage/reference metadata, and
+object bytes whose digest and size match. Missing, symlinked, altered, misbound
+or ambiguous references refuse. `agent_trial.transcript_retention` and invocation
+recomputation can use this independently retained transcript when no manifest
+entry exists. Partial transcripts remain diagnostic and cannot prove that a
+skill was not invoked. Historical stores with neither reference remain missing;
+no transcript is reconstructed from a later run. The journal is controller-owned
+and is not a signature against an operator who can rewrite the entire store.
+
+The controller-held raw fixture extras also gain a `finalization` object:
+`{"status": "succeeded", "reason": null}`, or `failed`/`not-observed` with a
+nonempty reason. The first outcome covers the entire fixture `finish`, including
+exceptions after service/git evidence was produced; retrying cannot replace it.
+Reasons record failure classes rather than copying exception payloads. These
+extras remain a separate content-addressed evidence artifact, not a v2 record
+family. Existing service, git, guard and credential checks remain necessary.
+
+Strict fixture judge replay accepts only a well-formed recorded `succeeded`
+outcome. A recorded failure, malformed outcome or unobserved finalization blocks
+replay even with `--assume-fixture-finalized`. Only **historical absence** can use
+that explicit assumption. Replay labels list the attempts whose finalization was
+established and those whose historical finalization was assumed. Historical D3
+stores are unchanged and do not acquire evidence of successful finalization.
