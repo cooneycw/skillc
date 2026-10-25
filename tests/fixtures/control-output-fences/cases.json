@@ -1,0 +1,14 @@
+{
+  "children": [
+    {"name":"bad-fails","declared":"BAD","child_fails":true,"control_failed":1,"control_passed":0,"unexpected":false},
+    {"name":"good-passes","declared":"GOOD","child_fails":false,"control_failed":0,"control_passed":1,"unexpected":false},
+    {"name":"bad-clean","declared":"BAD","child_fails":false,"control_failed":0,"control_passed":1,"unexpected":true},
+    {"name":"good-fails","declared":"GOOD","child_fails":true,"control_failed":1,"control_passed":0,"unexpected":true}
+  ],
+  "protocol": [
+    {"name":"missing","text":"1 failed in 0.01s\n","failed":1,"control_invocations":0},
+    {"name":"unclosed","text":"::cicd-negative-control:BEGIN:BAD:broken::\n1 failed in 0.01s\n","failed":1,"control_invocations":0},
+    {"name":"mismatched","text":"::cicd-negative-control:BEGIN:BAD:broken::\n1 failed in 0.01s\n::cicd-negative-control:END:GOOD:broken::\n","failed":1,"control_invocations":0},
+    {"name":"unknown","text":"::cicd-negative-control:BEGIN:BAD:unknown::\nchild raised before a summary\n::cicd-negative-control:END:BAD:unknown::\n","failed":0,"control_invocations":1,"unexpected":["unknown"]}
+  ]
+}
