@@ -352,12 +352,22 @@ def _ensure_private_trigger_dir(path: Path) -> None:
     further for 0700 (every bit already absent from "group"/"other"), but
     stating the final mode explicitly removes any dependence on what the
     umask happens to be rather than reasoning about whether it is safe
-    this time."""
-    if not path.exists():
+    this time. Concurrent creators arbitrate with mkdir itself: only the
+    successful creator finalizes its mode. An existing or competing leaf must
+    pass lstat/type/owner/mode checks without following a link or changing it.
+    This does not exclude later same-uid path replacement."""
+    try:
         path.mkdir(parents=True, mode=0o700)
+    except FileExistsError:
+        pass  # validate the winner exactly as any already-existing leaf
+    else:
         os.chmod(path, 0o700)
         return
-    st = path.stat()
+    st = path.lstat()
+    if not stat.S_ISDIR(st.st_mode):
+        raise BackendUnavailable(
+            f"refusing to use trigger socket directory {path}: not a real directory"
+        )
     if st.st_uid != os.getuid():
         raise BackendUnavailable(
             f"refusing to use trigger socket directory {path}: owned by uid {st.st_uid}, "

@@ -1,0 +1,184 @@
+{
+  "purpose": "Development replay of an ambiguity-bounded historical grader distinction; not a CPP defect or effectiveness claim.",
+  "source": {
+    "experiment_id": "calibration-0d206a11",
+    "trial_id": "t6-calibration_provided_1",
+    "attempt_id": "a-cd2c7a7de61f",
+    "result_id": "r-5479ff20024a",
+    "manifest_digest": "sha256:b3827783de49e3e7849d2edbfb9eb384c1130010dac512aa74c3d0809f420b52",
+    "transcript": {
+      "coverage": "complete",
+      "digest": "sha256:c8565da1e0ad088f32bc74acb5e4a1663ea4eb4b4879d7fd4efd217979e99634",
+      "size": 820665,
+      "reason": null
+    },
+    "approved_declaration_digest": "sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee",
+    "frozen_approval_commit": "1c76a4d5dc3944ab96025ff56290413b75a5c31a",
+    "case": {
+      "id": "helper-different-question",
+      "revision": "1"
+    },
+    "grader": {
+      "id": "helper-different-question",
+      "revision": "1",
+      "digest": "sha256:c35cc7f666ac84858640d114804ac3db546dd8a501213ba6dcc7470516050523"
+    },
+    "subject": {
+      "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+    },
+    "declared_collection": {
+      "locator": "github.com/cooneycw/claude-power-pack",
+      "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+    },
+    "client": {
+      "name": "codex",
+      "version": "0.157.1"
+    },
+    "image": {
+      "digest": "sha256:b9816879e22d1f62dc6b8614c787e7666c1d9f438437c3d03d3c622513d1a563"
+    },
+    "model_observed": "gpt-6-astra",
+    "reasoning_effort_observed": "high",
+    "receipt": {
+      "file": "receipt-a-cd2c7a7de61f.json",
+      "digest": "sha256:317ec9dffe59cc21842a99d1e04ea4455e8f191a30e1491aafa4b802dfc470a1",
+      "subject": {
+        "locator": "github.com/cooneycw/claude-power-pack",
+        "revision": "snapshot:sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52",
+        "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+      }
+    },
+    "declaration_linkage": "Legacy schedule-only configuration; separate retained approved declaration joined explicitly to ledger and observed source."
+  },
+  "grader": {
+    "path": "evals/calibration-557-repeat/historical-task-v1",
+    "id": "helper-different-question",
+    "revision": "1",
+    "digest": "sha256:c35cc7f666ac84858640d114804ac3db546dd8a501213ba6dcc7470516050523"
+  },
+  "good_origin": {
+    "source": "Pre-existing independently qualified contacts-last alternative; no new model success.",
+    "path": "evals/calibration-557-repeat/historical-task-v1/alternatives/contacts-last",
+    "task_source_commit": "fc02838",
+    "task_tree": "2321b8cfd1dc45ce10449e87df2e373a02a2629c"
+  },
+  "files": {
+    "bad": {
+      "APPROVED.md": {
+        "digest": "sha256:aa2e77a9d49d315f4456fe0c3dd7686138c7ea483cc31834774e9a415a44feec",
+        "size": 326,
+        "mode": "-"
+      },
+      "CHANGES.md": {
+        "digest": "sha256:c755c91e44213bf7006f9bad05962229375fb40a3a7cdddf3b157678b2f40fbd",
+        "size": 216,
+        "mode": "-"
+      },
+      "CONTRIBUTING.md": {
+        "digest": "sha256:f48f51aa340aa33434dc717b3df569202fe7286b1e0ae144e559c4c09cb2e3fd",
+        "size": 263,
+        "mode": "-"
+      },
+      "approved.diff": {
+        "digest": "sha256:5617a8e3fdeb7b0999fee496f7ef783b9e028e9140a4ac3b6a261051bc7790e0",
+        "size": 564,
+        "mode": "-"
+      },
+      "report.json": {
+        "digest": "sha256:be49ec4f2873e84f00221587dee0ae8faf1f7784ef51c523759c2a87301bf12e",
+        "size": 223,
+        "mode": "-"
+      },
+      "tools/verify-change.py": {
+        "digest": "sha256:2b9a5d8a6614c5ed931d4e0f78ce2bd462ad37725f5c7c4c60adda4af2833dd9",
+        "size": 1782,
+        "mode": "x"
+      },
+      "docs/runbook.md": {
+        "digest": "sha256:ab61fe01860dba3441bbe16d36e321b6c1c67ece0c911e79b334ae43cad9807c",
+        "size": 1114,
+        "mode": "-"
+      }
+    },
+    "good": {
+      "APPROVED.md": {
+        "digest": "sha256:aa2e77a9d49d315f4456fe0c3dd7686138c7ea483cc31834774e9a415a44feec",
+        "size": 326,
+        "mode": "-"
+      },
+      "CHANGES.md": {
+        "digest": "sha256:c755c91e44213bf7006f9bad05962229375fb40a3a7cdddf3b157678b2f40fbd",
+        "size": 216,
+        "mode": "-"
+      },
+      "CONTRIBUTING.md": {
+        "digest": "sha256:f48f51aa340aa33434dc717b3df569202fe7286b1e0ae144e559c4c09cb2e3fd",
+        "size": 263,
+        "mode": "-"
+      },
+      "approved.diff": {
+        "digest": "sha256:5617a8e3fdeb7b0999fee496f7ef783b9e028e9140a4ac3b6a261051bc7790e0",
+        "size": 564,
+        "mode": "-"
+      },
+      "report.json": {
+        "digest": "sha256:ab0b9e81db29898036fd9bef1ce7a762be18a36e9d34b153d45631cab078b6e0",
+        "size": 163,
+        "mode": "-"
+      },
+      "tools/verify-change.py": {
+        "digest": "sha256:2b9a5d8a6614c5ed931d4e0f78ce2bd462ad37725f5c7c4c60adda4af2833dd9",
+        "size": 1782,
+        "mode": "x"
+      },
+      "docs/runbook.md": {
+        "digest": "sha256:581cb881cdc802274f34b4ff6a0227e40b1fd903046ad1f556d77032beca450f",
+        "size": 1114,
+        "mode": "-"
+      }
+    }
+  },
+  "expected": {
+    "bad": {
+      "status": "FAIL",
+      "violated": [
+        "one-section-per-step",
+        "report-verdict"
+      ]
+    },
+    "good": {
+      "status": "PASS",
+      "violated": []
+    }
+  },
+  "controls": {
+    "always-pass": {
+      "path": "grader-controls/always_pass.py",
+      "digest": "sha256:60c5a0e2f12ff663868704d0c23ed8c8292418a94af47782244a16f88cb77278"
+    },
+    "always-fail": {
+      "path": "grader-controls/always_fail.py",
+      "digest": "sha256:5c966ce43f6dd8fbadd7a4ede68f39e6100317af2d1035dfed55b15b13c2e64f"
+    }
+  },
+  "sanitization": {
+    "omitted": [
+      ".skillc-canary",
+      ".skillc-canary-result",
+      "private raw transcript and original records"
+    ],
+    "candidate_byte_changes": [],
+    "privacy_check": "Seeded bad fixture detected; seven regular UTF-8 files in each candidate scanned, zero matches/skips; no hostname deny-list configured.",
+    "executable_modes": "Captured manifest records normalized owner-executable markers: helper x, six other public files -. These markers are preserved. Full Unix permissions were not captured; public 0755/0644 permissions are packaging choices. Good markers come from the archived alternative."
+  },
+  "bounds": {
+    "agent_or_model_trials": 0,
+    "api_judge_calls": 0,
+    "retries": 0,
+    "deterministic_grades_per_pair": 2,
+    "probe_seconds": 30,
+    "judge_seconds": 30,
+    "pair_seconds_excluding_cleanup": 120,
+    "public_fixture_provenance_bytes_max": 102400
+  }
+}
