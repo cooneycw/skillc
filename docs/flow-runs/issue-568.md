@@ -71,3 +71,68 @@ A permissive exception inside the old lane could silently change historical clai
 
 
 Outstanding: all 568B task/grader/profile/runtime/full-prompt/paired-execution/declaration/sizing/holdout acceptance; #568 stays OPEN. No live study, image approval, host install or deployment. Separate exact-head merge clearance required.
+
+<!-- flow-run n=2 id=e83b7c171c574f7796007498759a85b2 -->
+## Run 2
+
+- Run-id:            e83b7c171c574f7796007498759a85b2
+- Run-start:         6b78522a9e16baca33254dfc448a8cbc59e166d1
+
+- Issue: #568
+- Base SHA: 6b78522a9e16baca33254dfc448a8cbc59e166d1
+- Necessity verdict: Still needed
+- Approval: granted
+- Approver: skillc-proof root orchestrator, GO-WITH-CONDITIONS for B1 only, durable outbox revision 7
+- Recorded at: 2026-10-25T08:51:59.607621+00:00
+
+### Section B evidence
+
+PR570 merged6b78522 after issue568 creation2026-10-25T07:32:17Z; it supplies
+explicit-product comparison validation, not this artifact task or paired fixture
+route. Inspected570 heads fe58347/a82a8af, prior main1fcf690 and earlier
+PR567/565/564/562; those do not supply this new task. Related inspected203/204,
+28,557,248,245/246,287,434 and505 do not supersede the bounded B1 slice.
+All13 readable registered sibling worktrees had no relevant unpushed commits.
+CPP621/624 database acceptance skips and CPP657 completeness loss ground the
+failure class;557's floor remains ambiguity-bounded, without CPP causality.
+
+### Section C - the approved plan
+
+1. `evals/level3/change-with-regression-568/README.md` - Freeze the complete public CLI/API/validation/atomicity/history/testing contract from v2, control populations, artifact-only status and missing runtime bridge.
+2. `evals/level3/change-with-regression-568/goal.md` - Describe the desired project feature/delivery result without CPP procedure; label which later service requirement is not certified by B1.
+3. `evals/level3/change-with-regression-568/fixture/Makefile` - Run the common stdlib unittest suite without CPP-specific receipts or external database.
+4. `evals/level3/change-with-regression-568/fixture/inventory.py` - Existing correct SQLite put/list API+CLI and deterministic schema initialization, with new batch feature absent.
+5. `evals/level3/change-with-regression-568/fixture/tests/test_legacy.py` - Existing API/metadata/audit behavior through public interfaces, not private implementation details.
+6. `evals/level3/change-with-regression-568/oracle.py` - Independently observe semantic outputs and database state; bounded exact-remote extraction using existing SafeTree/GitDir for trusted constructed export controls. No host mode for arbitrary candidate paths.
+7. `evals/level3/change-with-regression-568/controls.json` - Literal public input/golden/expected dimensions and exact mutation preconditions/source references. Do not bury full Python programs in JSON or derive expectations from candidate code.
+8. `evals/level3/change-with-regression-568/qualify.py` - Fixed24-case certification, expected population validation and strict process/output/temp/deadline/cleanup bounds; known blinding graders must be refused.
+9. `evals/level3/change-with-regression-568/candidates/reference.py` - Literal reviewed full correct implementation using prevalidation and quantity-only transactional upsert.
+10. `evals/level3/change-with-regression-568/candidates/alternative.py` - Literal independently structured correct UPDATE/INSERT+rollback strategy, satisfying the same public interfaces.
+11. `evals/level3/change-with-regression-568/candidates/test_import.py` - Literal shared feature/property tests for both formats, late-invalid rollback and audit/history preservation; used with each valid implementation, not an implementation-pattern test.
+12. `tests/test_change_with_regression_568.py` - Qualification controls, known-red pre-fix/mutant executions, alternate valid strategies, process-tree cleanup and remote-vs-local target proof.
+13. `evals/flow-auto-calibration-568/holdout-reservation.md` - Disjoint expression-language family metadata, custodian pending/access boundary, no task body or held-out proof.
+14. `evals/flow-auto-calibration-568/task-interface.md` - Source-grounded later paired-service/full-prompt/selection/retention blockers and B2/B3 boundaries, not a completed declaration.
+15. `changelog.d/568-b1.md` - Artifact certification only and the specific next prerequisite, without calibration/live benefit claims.
+
+Scope:15 product paths, at most2000 nonworkflow changed lines; required normal
+workflow/as-read/receipt provenance separately accounted. No shared core, global
+registry, root Makefile, profile/image/declaration/service-engine changes.
+Exactly24 top-level controls,24 public semantic vectors per valid strategy,
+six-implementation test-protection pack, four separately reported resource probes
+and below-limit twins. Public semantics from the reviewed B1 contract are fixed.
+Host execution only of reviewed committed fixture sources, never arbitrary
+candidate code. Process groups/deadlines/output and parent staging budgets must
+have actual controls; this is not an OS hostile-process/filesystem sandbox.
+Risks: expectation coupling, implementation-coupled tests, clipped populations,
+and constructed remote extraction confused with a dispatched paired service.
+B2 service bridge and B3 full-prompt/runtime-selection/freeze/rehearsal remain;
+reservation custodian pending, no held-out proof, no live study or automatic203GO.
+Root reviewed plan SHA256446b3c0cdefa63bb8c1e9f8557f6b869e1237aaf0d5dd88f3a8a5f5d099fb3d8.
+
+The genuine mint's optional stored session field is empty: the creation/claim
+calls carried the actual native session, but reconcile did not. Root explicitly
+authorized retaining this actual ID without state rewrite/remint; original native
+events remain caller evidence. Subsequent begin/approve supply actual session.
+CC run1 remains immutable history; this approval authorizes only run2/B1.
+Workflow-only checkpoint and read-only original-rollout attribution preflight
+were specifically authorized before substantive work. No synthetic review receipt.
