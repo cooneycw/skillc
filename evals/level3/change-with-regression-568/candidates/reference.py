@@ -59,6 +59,7 @@ def _unique(pairs):
 
 
 def _rows(path, kind):
+    csv.field_size_limit(sys.maxsize)
     try:
         with open(path, encoding="utf-8", newline="") as stream:
             if kind == "csv":

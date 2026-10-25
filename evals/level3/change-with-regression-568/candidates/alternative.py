@@ -58,6 +58,7 @@ def _object(pairs):
 
 
 def _records(path, kind):
+    csv.field_size_limit(sys.maxsize)
     try:
         with open(path, encoding="utf-8", newline="") as f:
             records = csv.reader(f, strict=True) if kind == "csv" else enumerate(f, 1)

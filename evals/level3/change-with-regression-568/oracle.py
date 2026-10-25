@@ -169,6 +169,7 @@ def seed(db, kind=None, extra=()):
 
 
 def vector(code, row, budget, claim=None):
+    start_steps = budget.processes
     with tempfile.TemporaryDirectory(prefix="568-vector-") as tmp:
         d = Path(tmp)
         budget.write(d / "inventory.py", code)
@@ -201,6 +202,19 @@ def vector(code, row, budget, claim=None):
             output_ok = False
         output_ok &= rc == row["code"]
         output_ok &= stderr == "" if row["code"] == 0 else stderr.startswith(row["prefix"]) and len(stderr) > len(row["prefix"])
+        if row["action"] != "import":
+            cli = [sys.executable, "inventory.py", "--db", str(db)]
+            calls = [(cli + ["list"], row["stdout"])]
+            if row["action"] != "list":
+                sku, quantity = ("A", "8") if row["action"] == "set" else ("B", "2")
+                calls.insert(0, (cli + ["put", sku, quantity], {"updated": 1}))
+            for command, wanted in calls:
+                status, out, err = bounded(command, d, budget)
+                try:
+                    output_ok &= status == 0 and err == "" and out.endswith("\n") and json.loads(out) == wanted
+                except ValueError:
+                    output_ok = False
+            after = state(db)
         expected = [tuple(x) for x in row["items"]]
         metadata = {x[0]: x[2:] for x in after["items"]}
         preserved = all(metadata.get(x[0]) == x[2:] for x in before["items"])
@@ -216,7 +230,7 @@ def vector(code, row, budget, claim=None):
             feature, legacy = True, bool(output_ok and after["items"] == expected and preserved)
         return {"id": row["id"], "feature": bool(feature), "legacy": legacy, "code": rc,
                 "stdout": stdout, "stderr": stderr, "items": after["items"], "audit": after["audit"],
-                "managed_steps": 1}
+                "managed_steps": budget.processes - start_steps}
 
 
 def semantic(name, manifest, sources, budget, claim=None):
