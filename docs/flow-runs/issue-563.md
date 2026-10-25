@@ -129,3 +129,13 @@ The retained full make verify passed; its outer finish gate originally failed
 for the missing receipt. That historical failure remains a failure. Receipt
 enrolment and current-base integration are checked separately below.
 
+
+Current main08a6887053eb7bcf3c7d3fc6545a7aa7aad2ec74 merged cleanly; upstream
+paths do not overlap the approved source lane. The ten new trigger-directory
+controls plus twenty newly integrated historical replay cases pass:30/30 exact
+JUnit identities, make test EXIT0. Source and existing backend test bytes are
+unchanged from the reviewed head. The explicit merged-helper enrolment-only gate
+exits0 and audit-flow verifies the original captured prefix. This pairs the
+retained full make verify EXIT0 with actual receipt enrolment; it does not rename
+the historical outer finish failure as a pass or rerun a full suite for metadata.
+Final required CI and root exact-head/current-base clearance remain pending.
