@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import suppress
+from contextlib import closing, suppress
 from pathlib import Path
 
 try:
@@ -152,7 +152,7 @@ def bounded(argv, cwd, budget, seconds=5, output_limit=LIMIT):
 def state(db):
     if not db.exists():
         return {"exists": False, "schema": [], "items": [], "audit": []}
-    with sqlite3.connect(db) as c:
+    with closing(sqlite3.connect(db)) as c:
         schema = c.execute("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
         names = {row[0] for row in schema}
         return {"exists": True, "schema": schema,
@@ -162,7 +162,7 @@ def state(db):
 
 def seed(db, kind=None, extra=()):
     if kind != "missing":
-        with sqlite3.connect(db) as c:
+        with closing(sqlite3.connect(db)) as c, c:
             if kind != "empty":
                 c.executescript(SCHEMA)
                 c.executemany("INSERT INTO items VALUES (?,?,?,?)", extra)
