@@ -204,6 +204,18 @@ def render(result: Verdict, *, sha: str, runner_sha: str) -> str:
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) == 9 and argv[5] == "--opt-in":
+        from ci.real_docker_optin import publish
+        try:
+            status, description, body = publish(Path(argv[1]), name=argv[6], sha=argv[2],
+                                                runner_sha=argv[3], evidence=Path(argv[7]),
+                                                run_code=int(argv[8]))
+            print(f"{status}\n{description}\n---\n{body}")
+            return EXIT_CODES[status]
+        except (OSError, ValueError):
+            print("ERROR\nERROR: opt-in report custody unavailable\n---\n"
+                  "Opt-in report custody failed; no certification is established.")
+            return 2
     if len(argv) not in (4, 5):
         print("usage: real_docker_post.py <junit-xml-report> <sha> <runner-sha> [<checkout>]", file=sys.stderr)
         return 2

@@ -27,6 +27,17 @@ for var in INSTALLED_ROOT GITHUB_REPO GITHUB_TOKEN_FILE STATE_FILE; do
     fi
 done
 
+# Resolve private paths before changing directory; WORK never supplies Python imports.
+CALLER_CWD="$(pwd -P)"
+for var in INSTALLED_ROOT STATE_FILE GITHUB_TOKEN_FILE; do
+    if [[ -n "${!var:-}" && "${!var}" != /* ]]; then
+        printf -v "$var" '%s/%s' "$CALLER_CWD" "${!var}"
+    fi
+done
+[[ "$CONFIG_FILE" = /* ]] || CONFIG_FILE="$CALLER_CWD/$CONFIG_FILE"
+export SKILLC_REAL_DOCKER_CONFIG="$CONFIG_FILE" PYTHONPATH="$INSTALLED_ROOT"
+cd "$INSTALLED_ROOT"
+
 RUNNER="$INSTALLED_ROOT/ci/real-docker/run-real-docker"
 
 # S4: token read from a file, used via curl's -K config, never on argv.
@@ -108,6 +119,8 @@ print(len(page), hit_known)
     PAGE=$((PAGE + 1))
 done
 
+(
+cd "$INSTALLED_ROOT"
 PYTHONPATH="$INSTALLED_ROOT" python3 -c '
 import json, sys
 from ci.real_docker_trigger import select_requested_shas
@@ -118,10 +131,11 @@ processed = frozenset(json.load(open(sys.argv[3])))
 
 result = select_requested_shas(comments, owner_login=owner_login, processed_ids=processed)
 json.dump({
-    "requests": list(result.requests),
+    "requests": [list(r) + [""] for r in result.requests] + list(result.optin_requests),
     "newly_seen_ids": list(result.newly_seen_ids),
 }, open(sys.argv[4], "w"))
 ' "$COMMENTS_FILE" "$OWNER_LOGIN" "$PROCESSED_FILE" "$SELECTION_FILE"
+)
 
 # ------------------------------------------------------- run, sequentially
 #
@@ -146,30 +160,41 @@ state = json.load(open(sys.argv[1]))
 existing = set(state.get("processed_comment_ids", []))
 existing.add(int(sys.argv[2]))
 state["processed_comment_ids"] = sorted(existing)
+state.get("pending_comment_requests", {}).pop(sys.argv[2], None)
 json.dump(state, open(sys.argv[1], "w"))
 ' "$STATE_FILE" "$1"
 }
 
-# Comments that were SEEN but never matched/triggered anything carry no
-# run to wait on - safe to mark processed immediately, unconditionally.
+# Freeze first-seen request tuples before running; lock retries never re-read edits.
 python3 -c '
 import json, sys
 state = json.load(open(sys.argv[1]))
 selection = json.load(open(sys.argv[2]))
-triggered_ids = {cid for cid, _sha in selection["requests"]}
-non_triggering = [i for i in selection["newly_seen_ids"] if i not in triggered_ids]
+pending = state.get("pending_comment_requests", {})
+for request in selection["requests"]:
+    pending.setdefault(str(request[0]), request)
 existing = set(state.get("processed_comment_ids", []))
-existing.update(non_triggering)
+existing.update(selection["newly_seen_ids"])
 state["processed_comment_ids"] = sorted(existing)
+if pending or "pending_comment_requests" in state:
+    state["pending_comment_requests"] = pending
+selection["requests"] = list(pending.values())
 json.dump(state, open(sys.argv[1], "w"))
+json.dump(selection, open(sys.argv[2], "w"))
 ' "$STATE_FILE" "$SELECTION_FILE"
 
 run_one() {
     # Echoes the exit code; never raises under `set -e` in the caller.
-    local sha="$1"
+    local sha="$1" optin="${2:-}"
     echo "poll-triggers: running $sha" >&2
-    "$RUNNER" "$sha" && echo 0 && return 0
-    echo $?
+    local result=0
+    if [ -n "$optin" ]; then
+        (cd "$CALLER_CWD" && "$RUNNER" "$sha" --opt-in "$optin") >&2 || result=$?
+    else
+        (cd "$CALLER_CWD" && "$RUNNER" "$sha") >&2 || result=$?
+    fi
+    echo "$result"
+    return 0
 }
 
 if [ -n "$MAIN_SHA_TO_RUN" ]; then
@@ -185,10 +210,11 @@ REQUESTS_JSON="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sy
 REQUEST_COUNT="$(echo "$REQUESTS_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 i=0
 while [ "$i" -lt "$REQUEST_COUNT" ]; do
-    PAIR="$(echo "$REQUESTS_JSON" | python3 -c "import json,sys; cid, sha = json.load(sys.stdin)[$i]; print(cid); print(sha)")"
+    PAIR="$(echo "$REQUESTS_JSON" | python3 -c "import json,sys; cid, sha, optin = json.load(sys.stdin)[$i]; print(cid); print(sha); print(optin)")"
     COMMENT_ID="$(echo "$PAIR" | sed -n '1p')"
     REQUESTED_SHA="$(echo "$PAIR" | sed -n '2p')"
-    EXIT_CODE="$(run_one "$REQUESTED_SHA")"
+    OPTIN_NAME="$(echo "$PAIR" | sed -n '3p')"
+    EXIT_CODE="$(run_one "$REQUESTED_SHA" "$OPTIN_NAME")"
     if [ "$EXIT_CODE" != "3" ]; then
         persist_comment_done "$COMMENT_ID"
     else
