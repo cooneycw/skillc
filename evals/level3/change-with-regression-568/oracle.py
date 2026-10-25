@@ -218,8 +218,8 @@ def vector(code, row, budget, claim=None):
                     output_ok &= status == 0 and err == "" and out.endswith("\n") and json.loads(out) == wanted
                 except ValueError:
                     output_ok = False
+                observed_states.append(state(db))
             after = state(db)
-            observed_states.append(after)
         expected = [tuple(x) for x in row["items"]]
         metadata = {x[0]: x[2:] for x in after["items"]}
         preserved = all(metadata.get(x[0]) == x[2:] for x in before["items"])
