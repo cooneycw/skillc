@@ -142,7 +142,7 @@ def combine(raw: str | None, record: Mapping[str, object]) -> str | None:
             return "UNKNOWN"
         if marker.get("attempt_id") != record.get("attempt_id") or marker.get("scope") != "owned-attempt-through-storage-and-cleanup":
             return "UNKNOWN"
-        if marker.get("clock") not in {"monotonic", "injected-policy-only"} or not isinstance(marker.get("identity"), str):
+        if marker.get("clock") not in ("monotonic", "injected-policy-only") or not isinstance(marker.get("identity"), str):
             return "UNKNOWN"
         start, end, allowance = (number(marker.get(k)) for k in ("start", "end", "allowance"))
         elapsed = number(final.get("elapsed"))

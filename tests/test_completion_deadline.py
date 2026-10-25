@@ -434,3 +434,108 @@ def test_completion_evidence_requires_valid_finite_matching_healthy_data(field: 
     assert combine("PASS", {**record, "completion": {**final, field: value}}) == "UNKNOWN"
     assert combine("FAIL", {**record, "completion": None}) == "FAIL"
     assert combine("PASS", normalize(record, [])) == "UNKNOWN"  # Copied private data has no durable marker.
+
+
+@pytest.mark.parametrize("clock_value", [[], {}])
+def test_malformed_marker_clock_is_unknown(clock_value: Any) -> None:
+    from skillc.completion import CompletionDeadline, combine
+    deadline = CompletionDeadline.after(10, lambda: 0.0)
+    marker = deadline.marker("attempt")
+    record = {"attempt_id": "attempt", "completion_required": True,
+              "completion_marker": marker, "completion": deadline.qualify(marker, True)}
+    assert combine("PASS", record) == "PASS"
+    marker["clock"] = clock_value
+    record["completion"] = deadline.qualify(marker, True)
+    assert combine("PASS", record) == "UNKNOWN"
+    assert combine("FAIL", record) == "FAIL"
+
+
+@pytest.mark.parametrize("cancelled", [True, False])
+def test_host_shared_expiry_preserves_already_requested_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool,
+) -> None:
+    import sys
+
+    from test_agent_trial import _planned
+
+    from skillc.completion import CompletionDeadline
+
+    experiment, aid = _planned(trial.open_store(tmp_path / "store", []))
+    workspace_base = tmp_path / "work"
+    workspace_base.mkdir()
+    workspace = trial.allocate_workspace(experiment, aid, workspace_base, [])
+    ticks = [0.0]
+    endpoint = CompletionDeadline.after(5, lambda: ticks[0])
+    original = trial.Experiment.record
+
+    def record(self: trial.Experiment, attempt: str, event: str, **detail: Any) -> None:
+        original(self, attempt, event, **detail)
+        if event == "started":
+            ticks[0] = 6.0
+
+    monkeypatch.setattr(trial.Experiment, "record", record)
+    result = trial.run_attempt(experiment, aid, [sys.executable, "-c", "import time; time.sleep(30)"],
+                               workspace, 5, cancel=lambda: cancelled, completion_deadline=endpoint)
+    assert result["confirmed"] is True
+    assert result["reason"] == ("operator-cancelled" if cancelled else "timeout")
+    assert trial.cleanup_workspace(experiment, aid)["status"] == "removed"
+
+
+@pytest.mark.parametrize("infrastructure_first", [True, False])
+def test_wave_first_cause_survives_shared_expiry_and_cleanup_loss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, infrastructure_first: bool,
+) -> None:
+    import os
+    import threading
+    import time
+
+    from test_coordination_wave import ACTOR
+
+    expired = threading.Event()
+    original_decide = cw._Controller.decide
+    original_attempt = trial.run_attempt
+    original_cleanup = trial.cleanup_workspace
+    stops: list[str] = []
+
+    def decide(controller: Any, role: str, request: Any) -> Any:
+        reply = original_decide(controller, role, request)
+        if role == "worker-a" and request["op"] == "ack":
+            if infrastructure_first:
+                controller.fail("controlled-infrastructure-first", unknown=True)
+            expired.set()
+        return reply
+
+    def attempt(experiment: Any, aid: str, *args: Any, **kwargs: Any) -> Any:
+        result = original_attempt(experiment, aid, *args, **kwargs)
+        if str(experiment.trial_of(aid)["trial_id"]).endswith("worker-a"):
+            stops.append(str(result["reason"]))
+        return result
+
+    def cleanup(experiment: Any, aid: str) -> Any:
+        result = original_cleanup(experiment, aid)
+        if str(experiment.trial_of(aid)["trial_id"]).endswith("worker-a"):
+            assert result["status"] == "removed"
+            return {"status": "unknown", "errors": ["controlled later cleanup loss"]}
+        return result
+
+    monkeypatch.setattr(cw._Controller, "decide", decide)
+    monkeypatch.setattr(trial, "run_attempt", attempt)
+    monkeypatch.setattr(trial, "cleanup_workspace", cleanup)
+    work = tmp_path / "work"
+    work.mkdir()
+    result = cw.run_wave(cw.WavePlan(actor_digest=trial.sha256_bytes(ACTOR.read_bytes()),
+                                     mode="hang", deadline=5), ACTOR, tmp_path / "store", work,
+                         clock=lambda: time.monotonic() + (10 if expired.is_set() else 0))
+    assert stops == ["operator-cancelled"]
+    assert ("deadline" in result.report["failures"]) is not infrastructure_first
+    assert result.report["status"] == ("UNKNOWN" if infrastructure_first else "FAIL")
+    assert "cleanup-unconfirmed" in result.report["unknown"]
+    for _, attempt_record in result.experiment.attempts():
+        aid = str(attempt_record["attempt_id"])
+        assert (result.experiment.root / f"lifecycle-{aid}.json").is_file()
+        for event in result.experiment.events(aid):
+            if event["event"] == "started":
+                with pytest.raises(ProcessLookupError):
+                    os.killpg(int(str(event["pid"])), 0)
+            if event["event"] == "workspace":
+                assert not Path(str(event["path"])).exists()

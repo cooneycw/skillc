@@ -1866,3 +1866,36 @@ def test_duplicate_owned_registration_refuses_across_collector_instances(store: 
     assert first == ["probe-controlled-identity"] and second == []
     assert first.all_absent() is False
     assert len([e for e in experiment.events(aid) if e.get("event") == "owned-attempt"]) == 1
+
+
+@pytest.mark.parametrize("wrong_parent", [True, False])
+def test_supplied_collector_is_checked_before_legacy_agent_preparation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, wrong_parent: bool,
+) -> None:
+    experiment, aid = _planned(store)
+    other, other_aid = _planned(store)
+    ids = t.OwnedAttemptIds(other, other_aid) if wrong_parent else t.OwnedAttemptIds(experiment, aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+
+    def prepare(self: object, attempt: str) -> object:
+        prepared.append(attempt)
+        raise RuntimeError("controlled preparation reached")
+
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    kwargs = {"backend": backend, "experiment": experiment, "attempt_id": aid, "client": "codex",
+                  "base_argv": _fake_argv(fmt="codex-fake", home=_mapped_home(docker_state, aid),
+                                      transcript_relpath=".codex/sessions/test.jsonl"),
+                  "prompt": "Fix the helper.", "skill_name": None, "surface": {}, "limits": Limits(timeout=5),
+                  "base": base, "credential_explicit_path": _fresh_credential(tmp_path, "codex"),
+                  "recorded_attempt_ids": ids, "completion_deadline": None}
+    if wrong_parent:
+        with pytest.raises(t.Refused, match="owned IDs belong to a different experiment or parent"):
+            at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
+        assert prepared == []
+    else:
+        with pytest.raises(RuntimeError, match="controlled preparation reached"):
+            at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
+        assert prepared == [aid]
+    assert ids == []

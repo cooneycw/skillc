@@ -288,6 +288,15 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
             controller.fail("accounting-exception", unknown=True)
         diagnostics[role] = record
 
+    def cancellation_requested() -> bool:
+        if controller.cancel.is_set():
+            return True
+        try:
+            shared_deadline.remaining(effective_deadline)
+        except completion.CompletionUnavailable:
+            controller.cancel_for_deadline()
+        return controller.cancel.is_set()
+
     def participant(role: str, socket_path: Path, staged_actor: Path) -> None:
         binding = controller.roles[role]
         aid = binding["attempt_id"]
@@ -306,7 +315,7 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
             config.update(wave=experiment.root.name, mode=plan.mode)
             result = trial.run_attempt(experiment, aid,
                                        [sys.executable, "-I", str(staged_actor), str(socket_path), json.dumps(config)],
-                                       workspace, remaining, grace=0.2, cancel=controller.cancel.is_set,
+                                       workspace, remaining, grace=0.2, cancel=cancellation_requested,
                                        completion_deadline=shared_deadline)
             record["stop"] = result
             stopped = result.get("confirmed") is True

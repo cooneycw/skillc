@@ -2589,13 +2589,13 @@ def run_one_attempt(
     record, a nested-codex count that is not zero), and grading receives the
     controller-held evidence as `verify`'s `trusted_extras`. `None` (the
     default) changes nothing for any other caller."""
+    if recorded_attempt_ids is not None and not recorded_attempt_ids.bound_to(experiment, attempt_id):
+        raise trial.Refused("owned IDs belong to a different experiment or parent")
     completion_marker = None
     if completion_deadline is not None:
         completion_marker = completion.mark(experiment, attempt_id, completion_deadline)
         if recorded_attempt_ids is None:
             recorded_attempt_ids = trial.OwnedAttemptIds(experiment, attempt_id)
-        elif not recorded_attempt_ids.bound_to(experiment, attempt_id):
-            raise trial.Refused("owned IDs belong to a different experiment or parent")
     if nested_codex_policy is not None and nested_codex_policy not in cg.NESTED_POLICIES:
         raise ValueError(f"nested_codex_policy must be one of {cg.NESTED_POLICIES}, not {nested_codex_policy!r}")
     if extra_home_modes is not None:

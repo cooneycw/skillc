@@ -897,6 +897,11 @@ def run_attempt(
             deadline = time.monotonic() + timeout
             reason = "exited"
             while proc.poll() is None:
+                # Preserve cancellation already witnessed by the controller before
+                # a later shared-clock expiry can replace its cause.
+                if completion_deadline is not None and cancel is not None and cancel():
+                    reason = "operator-cancelled"
+                    break
                 try:
                     if completion_deadline is not None:
                         completion_deadline.remaining(timeout)
@@ -906,7 +911,7 @@ def run_attempt(
                 if completion_deadline is None and time.monotonic() >= deadline:
                     reason = "timeout"
                     break
-                if cancel is not None and cancel():
+                if completion_deadline is None and cancel is not None and cancel():
                     reason = "operator-cancelled"
                     break
                 time.sleep(0.02)
