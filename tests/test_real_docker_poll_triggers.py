@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "example/project"
 OWNER = "the-owner"
@@ -294,3 +296,15 @@ def test_an_unparseable_comment_page_stops_the_tick_before_any_decision(tmp_path
     assert "JSONDecodeError" in result.stderr
     assert _runs(events) == []
     assert new_state == state
+
+
+@pytest.mark.parametrize("name", ["flow-auto-cold", "unknown-control"])
+def test_optin_owner_command_is_forwarded_once(tmp_path: Path, name: str) -> None:
+    """#576: unknown names must reach installed refusal, not vanish in parsing."""
+    command = f"/run-real-docker {REQUESTED_SHA} --opt-in {name}"
+    result, events, state = _tick(tmp_path, {1: [_comment(901, command, OWNER),
+                                               _comment(900, command)]},
+                                  state={"last_main_sha": MAIN_SHA, "processed_comment_ids": []})
+    assert result.returncode == 0, result.stderr
+    assert _runs(events) == [[REQUESTED_SHA, "--opt-in", name]]
+    assert state["processed_comment_ids"] == [900, 901]

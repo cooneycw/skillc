@@ -492,3 +492,74 @@ co-tenant's identical build.
   first-ever run against a repository with a very large, entirely
   unprocessed comment history; ordinary ticks stop within one page once
   they reach an already-processed id.
+
+## Owner-requested opt-ins (#576)
+
+An owner comment may request exactly one installed opt-in:
+
+```
+/run-real-docker <40-hex-sha> --opt-in flow-auto-cold
+```
+
+The closed entry in the INSTALLED `ci/real_docker_optin.py` maps
+`flow-auto-cold` to exactly `SKILLC_FLOW_AUTO_COLD=1` and
+`tests/test_profile_flow_auto_87ecb097_cold.py::test_actual_cold_profile`.
+A tested checkout cannot add or redefine this entry. Unknown names are refused
+by name before tests, with ERROR on their own opt-in context. Names use lowercase
+letters, digits and dashes (1-40 characters). Owner and first-seen comment-ID
+checks still apply; editing an already processed comment cannot request a run.
+The automatic main path never enables opt-ins. Opt-ins support `--break none`
+only. An inherited cold switch or break environment does not grant execution.
+
+An opt-in posts exclusively to `skillc/real-docker-optin/flow-auto-cold` and
+cannot satisfy or overwrite `skillc/real-docker`. Its exact named node must
+execute once: skipped, deselected, duplicate, uncollected or missing nodes produce
+ERROR, with executed/expected counts. An executed failing node produces FAILURE;
+a passing executed node produces SUCCESS 1/1. The ordinary declared-file floor
+is unchanged. Current main may not carry the cold-test file yet: requesting the
+opt-in on such a SHA must produce ERROR 0/1, never substitute a different test.
+Report counts establish execution of this named node, not native wake or agent
+performance. The installed-code boundary retains R1's report-producer limitation.
+
+The installed policy bounds environment setup plus pytest to 2,400 seconds total
+(the cold test itself uses an 1,800-second budget and 1,900-second pytest timeout).
+Timeout terminates the owned process group and cannot earn success. Before any
+checkout/test work, preflight requires 10 GiB available bytes and 100,000 available
+inodes on BOTH the work filesystem and Docker's reported storage filesystem.
+Insufficient or unreadable headroom refuses the run. Lock acquisition retains its
+separate bounded wait/retry behavior. Teardown is required and receives no extra
+success credit from the execution budget. These prechecks do not reserve storage
+or forcefully interrupt host filesystem operations.
+
+Set `OPTIN_EVIDENCE_ROOT` in the private `config.env` to an operator-owned directory
+outside `$WORK_CHECKOUT` and any temporary scratch directory. For each opt-in the
+installed posting helper creates a unique private directory there, retains raw
+JUnit when available and writes `binding.json` containing tested/runner full SHAs,
+context, opt-in, exact node, executed/expected counts, run exit and report SHA256.
+A missing report is explicitly absent, not replaced with a fabricated JUnit.
+Report files use mode 0600 in a private directory. Retention failure produces
+ERROR. This evidence survives shell temporary-file cleanup and future checkout
+cleans. Configure `GITHUB_COMMENT_ISSUE` to publish the status comment containing
+the digest, exact node, counts and logical evidence identifier. The operator
+retrieves raw JUnit privately by that identifier; private paths and raw report
+contents must not be pasted into public comments. This retained JUnit with its
+status/comment binding and operator retrieval satisfies the attachment contract.
+
+A new allowlist entry requires the same explicit reviewed installed-runner re-pin
+as a new declared floor file. After this change merges:
+
+1. Disable the timer and confirm no runner or pytest is active, as in Re-pin above.
+2. Fetch in `$INSTALLED_ROOT`, detach at the reviewed merged main SHA containing
+   the allowlist, and configure private `OPTIN_EVIDENCE_ROOT` and comment issue.
+3. If re-certifying ordinary main, re-seed `last_main_sha` to its parent using the
+   existing procedure; keep all `processed_comment_ids` intact.
+4. Re-enable the timer, then obtain a new owner-authorized comment with the full
+   tested SHA and opt-in name. Re-pin does not replay an old comment ID.
+5. Verify the separate opt-in context, runner pin, exact node, 1/1 execution and
+   retained report/binding digest. A separate ordinary certifying run is still
+   needed for `skillc/real-docker`.
+
+Offline controls exercise the actual poller, shell, installed helper, real tiny
+pytest reports and private retention with external Docker/GitHub I/O replaced.
+They do not establish the operator's physical cold-profile positive; that remains
+an explicitly authorized post-merge run after re-pin.

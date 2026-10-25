@@ -118,7 +118,7 @@ processed = frozenset(json.load(open(sys.argv[3])))
 
 result = select_requested_shas(comments, owner_login=owner_login, processed_ids=processed)
 json.dump({
-    "requests": list(result.requests),
+    "requests": [list(r) + [""] for r in result.requests] + list(result.optin_requests),
     "newly_seen_ids": list(result.newly_seen_ids),
 }, open(sys.argv[4], "w"))
 ' "$COMMENTS_FILE" "$OWNER_LOGIN" "$PROCESSED_FILE" "$SELECTION_FILE"
@@ -156,7 +156,7 @@ python3 -c '
 import json, sys
 state = json.load(open(sys.argv[1]))
 selection = json.load(open(sys.argv[2]))
-triggered_ids = {cid for cid, _sha in selection["requests"]}
+triggered_ids = {r[0] for r in selection["requests"]}
 non_triggering = [i for i in selection["newly_seen_ids"] if i not in triggered_ids]
 existing = set(state.get("processed_comment_ids", []))
 existing.update(non_triggering)
@@ -166,10 +166,16 @@ json.dump(state, open(sys.argv[1], "w"))
 
 run_one() {
     # Echoes the exit code; never raises under `set -e` in the caller.
-    local sha="$1"
+    local sha="$1" optin="${2:-}"
     echo "poll-triggers: running $sha" >&2
-    "$RUNNER" "$sha" && echo 0 && return 0
-    echo $?
+    local result=0
+    if [ -n "$optin" ]; then
+        "$RUNNER" "$sha" --opt-in "$optin" >&2 || result=$?
+    else
+        "$RUNNER" "$sha" >&2 || result=$?
+    fi
+    echo "$result"
+    return 0
 }
 
 if [ -n "$MAIN_SHA_TO_RUN" ]; then
@@ -185,10 +191,11 @@ REQUESTS_JSON="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sy
 REQUEST_COUNT="$(echo "$REQUESTS_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 i=0
 while [ "$i" -lt "$REQUEST_COUNT" ]; do
-    PAIR="$(echo "$REQUESTS_JSON" | python3 -c "import json,sys; cid, sha = json.load(sys.stdin)[$i]; print(cid); print(sha)")"
+    PAIR="$(echo "$REQUESTS_JSON" | python3 -c "import json,sys; cid, sha, optin = json.load(sys.stdin)[$i]; print(cid); print(sha); print(optin)")"
     COMMENT_ID="$(echo "$PAIR" | sed -n '1p')"
     REQUESTED_SHA="$(echo "$PAIR" | sed -n '2p')"
-    EXIT_CODE="$(run_one "$REQUESTED_SHA")"
+    OPTIN_NAME="$(echo "$PAIR" | sed -n '3p')"
+    EXIT_CODE="$(run_one "$REQUESTED_SHA" "$OPTIN_NAME")"
     if [ "$EXIT_CODE" != "3" ]; then
         persist_comment_done "$COMMENT_ID"
     else
