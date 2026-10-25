@@ -710,3 +710,20 @@ and EXACT case-sensitive owned name. Live output, wrong name/case, empty output,
 daemon and permission errors remain non-absence.13cleanup controls pass; lint and
 types pass. Authored1525/1600 before genuine receipt. Docker remains diagnosis-only
 until root authorizes a second physical invocation; no cap weakened or fake receipt.
+
+### Corrected physical result and actual main integration
+
+Root grant19 ran committed1799ebb once with unchanged caps/cases. Physical2 passed
+in231.82s (JUnit case231.778s), population1/1 matched. All10case/substep counts
+matched;533parent commands;22,766,184parent bytes; max command stream256,041bytes.
+Actual cached image120719aa157ab95aecaa6ce31297fd106f57083613054f00d933774fe7b11ef9
+and uncached965f0baa7f499f1d230b83cacf19d7dad630fbd8a626d2c50d79cbd1a6d25965
+were recorded before use. All8containers/2tags absence confirmed, Docker slot
+released. Full flow/native reviewer/live outcome remains UNPROVEN.
+
+Normal merge29d702d8 integrated actual574 into this same run; no conflict or remint.
+At mergeae7162f4 all467physical source blobs/modes/sizes matched1799ebb exactly.
+The following subject README edit only records these observed results; executable
+and profile inputs stay identical. Postmerge main CI1114 was pending at handoff,
+not claimed green. Formal independent review starts after physical results;
+actual receipt and final full slot remain separate root grants.

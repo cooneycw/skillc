@@ -31,3 +31,9 @@ memory+swap, CPU1 and pids128. Writable tmpfs maxima are home256MiB, work/cache2
 project32MiB and tmp64MiB, totalling608MiB maxima within512MiB actual memory.
 Allocation/cleanup uncertainty remains UNKNOWN. Daemon cache is not disk-quota
 controlled and timed-out builds must not be treated as confirmed cleanup.
+
+Development proof on source `1799ebb276d6c0218861d296afb19249ae8e9691` passed
+all ten cases and exact substeps in231.82s, with533parent commands. Eight owned
+containers and two image tags were confirmed absent. The first run remains
+UNKNOWN after a cleanup diagnostic case mismatch; the corrected run is separate.
+This is offline cold-command evidence, not native workflow or efficacy evidence.
