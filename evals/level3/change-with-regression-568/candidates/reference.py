@@ -76,7 +76,10 @@ def _rows(path, kind):
                         raw = record["quantity"]
                         if re.fullmatch(r"[0-9]+", raw) is None:
                             raise ValueError("invalid quantity")
-                        sku, quantity = record["sku"], int(raw)
+                        digits = raw.lstrip("0") or "0"
+                        if len(digits) > 10:
+                            raise ValueError("invalid quantity")
+                        sku, quantity = record["sku"], int(digits)
                         validate(sku, quantity)
                     except ValueError as exc:
                         raise ValueError(f"line {reader.line_num}: {exc}") from exc

@@ -36,8 +36,9 @@ class ImportProperties(unittest.TestCase):
                     c.execute("SELECT * FROM audit ORDER BY event_id").fetchall())
 
     def test_csv_preserves_related_history(self):
-        p = self.run_import("csv", "sku,quantity\nA,8\nB,2\n")
+        p = self.run_import("csv", "sku,quantity\nA," + "0" * 4301 + "8\nB,2\n")
         self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(p.stdout.endswith("\n"))
         self.assertEqual(json.loads(p.stdout), {"imported": 2})
         self.assertEqual(self.state(), ([("A", 8, "keep", "original"), ("B", 2, "", "item:B")],
                                         [(1, "A", "history")]))

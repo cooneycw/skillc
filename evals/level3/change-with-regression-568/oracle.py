@@ -196,7 +196,7 @@ def vector(code, row, budget, claim=None):
         rc, stdout, stderr = bounded(argv, d, budget)
         after = state(db)
         try:
-            output_ok = json.loads(stdout) == row["stdout"] if row["code"] == 0 else stdout == ""
+            output_ok = (stdout.endswith("\n") and json.loads(stdout) == row["stdout"]) if row["code"] == 0 else stdout == ""
         except ValueError:
             output_ok = False
         output_ok &= rc == row["code"]

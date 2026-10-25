@@ -78,7 +78,10 @@ def _records(path, kind):
                         obj = dict(zip(header, entry))
                         if not obj["quantity"] or any(ch not in "0123456789" for ch in obj["quantity"]):
                             raise ValueError("invalid quantity")
-                        quantity, sku = int(obj["quantity"]), obj["sku"]
+                        digits = obj["quantity"].lstrip("0") or "0"
+                        if len(digits) > 10:
+                            raise ValueError("invalid quantity")
+                        quantity, sku = int(digits), obj["sku"]
                         validate(sku, quantity)
                     except ValueError as exc:
                         raise ValueError(f"line {number}: {exc}") from exc
