@@ -1151,3 +1151,30 @@ credentialsabsent retained; successful source/evidence reads recorded. Two MEDIU
 findings accepted: malformed ownership response aborts later cleanup; actor failure
 loses command diagnostics at tmpfs removal. Their controls/fixes and one remaining
 actual re-review are owed; no receipt or final full gate is claimed yet.
+
+### Two accepted first-review corrections, root gate20
+
+Current pre-fix controls demonstrated TypeError for null labels and IndexError
+for an empty successful inspect; actual old actor call body emitted no parent
+observation for distinctive healthy/nonzero/owned-child-timeout inputs. All five
+red executions are retained; none depends on absence of a new helper/API. The
+actual nested call is compiled only for host-side controlled command tests,
+without invoking profile installation on host.
+
+Ownership now validates exact one-object Config/Labels shape and nonce before
+remove; malformed ownership stays per-resourceUNKNOWN and later cleanup proceeds.
+The same Budget.command observer finally flushes structured stderr evidence on
+return/nonzero/error/owned-child-timeout. Actual available stream counts/SHA256,
+explicit clipped256head+256tail byte excerpts, and not-started attribution remain
+separate from complete raw-output retention. Encoded16KiB/event and256KiB/actor
+caps refuse overflow inside unchanged1MiB parentstderr. Earlier command output is
+never borrowed for prelaunch refusal. Original final stdout JSON and successful
+case observations/counts remain. Existing55s actor budget now starts before prep.
+An outer kill may retain only flushed prefix and remainsUNKNOWN, not universal
+cancellation/output proof. All source/parent/resource caps are unchanged.
+
+Focused49passed/1physical skip,50collection/JUnit identities matched; lint and
+two-module types pass. Authored1635/1700 before actual receipt. Physical2PASS is
+still bound to1799ebb, not recredited to these changed executable inputs. Actual
+fault/container revalidation needs separate slot ruling. Final second actual
+independent review follows this checkpoint; no third review is authorized.

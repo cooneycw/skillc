@@ -6,6 +6,7 @@ is the trusted in-container actor, never an arbitrary candidate executor.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -53,7 +54,7 @@ class Budget:
     def __init__(self, root: Path, seconds: float = 1800, reserve: float = 0) -> None:
         self.root, self.deadline = root, time.monotonic() + seconds
         self.work_deadline = self.deadline - reserve
-        self.used, self.calls = 0, 0
+        self.used, self.calls, self.diagnostic_bytes = 0, 0, 0
         self.events: list[dict[str, Any]] = []
 
     def check(self) -> None:
@@ -142,6 +143,46 @@ def docker_absent(rc: int, out: str, err: str, name: str, kind: str) -> bool:
         return False
 
 
+def owned_inspect(out: str, nonce: str) -> bool:
+    rows = json.loads(out)
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        return False
+    config = rows[0].get("Config")
+    labels = config.get("Labels") if isinstance(config, dict) else None
+    return isinstance(labels, dict) and labels.get("skillc.b3a") == nonce
+
+
+def observed_command(budget: Budget, observations: list[Any], argv: list[str], cwd: Path,
+                     env: dict[str, str] | None = None) -> tuple[int, str]:
+    before = budget.calls
+    row: dict[str, Any] = {"command": argv[:2]}
+    try:
+        rc, out, err = budget.command(argv, cwd=cwd, env=env)
+        row.update(rc=rc, output=out + err)
+        return rc, out + err
+    except BaseException as exc:
+        row["error"] = type(exc).__name__ + ": " + str(exc)[:256]
+        raise
+    finally:
+        observations.append(row)
+        event: dict[str, Any] = {"command": [a[:128] for a in argv[:2]], "substeps": len(observations),
+                                 "started": budget.calls > before, "rc": row.get("rc"), "error": row.get("error")}
+        for field, suffix in (("stdout", "out"), ("stderr", "err")):
+            try:
+                raw = (budget.root / f"command-{budget.calls}.{suffix}").read_bytes() if event["started"] else b""
+                excerpt = raw if len(raw) <= 512 else raw[:256] + b"[...clipped...]" + raw[-256:]
+                event[field] = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                                "excerpt": excerpt.decode(errors="replace"), "clipped": len(raw) > 512,
+                                "not_started": not event["started"]}
+            except OSError as exc:
+                event[field] = {"unavailable": str(exc)[:256]}
+        payload = json.dumps({"actor_observation": event})
+        need(len(payload.encode()) + 1 <= 16 * 1024, "actor diagnostic event cap")
+        need(budget.diagnostic_bytes + len(payload.encode()) + 1 <= 256 * 1024, "actor diagnostic aggregate cap")
+        budget.diagnostic_bytes += len(payload.encode()) + 1
+        print(payload, file=sys.stderr, flush=True)
+
+
 def cleanup_owned(budget: Budget, containers: list[str], tags: list[str], nonce: str) -> list[dict[str, Any]]:
     outcomes = []
     for kind, names in (("container", containers), ("image", tags)):
@@ -153,7 +194,7 @@ def cleanup_owned(budget: Budget, containers: list[str], tags: list[str], nonce:
                 if rc:
                     need(docker_absent(rc, out, err, name, kind), "ownership/absence unavailable")
                 else:
-                    need(json.loads(out)[0]["Config"]["Labels"]["skillc.b3a"] == nonce, "refuse foreign cleanup")
+                    need(owned_inspect(out, nonce), "refuse foreign cleanup")
                     remove = [*prefix, "rm"] + (["-f"] if kind == "container" else [])
                     need(budget.command([*remove, name], cleanup=True)[0] == 0, "owned removal failed")
                     rc, out, err = budget.command([*prefix, "inspect", name], cleanup=True)
@@ -171,6 +212,9 @@ def cleanup_owned(budget: Budget, containers: list[str], tags: list[str], nonce:
 
 # Everything below actor() runs inside the isolated disposable container.
 def actor(case: str) -> dict[str, Any]:
+    logs = Path("/work/commands")
+    logs.mkdir()
+    case_budget = Budget(logs, 55)
     from skillc import profile
     source = Path("/opt/controller/tests/fixtures/profile-cpp-codex-flow-auto-87ecb097")
     decl = Path("/opt/controller/evals/subjects/cpp-codex-flow-auto-87ecb097/profile.json")
@@ -181,13 +225,8 @@ def actor(case: str) -> dict[str, Any]:
     need(len(verified["files"]) == 121 and all(r["status"] == "satisfied" for r in verified["files"]),
          "actual installed surface")
     observations: list[Any] = [{"installed_files": len(verified["files"]), "receipt": receipt}]
-    logs = Path("/work/commands")
-    logs.mkdir()
-    case_budget = Budget(logs, 55)
     def call(argv: list[str], cwd: Path, env: dict[str, str] | None = None) -> tuple[int, str]:
-        rc, out, err = case_budget.command(argv, cwd=cwd, env=env)
-        observations.append({"command": argv[:2], "rc": rc, "output": out + err})
-        return rc, out + err
+        return observed_command(case_budget, observations, argv, cwd, env)
     project = Path("/project/repo")
     project.mkdir()
     for args in (["init", "-q", "-b", "issue-42-cold"], ["config", "user.name", "fixture"],
@@ -478,7 +517,7 @@ else:
             budget.publish(target, {"status": "must not publish"})
         assert not target.exists()
 
-    @pytest.mark.parametrize("fault", ["early-error", "expired", "image-still-present"])
+    @pytest.mark.parametrize("fault", ["early-error", "null-labels", "empty-inspect", "expired", "image-still-present"])
     def test_cleanup_accounts_every_resource(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
         budget = Budget(tmp_path)
         seen: list[str] = []
@@ -489,13 +528,15 @@ else:
                 seen.append(argv[-1])
                 if fault == "early-error" and argv[-1] == "first":
                     raise OSError("controlled first cleanup failure")
+                if argv[-1] == "first" and fault in ("null-labels", "empty-inspect"):
+                    return 0, json.dumps([] if fault == "empty-inspect" else [{"Config": {"Labels": None}}]), ""
                 if fault == "image-still-present":
                     return 0, json.dumps([{"Config": {"Labels": {"skillc.b3a": "owned"}}}]), ""
                 return 1, "[]", ("Error response from daemon: No such image: " if argv[1] == "image" else "error: no such object: ") + argv[-1]
             monkeypatch.setattr(budget, "command", command)
         rows = cleanup_owned(budget, ["second", "first"], ["tag"], "owned")
         assert len(rows) == 3
-        if fault == "early-error":
+        if fault in ("early-error", "null-labels", "empty-inspect"):
             assert not rows[0]["absent"] and rows[1]["absent"] and rows[2]["absent"]
             assert seen == ["first", "second", "tag"]
         else:
@@ -604,3 +645,66 @@ else:
         monkeypatch.setattr(budget, "command", lambda *a, **kw: (rc, out, error))
         rows = cleanup_owned(budget, [] if image else [name], [name] if image else [], "owned")
         assert rows[0]["absent"] == (fault in ("lowercase", "image"))
+
+    @pytest.mark.parametrize("mode", ["healthy", "nonzero", "timeout"])
+    def test_actual_actor_call_retains_command_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                       capsys: pytest.CaptureFixture[str], mode: str) -> None:
+        budget = Budget(tmp_path, 5)
+        observations: list[Any] = []
+        node = next(n for n in ast.walk(ast.parse(Path(__file__).read_text())) if isinstance(n, ast.FunctionDef) and n.name == "call")
+        namespace = {**globals(), "case_budget": budget, "observations": observations}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "actual actor call closure", "exec"), namespace)  # noqa: S102 - only this committed closure, never a host install
+        ready = tmp_path / "ready"
+        waited: list[bool] = []
+        wait = subprocess.Popen.wait
+        def ready_wait(process: Any, timeout: float | None = None) -> Any:
+            if mode == "timeout" and not waited:
+                while not ready.exists() and time.monotonic() < budget.deadline:
+                    time.sleep(0.005)
+                assert ready.exists(), "actual child must emit before the timeout control"
+                waited.append(True)
+                timeout = 0.01
+            return wait(process, timeout=timeout)
+        monkeypatch.setattr(subprocess.Popen, "wait", ready_wait)
+        code = "import sys,time,pathlib;print('distinctive-out',flush=True);print('distinctive-err',file=sys.stderr,flush=True);"
+        code += f"pathlib.Path({str(ready)!r}).touch();time.sleep(60)" if mode == "timeout" else f"sys.exit({7 if mode == 'nonzero' else 0})"
+        if mode == "timeout":
+            with pytest.raises(subprocess.TimeoutExpired):
+                namespace["call"]([sys.executable, "-c", code], tmp_path)
+        else:
+            rc, output = namespace["call"]([sys.executable, "-c", code], tmp_path)
+            assert rc == (7 if mode == "nonzero" else 0) and "distinctive-out" in output
+        captured = capsys.readouterr().err
+        assert "actor_observation" in captured, "parent must retain actual command diagnostics before cleanup"
+        assert "distinctive-out" in captured and "distinctive-err" in captured
+        assert len(observations) == 1
+
+    def test_actor_diagnostic_clips_and_bounds_events(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        budget = Budget(tmp_path)
+        rows: list[Any] = []
+        observed_command(budget, rows, [sys.executable, "-c", "print('x'*2048)"], tmp_path)
+        event = json.loads(capsys.readouterr().err)["actor_observation"]
+        assert event["stdout"]["clipped"] and event["stdout"]["bytes"] == 2049
+        assert event["stdout"]["sha256"] == hashlib.sha256((tmp_path / "command-1.out").read_bytes()).hexdigest()
+        budget.diagnostic_bytes = 256 * 1024
+        with pytest.raises(RuntimeError, match="actor diagnostic aggregate cap"):
+            observed_command(budget, rows, [sys.executable, "-c", "pass"], tmp_path)
+
+    def test_actor_diagnostic_refuses_oversized_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        budget = Budget(tmp_path)
+        exception = type("OversizedFailure" * 2048, (RuntimeError,), {})
+        def unavailable(*args: Any, **kwargs: Any) -> Any:
+            raise exception("controlled encoding overflow")
+        monkeypatch.setattr(budget, "command", unavailable)
+        with pytest.raises(RuntimeError, match="actor diagnostic event cap"):
+            observed_command(budget, [], ["controlled"], tmp_path)
+
+    def test_prelaunch_diagnostic_never_borrows_previous_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        budget = Budget(tmp_path)
+        observed_command(budget, [], [sys.executable, "-c", "print('old-output')"], tmp_path)
+        capsys.readouterr()
+        budget.deadline = time.monotonic() - 1
+        with pytest.raises(RuntimeError, match="whole cold proof deadline"):
+            observed_command(budget, [], [sys.executable, "-c", "pass"], tmp_path)
+        event = json.loads(capsys.readouterr().err)["actor_observation"]
+        assert not event["started"] and event["stdout"]["not_started"] and event["stdout"]["bytes"] == 0
