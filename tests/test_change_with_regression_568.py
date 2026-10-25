@@ -189,3 +189,39 @@ def test_list_order_probe_has_a_real_negative_population(q: Any) -> None:
     wrong = original.replace(needle, needle + b" DESC", 1)
     assert wrong != original
     assert not q.o.vector(wrong, row, q.o.Budget())["legacy"]
+
+
+@pytest.mark.parametrize("name", ["reference", "alternative"])
+def test_unlimited_leading_zeroes_are_valid(q: Any, name: str) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    row = next(v for v in m["vectors"] if v["id"] == "csv-reversed-header")
+    row["input"] = "quantity,sku\n" + "0" * 4301 + "8,A\n"
+    assert q.o.vector(q.o.program(name, m, sources), row, q.o.Budget())["feature"]
+
+
+def test_missing_success_newline_is_rejected(q: Any) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    original = q.o.program("reference", m, sources)
+    needle = b"print(json.dumps(result))"
+    assert original.count(needle) == 1
+    wrong = original.replace(needle, b'print(json.dumps(result), end="")', 1)
+    row = next(v for v in m["vectors"] if v["id"] == "csv-reversed-header")
+    assert not q.o.vector(wrong, row, q.o.Budget())["feature"]
+
+
+@pytest.mark.parametrize("population", ["empty", "skipped", "failing", "active"])
+def test_public_verification_requires_active_tests(tmp_path: Path, population: str) -> None:
+    shutil.copyfile(TASK / "fixture/Makefile", tmp_path / "Makefile")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    if population != "empty":
+        decorator = "@unittest.skip('controlled skip')\n" if population == "skipped" else ""
+        assertion = "self.fail('controlled failure')" if population == "failing" else "self.assertTrue(True)"
+        (tests / "test_control.py").write_text(
+            "import unittest\n" + decorator + "class Control(unittest.TestCase):\n"
+            + " def test_case(self): " + assertion + "\n")
+    proc = subprocess.run(["make", "verify"], cwd=tmp_path, capture_output=True,
+                          text=True, timeout=5, check=False)
+    assert (proc.returncode == 0) == (population == "active"), proc.stdout + proc.stderr
