@@ -1178,3 +1178,29 @@ two-module types pass. Authored1635/1700 before actual receipt. Physical2PASS is
 still bound to1799ebb, not recredited to these changed executable inputs. Actual
 fault/container revalidation needs separate slot ruling. Final second actual
 independent review follows this checkpoint; no third review is authorized.
+
+### Final second-review correction and owner migration stop
+
+Actual final reviewer derived codex/gpt-6-astra and found one LOW: command-number
+allocation preceded Popen. Root gate23 approved only a separate started_calls set
+updated immediately after successful Popen return, with observer membership check.
+Missing cwd and expiry after stream allocation both exposed false startedTrue on
+pre-fix behavior by assertion, then passed after repair. Popen proves managed
+launcher creation, not successful exec of the requested target. Two independent
+review passes are complete; no third is authorized. No review receipt is written.
+
+Current focused51passed/1explicitphysical skip,52collected/JUnit identities matched;
+lint and two-module types pass. Authored1658/1750 before a genuine receipt. Final
+source has not had full repository verification or physical revalidation; the
+prior physical2PASS remains tied to1799ebb. Root prohibits new Docker allocations
+or builds pending owned-space assessment. No live study or efficacy claim.
+
+Owner migration stop supersedes further work: preserve source/workflow WIP on its
+branch, no new tests/reviews/builds/PR/merge, keep raw runtime/review transcripts
+out of the public repository. Runtime evidence and exact resumption instructions
+are handed privately to the orchestrator for verified private archive transfer.
+Current worktrees/retained evidence/protected archives are not deleted. Owned
+worktree claims and wave role are released after remote-confirmed source push.
+The corrected cleanup hypothesis is comparative CPP-vs-baseline cleanup measured
+before harness teardown; AA owns its read-only endpoint proposal. It is not a new
+harness cleanup implementation prerequisite for this source checkpoint.

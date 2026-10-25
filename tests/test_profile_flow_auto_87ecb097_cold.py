@@ -54,6 +54,7 @@ class Budget:
     def __init__(self, root: Path, seconds: float = 1800, reserve: float = 0) -> None:
         self.root, self.deadline = root, time.monotonic() + seconds
         self.work_deadline = self.deadline - reserve
+        self.started_calls: set[int] = set()
         self.used, self.calls, self.diagnostic_bytes = 0, 0, 0
         self.events: list[dict[str, Any]] = []
 
@@ -91,6 +92,7 @@ class Budget:
             need(remaining > 0, "no launch after expiry")
             p = subprocess.Popen([sys.executable, "-c", launcher, str(LIMIT), *argv],
                                  cwd=cwd, env=env, stdout=out, stderr=err, start_new_session=True)
+            self.started_calls.add(self.calls)  # Launcher created; target exec is not established.
             try:
                 p.wait(timeout=remaining)
             except BaseException:
@@ -166,7 +168,8 @@ def observed_command(budget: Budget, observations: list[Any], argv: list[str], c
     finally:
         observations.append(row)
         event: dict[str, Any] = {"command": [a[:128] for a in argv[:2]], "substeps": len(observations),
-                                 "started": budget.calls > before, "rc": row.get("rc"), "error": row.get("error")}
+                                 "started": budget.calls > before and budget.calls in budget.started_calls,
+                                 "rc": row.get("rc"), "error": row.get("error")}
         for field, suffix in (("stdout", "out"), ("stderr", "err")):
             try:
                 raw = (budget.root / f"command-{budget.calls}.{suffix}").read_bytes() if event["started"] else b""
@@ -708,3 +711,23 @@ else:
             observed_command(budget, [], [sys.executable, "-c", "pass"], tmp_path)
         event = json.loads(capsys.readouterr().err)["actor_observation"]
         assert not event["started"] and event["stdout"]["not_started"] and event["stdout"]["bytes"] == 0
+
+    @pytest.mark.parametrize("fault", ["missing-cwd", "second-deadline"])
+    def test_observer_distinguishes_allocation_from_process_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                capsys: pytest.CaptureFixture[str], fault: str) -> None:
+        budget = Budget(tmp_path, 5)
+        marker = tmp_path / "must-not-execute"
+        if fault == "second-deadline":
+            opened = Path.open
+            def expire(path: Path, *args: Any, **kwargs: Any) -> Any:
+                stream = opened(path, *args, **kwargs)
+                if path.suffix == ".err" and args == ("xb",):
+                    budget.work_deadline = time.monotonic() - 1
+                return stream
+            monkeypatch.setattr(Path, "open", expire)
+        with pytest.raises((FileNotFoundError, RuntimeError)):
+            observed_command(budget, [], [sys.executable, "-c", f"open({str(marker)!r},'w').write('unexpected')"],
+                             tmp_path / "missing" if fault == "missing-cwd" else tmp_path)
+        event = json.loads(capsys.readouterr().err)["actor_observation"]
+        assert budget.calls == 1 and not marker.exists()
+        assert not event["started"], "allocated streams do not establish Popen success"
