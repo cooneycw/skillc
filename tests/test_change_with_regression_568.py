@@ -8,9 +8,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+GROUP = "inventory568-full-qualification"
+full_users: set[str] = set()
 
 TASK = Path(__file__).resolve().parents[1] / "evals/level3/change-with-regression-568"
 pytestmark = pytest.mark.skipif(
@@ -33,14 +37,35 @@ def q() -> Any:
 
 
 @pytest.fixture(scope="module")
-def certified(q: Any) -> dict[str, Any]:
+def certified(q: Any, request: pytest.FixtureRequest) -> Any:
     published: list[str] = []
-    report = dict(q.qualify(emit=published.append))
+    calls: list[Any] = []
+    publish = q._publish
+
+    def observed(report: Any, budget: Any, emit: Any) -> Any:
+        calls.append((report, budget))
+        return publish(report, budget, emit)
+
+    q._publish = observed
+    try:
+        report = q.qualify(emit=published.append)
+    finally:
+        q._publish = publish
+    assert len(calls) == 1 and calls[0][0] is report
+    assert calls[0][1].processes == report["managed_process_count"] == 359
     assert len(published) == 1 and published[0].endswith("QUALIFY: ok (artifact certification only)")
-    return report
+    print("INVENTORY568_FULL_FIXTURE", os.environ.get("PYTEST_XDIST_WORKER", "serial"), id(report), 359)
+    yield report
+    expected = {getattr(item, "originalname", item.name) for item in request.session.items if item.path == Path(__file__)
+                and (mark := item.get_closest_marker("xdist_group")) and mark.kwargs.get("name") == GROUP}
+    assert full_users == expected  # A split across workers cannot silently repeat the module fixture.
+    print("INVENTORY568_FULL_CONSUMERS", sorted(full_users), id(report))
 
 
-def test_fixed_population_discriminates_artifacts(certified: dict[str, Any]) -> None:
+@pytest.mark.xdist_group(name=GROUP)
+@pytest.mark.timeout(510)  # 450s qualification + finite 60s external scheduling/cleanup guard.
+def test_fixed_population_discriminates_artifacts(certified: dict[str, Any], request: pytest.FixtureRequest) -> None:
+    full_users.add(getattr(request.node, "originalname", request.node.name))
     assert certified["case_count"] == 24
     assert certified["valid_vector_count"] == 48
     assert certified["protection_suite_executions"] == 6
@@ -60,7 +85,10 @@ def test_fixed_population_discriminates_artifacts(certified: dict[str, Any]) -> 
     assert initial["legacy"] and not initial["feature"]
 
 
-def test_actual_feature_and_regression_test_reds(certified: dict[str, Any]) -> None:
+@pytest.mark.xdist_group(name=GROUP)
+@pytest.mark.timeout(510)  # 450s qualification + finite 60s external scheduling/cleanup guard.
+def test_actual_feature_and_regression_test_reds(certified: dict[str, Any], request: pytest.FixtureRequest) -> None:
+    full_users.add(getattr(request.node, "originalname", request.node.name))
     rows = {r["program"]: r for r in certified["protection"]}
     assert set(rows) == {"reference", "alternative", "csv-only", "jsonl-only", "partial", "replace"}
     assert rows["reference"]["ok"] and rows["alternative"]["ok"]
@@ -109,7 +137,10 @@ def test_mutation_must_really_apply(q: Any) -> None:
         q.o.program("../arbitrary", m, sources)
 
 
-def test_resources_have_real_refusal_and_positive_twins(certified: dict[str, Any]) -> None:
+@pytest.mark.xdist_group(name=GROUP)
+@pytest.mark.timeout(510)  # 450s qualification + finite 60s external scheduling/cleanup guard.
+def test_resources_have_real_refusal_and_positive_twins(certified: dict[str, Any], request: pytest.FixtureRequest) -> None:
+    full_users.add(getattr(request.node, "originalname", request.node.name))
     probes = certified["resource_probes"]
     assert set(probes) == {"stdout-overflow", "stderr-overflow", "staging-overflow", "owned-child-timeout"}
     assert probes["owned-child-timeout"]["below"]["status"] == "PASS"
@@ -168,18 +199,32 @@ def test_uncommitted_source_is_not_host_executable(q: Any, monkeypatch: pytest.M
         q.o.load_sources()
 
 
-def test_delayed_final_step_cannot_publish_green(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    def late(budget: Any) -> dict[str, str]:
-        assert budget.deadline > q.o.time.monotonic()
-        # Controlled expiry after the final child/precheck, without a 450-second sleep.
-        budget.deadline = q.o.time.monotonic() - 1
-        return {}
-
-    monkeypatch.setattr(q, "resources", late)
+@pytest.mark.parametrize("expiry", ["healthy", "before", "serialization"])
+def test_delayed_final_step_cannot_publish_green(q: Any, monkeypatch: pytest.MonkeyPatch, expiry: str) -> None:
+    budget = q.o.Budget()
+    report = {"unit_control": "publication only; not artifact qualification"}
     published: list[str] = []
-    with pytest.raises(q.o.Unavailable, match="whole qualification deadline"):
-        q.qualify(emit=published.append)
-    assert published == []
+    serialized: list[Any] = []
+    dumps = q.json.dumps
+
+    def serialize(value: Any) -> str:
+        serialized.append(value)
+        payload = dumps(value)
+        if expiry == "serialization":
+            budget.deadline = q.o.time.monotonic() - 1
+        return payload
+
+    if expiry == "before":
+        budget.deadline = q.o.time.monotonic() - 1
+    monkeypatch.setattr(q, "json", SimpleNamespace(dumps=serialize))
+    if expiry == "healthy":
+        assert q._publish(report, budget, published.append) is report
+        assert published == [dumps(report) + "\nQUALIFY: ok (artifact certification only)"]
+    else:
+        with pytest.raises(q.o.Unavailable, match="whole qualification deadline"):
+            q._publish(report, budget, published.append)
+        assert published == []
+    assert serialized == [report] and budget.processes == 0
 
 
 def test_list_order_probe_has_a_real_negative_population(q: Any) -> None:

@@ -189,6 +189,14 @@ def remote_case(name, m, sources, budget):
                 "files": o.identity(captured["files"]), "remote_vector": actual, "local_vector": local}
 
 
+def _publish(report, budget, emit):
+    payload = json.dumps(report) + "\nQUALIFY: ok (artifact certification only)"
+    budget.check()
+    if emit is not None:
+        emit(payload)
+    return report
+
+
 def qualify(emit=None):
     budget = o.Budget()
     sources = o.load_sources()
@@ -270,11 +278,7 @@ def qualify(emit=None):
             "protection_suite_executions": len(protection),
             "protection_executed_tests": sum(r["count"] for r in protection),
             "limits": "trusted host fixtures; no arbitrary candidate or paired/live calibration"}
-    payload = json.dumps(report) + "\nQUALIFY: ok (artifact certification only)"
-    budget.check()
-    if emit is not None:
-        emit(payload)
-    return report
+    return _publish(report, budget, emit)
 
 
 def test_population(row):

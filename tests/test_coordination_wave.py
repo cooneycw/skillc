@@ -518,20 +518,37 @@ def test_natural_exit_survives_same_role_channel_loss(tmp_path: Path, monkeypatc
     assert "channel-coverage-unavailable" in result.report["unknown"]
 
 
-def test_final_decision_emission_is_outside_completion_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("expiry_write", ["wave-report.json", "wave-report-late.json"])
+def test_final_decision_emission_is_outside_completion_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expiry_write: str,
+) -> None:
     write = cw._write
+    ticks = [0.0]
+    observed: list[str] = []
 
     def delayed(path: Path, value: object) -> str:
-        if path.name == "wave-report-late.json":
-            time.sleep(0.7)
-        return write(path, value)
+        digest = write(path, value)
+        if path.name == expiry_write:
+            observed.append(path.name)
+            ticks[0] = 11.0  # Policy time crosses the default ten-second endpoint after this write.
+        return digest
 
     monkeypatch.setattr(cw, "_write", delayed)
-    started = time.monotonic()
-    result = run(tmp_path, deadline=0.6)
-    assert result.report["status"] == "PASS", result.report
-    assert result.report["completion_elapsed"] < result.report["deadline"] < time.monotonic() - started
+    base = tmp_path / "work"
+    base.mkdir()
+    plan = cw.WavePlan(actor_digest=trial.sha256_bytes(ACTOR.read_bytes()))
+    result = cw.run_wave(plan, ACTOR, tmp_path / "store", base, clock=lambda: ticks[0])
+    late_provisional = expiry_write == "wave-report.json"
+    assert observed == [expiry_write] and len(result.report["outputs"]) == 3
+    assert_resources_absent(result)
+    assert not result.report["unknown"] and "incomplete-wave" not in result.report["failures"]
+    assert result.report["status"] == ("FAIL" if late_provisional else "PASS"), result.report
+    assert result.report["failures"] == (["deadline"] if late_provisional else [])
+    assert result.report["primary"]["completed"] == int(not late_provisional)
+    assert (result.report["completion_elapsed"] > plan.deadline) is late_provisional
+    assert ticks[0] > plan.deadline and result.report["clock"] == "injected-policy-only"
     assert result.report["final_decision_emission"] == "outside-completion-deadline"
+    assert json.loads((result.experiment.root / "wave-report.json").read_bytes()) == result.report
 
 
 @pytest.mark.parametrize("deadline_entry", ["main-loop", "allocation"])
