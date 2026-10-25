@@ -115,3 +115,17 @@ blocked, repository-local credentials absent. The mixed-model implementer
 receipt limitation is unchanged; no fake receipt or skipped review is claimed.
 Full verification and exact-head CI remain required, and receipt enrollment
 remains held for the separately assigned truthful CPP helper repair.
+### Receipt completion after CPP1558
+
+The merged CPP1558 helper generated the actual schema3 ran receipt at
+docs/measurements/counter-model/2026-10-25T005206Z-issue-563.json from the original
+fresh run and review traces. Implementer codex/gpt-6.1-sol, reviewer
+codex/gpt-6-astra, scope unverified, network blocked, local credentials absent.
+Initial cleanliness remains unmeasured and approval execution unverified; neither
+was reconstructed. Six whole review report entries are proposed; zero are
+credited as already covered under the verified all-subcases-before-first-proposal
+standard. Zero does not claim that no existing controls covered those cases.
+The retained full make verify passed; its outer finish gate originally failed
+for the missing receipt. That historical failure remains a failure. Receipt
+enrolment and current-base integration are checked separately below.
+
