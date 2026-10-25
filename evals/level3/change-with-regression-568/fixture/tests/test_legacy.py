@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 import inventory
 

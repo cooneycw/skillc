@@ -1,11 +1,11 @@
 """Public property tests; use only the documented CLI and SQLite state."""
 import json
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 
 class ImportProperties(unittest.TestCase):
@@ -28,7 +28,7 @@ class ImportProperties(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return subprocess.run([sys.executable, "inventory.py", "--db", str(self.db),
                                "import", "--format", kind, str(path)],
-                              capture_output=True, text=True, timeout=3)
+                              capture_output=True, text=True, timeout=3, check=False)
 
     def state(self):
         with sqlite3.connect(self.db) as c:

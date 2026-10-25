@@ -1,29 +1,17 @@
 """Certify the fixed trusted artifact population; no arbitrary candidate option."""
-import json
 import importlib.util
-import os
-from pathlib import Path
-import subprocess
+import json
 import sys
 import tempfile
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 _spec = importlib.util.spec_from_file_location("inventory568_oracle", Path(__file__).with_name("oracle.py"))
 o = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(o)
 
-CASES = ("reference-valid-pack alternative-valid-pack initial-missing-batch csv-only-importer "
-         "partial-commit-late-invalid shared-replace-regression duplicate-first-wins boolean-as-integer "
-         "metadata-overwrite false-completion benign-refactor remote-correct-local-wrong "
-         "remote-wrong-local-correct unreadable-remote-object unsupported-packed-remote "
-         "missing-selected-python simulated-required-import-unavailable missing-or-empty-own-case-population "
-         "all-skipped-test-probe always-pass-grader always-fail-grader crash-grader no-output-grader "
-         "timed-out-probe-with-child").split()
-VECTORS = ("legacy-set-existing legacy-list-order legacy-new-defaults csv-valid-update-insert-and-duplicates "
-           "csv-reversed-header csv-header-only csv-empty csv-duplicate-header csv-extra-column csv-bad-sku "
-           "csv-bad-quantity csv-late-invalid-rollback jsonl-valid-update-insert-and-duplicates jsonl-empty "
-           "jsonl-missing-extra-key jsonl-duplicate-key jsonl-boolean jsonl-float jsonl-null "
-           "jsonl-late-invalid-rollback input-bad-utf8 input-missing db-missing db-uninitialized").split()
+CASES = ["reference-valid-pack", "alternative-valid-pack", "initial-missing-batch", "csv-only-importer", "partial-commit-late-invalid", "shared-replace-regression", "duplicate-first-wins", "boolean-as-integer", "metadata-overwrite", "false-completion", "benign-refactor", "remote-correct-local-wrong", "remote-wrong-local-correct", "unreadable-remote-object", "unsupported-packed-remote", "missing-selected-python", "simulated-required-import-unavailable", "missing-or-empty-own-case-population", "all-skipped-test-probe", "always-pass-grader", "always-fail-grader", "crash-grader", "no-output-grader", "timed-out-probe-with-child"]
+VECTORS = ["legacy-set-existing", "legacy-list-order", "legacy-new-defaults", "csv-valid-update-insert-and-duplicates", "csv-reversed-header", "csv-header-only", "csv-empty", "csv-duplicate-header", "csv-extra-column", "csv-bad-sku", "csv-bad-quantity", "csv-late-invalid-rollback", "jsonl-valid-update-insert-and-duplicates", "jsonl-empty", "jsonl-missing-extra-key", "jsonl-duplicate-key", "jsonl-boolean", "jsonl-float", "jsonl-null", "jsonl-late-invalid-rollback", "input-bad-utf8", "input-missing", "db-missing", "db-uninitialized"]
 PROTECTION = ["reference", "alternative", "csv-only", "jsonl-only", "partial", "replace"]
 RESOURCES = ["stdout-overflow", "stderr-overflow", "staging-overflow", "owned-child-timeout"]
 
@@ -171,7 +159,9 @@ def remote_case(name, m, sources, budget):
             blob = held["files"]["inventory.py"]["blob"]
             target = remote / "objects" / blob[:2] / blob[2:]
             need(target.is_file(), "unreadable object control not loose")
-            target.write_bytes(b"broken zlib")
+            target.unlink()
+            budget.write(target, b"broken zlib")
+            need(target.read_bytes() == b"broken zlib", "corruption precondition failed")
         elif name == "unsupported-packed-remote":
             git("-C", str(remote), "repack", "-ad")
             need(any((remote / "objects/pack").glob("*.pack")), "pack control not installed")

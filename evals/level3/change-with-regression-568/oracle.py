@@ -1,15 +1,17 @@
 """Trusted committed-fixture qualification, NOT an arbitrary-candidate sandbox."""
-from contextlib import suppress
 import hashlib
 import json
 import os
-from pathlib import Path
+import shutil
 import signal
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import suppress
+from pathlib import Path
+
 try:
     import resource
 except ImportError:
@@ -103,15 +105,18 @@ def bounded(argv, cwd, budget, seconds=5, output_limit=LIMIT):
     if remaining <= 0:
         raise Unavailable("whole qualification deadline")
 
-    def limits():
-        resource.setrlimit(resource.RLIMIT_FSIZE, (output_limit, output_limit))
-
+    if not argv or shutil.which(argv[0]) is None:
+        raise Unavailable("selected executable unavailable")
+    launcher = ("import os,resource,sys;"
+                "n=int(sys.argv[1]);resource.setrlimit(resource.RLIMIT_FSIZE,(n,n));"
+                "os.execvp(sys.argv[2],sys.argv[2:])")
     with tempfile.TemporaryDirectory(prefix="568-output-") as tmp:
         out, err = Path(tmp) / "stdout", Path(tmp) / "stderr"
         with out.open("wb") as stdout, err.open("wb") as stderr:
             try:
-                p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=stdout,
-                                     stderr=stderr, start_new_session=True, preexec_fn=limits,
+                p = subprocess.Popen([sys.executable, "-c", launcher, str(output_limit), *argv],
+                                     cwd=cwd, stdin=subprocess.DEVNULL, stdout=stdout,
+                                     stderr=stderr, start_new_session=True,
                                      env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
             except OSError as exc:
                 raise Unavailable("probe could not launch") from exc

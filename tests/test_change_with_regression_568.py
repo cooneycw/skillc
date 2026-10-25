@@ -4,10 +4,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -105,7 +105,7 @@ def test_resources_have_real_refusal_and_positive_twins(certified: dict[str, Any
 
 
 def test_neutered_cleanup_is_not_a_green(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    owned = []
+    owned: list[Any] = []
     real = q.o.stop_group
     monkeypatch.setattr(q.o, "stop_group", owned.append)
     try:
@@ -135,6 +135,6 @@ def test_no_arbitrary_candidate_cli(q: Any, tmp_path: Path) -> None:
     sentinel = tmp_path / "would-execute.py"
     sentinel.write_text("raise RuntimeError('must not execute')\n")
     proc = subprocess.run([sys.executable, str(TASK / "qualify.py"), "--candidate", str(sentinel)],
-                          capture_output=True, text=True, timeout=5)
+                          capture_output=True, text=True, timeout=5, check=False)
     assert proc.returncode == 64
     assert "committed fixture cases only" in proc.stderr

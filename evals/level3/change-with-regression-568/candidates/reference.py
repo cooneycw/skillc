@@ -2,10 +2,10 @@
 import argparse
 import csv
 import json
-from pathlib import Path
 import re
 import sqlite3
 import sys
+from pathlib import Path
 
 
 def validate(sku, quantity):
