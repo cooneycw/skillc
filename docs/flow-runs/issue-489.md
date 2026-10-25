@@ -175,3 +175,13 @@ retained; no redundant full rerun for metadata/disjoint base. Actual merged-help
 enrollment exits0 and audit-flow verifies the original captured prefix after
 integration. Final remote full required CI and fresh exact-head/root/base
 clearance remain necessary; no inherited merge permission.
+
+After #562 merged, current main9a62b80979bf3e374049d0933f7e6822bb9d9cda
+integrated cleanly for the final delivery. All reviewed producer/test/fixture/
+changelog bytes remain identical to the original ffbf03d review. The104 affected
+cases pass again against this changed CLI/base, with104 exact collected/JUnit
+identities. Log:/tmp/skillc-489-final-integration-check.txt. Actual receipt
+enrollment exits0 and audit-flow still verifies the original captured prefix.
+Earlier required1095 pertains to the prior base and is not reused as evidence
+for this new head. Final required CI and root exact-head/current-base clearance
+remain pending; no repeat local full suite for this disjoint base integration.
