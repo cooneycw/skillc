@@ -1,0 +1,31 @@
+{
+  "branch": "issue-569-certify-bounded-register-wave-completion-with-cont",
+  "counts": {
+    "accepted": 2,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "27b5b982ebc61aa7154d1f845eab1b55fbc3f01b",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-39-48-01a16fdb-0b9d-7133-83ae-fd9718f95524.jsonl",
+    "thread_id": "01a16fdb-0b9d-7133-83ae-fd9718f95524"
+  },
+  "issue": "569",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-25T10:02:00Z",
+  "red_cases": {
+    "already_covered": 18,
+    "proposed": 20
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/25/rollout-2026-10-25T05-51-46-01a17279-2e18-7250-9069-650b8ffa447a.jsonl",
+    "thread_id": "01a17279-2e18-7250-9069-650b8ffa447a"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}
