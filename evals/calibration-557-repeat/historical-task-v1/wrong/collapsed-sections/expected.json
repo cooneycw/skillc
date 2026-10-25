@@ -1,0 +1,7 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "approved-content-present",
+  "other-content-preserved"
+ ]
+}

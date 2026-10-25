@@ -1,0 +1,31 @@
+{
+  "branch": "issue-28-turn-one-observed-failure-into-a-development-regre",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "7373a5b4c6245a20a2cbff74e3dfba51e240f9f4",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-39-48-01a16fdb-0b9d-7133-83ae-fd9718f95524.jsonl",
+    "thread_id": "01a16fdb-0b9d-7133-83ae-fd9718f95524"
+  },
+  "issue": "28",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-24T23:35:54Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T19-35-23-01a17044-db28-7662-b11c-18ed9d43741b.jsonl",
+    "thread_id": "01a17044-db28-7662-b11c-18ed9d43741b"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
