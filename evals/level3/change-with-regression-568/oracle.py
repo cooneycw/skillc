@@ -39,6 +39,10 @@ class Budget:
         self.used = 0
         self.processes = 0
 
+    def check(self):
+        if time.monotonic() >= self.deadline:
+            raise Unavailable("whole qualification deadline")
+
     def write(self, path, data):
         if len(data) > self.capacity - self.used:
             raise Unavailable("parent staging budget")

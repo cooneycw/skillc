@@ -40,6 +40,8 @@ def certified(q: Any) -> dict[str, Any]:
 def test_fixed_population_discriminates_artifacts(certified: dict[str, Any]) -> None:
     assert certified["case_count"] == 24
     assert certified["valid_vector_count"] == 48
+    assert certified["protection_suite_executions"] == 6
+    assert certified["protection_executed_tests"] == 30
     cases = certified["cases"]
     assert cases["reference-valid-pack"] == cases["alternative-valid-pack"] == "PASS"
     assert cases["initial-missing-batch"] == cases["shared-replace-regression"] == "FAIL"
@@ -159,3 +161,15 @@ def test_uncommitted_source_is_not_host_executable(q: Any, monkeypatch: pytest.M
     monkeypatch.setattr(q.o.subprocess, "check_output", lambda *a, **kw: b"not the committed source")
     with pytest.raises(q.o.Unavailable, match="differs from HEAD"):
         q.o.load_sources()
+
+
+def test_delayed_final_step_cannot_publish_green(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def late(budget: Any) -> dict[str, str]:
+        assert budget.deadline > q.o.time.monotonic()
+        # Controlled expiry after the final child/precheck, without a 450-second sleep.
+        budget.deadline = q.o.time.monotonic() - 1
+        return {}
+
+    monkeypatch.setattr(q, "resources", late)
+    with pytest.raises(q.o.Unavailable, match="whole qualification deadline"):
+        q.qualify()

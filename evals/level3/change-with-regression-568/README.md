@@ -72,16 +72,21 @@ The oracle uses independent literal expected SQLite rows/output, never candidate
 logic or SQL/AST identity. Refs #568; the parent remains open.
 
 The fixed population is 24 top-level cases and 24 semantic vectors for each valid
-strategy, plus six public-interface implementations in each test-protection pack
-(two valid, four faulty) and four separately reported resource probes with twins.
+strategy. One identical shared test suite runs once against each of six
+public-interface implementations (two valid, four faulty): six suite executions,
+five tests each, not twelve executions. Four resource probes have separate twins.
 Missing/extra/duplicate/empty populations refuse qualification. Known controlled
 UNKNOWN cases do not hide unavailable real prerequisites for valid cases.
 
-Process groups use five-second child deadlines and a 450-second whole deadline;
+Process groups use five-second child deadlines and a 450-second whole deadline,
+starting before source validation and checked after final cleanup/report assembly;
 stdout/stderr are file-backed and each capped at 1MiB. Parent-owned staging and
 retained files have a 64MiB budget. POSIX process/resource controls are required.
 This is not an OS filesystem quota or a hostile-process sandbox: only reviewed
 fixture programs run here. Limits, timeouts and cleanup failures stay explicit.
+Output controls cross the actual 1MiB defaults. Staging controls construct the
+default 64MiB quota counter boundary and perform a one-byte positive/negative
+write; they do not claim a physical 64MiB disk-fill experiment.
 
 Constructed exports use the existing SafeTree/GitDir verified object reader from
 one supplied export. The exact remote main's files/modes matter; a local tree or

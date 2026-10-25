@@ -184,9 +184,10 @@ def remote_case(name, m, sources, budget):
 
 
 def qualify():
+    budget = o.Budget()
     sources = o.load_sources()
     m = manifest(sources)
-    budget = o.Budget()
+    budget.check()
     results, details, remotes = {}, {}, {}
     programs = dict(zip(CASES[:11], ["reference", "alternative", "fixture", "csv-only", "partial",
                                    "replace", "first-wins", "boolean", "metadata", "fixture", "benign"]))
@@ -251,14 +252,18 @@ def qualify():
         need(row["ok"] == (name in ("reference", "alternative")), "public test protection: " + name)
         protection.append(row)
     controls = resources(budget)
-    return {"status": "CERTIFIED ARTIFACTS ONLY", "cases": results,
+    report = {"status": "CERTIFIED ARTIFACTS ONLY", "cases": results,
             "semantic": details, "protection": protection, "resource_probes": controls,
             "case_count": len(results), "valid_vector_count": 2 * len(VECTORS),
             "remote_cases": remotes,
             "executed_semantic_vectors": sum(len(r["vectors"]) for r in details.values()),
             "managed_process_count": budget.processes, "parent_owned_bytes": budget.used,
             "process_count_scope": "wrapper launches, excludes nested unittest CLI subcalls",
+            "protection_suite_executions": len(protection),
+            "protection_executed_tests": sum(r["count"] for r in protection),
             "limits": "trusted host fixtures; no arbitrary candidate or paired/live calibration"}
+    budget.check()
+    return report
 
 
 def test_population(row):
