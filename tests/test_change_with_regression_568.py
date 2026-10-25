@@ -238,3 +238,15 @@ def test_removed_legacy_cli_is_rejected(q: Any, command: str) -> None:
     wrong = original.replace(needle, ('add_parser("removed-' + command + '")').encode(), 1)
     row = next(v for v in m["vectors"] if v["id"] == "legacy-set-existing")
     assert not q.o.vector(wrong, row, q.o.Budget())["legacy"]
+
+
+def test_noop_cli_put_cannot_borrow_api_state(q: Any) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    original = q.o.program("reference", m, sources)
+    needle = b"            set_quantity(args.db, args.sku, args.quantity)"
+    assert original.count(needle) == 1
+    wrong = original.replace(needle, b"            pass  # false updated receipt", 1)
+    for row in m["vectors"]:
+        if row["id"] in ("legacy-set-existing", "legacy-new-defaults"):
+            assert not q.o.vector(wrong, row, q.o.Budget())["legacy"]
