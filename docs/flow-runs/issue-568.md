@@ -665,3 +665,15 @@ and cannot yield all-absent success. Final focused selection32passed/1explicit
 physical skip,33collection/JUnit identities matched; lint and two-module types
 pass. Authored added+deleted1454/1500; pinned-source bytes/modes unchanged.
 Physical Docker/120-declaration consuming result remain pending actual slot.
+
+### Approved staging correction, root gate16
+
+Actual da559e4 selected Git archive failed at1MiB with exit128/File too large:
+RLIMIT_FSIZE bounds artifact files as well as streams. Root approved staging-only
+replacement with existing bounded Git ls-tree/cat-file commands and actual spool
+bytes. No stream/deadline/retention limit changed. A committed binary/CRLF aggregate
+larger than1MiB distinguishes old archive failure from exact blob/mode staging;
+five blobs require exactly six staging Git calls. Pinned source files remain
+unchanged. Actual selected HEAD export and exact launch footprint are checked
+separately before Docker. Authored added+deleted1487/1500; further expansion must
+return to root. No physical Docker or complete workflow success claimed.

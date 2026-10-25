@@ -75,7 +75,7 @@ class Budget:
             raise
 
     def command(self, argv: list[str], cap: float = 30, cleanup: bool = False,
-                cwd: Path | None = None, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+                cwd: Path | None = None, env: dict[str, str] | None = None, raw: bool = False) -> tuple[int, str, str]:
         if not cleanup:
             self.check()
         remaining = min(cap, (self.deadline if cleanup else self.work_deadline) - time.monotonic())
@@ -101,7 +101,28 @@ class Budget:
         need(all(n < LIMIT for n in sizes), "command output limit")
         if not cleanup:
             self.check()
-        return p.returncode, paths[0].read_text(), paths[1].read_text()
+        return p.returncode, "" if raw else paths[0].read_text(), paths[1].read_text()
+
+
+def stage_context(budget: Budget, context: Path, paths: list[str], repo: Path) -> list[dict[str, Any]]:
+    rc, listing, _ = budget.command(["git", "ls-tree", "-rlz", "HEAD", "--", *paths], cwd=repo)
+    need(rc == 0 and listing, "selected Git source population")
+    entries = []
+    for record in listing.rstrip("\0").split("\0"):
+        metadata, name = record.split("\t", 1)
+        mode, kind, oid, size = metadata.split()
+        need(mode in ("100644", "100755") and kind == "blob" and not Path(name).is_absolute()
+             and ".." not in Path(name).parts and int(size) < LIMIT, "regular bounded source blob")
+        need(budget.command(["git", "cat-file", "blob", oid], cwd=repo, raw=True)[0] == 0, "source blob unavailable")
+        data = (budget.root / f"command-{budget.calls}.out").read_bytes()
+        need(len(data) == int(size), "source blob length")
+        target = context / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(0o755 if mode == "100755" else 0o644)
+        entries.append({"path": name, "mode": mode, "object_id": oid, "bytes": len(data)})
+        budget.check()
+    return entries
 
 
 def failure_diagnostic(path: Path, value: dict[str, Any]) -> None:
@@ -300,18 +321,9 @@ def cold_proof(tmp: Path) -> dict[str, Any]:
         rc, tree_id, _ = budget.command(["git", "rev-parse", "HEAD^{tree}"])
         need(rc == 0, "source tree unavailable")
         identities.update(commit=head.strip(), tree=tree_id.strip())
-        archive = tmp / "context.tar"
-        need(budget.command(["git", "archive", "--output", str(archive), "HEAD", *paths])[0] == 0, "source archive")
-        budget.check()
-        import tarfile
-        with tarfile.open(archive) as tar:
-            tar.extractall(context, filter="data")
-        for name in paths:
-            original = spec.ROOT / name
-            items = original.rglob("*") if original.is_dir() else [original]
-            for p in items:
-                if p.is_file():
-                    need((context / p.relative_to(spec.ROOT)).read_bytes() == p.read_bytes(), "export source identity")
+        identities["source_files"] = stage_context(budget, context, paths, spec.ROOT)
+        for entry in identities["source_files"]:
+            need((context / entry["path"]).read_bytes() == (spec.ROOT / entry["path"]).read_bytes(), "export source identity")
         for target in ("cached", "uncached"):
             tag = f"skillc-b3a-{nonce}:{target}"
             tags.append(tag)
@@ -533,3 +545,24 @@ else:
         assert seen == ["first", "second", "tag"] and failed
         assert not rows[0]["absent"] and rows[1]["absent"] and rows[2]["absent"]
         assert "retention_error" in rows[0]
+
+    def test_staging_large_aggregate_preserves_blob_bytes_and_modes(tmp_path: Path) -> None:
+        repo, context = tmp_path / "repo", tmp_path / "context"
+        repo.mkdir()
+        budget = Budget(tmp_path)
+        for args in (["init", "-q"], ["config", "user.name", "fixture"], ["config", "user.email", "fixture@example.invalid"]):
+            assert budget.command(["git", *args], cwd=repo)[0] == 0
+        data = (b"line\r\n" + bytes(range(256))) * 1100
+        for name in ("a", "b", "c", "d", "e"):
+            (repo / name).write_bytes(data)
+        (repo / "a").chmod(0o755)
+        for args in (["add", "."], ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "seed"]):
+            assert budget.command(["git", *args], cwd=repo)[0] == 0
+        rc, _, err = budget.command(["git", "archive", "--output", str(tmp_path / "old.tar"), "HEAD"], cwd=repo)
+        assert rc != 0 and "File too large" in err  # Actual old path's other verdict.
+        start = budget.calls
+        entries = stage_context(budget, context, ["."], repo)
+        assert len(entries) == 5 and budget.calls - start == 6
+        assert sum(r["bytes"] for r in entries) > LIMIT
+        assert all((context / r["path"]).read_bytes() == data for r in entries)
+        assert (context / "a").stat().st_mode & 0o111
