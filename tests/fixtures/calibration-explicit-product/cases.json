@@ -1,0 +1,383 @@
+{
+  "valid": {
+    "kind": "calibration-declaration",
+    "issue": 568,
+    "approval": {
+      "by": "test-only",
+      "at": "2026-10-12",
+      "attempts_per_arm": 1,
+      "task_fixture": "discrimination/fixture",
+      "declaration_digest": "sha256:e37188eeb96415dc56776886c1981992d64fa182ecd5a8752c18b2767daffaad"
+    },
+    "task": {
+      "path": "evals/level3/gate-stops-early",
+      "fixture": "discrimination/fixture",
+      "grader_id": "gate-stops-early",
+      "grader_revision": "5"
+    },
+    "arms": [
+      {
+        "name": "full-cpp",
+        "subject": {
+          "name": "cpp-codex",
+          "locator": "github.com/cooneycw/claude-power-pack",
+          "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+        },
+        "treatment": "the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); a real installation receipt is written",
+        "instruction": "Use tdd to complete this task.",
+        "named_skills": [
+          "tdd"
+        ]
+      },
+      {
+        "name": "baseline",
+        "subject": null,
+        "treatment": "an identical disposable home with no skill installed; stays on the agent-observation readiness stand-in"
+      }
+    ],
+    "shared": {
+      "client": {
+        "name": "codex",
+        "version": "0.157.1"
+      },
+      "model": "gpt-6-astra",
+      "reasoning_effort": "high",
+      "tools": "the client's defaults inside the trial container; no MCP servers",
+      "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+      "public_requirements": "evals/level3/slugkit-pipeline/goal.md, delivered verbatim to both arms",
+      "image": {
+        "tag": "skillc-trial:latest",
+        "digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "receipt_sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "per_attempt_seconds": 1200,
+      "total_seconds": 10800,
+      "agent_network": {
+        "policy": "egress:provider-only (#442)",
+        "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
+        "codex_server_side_off": [
+          "--strict-config",
+          "-c",
+          "web_search=\"disabled\"",
+          "--disable",
+          "apps",
+          "--disable",
+          "plugins",
+          "--disable",
+          "remote_plugin"
+        ]
+      }
+    },
+    "attempts_per_arm": 1,
+    "arm_order": {
+      "seed": 20260930,
+      "sequence": [
+        "full-cpp",
+        "baseline"
+      ]
+    },
+    "retain_transcripts": true,
+    "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's four criteria (functional-trailing-hyphen, integration-installed-path, pipeline-green, pipeline-honest), status by records.derive_status; installation-ready never enters it",
+    "reported_beside": "skillc.calibration.readiness_beside: installation-ready, its readiness source and the verified-result status, per attempt",
+    "report_questions": [
+      "1. Does the grader behave (controls green and red as designed)?",
+      "2. Can the baseline reach the primary endpoint?",
+      "3. Is difficulty useful: not both arms at ceiling, not both at floor?",
+      "4. Did the full-cpp arm select and use CPP, from retained transcripts rather than the heuristic alone?",
+      "5. What is the per-attempt time and quota cost, to size #203?"
+    ],
+    "outcome_endpoint": {
+      "version": 1,
+      "name": "common-task-outcome",
+      "criteria": [
+        "functional-windows-fix",
+        "regression-fails-on-original",
+        "gate-green"
+      ]
+    },
+    "task_content": {
+      "version": 1,
+      "goal_digest": "sha256:250b82c4e9ebd2cb5afc88e3a4f1dfaa19075b22142b87444efe3f33cff1bb9e",
+      "grader_digest": "sha256:332318a553fdb7cfcd518d1baf0bef9a04895c7941a3ddd9307669bca15b21bc",
+      "fixture_digest": "sha256:3dc9df492cb2a75698598dfa1c19bb94537d7d16d7b85b9a2feb6af550930d8c"
+    },
+    "run_store": "~/skillc-evidence/test",
+    "tolerance": {
+      "non_evaluable_per_arm": 1
+    },
+    "lane": "explicit-product",
+    "explicit_product": {
+      "version": 1,
+      "prompt_digests": {
+        "baseline": "sha256:250b82c4e9ebd2cb5afc88e3a4f1dfaa19075b22142b87444efe3f33cff1bb9e",
+        "full-cpp": "sha256:4efc4290f03f6c057e23d69cceb81fc7662a00c5125fe07cb87df6a3df69e218"
+      },
+      "selected_skills": [
+        "tdd"
+      ],
+      "installed_home_digest": "sha256:d40febc2885393e64f7bda53e56e21fa0ab6209288a080ece8e10fcf1ba7aa09"
+    },
+    "_comment": "Committed synthetic unit control only; not a task certification or live-run authorization."
+  },
+  "reject": [
+    {
+      "name": "legacy-explicit",
+      "path": [
+        "lane"
+      ],
+      "value": "matched-outcome"
+    },
+    {
+      "name": "missing-endpoint",
+      "path": [
+        "outcome_endpoint"
+      ],
+      "value": null
+    },
+    {
+      "name": "baseline-instruction",
+      "path": [
+        "arms",
+        1,
+        "instruction"
+      ],
+      "value": "Use tdd"
+    },
+    {
+      "name": "missing-instruction",
+      "path": [
+        "arms",
+        0,
+        "instruction"
+      ],
+      "value": ""
+    },
+    {
+      "name": "missing-names",
+      "path": [
+        "arms",
+        0,
+        "named_skills"
+      ],
+      "value": []
+    },
+    {
+      "name": "substring-name",
+      "path": [
+        "arms",
+        0,
+        "instruction"
+      ],
+      "value": "Use tdd-extra"
+    },
+    {
+      "name": "uninstalled-name",
+      "path": [
+        "explicit_product",
+        "selected_skills"
+      ],
+      "value": [
+        "other"
+      ]
+    },
+    {
+      "name": "duplicate-selection",
+      "path": [
+        "explicit_product",
+        "selected_skills"
+      ],
+      "value": [
+        "tdd",
+        "tdd"
+      ]
+    },
+    {
+      "name": "unsorted-selection",
+      "path": [
+        "explicit_product",
+        "selected_skills"
+      ],
+      "value": [
+        "tdd",
+        "aaa"
+      ]
+    },
+    {
+      "name": "non-name-selection",
+      "path": [
+        "explicit_product",
+        "selected_skills"
+      ],
+      "value": [
+        "tdd",
+        "bad name"
+      ]
+    },
+    {
+      "name": "extra-field",
+      "path": [
+        "explicit_product",
+        "extra"
+      ],
+      "value": true
+    },
+    {
+      "name": "boolean-version",
+      "path": [
+        "explicit_product",
+        "version"
+      ],
+      "value": true
+    },
+    {
+      "name": "bad-digest",
+      "path": [
+        "explicit_product",
+        "installed_home_digest"
+      ],
+      "value": "UNKNOWN"
+    },
+    {
+      "name": "missing-prompt-arm",
+      "path": [
+        "explicit_product",
+        "prompt_digests"
+      ],
+      "value": {
+        "baseline": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "extra-prompt-arm",
+      "path": [
+        "explicit_product",
+        "prompt_digests",
+        "natural"
+      ],
+      "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "arm-budget",
+      "path": [
+        "arms",
+        0,
+        "per_attempt_seconds"
+      ],
+      "value": 30
+    },
+    {
+      "name": "arm-model",
+      "path": [
+        "arms",
+        0,
+        "model"
+      ],
+      "value": "other"
+    },
+    {
+      "name": "arm-tools",
+      "path": [
+        "arms",
+        0,
+        "tools"
+      ],
+      "value": []
+    },
+    {
+      "name": "natural-arm",
+      "path": [
+        "arms"
+      ],
+      "value": [
+        {
+          "name": "full-cpp",
+          "subject": {
+            "name": "cpp-codex",
+            "locator": "github.com/cooneycw/claude-power-pack",
+            "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+          },
+          "treatment": "the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); a real installation receipt is written",
+          "instruction": "Use tdd to complete this task.",
+          "named_skills": [
+            "tdd"
+          ]
+        },
+        {
+          "name": "baseline",
+          "subject": null,
+          "treatment": "an identical disposable home with no skill installed; stays on the agent-observation readiness stand-in"
+        },
+        {
+          "name": "natural",
+          "subject": {
+            "name": "cpp-codex",
+            "locator": "github.com/cooneycw/claude-power-pack",
+            "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+          }
+        }
+      ]
+    },
+    {
+      "name": "no-explicit-product",
+      "path": [
+        "explicit_product"
+      ],
+      "value": null
+    },
+    {
+      "name": "no-named-skills",
+      "path": [
+        "arms",
+        0,
+        "named_skills"
+      ],
+      "value": null
+    },
+    {
+      "name": "non-name-named-skill",
+      "path": [
+        "arms",
+        0,
+        "named_skills"
+      ],
+      "value": [
+        "tdd",
+        " tdd"
+      ]
+    },
+    {
+      "name": "baseline-names",
+      "path": [
+        "arms",
+        1,
+        "named_skills"
+      ],
+      "value": [
+        "tdd"
+      ]
+    }
+  ],
+  "runtime_reject": [
+    "missing-treatment",
+    "missing-receipt",
+    "selection",
+    "bytes",
+    "mode",
+    "added-file",
+    "removed-file",
+    "noncanonical-path",
+    "escaping-path",
+    "nul-path",
+    "unknown-mode",
+    "orphan-mode",
+    "prompt",
+    "instruction",
+    "approval",
+    "pins-path",
+    "pins-body",
+    "pins-description",
+    "pins-empty",
+    "hidden-skill"
+  ],
+  "installed_body": "---\nname: tdd\ndescription: A synthetic test skill.\n---\n# tdd\n"
+}

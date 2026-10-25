@@ -64,7 +64,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import agent_trial, calibration, demo, gate_state, profile, trial, verify
 from . import attempt_guard as ag
@@ -478,10 +478,84 @@ def _outcome_task_inputs(
     return goal.decode("utf-8"), cc.surface_mapping(files)
 
 
+def base_prompt(declaration: calibration.CalibrationDeclaration, arm: str, goal: str) -> str:
+    """Exact pre-bootstrap prompt; canary and later controller turns are separate."""
+    instruction = calibration.arm_spec(declaration, arm).get("instruction")
+    return f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
+
+
+def installed_home_digest(treatment: Treatment) -> str:
+    """Hash every treatment-supplied home file at its effective delivery mode."""
+    if not treatment.home_files or set(treatment.home_modes) - set(treatment.home_files):
+        raise CalibrationRefused("explicit_product has empty home files or orphan file modes")
+    manifest = []
+    for path, body in sorted(treatment.home_files.items()):
+        relative = PurePosixPath(path)
+        if not path or str(relative) != path or relative.is_absolute() or ".." in relative.parts \
+                or not relative.parts or "\0" in path:
+            raise CalibrationRefused("explicit_product home paths must be canonical relative file paths")
+        try:
+            mode = agent_trial.delivery_mode(path, treatment.home_modes)
+        except agent_trial.HomeFileVerificationRefused as exc:
+            raise CalibrationRefused(str(exc)) from exc
+        manifest.append({"path": path, "digest": trial.sha256_bytes(body), "mode": f"{mode:04o}"})
+    return trial.sha256_bytes(trial.canonical(manifest))
+
+
+def _require_explicit_product(
+    declaration: calibration.CalibrationDeclaration, root: Path, treatment: Treatment | None,
+) -> None:
+    if declaration.lane != calibration.EXPLICIT_PRODUCT_LANE:
+        return
+    if treatment is None or treatment.receipt_context is None:
+        raise CalibrationRefused("explicit_product requires the actual Treatment and installed receipt context")
+    raw = declaration.data["explicit_product"]
+    assert isinstance(raw, dict)
+    if sorted(treatment.receipt_context.declared) != raw["selected_skills"]:
+        raise CalibrationRefused("explicit_product selected_skills differs from the actual installed population")
+    if installed_home_digest(treatment) != raw["installed_home_digest"]:
+        raise CalibrationRefused("explicit_product installed_home_digest differs from actual delivered bytes/modes")
+    surface = m.SURFACES.get(treatment.receipt_context.surface_name)
+    if surface is None:
+        raise CalibrationRefused("explicit_product receipt names an unsupported skill surface")
+    prefix = PurePosixPath(surface.home_skills_relpath)
+    expected_paths = {str(prefix / name / "SKILL.md") for name in raw["selected_skills"]}
+    installed_paths = {path for path in treatment.home_files
+                       if PurePosixPath(path).name == "SKILL.md" and PurePosixPath(path).parent.parent == prefix}
+    if installed_paths != expected_paths:
+        raise CalibrationRefused("explicit_product installed skill entrypoints differ from selected_skills")
+    pins = []
+    for path in sorted(expected_paths):
+        try:
+            description, body = profile.skill_md_digests(treatment.home_files[path])
+        except FrontmatterError as exc:
+            raise CalibrationRefused(f"{path}: {exc}") from exc
+        pins.append({"path": path, "body_digest": body, "description_digest": description})
+    if sorted(treatment.skill_digests, key=lambda pin: pin["path"]) != pins:
+        raise CalibrationRefused("explicit_product skill pins differ from the actual installed skill bytes")
+    goal, _surface = _outcome_task_inputs(declaration, root)
+    prompts = {arm: trial.sha256_bytes(base_prompt(declaration, arm, goal).encode("utf-8"))
+               for arm in declaration.arms}
+    if prompts != raw["prompt_digests"]:
+        raise CalibrationRefused("explicit_product prompt_digests differ from actual base prompts")
+
+
+def _launch_declaration(declaration: calibration.CalibrationDeclaration) -> calibration.CalibrationDeclaration:
+    """Mutable data cannot erase the opt-in cached when this declaration was parsed."""
+    if declaration.lane == calibration.EXPLICIT_PRODUCT_LANE or "explicit_product" in declaration.data \
+            or calibration.outcome_endpoint(declaration) is not None:
+        parsed = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
+        if declaration.lane == calibration.EXPLICIT_PRODUCT_LANE and parsed.lane != declaration.lane:
+            raise CalibrationRefused("explicit_product lane differs from the parsed declaration")
+        return parsed
+    return declaration
+
+
 def plan_calibration(
     declaration: calibration.CalibrationDeclaration, store: Path, *,
     root: Path, treatment_digest: str, image_digest: str | None,
     skill_digests: Sequence[Mapping[str, str]] = (),
+    treatment: Treatment | None = None,
 ) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
     """Plan one trial per attempt through the real controller, in
     `arm_order.sequence`. `repeat` is the arm's own 1-based attempt count.
@@ -492,14 +566,17 @@ def plan_calibration(
     installs nothing and stays unpinned (its contamination rule is #427)."""
     if not skill_digests and any(arm != calibration.BASELINE_ARM for arm in declaration.arm_order):
         raise CalibrationRefused("a treated arm has no skill_digests to pin; refusing to plan it unpinned")
-    if calibration.outcome_endpoint(declaration) is not None:
-        declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
+    declaration = _launch_declaration(declaration)
     client_name, client_version = declared_client(declaration)
     grader = verify.GraderDef.load(root / declaration.task_path)
     grader_identity = grader.identity()
     snapshot = None
     if calibration.outcome_endpoint(declaration) is not None:
         calibration.require_approved(declaration, root)
+        _require_explicit_product(declaration, root, treatment)
+        if declaration.lane == calibration.EXPLICIT_PRODUCT_LANE and treatment is not None \
+                and (treatment.digest != treatment_digest or tuple(skill_digests) != treatment.skill_digests):
+            raise CalibrationRefused("explicit_product planned treatment digest/pins differ from actual Treatment")
         if image_digest != _shared_str(declaration, "image", "digest"):
             raise CalibrationRefused("planned image differs from the approved declaration")
         _outcome_task_inputs(declaration, root)
@@ -603,12 +680,12 @@ def run_calibration(
     one every time; a test's scripted client needs the attempt id), to which
     the declared model and effort are added. `total_seconds` overrides the
     declared total cap - for tests only; the CLI never sets it."""
-    if treatment.gate_state_protocol is not None:
+    if treatment is not None and treatment.gate_state_protocol is not None:
         raise CalibrationRefused("gate-state treatment is fixture-only")
     # ADR 0005: nothing - no store, no plan, no container - before this.
-    if calibration.outcome_endpoint(declaration) is not None:
-        declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
+    declaration = _launch_declaration(declaration)
     calibration.require_approved(declaration, root)
+    _require_explicit_product(declaration, root, treatment)
     if calibration.outcome_endpoint(declaration) is not None:
         if image_digest != _shared_str(declaration, "image", "digest"):
             raise CalibrationRefused("planned image differs from the approved declaration")
@@ -644,6 +721,7 @@ def run_calibration(
     experiment, schedule = plan_calibration(
         declaration, store, root=root, treatment_digest=treatment.digest, image_digest=image_digest,
         skill_digests=treatment.skill_digests,
+        treatment=treatment,
     )
     outcomes: list[mp.AttemptOutcome] = []
     write_outcomes(run_dir, experiment, outcomes, declaration)
@@ -657,8 +735,7 @@ def run_calibration(
         if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
             return skipped
         treated = scheduled.arm != calibration.BASELINE_ARM
-        instruction = calibration.arm_spec(declaration, scheduled.arm).get("instruction")
-        prompt = f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
+        prompt = base_prompt(declaration, scheduled.arm, goal)
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
@@ -1553,7 +1630,12 @@ def build_report(
         _shared_str(declaration, "model"), _shared_str(declaration, "reasoning_effort"),
     ):
         raise CalibrationRefused("report model/effort differs from the bound declaration")
-    if endpoint is not None and named_skills:
+    if declaration is not None and declaration.lane == calibration.EXPLICIT_PRODUCT_LANE:
+        bound_names = named_skills_by_arm(declaration)
+        if named_skills is not None and {k: tuple(v) for k, v in named_skills.items()} != bound_names:
+            raise CalibrationRefused("report named_skills differs from the bound explicit_product declaration")
+        named_skills = bound_names
+    elif endpoint is not None and named_skills:
         raise CalibrationRefused("common-task-outcome cannot add post-run named-skill eligibility")
     ids = [outcome.scheduled.attempt_id for outcome in outcomes]
     if len(set(ids)) != len(ids):
@@ -1633,7 +1715,7 @@ def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[st
     `opened` is the uptake rate's numerator and `observed` its denominator
     (k/n, #203 ruling 3c): an attempt whose invocations were not recorded is
     in neither. A provided-skill arm also counts `named_opened`, the attempts
-    eligible for the value comparison."""
+    with recorded requested use; this never changes the scheduled primary counts."""
     arms: dict[str, dict[str, object]] = {}
     for entry in entries:
         arm = str(entry.get("arm"))
