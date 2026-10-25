@@ -2037,6 +2037,23 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
 
 
 def cmd_level3_live(args: argparse.Namespace) -> int:
+    if getattr(args, "preflight_launch_env", False):
+        if args.rehearse is not None or args.judge_replay is not None or args.assume_fixture_finalized:
+            print("skillc: cannot combine --preflight-launch-env with rehearsal or judge replay options",
+                  file=sys.stderr)
+            return 2
+        from . import collection_conformance as cc
+        from . import fixture_live as fl
+
+        try:
+            declaration = fl.load_declaration(Path(args.declaration))
+            fl.preflight_launch_env(declaration, cc.DEFAULT_CLIENT_ARGVS[fl.CLIENT])
+        except (fl.LiveRefused, OSError, ValueError) as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+        print("skillc: current environment permits the real-client opt-in guard; no launch attempted. "
+              "The guard is checked again at launch.", file=sys.stderr)
+        return 0
     if getattr(args, "judge_replay", None):
         return _cmd_level3_live_judge_replay(args)
     return _cmd_level3_live_run(args)
@@ -3058,6 +3075,11 @@ def build_parser() -> argparse.ArgumentParser:
              "SKILLC_ALLOW_REAL_AGENT=1)",
     )
     p_level3_live.add_argument("declaration", help="the level3-fixture-live-declaration JSON to run")
+    p_level3_live.add_argument(
+        "--preflight-launch-env", action="store_true",
+        help="check only the current real-client environment opt-in; no image, credential, store, "
+             "backend or client is touched, and no run is authorized",
+    )
     p_level3_live.add_argument("--image", help="trial image tag (default: the declared shared.image.tag)")
     p_level3_live.add_argument("--runtime-supply-receipt",
                                help="receipt of the pinned runtime image (required unless --rehearse dry)")

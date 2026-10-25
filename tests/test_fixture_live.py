@@ -2161,3 +2161,52 @@ def test_late_live_fixture_failure_is_persisted_and_blocks_strict_replay(
     [entry] = [a for a in report["attempts"] if a["attempt_id"] == attempt_id]
     assert "finalization outcome is failed" in entry["replay_blocked_reason"]
     assert not entry["criteria"]
+
+
+@pytest.mark.parametrize("case", json.loads((ROOT / "tests/fixtures/fixture-preflight/cases.json").read_text())["scan"],
+                         ids=lambda c: c["name"])
+def test_report_retains_scan_facts_safely(case: dict[str, Any], tmp_path: Path,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    original = _clean_record
+    hits = copy.deepcopy(case["hits"])
+    unsafe = "".join(case.get("unsafe_identity_parts", []))
+    if unsafe:
+        hits[0]["argv_head"] += " " + unsafe
+
+    def record(**changes: Any) -> dict[str, Any]:
+        result = original(**changes)
+        result["observation"]["transcript_codex_invocations"] = hits
+        result["observation"]["transcript_files_found"] = case["files"]
+        return result
+
+    monkeypatch.setattr(sys.modules[__name__], "_clean_record", record)
+    report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), [LIVE_SHAPE] * 10)
+    for row in report["attempts"]:
+        expected = hits if case["coverage"] == "complete" else None
+        assert row["transcript_codex_invocations"] == expected
+        assert row["transcript_files_found"] == (None if isinstance(case["files"], bool) else case["files"])
+        assert row["transcript_scan_retention"]["coverage"] == case["coverage"]
+    if unsafe:
+        assert unsafe not in json.dumps(report)
+
+
+def test_report_absent_observation_is_unknown(tmp_path: Path) -> None:
+    report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), [None] * 10)
+    for row in report["attempts"]:
+        assert row["transcript_codex_invocations"] is None
+        assert row["transcript_files_found"] is None
+        assert row["transcript_scan_retention"]["coverage"] == "missing"
+
+
+def test_report_scan_check_failure_is_bounded_unknown(tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreadable(raw: bytes) -> list[str]:
+        raise OSError("untrusted diagnostic must not be retained")
+
+    monkeypatch.setattr(at, "transcript_leak_findings", unreadable)
+    report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), [LIVE_SHAPE] * 10)
+    for row in report["attempts"]:
+        assert row["transcript_codex_invocations"] is None
+        assert row["transcript_scan_retention"] == {
+            "coverage": "missing", "reason": "scan retention check unreadable"}
+    assert "untrusted diagnostic" not in json.dumps(report)

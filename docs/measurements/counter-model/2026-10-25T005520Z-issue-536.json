@@ -1,0 +1,59 @@
+{
+  "branch": "issue-536-fixture-live-record-fidelity-real-agent-opt-in-in",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "ffc90c38b4c14f064b25fbbc6154f44d8dd5f7d7",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "flow_scope": {
+      "approval_execution": "unverified",
+      "approval_sha256": "24b892ffff948288605369eda4b84efa8d3ebb025044230c0d7b24af467305ff",
+      "approved_plan_sha256": "97f6fd2d77ad4a7210098b0dc7b2d46c139dbf647550f9cb06847d70473cf47c",
+      "base": "c80455538d4412391a375b76202f8c4ec6338be7",
+      "branch": "issue-536-fixture-live-record-fidelity-real-agent-opt-in-in",
+      "clean_probe_sha256": null,
+      "creation_line": 1633,
+      "creation_sha256": "bc03833ec43ded7b2bd6575d9dfed7ea0c0ea1ed78b14e5ba4a1d99ce4bf4fd8",
+      "excluded_prefix_models": [
+        "gpt-6-astra",
+        "gpt-6.1-sol"
+      ],
+      "excluded_prefix_records": 135,
+      "head": "ffc90c38b4c14f064b25fbbc6154f44d8dd5f7d7",
+      "included_model_contexts": 5,
+      "initial_cleanliness": "unmeasured",
+      "issue": "536",
+      "kind": "fresh-flow-run",
+      "originating_turn_id": "01a16fc7-b10e-7141-9fd3-4e8880df5547",
+      "rollout_bytes": 13306519,
+      "rollout_sha256": "e4b6b9d52b0ca0f6cf599f158567bf96574cf31de9f8e1af76585df16b3191c0",
+      "run_id": "bfaff44c62344e6b94602cebda83b6f2",
+      "snapshot_records": 4436,
+      "start_execution_id": "exec-c4cbed56-8b63-49a1-ac91-69f61e8d8e30",
+      "start_line": 136,
+      "version": 1
+    },
+    "rollout": "2026/10/24/rollout-2026-10-24T17-12-43-01a16fc2-3e17-7590-b1a5-40fb3710d1d6.jsonl",
+    "thread_id": "01a16fc2-3e17-7590-b1a5-40fb3710d1d6"
+  },
+  "issue": "536",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-25T00:55:20Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T18-35-37-01a1700e-2656-7282-a18d-9103f6af89ad.jsonl",
+    "thread_id": "01a1700e-2656-7282-a18d-9103f6af89ad"
+  },
+  "schema": 3,
+  "scope": "unverified",
+  "status": "ran"
+}

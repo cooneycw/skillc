@@ -465,3 +465,31 @@ invented citation. Issue and PR numbers share one sequence, as on GitHub.
   only a remote the subject cannot write may be given to it. The remote for a
   live attempt runs the same calls inside the attempt's containment, and that
   wiring is #434's.
+
+
+### No-launch opt-in check and recorded transcript scan (#536)
+
+`skillc level3-live <declaration> --preflight-launch-env` checks the real
+client's exact declared model/effort-pinned argv against the current
+`SKILLC_ALLOW_REAL_AGENT` environment. Only the exact value `1` permits it.
+Run this in the environment intended for the later live launch. It reads the
+declaration but touches no image, credential, private run store, backend or
+client. It accepts an unapproved declaration because it authorizes no run.
+It refuses combinations with rehearsal or judge-replay options.
+
+Success establishes only that current opt-in condition. It does not establish
+approval, budget, image or credential readiness, or promise a successful future
+launch. The actual lifecycle driver checks the guard again at launch; changing
+the environment after the check can therefore refuse the launch.
+
+Each live-report attempt now retains `transcript_codex_invocations` and
+`transcript_files_found` from its recorded observation, next to `nested_codex`.
+An observed empty scan is `[]`; an observed zero file count is `0`. Missing
+observations remain `null`. Building a report never rescans a transcript or
+changes credit. A scan with an unreadable entry becomes `null`, preserving the
+file count when known. Raw argv-derived scan content must pass the existing
+transcript identity and credential retention checks before it is retained; an
+unsafe scan becomes `null` in its entirety, never a filtered or empty scan.
+`transcript_scan_retention` gives `coverage` (`complete`, `missing`, or
+`refused`) and a fixed safe `reason`. These are additive report fields; the v2
+record schema and original raw observation are unchanged.

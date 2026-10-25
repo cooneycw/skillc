@@ -1113,6 +1113,27 @@ def require_turn_dispatch(declaration: LiveDeclaration, treatment: cr.Treatment,
         raise LiveRefused(f"a rehearsal home file shadows a source-executable subject helper: {shadowed}")
 
 
+
+def live_client_argv(declaration: LiveDeclaration, client_argv: Sequence[str]) -> list[str]:
+    """The same declared model/effort-pinned argv for preflight and launch."""
+    shared = declaration.shared
+    return mp.pin_model_argv(str(shared["model"]), str(shared["reasoning_effort"]), client_argv)
+
+
+def preflight_launch_env(declaration: LiveDeclaration, client_argv: Sequence[str]) -> None:
+    """Check only the real launch opt-in in the current environment; launch nothing.
+
+    This is no authorization or readiness receipt. The lifecycle driver checks
+    the environment again immediately before preparing the actual backend.
+    """
+    from . import lifecycle
+
+    try:
+        lifecycle._refuse_real_agent(live_client_argv(declaration, client_argv))
+    except lifecycle.RealAgentBlocked as exc:
+        raise LiveRefused(str(exc)) from exc
+
+
 def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatment: cr.Treatment,
              image_digest: str | None, backends: Callable[[], tuple[Any, Any]], client_argv: Sequence[str],
              credential_explicit_path: Path | None, rehearse: str | None = None,
@@ -1150,8 +1171,7 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     if rehearse is None and total_seconds is not None:
         raise LiveRefused("a live run cannot override the declared total_seconds cap")
     shared = declaration.shared
-    model, effort = str(shared["model"]), str(shared["reasoning_effort"])
-    argv = mp.pin_model_argv(model, effort, client_argv)
+    argv = live_client_argv(declaration, client_argv)
     task_root = root / declaration.task_path
     text = prompt(declaration, root)
     allowlist = str(shared["agent_network"]["allowlist_digest"])
@@ -1268,6 +1288,44 @@ def ledger_mode(experiment: trial.Experiment) -> str:
     return match.group(1) or "live"
 
 
+
+def _report_transcript_scan(record: Mapping[str, Any]) -> dict[str, object]:
+    """Copy observed facts, never reconstruct a historical transcript scan.
+
+    argv_head originates in raw client output. Refuse the entire scan on unsafe
+    or unreadable content instead of presenting a filtered list as complete.
+    Reasons are fixed labels and never include supplied bytes or exceptions.
+    """
+    from . import agent_trial
+
+    observation = record.get("observation")
+    observation = observation if isinstance(observation, Mapping) else {}
+    files = observation.get("transcript_files_found")
+    if not isinstance(files, int) or isinstance(files, bool) or files < 0:
+        files = None
+    hits = observation.get("transcript_codex_invocations")
+    coverage, reason = "missing", "scan not recorded or unreadable"
+    retained = None
+    if isinstance(hits, list) and all(isinstance(hit, Mapping) for hit in hits):
+        try:
+            encoded = json.dumps(hits, ensure_ascii=True, allow_nan=False).encode("utf-8")
+            unsafe = bool(agent_trial.transcript_leak_findings(encoded))
+        except (TypeError, ValueError, UnicodeError, OSError):
+            coverage, reason = "missing", "scan retention check unreadable"
+        else:
+            if unsafe:
+                coverage, reason = "refused", "scan failed retention safety checks"
+            elif all(not hit.get("unreadable")
+                     and isinstance(hit.get("program"), str)
+                     and isinstance(hit.get("guarded"), bool)
+                     and (hit.get("model") is None or isinstance(hit.get("model"), str))
+                     and isinstance(hit.get("argv_head"), str) for hit in hits):
+                retained = hits
+                coverage, reason = "complete", "recorded scan retained"
+    return {"transcript_codex_invocations": retained, "transcript_files_found": files,
+            "transcript_scan_retention": {"coverage": coverage, "reason": reason}}
+
+
 def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
                  outcomes: Sequence[mp.AttemptOutcome], stop: Stop, *, rehearse: str | None,
                  approved: bool) -> dict[str, Any]:
@@ -1307,6 +1365,7 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
             "agent_seconds": mp.agent_seconds(experiment, outcome.scheduled.attempt_id),
             "egress_eligible": egress_ok, "egress_reason": egress_reason,
             "nested_codex": fixture.get("codex_guard") if isinstance(fixture, Mapping) else None,
+            **_report_transcript_scan(record),
             "containment_trigger": containment_trigger(record, allowlist_digest=allowlist,
                                                        nested_policy=declaration.nested_policy),
             # #279: what the controller delivered, only when turns are declared.
