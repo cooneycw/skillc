@@ -691,3 +691,22 @@ Root cap amendment17 permits1600authored added+deleted lines, same399paths and
 Docker remains queued behind CC574 complete verification. Formal source review is
 explicitly deferred until physical results; no repeat full export is owed solely
 for this test-only negative-input addition. Actual cold run stages its own HEAD.
+
+### First physical result and narrow cleanup classifier correction
+
+Root Docker slot18 ran committed9cc3cc4 once. Terminal1FAIL228.94s; the retained
+result is UNKNOWN, not retroactively green. Both builds completed; all ten cases
+reached expected observed substeps1,1,7,13,7,7,11,7,1,9, including actual120-file
+preferred-consumer red and121-file routes. Cleanup removed all eight containers
+with exit0, but the classifier failed to recognize Docker's lowercase exact
+`error: no such object` diagnostic; both image-tag absence checks passed.
+Private owned/diagnostic/command files remain original. A separate fresh read-only
+check confirmed absence of the exact8containers/2tags; no rescue removal needed.
+
+Root approved the minimal classifier correction before any rerun. Actual lowercase
+input failed before the fix (absentFalse versus expectedTrue); corrected cleanup
+requires exit1, parsed empty-list stdout, the known normalized diagnostic prefix
+and EXACT case-sensitive owned name. Live output, wrong name/case, empty output,
+daemon and permission errors remain non-absence.13cleanup controls pass; lint and
+types pass. Authored1525/1600 before genuine receipt. Docker remains diagnosis-only
+until root authorizes a second physical invocation; no cap weakened or fake receipt.

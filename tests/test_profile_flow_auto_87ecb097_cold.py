@@ -133,6 +133,15 @@ def failure_diagnostic(path: Path, value: dict[str, Any]) -> None:
     path.write_text(payload)
 
 
+def docker_absent(rc: int, out: str, err: str, name: str, kind: str) -> bool:
+    prefix = "error: no such object: " if kind == "container" else "error response from daemon: no such image: "
+    message = err.strip()
+    try:
+        return rc == 1 and json.loads(out) == [] and message[:len(prefix)].casefold() == prefix and message[len(prefix):] == name
+    except ValueError:
+        return False
+
+
 def cleanup_owned(budget: Budget, containers: list[str], tags: list[str], nonce: str) -> list[dict[str, Any]]:
     outcomes = []
     for kind, names in (("container", containers), ("image", tags)):
@@ -142,13 +151,13 @@ def cleanup_owned(budget: Budget, containers: list[str], tags: list[str], nonce:
             try:
                 rc, out, err = budget.command([*prefix, "inspect", name], cleanup=True)
                 if rc:
-                    need("No such" in err, "ownership/absence unavailable")
+                    need(docker_absent(rc, out, err, name, kind), "ownership/absence unavailable")
                 else:
                     need(json.loads(out)[0]["Config"]["Labels"]["skillc.b3a"] == nonce, "refuse foreign cleanup")
                     remove = [*prefix, "rm"] + (["-f"] if kind == "container" else [])
                     need(budget.command([*remove, name], cleanup=True)[0] == 0, "owned removal failed")
-                    rc, _, err = budget.command([*prefix, "inspect", name], cleanup=True)
-                    need(rc != 0 and "No such" in err, "absence unconfirmed")
+                    rc, out, err = budget.command([*prefix, "inspect", name], cleanup=True)
+                    need(docker_absent(rc, out, err, name, kind), "absence unconfirmed")
                 row["absent"] = True
             except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
                 row["error"] = str(exc)
@@ -482,7 +491,7 @@ else:
                     raise OSError("controlled first cleanup failure")
                 if fault == "image-still-present":
                     return 0, json.dumps([{"Config": {"Labels": {"skillc.b3a": "owned"}}}]), ""
-                return 1, "", "No such container"
+                return 1, "[]", ("Error response from daemon: No such image: " if argv[1] == "image" else "error: no such object: ") + argv[-1]
             monkeypatch.setattr(budget, "command", command)
         rows = cleanup_owned(budget, ["second", "first"], ["tag"], "owned")
         assert len(rows) == 3
@@ -531,7 +540,7 @@ else:
         budget, seen = Budget(tmp_path), []
         def command(argv: list[str], **kw: Any) -> tuple[int, str, str]:
             seen.append(argv[-1])
-            return 1, "", "No such container"
+            return 1, "[]", ("Error response from daemon: No such image: " if argv[1] == "image" else "error: no such object: ") + argv[-1]
         write = Path.write_text
         failed: list[bool] = []
         def unavailable(path: Path, data: str, **kw: Any) -> int:
@@ -573,3 +582,25 @@ else:
             assert budget.command(["git", *args], cwd=repo)[0] == 0
         with pytest.raises(RuntimeError, match="regular bounded source blob"):
             stage_context(budget, context, ["oversized"], repo)
+
+    @pytest.mark.parametrize("fault", ["lowercase", "image", "daemon", "permission", "wrong-name", "wrong-case", "live", "empty-output"])
+    def test_cleanup_absence_binds_actual_missing_diagnostic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
+        budget, name = Budget(tmp_path), "owned-case"
+        image = fault == "image"
+        error = ("Error response from daemon: No such image: " if image else "error: no such object: ") + name
+        rc, out = 1, "[]\n"
+        if fault == "daemon":
+            error = "Cannot connect to the Docker daemon"
+        elif fault == "permission":
+            error = "permission denied while connecting to Docker"
+        elif fault == "wrong-name":
+            error += "-neighbour"
+        elif fault == "wrong-case":
+            error = error.replace(name, name.upper())
+        elif fault == "live":
+            rc, out, error = 0, json.dumps([{"Config": {"Labels": {"skillc.b3a": "owned"}}}]), ""
+        elif fault == "empty-output":
+            out = ""
+        monkeypatch.setattr(budget, "command", lambda *a, **kw: (rc, out, error))
+        rows = cleanup_owned(budget, [] if image else [name], [name] if image else [], "owned")
+        assert rows[0]["absent"] == (fault in ("lowercase", "image"))
