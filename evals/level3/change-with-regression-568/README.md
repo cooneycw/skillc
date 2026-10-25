@@ -92,3 +92,8 @@ Constructed exports use the existing SafeTree/GitDir verified object reader from
 one supplied export. The exact remote main's files/modes matter; a local tree or
 source digest is insufficient. Missing/unreadable/unsupported packed objects are
 UNKNOWN. These controls do not instantiate a paired fixture-service calibration.
+
+Run `python3 qualify.py` to emit the detailed JSON report followed by
+`QUALIFY: ok (artifact certification only)`. The success marker is assembled
+only after the complete qualification; unavailable, refused and expired runs
+never publish it. The marker does not certify paired service or live readiness.

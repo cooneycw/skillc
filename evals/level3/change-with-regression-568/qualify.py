@@ -270,7 +270,7 @@ def qualify(emit=None):
             "protection_suite_executions": len(protection),
             "protection_executed_tests": sum(r["count"] for r in protection),
             "limits": "trusted host fixtures; no arbitrary candidate or paired/live calibration"}
-    payload = json.dumps(report)
+    payload = json.dumps(report) + "\nQUALIFY: ok (artifact certification only)"
     budget.check()
     if emit is not None:
         emit(payload)

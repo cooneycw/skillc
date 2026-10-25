@@ -34,7 +34,10 @@ def q() -> Any:
 
 @pytest.fixture(scope="module")
 def certified(q: Any) -> dict[str, Any]:
-    return dict(q.qualify())
+    published: list[str] = []
+    report = dict(q.qualify(emit=published.append))
+    assert len(published) == 1 and published[0].endswith("QUALIFY: ok (artifact certification only)")
+    return report
 
 
 def test_fixed_population_discriminates_artifacts(certified: dict[str, Any]) -> None:
@@ -83,8 +86,10 @@ def test_blind_semantic_engine_cannot_certify(q: Any, monkeypatch: pytest.Monkey
     monkeypatch.setattr(q.o, "semantic", lambda *a, **kw: {
         "feature": True, "legacy": True, "vectors": [{"id": name} for name in q.VECTORS],
     })
+    published: list[str] = []
     with pytest.raises(q.Refused, match="initial-missing-batch"):
-        q.qualify()
+        q.qualify(emit=published.append)
+    assert published == []
 
 
 def test_always_pass_and_false_red_reconciliation(q: Any) -> None:
@@ -250,3 +255,14 @@ def test_noop_cli_put_cannot_borrow_api_state(q: Any) -> None:
     for row in m["vectors"]:
         if row["id"] in ("legacy-set-existing", "legacy-new-defaults"):
             assert not q.o.vector(wrong, row, q.o.Budget())["legacy"]
+
+
+def test_malformed_manifest_cannot_publish_marker(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    m["cases"] = []
+    monkeypatch.setattr(q.o, "load_sources", lambda: {**sources, "controls.json": json.dumps(m).encode()})
+    published: list[str] = []
+    with pytest.raises(q.Refused, match="case population"):
+        q.qualify(emit=published.append)
+    assert published == []
