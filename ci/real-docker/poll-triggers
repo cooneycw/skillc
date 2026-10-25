@@ -27,6 +27,17 @@ for var in INSTALLED_ROOT GITHUB_REPO GITHUB_TOKEN_FILE STATE_FILE; do
     fi
 done
 
+# Resolve private paths before changing directory; WORK never supplies Python imports.
+CALLER_CWD="$(pwd -P)"
+for var in INSTALLED_ROOT STATE_FILE GITHUB_TOKEN_FILE; do
+    if [[ -n "${!var:-}" && "${!var}" != /* ]]; then
+        printf -v "$var" '%s/%s' "$CALLER_CWD" "${!var}"
+    fi
+done
+[[ "$CONFIG_FILE" = /* ]] || CONFIG_FILE="$CALLER_CWD/$CONFIG_FILE"
+export SKILLC_REAL_DOCKER_CONFIG="$CONFIG_FILE" PYTHONPATH="$INSTALLED_ROOT"
+cd "$INSTALLED_ROOT"
+
 RUNNER="$INSTALLED_ROOT/ci/real-docker/run-real-docker"
 
 # S4: token read from a file, used via curl's -K config, never on argv.
@@ -108,6 +119,8 @@ print(len(page), hit_known)
     PAGE=$((PAGE + 1))
 done
 
+(
+cd "$INSTALLED_ROOT"
 PYTHONPATH="$INSTALLED_ROOT" python3 -c '
 import json, sys
 from ci.real_docker_trigger import select_requested_shas
@@ -122,6 +135,7 @@ json.dump({
     "newly_seen_ids": list(result.newly_seen_ids),
 }, open(sys.argv[4], "w"))
 ' "$COMMENTS_FILE" "$OWNER_LOGIN" "$PROCESSED_FILE" "$SELECTION_FILE"
+)
 
 # ------------------------------------------------------- run, sequentially
 #
@@ -146,22 +160,27 @@ state = json.load(open(sys.argv[1]))
 existing = set(state.get("processed_comment_ids", []))
 existing.add(int(sys.argv[2]))
 state["processed_comment_ids"] = sorted(existing)
+state.get("pending_comment_requests", {}).pop(sys.argv[2], None)
 json.dump(state, open(sys.argv[1], "w"))
 ' "$STATE_FILE" "$1"
 }
 
-# Comments that were SEEN but never matched/triggered anything carry no
-# run to wait on - safe to mark processed immediately, unconditionally.
+# Freeze first-seen request tuples before running; lock retries never re-read edits.
 python3 -c '
 import json, sys
 state = json.load(open(sys.argv[1]))
 selection = json.load(open(sys.argv[2]))
-triggered_ids = {r[0] for r in selection["requests"]}
-non_triggering = [i for i in selection["newly_seen_ids"] if i not in triggered_ids]
+pending = state.get("pending_comment_requests", {})
+for request in selection["requests"]:
+    pending.setdefault(str(request[0]), request)
 existing = set(state.get("processed_comment_ids", []))
-existing.update(non_triggering)
+existing.update(selection["newly_seen_ids"])
 state["processed_comment_ids"] = sorted(existing)
+if pending or "pending_comment_requests" in state:
+    state["pending_comment_requests"] = pending
+selection["requests"] = list(pending.values())
 json.dump(state, open(sys.argv[1], "w"))
+json.dump(selection, open(sys.argv[2], "w"))
 ' "$STATE_FILE" "$SELECTION_FILE"
 
 run_one() {
@@ -170,9 +189,9 @@ run_one() {
     echo "poll-triggers: running $sha" >&2
     local result=0
     if [ -n "$optin" ]; then
-        "$RUNNER" "$sha" --opt-in "$optin" >&2 || result=$?
+        (cd "$CALLER_CWD" && "$RUNNER" "$sha" --opt-in "$optin") >&2 || result=$?
     else
-        "$RUNNER" "$sha" >&2 || result=$?
+        (cd "$CALLER_CWD" && "$RUNNER" "$sha") >&2 || result=$?
     fi
     echo "$result"
     return 0

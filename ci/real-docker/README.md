@@ -434,8 +434,9 @@ inside the 5-minute timer interval) for the lock rather than failing
 immediately - a non-blocking lock would let a manual run's hold on it cause
 a timer-decided sha to be silently marked done without ever running.
 Exit code 3 means the lock was never acquired at all (the run never
-started); `poll-triggers` checks for exactly this code and does NOT persist
-that sha/comment as processed, so it is retried on the next tick. Exit
+started). Main SHA bookkeeping remains retryable. Comment IDs are marked seen
+on first sight, and their immutable pending SHA/opt-in tuple is retained until
+the run starts. A lock retry uses that stored tuple, never an edited comment. Exit
 codes 0/1/2/4 (SUCCESS/FAILURE/ERROR/RUNNER_BEHIND) all mean a run actually happened and
 reported something, and ARE persisted.
 
@@ -514,7 +515,8 @@ only. An inherited cold switch or break environment does not grant execution.
 An opt-in posts exclusively to `skillc/real-docker-optin/flow-auto-cold` and
 cannot satisfy or overwrite `skillc/real-docker`. Its exact named node must
 execute once: skipped, deselected, duplicate, uncollected or missing nodes produce
-ERROR, with executed/expected counts. An executed failing node produces FAILURE;
+ERROR, with executed/expected counts. A setup/phase error cannot establish execution and produces ERROR 0/1.
+An executed assertion failure produces FAILURE;
 a passing executed node produces SUCCESS 1/1. The ordinary declared-file floor
 is unchanged. Current main may not carry the cold-test file yet: requesting the
 opt-in on such a SHA must produce ERROR 0/1, never substitute a different test.
@@ -523,7 +525,11 @@ performance. The installed-code boundary retains R1's report-producer limitation
 
 The installed policy bounds environment setup plus pytest to 2,400 seconds total
 (the cold test itself uses an 1,800-second budget and 1,900-second pytest timeout).
-Timeout terminates the owned process group and cannot earn success. Before any
+The dedicated Linux helper becomes a child subreaper before launch. Timeout,
+SIGTERM and SIGINT sweep and reap only its owned/adopted descendants, including
+children that create new sessions. Unsupported or unconfirmed cleanup is ERROR.
+The final cleanup sample must fit the same original endpoint to earn success;
+bounded rescue cleanup outside it never adds on-time credit. Before any
 checkout/test work, preflight requires 10 GiB available bytes and 100,000 available
 inodes on BOTH the work filesystem and Docker's reported storage filesystem.
 Insufficient or unreadable headroom refuses the run. Lock acquisition retains its

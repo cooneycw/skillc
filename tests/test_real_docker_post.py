@@ -68,6 +68,7 @@ def _run_installed_runner(
     optin_xml: str | None = None,
     policy_fault: str = "",
     via_poller: bool = False,
+    work_cwd: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
     """Run the actual shell and posting modules; replace external I/O only.
 
@@ -103,6 +104,9 @@ def _run_installed_runner(
             f"Path({str(tmp_path / 'target-imported')!r}).write_text('bad')\n"
             "FLOW_AUTO_COLD = {'env': ('FORGED', '1'), 'nodes': ('forged.py::test_forged',)}\n"
             "TARGET_ONLY = FLOW_AUTO_COLD\n")
+        (checkout / 'json.py').write_text(
+            f"from pathlib import Path\nPath({str(tmp_path / 'target-json-imported')!r}).write_text('bad')\n"
+            "raise SystemExit('WORK json imported')\n")
     floor = (ROOT / "ci" / "check_real_docker_ran.py").read_text()
     anchor = f'    "{c.DECLARED_REAL_DOCKER_FILES[-1]}",\n)'
     assert anchor in floor
@@ -130,6 +134,10 @@ def _run_installed_runner(
         "OPTIN_EVIDENCE_ROOT": str(tmp_path / "retained"),
         "STATE_FILE": str(tmp_path / "state.json"),
     }
+    if work_cwd:
+        for key in ('INSTALLED_ROOT', 'WORK_CHECKOUT', 'LOCK_FILE', 'GITHUB_TOKEN_FILE',
+                    'OPTIN_EVIDENCE_ROOT', 'STATE_FILE'):
+            values[key] = os.path.relpath(values[key], checkout)
     config.write_text(''.join(f'{key}={shlex.quote(value)}\n' for key, value in values.items()))
     (tmp_path / "state.json").write_text(json.dumps({"last_main_sha": SHA, "processed_comment_ids": []}))
     binaries = tmp_path / "bin"
@@ -142,7 +150,7 @@ def _run_installed_runner(
     events = tmp_path / "events.jsonl"
     env = {
         "PATH": f"{binaries}{os.pathsep}{os.defpath}",
-        "SKILLC_REAL_DOCKER_CONFIG": str(config),
+        "SKILLC_REAL_DOCKER_CONFIG": os.path.relpath(config, checkout) if work_cwd else str(config),
         "RUNNER_TEST_EVENTS": str(events), "RUNNER_TEST_INSTALLED": str(installed),
         "SKILLC_FLOW_AUTO_COLD": "1", "SKILLC_LIVE_TEST_BREAK": "stale-unwanted-mode",
         "RUNNER_TEST_REQUEST": optin,
@@ -156,7 +164,7 @@ def _run_installed_runner(
                 *(["--opt-in", optin] if optin else [])])
     result = subprocess.run(
         runner_args,
-        cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30, check=False,
+        cwd=checkout if work_cwd else tmp_path, env=env, text=True, capture_output=True, timeout=30, check=False,
     )
     return result, [json.loads(line) for line in events.read_text().splitlines()] if events.exists() else []
 
@@ -476,3 +484,16 @@ def test_full_poller_installed_runner_posting_composition(tmp_path: Path) -> Non
     assert statuses[0]['context'] == 'skillc/real-docker-optin/unknown-control'
     assert not any(e['tool'] == 'uv' for e in events)
     assert json.loads((tmp_path / 'state.json').read_text())['processed_comment_ids'] == [10, 11]
+
+
+@pytest.mark.parametrize('poller', [False, True])
+def test_all_runner_imports_are_installed_from_hostile_cwd_and_relative_config(tmp_path: Path, poller: bool) -> None:
+    xml = ('<testsuite><testcase classname="tests.test_profile_flow_auto_87ecb097_cold" '
+           'name="test_actual_cold_profile"/></testsuite>')
+    result, events = _run_installed_runner(tmp_path, c.SUCCESS, 'none', optin='flow-auto-cold',
+                                          hostile_optin=True, optin_xml=xml, via_poller=poller, work_cwd=True)
+    assert result.returncode == 0, result.stderr
+    statuses = [e['payload'] for e in events if e['tool'] == 'curl' and 'payload' in e and 'context' in e['payload']]
+    assert len(statuses) == 1 and statuses[0]['state'] == 'success'
+    assert statuses[0]['context'] == 'skillc/real-docker-optin/flow-auto-cold'
+    assert not (tmp_path / 'target-json-imported').exists() and not (tmp_path / 'target-imported').exists()

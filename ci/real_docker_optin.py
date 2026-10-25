@@ -1,6 +1,7 @@
 """Installed-only opt-in policy, execution, exact population and private custody (#576)."""
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -48,39 +49,95 @@ def headroom(paths: tuple[Path, ...], policy: OptIn) -> None:
             raise ValueError("insufficient disk or inode headroom")
 
 
+class Cancelled(Exception):
+    """A termination signal enters the owned cleanup path."""
+
+
+def owned_children() -> list[int]:
+    return [int(pid) for pid in Path(f"/proc/self/task/{os.getpid()}/children").read_text().split()]
+
+
+def sweep() -> bool:
+    """Only a dedicated subreaper's direct/adopted children, never a global scan."""
+    end = time.monotonic() + 10
+    try:
+        while True:
+            while True:
+                try:
+                    if os.waitpid(-1, os.WNOHANG)[0] == 0:
+                        break
+                except ChildProcessError:
+                    break
+            children = owned_children()
+            if not children:
+                return True
+            for pid in children:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if time.monotonic() >= end:
+                return False
+            time.sleep(0.01)
+    except (OSError, ValueError):
+        return False
+
+
 def execute(work: Path, report: Path, policy: OptIn) -> int:
-    """One wall budget for environment setup and named pytest; own every process group."""
+    """Run ONLY in a dedicated helper process; one endpoint includes confirmed sweep."""
     deadline = time.monotonic() + policy.seconds
-    report.unlink(missing_ok=True)
-    env = dict(os.environ)
-    env[policy.env[0]] = policy.env[1]
-    env["SKILLC_REAL_DOCKER_RUN_LOCK_HELD"] = "1"
-    for key in ("SKILLC_LIVE_TEST_BREAK", "SKILLC_GATE_WITNESS_LIVE_BREAK", "SKILLC_GATE_SHIM_LIVE_BREAK",
-                "SKILLC_COLDINSTALL_LIVE_BREAK", "SKILLC_TRIAL_IMAGE_BREAK", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK",
-                "SKILLC_CWD_CONFINEMENT_LIVE_BREAK", "SKILLC_EGRESS_LIVE_BREAK", "SKILLC_CICD_PROFILE_LIVE_BREAK",
-                "SKILLC_CICD_DEPLOY_VERIFY_LIVE_BREAK"):
-        env[key] = "none"
-    for args in (["uv", "sync", "--locked", "--extra", "dev", "--quiet"],
-                 ["uv", "run", "--no-sync", "pytest", "-m", "real_docker", *policy.nodes,
-                  f"--junit-xml={report}"]):
-        left = deadline - time.monotonic()
-        if left <= 0:
-            return 124
-        process = subprocess.Popen(args, cwd=work, env=env, start_new_session=True)
-        try:
-            result = process.wait(timeout=max(0.001, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            result = 124
-        finally:
-            # Sweep the owned session's process group even if its leader exited.
+    old = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+    cancelled = False
+    def cancel(_sig: int, _frame: object) -> None:
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            raise Cancelled()
+    result, confirmed = 2, False
+    try:
+        for sig in old:
+            signal.signal(sig, cancel)
+        if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+            return 2
+        owned_children()  # Unreadable ownership refuses before any launch.
+        report.unlink(missing_ok=True)
+        env = dict(os.environ)
+        env[policy.env[0]] = policy.env[1]
+        env["SKILLC_REAL_DOCKER_RUN_LOCK_HELD"] = "1"
+        for key in ("SKILLC_LIVE_TEST_BREAK", "SKILLC_GATE_WITNESS_LIVE_BREAK", "SKILLC_GATE_SHIM_LIVE_BREAK",
+                    "SKILLC_COLDINSTALL_LIVE_BREAK", "SKILLC_TRIAL_IMAGE_BREAK", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK",
+                    "SKILLC_CWD_CONFINEMENT_LIVE_BREAK", "SKILLC_EGRESS_LIVE_BREAK", "SKILLC_CICD_PROFILE_LIVE_BREAK",
+                    "SKILLC_CICD_DEPLOY_VERIFY_LIVE_BREAK"):
+            env[key] = "none"
+        for args in (["uv", "sync", "--locked", "--extra", "dev", "--quiet"],
+                     ["uv", "run", "--no-sync", "pytest", "-m", "real_docker", *policy.nodes,
+                      f"--junit-xml={report}"]):
+            if deadline - time.monotonic() <= 0:
+                result = 124
+                break
+            process = subprocess.Popen(args, cwd=work, env=env, start_new_session=True)
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        if result != 0:
-            return result
-    return 0 if time.monotonic() <= deadline else 124
+                result = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                result = 124
+            if not sweep():
+                result = 2
+                break
+            if result != 0:
+                break
+    except Cancelled:
+        result = 143
+    except (OSError, ValueError, AttributeError):
+        result = 2
+    finally:
+        for sig in old:
+            signal.signal(sig, signal.SIG_IGN)
+        confirmed = sweep()
+        for sig, handler in old.items():
+            signal.signal(sig, handler)
+    if not confirmed:
+        return 2
+    return 124 if result == 0 and time.monotonic() > deadline else result
 
 
 def population(raw: bytes, policy: OptIn) -> tuple[str, int]:
@@ -93,7 +150,7 @@ def population(raw: bytes, policy: OptIn) -> tuple[str, int]:
         module = file.removesuffix(".py").replace("/", ".")
         matches = [case for case in tree.iter("testcase")
                    if case.get("classname") == module and case.get("name") == test]
-        if len(matches) != 1 or matches[0].find("skipped") is not None:
+        if len(matches) != 1 or (matches[0].find("skipped") is not None or matches[0].find("error") is not None):
             complete = False
             continue
         executed += 1
@@ -130,7 +187,9 @@ def publish(report: Path, *, name: str, sha: str, runner_sha: str,
         json.dump(binding, stream, sort_keys=True)
     (custody / "binding.json").chmod(0o600)
     node = policy.nodes[0]
-    description = f"{status}: {executed}/{len(policy.nodes)} executed; {node}"
+    description = f"{executed}/{len(policy.nodes)} {node} {report_digest or 'unavailable'}"
+    if len(description) > 140:
+        raise ValueError("opt-in status metadata exceeds GitHub description limit")
     body = (f"**real-Docker opt-in `{name}`: {status}**\n\n"
             f"- Commit: `{sha}`\n- Installed runner: `{runner_sha}`\n"
             f"- Context: `{context(name)}`\n- Node: `{node}`\n"
