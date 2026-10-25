@@ -77,3 +77,16 @@ whole-thread attribution limitation is recorded in CPP Nit Store #864,
 comment 6389865902. The review was performed, not skipped. This appended
 execution evidence leaves the approved Section C unchanged; the plan stability
 checker will truthfully flag the appended note.
+
+### Actual receipt completion after CPP1558
+
+The merged helper generated schema3 ran receipt docs/measurements/counter-model/2026-10-25T005520Z-issue-536.json
+from the original fresh-run and review traces. Implementer codex/gpt-6.1-sol;
+reviewer codex/gpt-6-astra; scope unverified, network blocked, local credentials
+absent. Initial cleanliness remains unmeasured and approval execution unverified;
+no anchors were reconstructed. Six whole report entries are proposed, zero
+credited as already covered under the verified pre-first-proposal/all-subcases
+standard. Zero does not claim that no existing controls covered those cases.
+The prior full make verify EXIT0 and original outer missing-receipt EXIT1 remain
+separate historical outcomes. Current-base integration and final CI remain held
+until the #563 prerequisite merges.
