@@ -1501,3 +1501,171 @@ def test_run_output_retention_keeps_bytes_or_an_explicit_limit(fault: str) -> No
         assert trial.sha256_bytes(raw) not in objects
     # A real empty raw stream is retained; it is not missing or an error summary.
     assert read_run_output(run, "stderr", objects.__getitem__) == (None if fault == "storage" else b"")
+
+
+@pytest.mark.parametrize("retain_ok", [False, True])
+def test_resume_admission_waits_for_retention_and_queued_inspection(retain_ok: bool) -> None:
+    """A queued different gate must see the completed retention verdict."""
+    from test_gate_state import IDENTITY, PROTOCOL, output, snap, wire
+
+    from skillc import gate_state, stage_capture
+    held, release, queued = threading.Event(), threading.Event(), threading.Event()
+    ledger = gate_state.Ledger(PROTOCOL, "a-retention")
+    calls: list[str] = []
+    results: dict[tuple[str, ...], ExecuteResult] = {("plan",): output(wire()),
+               ("summary",): ExecuteResult(reason="exited", exit_code=0,
+                                             stdout=b"Makefile OK\nFLOW_FINISH_GATE: ok\n", stderr=b"")}
+    backend = _FakeBackend(results=results, realpaths={"/work/repo": "/work/repo", "/work": "/work"})
+    snapshots = [snap(), snap(populated=True), snap(populated=True), snap(populated=True)]
+
+    def snapshot(cwd: str | None):
+        calls.append("export")
+        return snapshots.pop(0)
+
+    def sink(raw: bytes) -> str:
+        if raw == results[("plan",)].stdout:
+            held.set()
+            assert release.wait(5)
+            if not retain_ok:
+                raise OSError("late controller sink failure")
+        return _output_digest_for_test(raw)
+
+    witness = GateWitness({"flow-check-plan": ["plan"], "flow-check-summary": ["summary"]},
+                          _fixed_tree_digest, backend, None, _limits(), gate_exclusivity=False,
+                          exclusivity_basis="test", output_store=sink, workspace_root="/work",
+                          stage_capture={"flow-check-plan": stage_capture.capture_stages},
+                          resume_state=ledger, state_snapshot_fn=snapshot)
+    errors: list[BaseException] = []
+
+    def request(gate: str) -> None:
+        try:
+            if gate == "flow-check-summary": queued.set()
+            witness.decide({"op": "run_gate", "gate": gate, "cwd": "/work/repo"})
+        except BaseException as exc: errors.append(exc)  # noqa: BLE001 - retain thread failures
+
+    first = threading.Thread(target=request, args=("flow-check-plan",))
+    second = threading.Thread(target=request, args=("flow-check-summary",))
+    first.start()
+    assert held.wait(5)
+    second.start()
+    assert queued.wait(5)
+    # Retention is still inside the execution lock: no later start export or lease.
+    assert calls == ["export"] and ledger.sequence == 1 and ledger.leases == {}
+    release.set()
+    first.join(5); second.join(5)
+    assert not first.is_alive() and not second.is_alive() and not errors
+    record = witness.finalize("a-retention")
+    plan = record.gates["flow-check-plan"].runs[0]
+    summary = record.gates["flow-check-summary"].runs[0]
+    assert plan.completed_at is not None
+    assert plan.completed_at <= summary.requested_at
+    assert plan.state_evidence is not None and summary.state_evidence is not None
+    assert plan.state_evidence["admission"] == ("admitted" if retain_ok else "refused")
+    assert summary.state_evidence["admission"] == ("preserved" if retain_ok else "refused")
+    assert bool(ledger.leases) is retain_ok
+    if retain_ok:
+        assert next(iter(ledger.leases.values())).identity == IDENTITY
+
+
+def _output_digest_for_test(raw: bytes) -> str:
+    import hashlib
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize("failure", ["tree", "order", "backend"])
+def test_resume_lease_invalidated_on_every_post_entry_exception(failure: str) -> None:
+    from test_gate_state import PROTOCOL, admitted, snap
+
+    from skillc import stage_capture
+    ledger = admitted()
+    assert ledger.protocol == PROTOCOL
+    backend = _FakeBackend(realpaths={"/work/repo": "/work/repo", "/work": "/work"})
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected " + failure)
+
+    class BadOrder:
+        next = boom
+
+    witness = GateWitness({"flow-check-plan": ["plan"], "flow-check-summary": ["summary"]},
+                          boom if failure == "tree" else _fixed_tree_digest,
+                          backend, None, _limits(), gate_exclusivity=False, exclusivity_basis="test",
+                          workspace_root="/work", resume_state=ledger,
+                          state_snapshot_fn=lambda cwd: snap(populated=True),
+                          order=BadOrder() if failure == "order" else None,  # type: ignore[arg-type]
+                          stage_capture={"flow-check-plan": stage_capture.capture_stages})
+    if failure == "backend": backend.exec_in_attempt = boom  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="injected"):
+        witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": "/work/repo"})
+    assert ledger.leases == {}
+
+
+def test_production_backend_normal_none_stop_flag_can_admit(tmp_path: Path) -> None:
+    """Real DockerBackend normal branch through fake CLI, never replace(None)."""
+    from test_gate_state import PROTOCOL, finish, snap, wire
+
+    from skillc import gate_state
+    backend = d.DockerBackend(image="fake-image:1", base_dir=tmp_path / "work",
+                              docker_bin=_docker_bin(tmp_path / "docker-state"),
+                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
+    handle = backend.prepare("a-gw-536-normal")
+    backend.install(handle, {})
+    results: list[ExecuteResult] = []
+    thread = threading.Thread(target=lambda: results.append(backend.execute(
+        handle, ["python3", "-c", _primary_hold_script(20)], Limits(timeout=30))))
+    thread.start()
+    try:
+        # The fake CLI touches this only once the actual primary is running.
+        deadline = time.monotonic() + 5
+        assert isinstance(handle, d._Handle)
+        state_file = tmp_path / "docker-state" / (handle.name + ".json")
+        while time.monotonic() < deadline:
+            if state_file.exists() and json.loads(state_file.read_text()).get("status") == "running":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("primary never reached running state")
+        raw = json.dumps(wire(), indent=2) + "\nFLOW_FINISH_GATE: ok\n"
+        result = backend.exec_in_attempt(handle, ["python3", "-c", "print(" + repr(raw) + ",end='')"],
+                                         Limits(timeout=5))
+        assert result.reason == "exited" and result.exit_code == 0
+        assert result.stop_confirmed is None and result.stdout == raw.encode() and result.stderr == b""
+        ledger = gate_state.Ledger(PROTOCOL, "a-1")
+        stages, evidence = finish(ledger, ledger.begin("/work/repo", snap()), result, snap(populated=True))
+        assert evidence["admission"] == "admitted" and stages["stages"]["lint"]["outcome"] == "passed"
+    finally:
+        backend.exec_in_attempt(handle, ["python3", "-c", "open('/work/release','w').close()"], Limits(timeout=5))
+        thread.join(30)
+        backend.destroy(handle)
+
+
+def test_completion_order_failure_revokes_provisional_state_admission() -> None:
+    from test_gate_state import PROTOCOL, output, snap, wire
+
+    from skillc import gate_state, stage_capture
+    ledger = gate_state.Ledger(PROTOCOL, "a-completion")
+    backend = _FakeBackend(results={("plan",): output(wire())},
+                           realpaths={"/work/repo": "/work/repo", "/work": "/work"})
+    snapshots = iter([snap(), snap(populated=True)])
+
+    class FailingCompletion:
+        calls = 0
+
+        def next(self) -> int:
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("completion order unavailable")
+            return self.calls
+
+    witness = GateWitness({"flow-check-plan": ["plan"], "flow-check-summary": ["summary"]},
+                          _fixed_tree_digest, backend, None, _limits(), gate_exclusivity=False,
+                          exclusivity_basis="test", output_store=_output_digest_for_test,
+                          workspace_root="/work", resume_state=ledger,
+                          state_snapshot_fn=lambda cwd: next(snapshots),
+                          order=FailingCompletion(),  # type: ignore[arg-type]
+                          stage_capture={"flow-check-plan": stage_capture.capture_stages})
+    with pytest.raises(RuntimeError, match="completion order"):
+        witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": "/work/repo"})
+    assert ledger.leases == {}
+    run = witness.finalize("a-completion").gates["flow-check-plan"].runs[0]
+    assert run.reason is None and run.stages is not None and run.stages["status"] == "unavailable"

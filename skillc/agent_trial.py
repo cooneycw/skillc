@@ -98,6 +98,7 @@ from . import (
     credential,
     demo,
     gate_overlay,
+    gate_state,
     launch_evidence,
     leak,
     profile,
@@ -772,6 +773,7 @@ class _WitnessSession:
     #: gate's runner keeps RESUMABLE state; present at a run's start, the run's
     #: source digest reads unreadable, so its stages are never attributable.
     gate_state_paths: tuple[str, ...] = ()
+    gate_state_protocol: gate_state.Protocol | None = None
     output_store: Callable[[bytes], str] | None = field(default=None, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
@@ -851,9 +853,23 @@ class _WitnessSession:
                 if root is None:
                     return "unreadable: no repository contains the gate's working directory"
                 state = gate_state_problem(root, self.gate_state_paths)
-                if state is not None:
+                if state is not None and self.gate_state_protocol is None:
                     return f"unreadable: {state}"
                 return sd.digest_tree(root)
+
+        def state_snapshot(cwd: str | None) -> gate_state.Snapshot:
+            rel = sd.workspace_relative(cwd, CONTAINER_WORKSPACE)
+            if rel is None:
+                return gate_state.Snapshot(None, None, {}, "cwd-outside-workspace")
+            with tempfile.TemporaryDirectory(prefix="skillc-gate-state-") as directory:
+                exported = Path(directory)
+                backend.export(handle, exported)
+                root = sd.repository_root(exported, rel)
+                if root is None:
+                    return gate_state.Snapshot(None, None, {}, "no-containing-repository")
+                return gate_state.snapshot(root, self.gate_state_paths,
+                                           repository=root.relative_to(exported).as_posix(),
+                                           source=sd.digest_tree(root))
 
         if self.witness is not None:
             # #508: the cross-gate order is the single `_exec_lock` of ONE
@@ -871,6 +887,9 @@ class _WitnessSession:
             gates[pg.GATE] = [pg.REAL_MAKE, self.project_gate.goal]
             staged[pg.GATE] = pg.StagedRunner(self.project_gate)
         self.witness = GateWitness(
+            resume_state=(gate_state.Ledger(self.gate_state_protocol, self.attempt_id)
+                          if self.gate_state_protocol is not None else None),
+            state_snapshot_fn=state_snapshot if self.gate_state_protocol is not None else None,
             output_store=self.output_store,
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
@@ -2466,6 +2485,7 @@ def run_one_attempt(
     codex_guard: bool = False,
     declared_model: str | None = None,
     extra_home_modes: Mapping[str, str] | None = None,
+    gate_state_protocol: gate_state.Protocol | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2590,6 +2610,17 @@ def run_one_attempt(
                 "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
                 f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
             )
+    if gate_state_protocol is not None:
+        expected = {"flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
+                    "flow-check-summary": ("--check-summary",)}
+        if (not isinstance(gate_state_protocol, gate_state.Protocol) or fixture is None
+                or gate_witness is not None or gate_entrypoint is None
+                or gate_state_protocol.plan != "check"
+                or dict(gate_state_protocol.operations) != {"flow-check-plan": "runner", "flow-check-summary": "inspection"}
+                or {k: tuple(v) for k, v in fixture.gates.items()} != expected
+                or dict(fixture.stage_plans) != {"flow-check-plan": "check"}
+                or fixture.source_digest is not True or tuple(fixture.gate_state_paths) != (gate_state_protocol.state_path,)):
+            raise HomeFileVerificationRefused("gate-state protocol requires the exact supported fixture route")
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
     #: #525: the declared treatment deviations the bundled-gate overlay makes.
     treatment_deviation: list[dict[str, object]] = []
@@ -2618,6 +2649,7 @@ def run_one_attempt(
                                               frozenset({"op", "argv", "cwd", "exit_code", "why"}))}
                          if project_gate is not None and witness_session is not None else {})
     if witness_session is not None:
+        witness_session.gate_state_protocol = gate_state_protocol
         witness_session.order = attempt_order
         witness_session.require_via = gate_entrypoint in bundled_gate_entrypoints
         witness_session.source_digest = bool(fixture is not None and fixture.source_digest)

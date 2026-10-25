@@ -712,3 +712,58 @@ The live driver retains a diagnostic witness snapshot through a
 channel finalization failed, the retained witness records unavailable coverage;
 retaining that diagnostic snapshot does not authorize grading. Storage refusal
 is explicit rather than a claim that a witness was retained.
+
+### Fixture resume-state protocol v1 (#536 item 4)
+
+A separately pinned fixture profile may declare `gate_state_protocol` for the
+CPP `check` runner. The validated inventory binds this protocol to the delivered
+profile, source revision and installed closure. Only fixture-live construction
+allows it. Normal calibration, discrimination, degradation, this fixture campaign
+and uptake-study APIs refuse a reused opted-in treatment before planning or
+opening a store. No live runtime or historical profile is upgraded by this mode.
+
+Within one witness and attempt, the execution lock covers the start export,
+execution, complete output retention, end export, reconciliation, admission or
+invalidation, and completion stamp. Sequence numbers are allocated after taking
+that lock. Normal `exited` requires a non-boolean integer exit code and complete
+raw streams; `stop_confirmed=None` is the production backend's normal N/A value,
+not a missing timeout confirmation. Explicit false, malformed stop flags and all
+non-exited outcomes refuse admission. A later output-store or export failure
+invalidates older leases in the same attempt/repository state namespace across
+cwd and source keys; queued gates cannot inherit provisional facts.
+
+State exports contain zero or one safe ASCII-named regular file of at most
+64 MiB, with a filename at most 128 characters, below the declared state path.
+Links, unexpected populations and unreadable exports refuse. Records retain
+hashes, lengths and logical filenames, never raw state bytes or host paths.
+The verified profile declares the exact family and one safe .git/state_path;
+wire family and fixture state paths must match exactly. The ledger key includes
+attempt, containing repository, actual cwd, source tree,
+profile/inventory and producer identities, protocol family and plan. The source
+digest is independent of resumable state only in this explicit mode.
+
+The strict complete runner document must agree with its actual wrapper verdict
+and exit. It rejects extra JSON values/documents, duplicate keys or verdicts,
+unknown protocol fields/version, unsafe identities and contradictory carry
+flags. A loaded identity must equal both the prior controller-admitted generated
+identity and the start export. The end export must match the generated identity
+or actual cleanup. Carried stage outcomes inherit only matching prior controller
+stage facts, including their original execution number. State bytes alone supply
+no stage outcome. Exact duplicate output is tracked across the whole attempt independently of
+attribution keys and lease invalidation, and is conservatively not a new execution;
+no-save/no-op output can only preserve an unchanged prior eligible lease.
+Cleanup clears the lease while preserving completed run facts. Preservation
+advances a separate lease generation for stale-completion protection; it keeps
+the original producer execution and stage origins unchanged.
+
+`flow-check-summary` is inspection: it executes no runner plan and supplies no
+per-stage facts. A successful complete summary may preserve an unchanged prior
+lease. A first seeded summary cannot create one. Seeded, tampered and foreign
+state remain unattributable. Profiles without this field retain the earlier
+nonempty-state source refusal and carried-stage null behavior, with unchanged
+inventory and record fields.
+
+This establishes bounded equality of controller-held output and exports. It does
+not authenticate same-UID writers, establish whole-candidate quiescence, or rule
+out a coordinated forgery of an entire previously unseen stream. No actor trial,
+behavioral effectiveness, new image readiness or retrospective credit is claimed.
