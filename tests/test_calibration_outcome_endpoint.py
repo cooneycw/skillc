@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from conftest import p3_bindings
 
-from skillc import calibration, egress, trial, verify
+from skillc import calibration, egress, profile, trial, verify
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import matched_pilot as mp
@@ -586,3 +586,157 @@ def test_cli_runs_with_the_receipt_bytes_it_checked_not_a_second_read(
     assert result == 2
     assert len(seen) == 1 and isinstance(seen[0], rs.RuntimeSupply)
     assert seen[0].receipt_bytes == RECEIPT
+
+
+_EXPLICIT_CASES = json.loads((ROOT / "tests/fixtures/calibration-explicit-product/cases.json").read_text())
+
+
+def _explicit_treatment() -> cr.Treatment:
+    from skillc import agent_trial
+    body = _EXPLICIT_CASES["installed_body"].encode()
+    description, content = profile.skill_md_digests(body)
+    return cr.Treatment(
+        {".codex/skills/tdd/SKILL.md": body}, "sha256:" + "ab" * 32,
+        agent_trial.InstallationReceiptContext(frozenset({"tdd"}), "sha256:" + "ab" * 32,
+                                              "fixture", "fixture", "codex-skills", {}),
+        skill_digests=({"path": ".codex/skills/tdd/SKILL.md", "body_digest": content,
+                        "description_digest": description},),
+    )
+
+
+def test_explicit_product_plan_and_observational_report(tmp_path: Path) -> None:
+    declaration = calibration.parse_declaration(_EXPLICIT_CASES["valid"])
+    experiment, schedule = cr.plan_calibration(
+        declaration, trial.open_store(tmp_path / "store", forbidden=[]), root=ROOT, treatment=_explicit_treatment(),
+        treatment_digest="sha256:" + "ab" * 32, image_digest="sha256:" + "cd" * 32,
+        skill_digests=_explicit_treatment().skill_digests,
+    )
+    for observed in (None, False, True):
+        outcomes = _outcomes(schedule)
+        if observed is not None:
+            for outcome in outcomes:
+                outcome.record["observation"] = {"status": "observed", "transcript_files_found": 1,
+                                                "prompt_delivered": True, "skill_invocations": ["tdd"] if observed else []}
+        report: Any = cr.build_report(experiment, outcomes, declared_model="gpt-6-astra", declared_effort="high",
+                                     named_skills={"full-cpp": ("tdd",)})
+        treated = next(row for row in report["attempts"] if row["arm"] == "full-cpp")
+        assert treated["named_skill_opened"] == (observed if observed is not None else "UNKNOWN")
+        assert all(row["primary_endpoint"]["status"] == "PASS" for row in report["attempts"])
+        assert report["arms"]["full-cpp"]["scheduled"] == 1
+        assert report["arms"]["full-cpp"]["primary"] == {"PASS": 1}
+        assert len(_report(experiment, outcomes)["attempts"]) == 2  # derive names without caller metadata
+        with pytest.raises(cr.CalibrationRefused, match="named"):
+            cr.build_report(experiment, outcomes, declared_model="gpt-6-astra", declared_effort="high",
+                            named_skills={"full-cpp": ("other",)})
+
+
+@pytest.mark.parametrize("change", _EXPLICIT_CASES["runtime_reject"])
+@pytest.mark.parametrize("entry", ["run", "plan"])
+def test_explicit_product_identity_refuses_before_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str, entry: str,
+) -> None:
+    data = copy.deepcopy(_EXPLICIT_CASES["valid"])
+    treatment = _explicit_treatment()
+    if change == "missing-treatment":
+        treatment = None  # type: ignore[assignment]
+    elif change == "missing-receipt":
+        treatment = dataclasses.replace(treatment, receipt_context=None)
+    elif change == "selection":
+        assert treatment.receipt_context is not None
+        treatment = dataclasses.replace(treatment, receipt_context=dataclasses.replace(
+            treatment.receipt_context, declared=frozenset({"other"})))
+    elif change in {"bytes", "added-file", "removed-file", "noncanonical-path", "escaping-path", "nul-path"}:
+        files = dict(treatment.home_files)
+        if change == "removed-file":
+            files.clear()
+        else:
+            path = {"bytes": ".codex/skills/tdd/SKILL.md", "added-file": "extra",
+                    "noncanonical-path": "a/../extra", "escaping-path": "../extra", "nul-path": "bad\0"}[change]
+            files[path] = b"changed"
+        treatment = dataclasses.replace(treatment, home_files=files)
+    elif change in {"mode", "unknown-mode", "orphan-mode"}:
+        treatment = dataclasses.replace(treatment, home_modes={
+            "extra" if change == "orphan-mode" else ".codex/skills/tdd/SKILL.md":
+            "invalid" if change == "unknown-mode" else "100755"})
+    elif change == "wrong-client-surface":
+        assert treatment.receipt_context is not None
+        treatment = dataclasses.replace(
+            treatment, home_files={p.replace(".codex/", ".claude/"): b for p, b in treatment.home_files.items()},
+            receipt_context=dataclasses.replace(treatment.receipt_context, surface_name="claude-code-skills"),
+            skill_digests=tuple({**pin, "path": pin["path"].replace(".codex/", ".claude/")}
+                               for pin in treatment.skill_digests))
+        data["explicit_product"]["installed_home_digest"] = cr.installed_home_digest(treatment)
+        _approve(data)
+    elif change.startswith("pins-"):
+        pins = [dict(pin) for pin in treatment.skill_digests]
+        if change == "pins-empty":
+            pins.clear()
+        else:
+            key = {"pins-path": "path", "pins-body": "body_digest", "pins-description": "description_digest"}[change]
+            pins[0][key] = ".codex/skills/other/SKILL.md" if key == "path" else "sha256:" + "e" * 64
+        treatment = dataclasses.replace(treatment, skill_digests=tuple(pins))
+    elif change == "hidden-skill":
+        files = dict(treatment.home_files)
+        files[".codex/skills/other/SKILL.md"] = _EXPLICIT_CASES["installed_body"].encode()
+        treatment = dataclasses.replace(treatment, home_files=files)
+        data["explicit_product"]["installed_home_digest"] = cr.installed_home_digest(treatment)
+        _approve(data)
+    elif change == "prompt":
+        data["explicit_product"]["prompt_digests"]["baseline"] = "sha256:" + "a" * 64
+        _approve(data)
+    elif change == "instruction":
+        data["arms"][0]["instruction"] += " More instructions."
+        _approve(data)
+    else:
+        data["approval"]["declaration_digest"] = "sha256:" + "a" * 64
+    declaration = calibration.parse_declaration(data)
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("invalid identity reached store/plan/backend")
+    monkeypatch.setattr(trial, "open_store", forbidden)
+    monkeypatch.setattr(trial, "plan", forbidden)
+    with pytest.raises((calibration.DeclarationRefused, cr.CalibrationRefused)):
+        if entry == "run":
+            cr.run_calibration(declaration, run_dir=tmp_path / "run", root=ROOT,
+                               treatment=treatment, image_digest="sha256:" + "cd" * 32,
+                               backends=forbidden, argv_for=forbidden)
+        else:
+            cr.plan_calibration(declaration, tmp_path / "store", root=ROOT, treatment=treatment,
+                                treatment_digest="sha256:" + "ab" * 32,
+                                image_digest="sha256:" + "cd" * 32,
+                                skill_digests=treatment.skill_digests if treatment is not None else _TEST_PINS)
+    assert not list(tmp_path.iterdir())
+
+
+def test_explicit_product_direct_planner_reparses_mutated_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    declaration = calibration.parse_declaration(copy.deepcopy(_EXPLICIT_CASES["valid"]))
+    assert isinstance(declaration.data, dict)
+    del declaration.data["outcome_endpoint"]
+    del declaration.data["task_content"]
+    called = []
+    monkeypatch.setattr(trial, "plan", lambda *args: called.append(args))
+    with pytest.raises(calibration.DeclarationRefused):
+        cr.plan_calibration(declaration, tmp_path / "store", root=ROOT,
+                            treatment_digest="sha256:" + "ab" * 32,
+                            image_digest="sha256:" + "cd" * 32, skill_digests=_TEST_PINS)
+    assert called == []
+
+
+@pytest.mark.parametrize("change", _EXPLICIT_CASES["planner_reject"])
+def test_explicit_product_direct_planner_arguments_are_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    declaration = calibration.parse_declaration(_EXPLICIT_CASES["valid"])
+    treatment = _explicit_treatment()
+    called = []
+    monkeypatch.setattr(trial, "plan", lambda *args: called.append(args))
+    with pytest.raises(cr.CalibrationRefused, match="planned treatment"):
+        cr.plan_calibration(
+            declaration, tmp_path / "store", root=ROOT, treatment=treatment,
+            treatment_digest="sha256:" + "e" * 64 if change == "treatment-digest" else treatment.digest,
+            image_digest="sha256:" + "cd" * 32,
+            skill_digests=_TEST_PINS if change == "skill-pins" else treatment.skill_digests,
+        )
+    assert called == []

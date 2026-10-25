@@ -1,0 +1,31 @@
+{
+  "branch": "issue-568-prepare-a-certified-flow-auto-calibration-and-froz",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "c989a4bfe18ab701ed000a86bee21068b3bb79b7",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-39-48-01a16fdb-0b9d-7133-83ae-fd9718f95524.jsonl",
+    "thread_id": "01a16fdb-0b9d-7133-83ae-fd9718f95524"
+  },
+  "issue": "568",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-25T08:14:50Z",
+  "red_cases": {
+    "already_covered": 17,
+    "proposed": 17
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/25/rollout-2026-10-25T04-10-58-01a1721c-e4ff-73d1-b6f1-d1645ba8f192.jsonl",
+    "thread_id": "01a1721c-e4ff-73d1-b6f1-d1645ba8f192"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}
