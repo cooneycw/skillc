@@ -35,9 +35,14 @@ def unique(pairs):
 
 def manifest(sources):
     m = json.loads(sources["controls.json"], object_pairs_hook=unique)
+    need(isinstance(m, dict), "manifest must be an object")
+    need(set(m) == {"version", "cases", "vectors", "mutations", "protection", "resource_probes"},
+         "manifest field population")
     need(m.get("version") == 1 and type(m["version"]) is int, "manifest version")
     need(m.get("cases") == CASES, "case population differs, empty, or duplicated")
-    need([v.get("id") for v in m.get("vectors", [])] == VECTORS, "vector population differs")
+    rows = m.get("vectors")
+    need(isinstance(rows, list) and all(isinstance(v, dict) for v in rows), "vector population shape")
+    need([v.get("id") for v in rows] == VECTORS, "vector population differs")
     need(m.get("protection") == PROTECTION, "protection population differs")
     need(m.get("resource_probes") == RESOURCES, "resource population differs")
     need(set(m.get("mutations", {})) == {"csv-only", "jsonl-only", "partial", "replace", "first-wins", "boolean", "metadata"},
