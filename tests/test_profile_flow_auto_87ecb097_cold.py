@@ -566,3 +566,10 @@ else:
         assert sum(r["bytes"] for r in entries) > LIMIT
         assert all((context / r["path"]).read_bytes() == data for r in entries)
         assert (context / "a").stat().st_mode & 0o111
+        with pytest.raises(RuntimeError, match="selected Git source population"):
+            stage_context(budget, context, ["absent-selection"], repo)
+        (repo / "oversized").write_bytes(b"x" * LIMIT)
+        for args in (["add", "oversized"], ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "oversized control"]):
+            assert budget.command(["git", *args], cwd=repo)[0] == 0
+        with pytest.raises(RuntimeError, match="regular bounded source blob"):
+            stage_context(budget, context, ["oversized"], repo)

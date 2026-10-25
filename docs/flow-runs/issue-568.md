@@ -677,3 +677,17 @@ five blobs require exactly six staging Git calls. Pinned source files remain
 unchanged. Actual selected HEAD export and exact launch footprint are checked
 separately before Docker. Authored added+deleted1487/1500; further expansion must
 return to root. No physical Docker or complete workflow success claimed.
+
+Actual selected HEAD14a9489 staged467regular files through468bounded Git calls,
+10,961,340source bytes,21,989,925parent-retained bytes in22.01s. All exported bytes
+and modes matched. Largest selected blob256,041bytes; largest controller blob
+skillc/docker_backend.py181,776bytes. Private report retains all467object IDs.
+New-function empty selection and oversized single-blob inputs also refuse through
+stage_context itself; aggregate binary/CRLF healthy preserves bytes/modes. Changed
+control1passed, lint/types passed. Authored1494before receipt.
+
+Root cap amendment17 permits1600authored added+deleted lines, same399paths and
+8.5MB pinned-source cap; a genuine receipt path still needs a separate grant.
+Docker remains queued behind CC574 complete verification. Formal source review is
+explicitly deferred until physical results; no repeat full export is owed solely
+for this test-only negative-input addition. Actual cold run stages its own HEAD.
