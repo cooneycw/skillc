@@ -173,3 +173,17 @@ def test_delayed_final_step_cannot_publish_green(q: Any, monkeypatch: pytest.Mon
     monkeypatch.setattr(q, "resources", late)
     with pytest.raises(q.o.Unavailable, match="whole qualification deadline"):
         q.qualify()
+
+
+def test_list_order_probe_has_a_real_negative_population(q: Any) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    row = m["vectors"][1]
+    assert row["id"] == "legacy-list-order"
+    assert len(row.get("extra_items", [])) == 2, "one item cannot distinguish order"
+    original = q.o.program("reference", m, sources)
+    needle = b"ORDER BY sku COLLATE BINARY"
+    assert original.count(needle) == 1
+    wrong = original.replace(needle, needle + b" DESC", 1)
+    assert wrong != original
+    assert not q.o.vector(wrong, row, q.o.Budget())["legacy"]
