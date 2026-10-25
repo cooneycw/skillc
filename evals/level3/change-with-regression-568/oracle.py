@@ -196,6 +196,7 @@ def vector(code, row, budget, claim=None):
                     + "\nprint(json.dumps(inventory.list_items('db')))"]
         rc, stdout, stderr = bounded(argv, d, budget)
         after = state(db)
+        observed_states = [after]
         try:
             output_ok = (stdout.endswith("\n") and json.loads(stdout) == row["stdout"]) if row["code"] == 0 else stdout == ""
         except ValueError:
@@ -203,6 +204,9 @@ def vector(code, row, budget, claim=None):
         output_ok &= rc == row["code"]
         output_ok &= stderr == "" if row["code"] == 0 else stderr.startswith(row["prefix"]) and len(stderr) > len(row["prefix"])
         if row["action"] != "import":
+            # CLI gets an independent identical seed; it cannot borrow an API write.
+            db.unlink()
+            seed(db, row.get("db"), row.get("extra_items", ()))
             cli = [sys.executable, "inventory.py", "--db", str(db)]
             calls = [(cli + ["list"], row["stdout"])]
             if row["action"] != "list":
@@ -215,6 +219,7 @@ def vector(code, row, budget, claim=None):
                 except ValueError:
                     output_ok = False
             after = state(db)
+            observed_states.append(after)
         expected = [tuple(x) for x in row["items"]]
         metadata = {x[0]: x[2:] for x in after["items"]}
         preserved = all(metadata.get(x[0]) == x[2:] for x in before["items"])
@@ -227,9 +232,13 @@ def vector(code, row, budget, claim=None):
                 feature &= before == after
             legacy = bool(preserved)
         else:
-            feature, legacy = True, bool(output_ok and after["items"] == expected and preserved)
+            feature = True
+            legacy = bool(output_ok and preserved and all(
+                observed["items"] == expected and observed["audit"] == before["audit"]
+                and observed["schema"] == before["schema"] for observed in observed_states))
         return {"id": row["id"], "feature": bool(feature), "legacy": legacy, "code": rc,
                 "stdout": stdout, "stderr": stderr, "items": after["items"], "audit": after["audit"],
+                "observed_states": observed_states,
                 "managed_steps": budget.processes - start_steps}
 
 
