@@ -1,0 +1,111 @@
+{
+  "launch_environment": [
+    {
+      "name": "absent",
+      "value": null,
+      "exit": 2
+    },
+    {
+      "name": "empty",
+      "value": "",
+      "exit": 2
+    },
+    {
+      "name": "zero",
+      "value": "0",
+      "exit": 2
+    },
+    {
+      "name": "word",
+      "value": "true",
+      "exit": 2
+    },
+    {
+      "name": "exact",
+      "value": "1",
+      "exit": 0
+    }
+  ],
+  "scan": [
+    {
+      "name": "zero",
+      "hits": [],
+      "files": 0,
+      "coverage": "complete"
+    },
+    {
+      "name": "positive",
+      "hits": [
+        {
+          "program": "codex",
+          "guarded": true,
+          "model": "gpt-6-astra",
+          "argv_head": "codex exec --model gpt-6-astra"
+        }
+      ],
+      "files": 2,
+      "coverage": "complete"
+    },
+    {
+      "name": "missing",
+      "hits": null,
+      "files": null,
+      "coverage": "missing"
+    },
+    {
+      "name": "unreadable",
+      "hits": [
+        {
+          "program": null,
+          "guarded": false,
+          "model": null,
+          "unreadable": true
+        }
+      ],
+      "files": 1,
+      "coverage": "missing"
+    },
+    {
+      "name": "unsafe",
+      "hits": [
+        {
+          "program": "codex",
+          "guarded": false,
+          "model": null,
+          "argv_head": "codex exec"
+        }
+      ],
+      "files": 1,
+      "coverage": "refused",
+      "unsafe_identity_parts": [
+        "/ho",
+        "me/fixture-person/private"
+      ]
+    },
+    {
+      "name": "malformed",
+      "hits": [
+        {}
+      ],
+      "files": true,
+      "coverage": "missing"
+    },
+    {
+      "name": "credential",
+      "hits": [
+        {
+          "program": "codex",
+          "guarded": false,
+          "model": null,
+          "argv_head": "codex exec"
+        }
+      ],
+      "files": 1,
+      "coverage": "refused",
+      "unsafe_identity_parts": [
+        "gh",
+        "p_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      ]
+    }
+  ]
+}
