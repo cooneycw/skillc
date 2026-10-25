@@ -616,3 +616,22 @@ Risks: 8MBsource includes every skill source read during discovery, not every in
 B1artifact preparation shipped but main1111repair remainsCC574. B2services wait selected546 and real paired isolatedremotegrading. Fullflow actual model/client/reviewer/runtime, prompt/selection/equaltools/reviewcosts, sample sizing/rehearsal, heldoutcustodian and exactunapproveddeclaration/liveapproval remain. #568 and parents203/245 remainOPEN; Refs568 only. No task-success/latency/efficacy/readiness/live-study/consumerinstall/deploy claim or authorization. Keep571P42ad cleanownedinactive.
 
 Approval REQUIRED from root on this BB run. No product work before exact gate.
+
+### Source checkpoint evidence (cold operation not yet run)
+
+Supported fresh-run attribution passed against the complete original rollout,
+deriving codex/gpt-6.1-sol and measured-clean. Ordinary mixed historical model
+refusal remains retained. This is not a model review receipt. Exact399-path
+registry lane was actually registered and read back before product export.
+All388 pinned Git bytes/modes matched before export (8,168,295bytes).
+
+Focused source/wrapper selection:19passed,1explicit physical skip;20collected
+identities matched JUnit. Source guards include healthy input before each actual
+mutation. Lint and two-module types pass. Initial development canonical-manifest
+metadata/index-order failures and a local type-name collision were corrected;
+these are development failures, not product regression claims.
+
+No image build, physical Docker, profile installation, full repository check,
+independent review, receipt, CI or live study has run at this checkpoint. Actual
+cold controls, consuming missing-sibling red, resource/cleanup evidence and later
+review remain owed. Full flow capability remains UNPROVEN.
