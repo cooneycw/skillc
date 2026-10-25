@@ -30,6 +30,7 @@ import threading
 import time
 import types
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -3410,3 +3411,104 @@ def test_home_delivery_refuses_invalid_path_before_any_mutation(
     monkeypatch.setattr(subprocess, "run", must_not_run)
     with pytest.raises(BackendUnavailable, match="relative"):
         backend.deliver_home_file(handle, path, b"private-data")
+
+
+# #563: isolated real-filesystem creation arbitration, never the shared /tmp path.
+def test_concurrent_private_trigger_directory_creators_both_succeed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "trigger-dir"
+    barrier = threading.Barrier(2)
+    mkdir = Path.mkdir
+
+    def simultaneous(path: Path, mode: int = 0o777, parents: bool = False,
+                     exist_ok: bool = False) -> None:
+        if path == target:
+            barrier.wait(timeout=5)
+        mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", simultaneous)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(d._ensure_private_trigger_dir, target) for _ in range(2)]
+        for future in futures:
+            future.result(timeout=10)
+    assert target.is_dir() and stat.S_IMODE(target.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize("kind", ["safe", "mode", "owner", "file", "symlink"])
+def test_competing_trigger_creator_is_validated_without_chmod(
+        kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "trigger-dir"
+    link_target = tmp_path / "link-target"
+    link_target.mkdir(mode=0o700)
+    chmod, mkdir = os.chmod, Path.mkdir
+    chmod(link_target, 0o700)
+    winner_mode = 0o755 if kind == "mode" else 0o700
+
+    def competitor(path: Path, mode: int = 0o777, parents: bool = False,
+                   exist_ok: bool = False) -> None:
+        if path != target:
+            mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+            return
+        if kind == "symlink":
+            target.symlink_to(link_target, target_is_directory=True)
+        elif kind == "file":
+            target.write_text("not a directory")
+            chmod(target, winner_mode)
+        else:
+            mkdir(target, mode=winner_mode)
+            chmod(target, winner_mode)
+        raise FileExistsError("a competing creator won")
+
+    def no_chmod(path: Any, mode: int, **kwargs: Any) -> None:
+        pytest.fail("a competing creator's path must never be chmodded")
+
+    if kind == "owner":
+        uid = os.getuid()
+        monkeypatch.setattr(d.os, "getuid", lambda: uid + 1)
+    monkeypatch.setattr(Path, "mkdir", competitor)
+    monkeypatch.setattr(d.os, "chmod", no_chmod)
+    if kind == "safe":
+        d._ensure_private_trigger_dir(target)
+    else:
+        with pytest.raises(BackendUnavailable):
+            d._ensure_private_trigger_dir(target)
+    assert stat.S_IMODE(link_target.stat().st_mode) == 0o700
+    if kind == "symlink":
+        assert target.is_symlink()
+    else:
+        assert stat.S_IMODE(target.lstat().st_mode) == winner_mode
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_existing_trigger_leaf_must_be_a_real_directory(kind: str, tmp_path: Path) -> None:
+    target = tmp_path / "trigger-dir"
+    if kind == "file":
+        target.write_text("not a directory")
+        os.chmod(target, 0o700)
+    else:
+        destination = tmp_path / "destination"
+        destination.mkdir(mode=0o700)
+        os.chmod(destination, 0o700)
+        target.symlink_to(destination, target_is_directory=True)
+    with pytest.raises(BackendUnavailable):
+        d._ensure_private_trigger_dir(target)
+
+
+def test_creator_finalizes_mode_under_restrictive_umask_in_child(tmp_path: Path) -> None:
+    result = subprocess.run([
+        sys.executable, "-c",
+        ("import os,stat,sys; from pathlib import Path; from skillc import docker_backend as d; "
+         "os.umask(0o777); p=Path(sys.argv[1]); d._ensure_private_trigger_dir(p); "
+         "assert stat.S_IMODE(p.stat().st_mode)==0o700"),
+        str(tmp_path / "trigger-dir")], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+def test_trigger_directory_does_not_swallow_other_mkdir_errors(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def denied(*args: Any, **kwargs: Any) -> None:
+        raise PermissionError("creation denied")
+
+    monkeypatch.setattr(Path, "mkdir", denied)
+    with pytest.raises(PermissionError, match="creation denied"):
+        d._ensure_private_trigger_dir(tmp_path / "trigger-dir")
