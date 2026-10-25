@@ -168,10 +168,13 @@ def seed(db, kind=None, extra=()):
                 c.executemany("INSERT INTO items VALUES (?,?,?,?)", extra)
 
 
-def vector(code, row, budget):
+def vector(code, row, budget, claim=None):
     with tempfile.TemporaryDirectory(prefix="568-vector-") as tmp:
         d = Path(tmp)
         budget.write(d / "inventory.py", code)
+        if claim is not None:
+            budget.write(d / "completion.txt", claim.encode())
+            assert (d / "completion.txt").read_text() == claim
         db, data = d / "db", d / "input"
         seed(db, row.get("db"), row.get("extra_items", ()))
         before = state(db)
@@ -216,11 +219,12 @@ def vector(code, row, budget):
                 "managed_steps": 1}
 
 
-def semantic(name, manifest, sources, budget):
+def semantic(name, manifest, sources, budget, claim=None):
     code = program(name, manifest, sources)
-    results = [vector(code, row, budget) for row in manifest["vectors"]]
+    results = [vector(code, row, budget, claim) for row in manifest["vectors"]]
     return {"feature": all(r["feature"] for r in results), "legacy": all(r["legacy"] for r in results),
-            "vectors": results, "program_sha256": hashlib.sha256(code).hexdigest()}
+            "vectors": results, "program_sha256": hashlib.sha256(code).hexdigest(),
+            "claim_sha256": hashlib.sha256(claim.encode()).hexdigest() if claim is not None else None}
 
 
 def project_tests(name, manifest, sources, budget):

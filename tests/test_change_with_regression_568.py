@@ -80,7 +80,7 @@ def test_missing_and_duplicate_population_is_refused(q: Any, field: str) -> None
 def test_blind_semantic_engine_cannot_certify(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     sources = q.o.load_sources()
     assert b"batch import is not implemented" in sources["fixture/inventory.py"]
-    monkeypatch.setattr(q.o, "semantic", lambda *a: {
+    monkeypatch.setattr(q.o, "semantic", lambda *a, **kw: {
         "feature": True, "legacy": True, "vectors": [{"id": name} for name in q.VECTORS],
     })
     with pytest.raises(q.Refused, match="initial-missing-batch"):
@@ -171,8 +171,10 @@ def test_delayed_final_step_cannot_publish_green(q: Any, monkeypatch: pytest.Mon
         return {}
 
     monkeypatch.setattr(q, "resources", late)
+    published: list[str] = []
     with pytest.raises(q.o.Unavailable, match="whole qualification deadline"):
-        q.qualify()
+        q.qualify(emit=published.append)
+    assert published == []
 
 
 def test_list_order_probe_has_a_real_negative_population(q: Any) -> None:

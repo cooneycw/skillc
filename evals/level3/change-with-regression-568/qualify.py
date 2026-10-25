@@ -36,7 +36,7 @@ def unique(pairs):
 def manifest(sources):
     m = json.loads(sources["controls.json"], object_pairs_hook=unique)
     need(isinstance(m, dict), "manifest must be an object")
-    need(set(m) == {"version", "cases", "vectors", "mutations", "protection", "resource_probes"},
+    need(set(m) == {"version", "cases", "vectors", "mutations", "protection", "resource_probes", "completion_claim"},
          "manifest field population")
     need(m.get("version") == 1 and type(m["version"]) is int, "manifest version")
     need(m.get("cases") == CASES, "case population differs, empty, or duplicated")
@@ -45,6 +45,7 @@ def manifest(sources):
     need([v.get("id") for v in rows] == VECTORS, "vector population differs")
     need(m.get("protection") == PROTECTION, "protection population differs")
     need(m.get("resource_probes") == RESOURCES, "resource population differs")
+    need(isinstance(m.get("completion_claim"), str) and bool(m["completion_claim"]), "completion control absent")
     need(set(m.get("mutations", {})) == {"csv-only", "jsonl-only", "partial", "replace", "first-wins", "boolean", "metadata"},
          "mutation population differs")
     return m
@@ -188,7 +189,7 @@ def remote_case(name, m, sources, budget):
                 "files": o.identity(captured["files"]), "remote_vector": actual, "local_vector": local}
 
 
-def qualify():
+def qualify(emit=None):
     budget = o.Budget()
     sources = o.load_sources()
     m = manifest(sources)
@@ -201,7 +202,8 @@ def qualify():
     need(len(expected) == 24, "internal expected population")
     for index, name in enumerate(CASES):
         if name in programs:
-            observed = o.semantic(programs[name], m, sources, budget)
+            observed = o.semantic(programs[name], m, sources, budget,
+                                  claim=m["completion_claim"] if name == "false-completion" else None)
             need([r["id"] for r in observed["vectors"]] == VECTORS, "executed vectors clipped")
             details[name] = observed
             results[name] = verdict(observed)
@@ -250,6 +252,7 @@ def qualify():
         else:
             results[name] = child_probe(budget)["status"]
         need(results.get(name) == expected[index], name + ": unexpected verdict " + str(results.get(name)))
+    reconcile({"good": results[CASES[0]], "bad": results[CASES[2]], "missing": results[CASES[13]]})
     protection = []
     for name in PROTECTION:
         row = o.project_tests(name, m, sources, budget)
@@ -267,7 +270,10 @@ def qualify():
             "protection_suite_executions": len(protection),
             "protection_executed_tests": sum(r["count"] for r in protection),
             "limits": "trusted host fixtures; no arbitrary candidate or paired/live calibration"}
+    payload = json.dumps(report)
     budget.check()
+    if emit is not None:
+        emit(payload)
     return report
 
 
@@ -280,8 +286,7 @@ if __name__ == "__main__":
         print("Unsupported arguments: qualification accepts committed fixture cases only.", file=sys.stderr)
         raise SystemExit(64)
     try:
-        report = qualify()
+        qualify(emit=print)
     except (o.Unavailable, Refused) as exc:
         print(json.dumps({"status": "UNKNOWN" if isinstance(exc, o.Unavailable) else "REFUSED", "reason": str(exc)}))
         raise SystemExit(2 if isinstance(exc, o.Unavailable) else 1)
-    print(json.dumps(report))
