@@ -12,7 +12,8 @@ dependencies = []
 skillc = "skillc.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-timeout>=2.3", "pytest-xdist>=3.6", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6", "types-PyYAML>=6"]
+# Pydantic is only for the pinned CPP wrapper acceptance fixture (#536).
+dev = ["pytest>=8", "pytest-timeout>=2.3", "pytest-xdist>=3.6", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6", "types-PyYAML>=6", "pydantic==2.12.5"]
 
 [build-system]
 requires = ["hatchling"]
@@ -66,4 +67,5 @@ exclude = ['^evals/level1/[^/]+/(fixture|reference|alternatives|wrong)/',
            '^tests/fixtures/profile-cpp-codex-cicd-86641e8/',
            '^tests/fixtures/profile-cpp-codex-flow-auto-86641e8/',
            '^tests/fixtures/profile-cpp-codex-flow-auto-ca3030d/',
-           '^tests/fixtures/profile-cpp-codex-flow-check-652c0118/']
+           '^tests/fixtures/profile-cpp-codex-flow-check-652c0118/',
+           '^tests/fixtures/profile-cpp-codex-flow-check-resume-v1/']

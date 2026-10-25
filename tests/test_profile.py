@@ -704,3 +704,14 @@ def test_diagnose_reports_an_unsatisfiable_gate_entrypoint_as_a_problem(tmp_path
     prof = _profile(tmp_path, gate_entrypoint=".helpers/does-not-exist.sh")
     result = p.diagnose(prof, p.DirTree(src))
     assert any(problem["category"] == "gate-entrypoint-not-installed" for problem in result["problems"])
+
+
+@pytest.mark.parametrize("value", [None, {}, [], "", {"version": 2},
+                                   {"version": 1, "family": "cpp-run-state", "plan": "check", "operations": {}}])
+def test_gate_state_protocol_malformed_opt_in_is_refused(tmp_path: Path, value: object) -> None:
+    from test_gate_state import ROOT
+    data = json.loads((ROOT / "evals/subjects/cpp-codex-flow-check-resume-v1/profile.json").read_text())
+    data["gate_state_protocol"] = value
+    (tmp_path / "subject.json").write_bytes((ROOT / "evals/subjects/cpp-codex-flow-check-resume-v1/subject.json").read_bytes())
+    with pytest.raises(p.Refused, match="gate-state"):
+        p.Profile.from_dict(data, tmp_path)

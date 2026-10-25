@@ -77,7 +77,7 @@ _PROFILE_KEYS = {
     "allowed_destinations", "reference_patterns", "dependencies", "unsupported",
     "mirrors", "generated_from", "declared_empty_kinds", "client_profiles", "notes",
     "gate_entrypoint", "gate_witness", "bundled_gate_entrypoints", "checksum_consumers",
-    "checkout_gate_entrypoints",
+    "checkout_gate_entrypoints", "gate_state_protocol",
 }
 
 #: #525: a CPP skill from #1408 on runs its BUNDLED gate (`scripts/<gate>`
@@ -261,6 +261,7 @@ class Profile:
     #: #529: installed path of a checkout gate copy -> the selected skill whose
     #: fallback names it. Empty (absent) for every profile before #529.
     checkout_gate_entrypoints: dict[str, str] = field(default_factory=dict)
+    gate_state_protocol: dict[str, Any] | None = None
     raw: dict[str, object] = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -459,7 +460,17 @@ class Profile:
             raise Refused("a bundled gate's mirror is proven against the subject's checksum_manifest, which this "
                           "subject does not declare (#525)")
 
+        protocol = None
+        if "gate_state_protocol" in data:
+            from . import gate_state
+            try:
+                protocol = gate_state.configuration(data["gate_state_protocol"])
+            except ValueError as exc:
+                raise Refused(str(exc)) from exc
+            if gate_entrypoint is None or gate_witness not in (None, "flow-check"):
+                raise Refused("gate_state_protocol requires a declared fixture gate entrypoint")
         return cls(
+            gate_state_protocol=protocol,
             name=name, subject=subject, subject_path=subject_path, select=select,
             treatment_question=str(question), allowed_destinations=tuple(allowed),
             patterns=tuple(patterns), dependencies=deps, unsupported=unsupported,
@@ -1194,6 +1205,7 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
 
     inventory_body: dict[str, Any] = {
         "inventory_schema": INVENTORY_SCHEMA,
+        **({"gate_state_protocol": profile.gate_state_protocol} if profile.gate_state_protocol is not None else {}),
         "profile": profile.name,
         "profile_digest": m.sha256_bytes(_canonical(profile.raw)),
         "subject": {

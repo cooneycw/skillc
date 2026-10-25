@@ -2203,7 +2203,8 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
         found = (acquired.subject.locator, acquired.subject.revision, acquired.subject.client)
         if found != (subject["locator"], subject["revision"], fl.CLIENT):
             raise fl.LiveRefused(f"acquired subject {found} is not the declared one")
-        treatment = cr.build_treatment(acquired, subject_profile=str(subject["profile"]), root=cr.ROOT)
+        treatment = cr.build_treatment(acquired, subject_profile=str(subject["profile"]), root=cr.ROOT,
+                                       fixture_gate_state=True)
         selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
             gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,

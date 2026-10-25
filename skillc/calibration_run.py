@@ -66,7 +66,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agent_trial, calibration, demo, profile, trial, verify
+from . import agent_trial, calibration, demo, gate_state, profile, trial, verify
 from . import attempt_guard as ag
 from . import collection_conformance as cc
 from . import matched_pilot as mp
@@ -136,6 +136,7 @@ class Treatment:
     #: `100755`), so an installed helper arrives executable when its source is.
     #: Empty only for a hand-built treatment, which keeps the 0600 delivery.
     home_modes: Mapping[str, str] = field(default_factory=dict)
+    gate_state_protocol: gate_state.Protocol | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,7 @@ class _ClosureResult:
     skill_pins: tuple[dict[str, str], ...] = ()
     #: #505: `profile.installed_home_modes` of the same verified records.
     home_modes: dict[str, str] = field(default_factory=dict)
+    gate_state_protocol: gate_state.Protocol | None = None
 
 
 def _installed_skill_pins(
@@ -255,7 +257,9 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
     bundled = tuple(str(p) for p in inventory.get("bundled_gate_entrypoints", ()))
     consumers = {str(c["path"]): str(c["reason"]) for c in inventory.get("checksum_consumers", ())}
     checkout = {str(k): str(v) for k, v in dict(inventory.get("checkout_gate_entrypoints", {})).items()}
-    return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
+    return _ClosureResult(gate_state_protocol=(gate_state.Protocol.from_inventory(inventory)
+                                               if "gate_state_protocol" in inventory else None),
+                          home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
                           gate_witness=gate_witness, bundled_gate_entrypoints=bundled, checksum_consumers=consumers,
                           bundled_checksum_manifest=inventory.get("bundled_checksum_manifest"),
                           checkout_gate_entrypoints=checkout,
@@ -265,7 +269,7 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
 
 def build_treatment(
     acquired: cc.AcquiredCollection, *, listing_client_argv: Sequence[str] | None = None,
-    subject_profile: str | None = None, root: Path | None = None,
+    subject_profile: str | None = None, root: Path | None = None, fixture_gate_state: bool = False,
 ) -> Treatment:
     """The treatment arm from an acquisition, built exactly as
     `run_collection_agent_attempt` builds its own - the same home files, the
@@ -298,9 +302,13 @@ def build_treatment(
     bundled_gate_entrypoints: tuple[str, ...] = ()
     bundled_checksum_manifest: str | None = None
     checkout_gate_entrypoints: Mapping[str, str] = {}
+    protocol: gate_state.Protocol | None = None
     if subject_profile is not None:
         assert root is not None
         closure = _closure_home_files(acquired, subject_profile, root)
+        protocol = closure.gate_state_protocol
+        if protocol is not None and fixture_gate_state is not True:
+            raise CalibrationRefused("gate-state protocol is supported only by fixture-live construction")
         closure_files = closure.home_files
         # A validated profile's own closure covers the selected skill's
         # bundled files too (profile.py installs skills AND dependencies
@@ -380,6 +388,7 @@ def build_treatment(
                 f"digests: {disagreements}"
             )
     return Treatment(
+        gate_state_protocol=protocol,
         home_files=home_files,
         home_modes=home_modes,
         digest=acquired.source.digest,
@@ -594,6 +603,8 @@ def run_calibration(
     one every time; a test's scripted client needs the attempt id), to which
     the declared model and effort are added. `total_seconds` overrides the
     declared total cap - for tests only; the CLI never sets it."""
+    if treatment.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
     # ADR 0005: nothing - no store, no plan, no container - before this.
     if calibration.outcome_endpoint(declaration) is not None:
         declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
@@ -887,6 +898,8 @@ def degraded_treatment(intact: Treatment, declaration: calibration.Discriminatio
     was run at. Derived rather than re-acquired because both degrade-subject
     paths lose the checkout a profile closure needs, and a snapshot-sourced
     degrade can never carry the declared `git:` revision label."""
+    if intact.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
     mutation = declaration.mutation
     skill, path = str(mutation.get("skill")), str(mutation.get("path"))
     if path == "SKILL.md":
@@ -1194,6 +1207,8 @@ def run_discrimination(
     approval, derivation, planning, the store, the cap-enforcing schedule and
     reconciliation are the real ones, so a rehearsal accounts for every slot a
     live run would. `total_seconds` overrides the declared cap (tests only)."""
+    if intact is not None and intact.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
     calibration.require_approved_discrimination(declaration, root)
     require_precondition(declaration, precondition_report, root, rehearse=rehearse)  # #287 option 1, ruling (A)
     if image_digest != _shared_str(declaration, "image", "digest"):

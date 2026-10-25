@@ -251,3 +251,15 @@ def test_a_stage_reader_for_an_undeclared_gate_is_refused() -> None:
 def test_the_production_attempt_declares_the_plan_gate_as_stage_bearing() -> None:
     source = (ROOT / "skillc" / "agent_trial.py").read_text(encoding="utf-8")
     assert 'stage_capture={"flow-check-plan": stage_capture.capture_stages}' in source
+
+
+@pytest.mark.parametrize("extra", [b'{"error":"compact-second"}\n', b'  {"error":"indented-second"}\n',
+                                   b'FLOW_FINISH_GATE: fail\n'])
+def test_protocol_strict_reader_refuses_extra_streams_without_rewriting_legacy(extra: bytes) -> None:
+    raw, exit_code = _sample("gate-stops-early", "all-passed")
+    # Historical default remains the same; opt-in selects the stricter parser.
+    assert stage_capture.capture_stages(extra + raw, exit_code)["status"] == "captured"
+    document, _, why = stage_capture._document((extra + raw).decode(), strict=True)
+    assert document is None and why
+    document, _, why = stage_capture._document(raw.decode(), strict=True)
+    assert document is not None and why is None

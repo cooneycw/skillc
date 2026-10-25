@@ -462,6 +462,7 @@ def attempt_kwargs(*, experiment: trial.Experiment, attempt_id: str, backend: Do
         # #287 auto6: the fixture route keeps its own gate map; a non-default
         # gate_witness is refused alongside a fixture.
         "gate_witness": None,
+        **({"gate_state_protocol": treatment.gate_state_protocol} if treatment.gate_state_protocol is not None else {}),
     }
 
 
@@ -529,6 +530,8 @@ def run_rows(manifest: Manifest, *, root: Path, run_dir: Path, treatment: cr.Tre
              rows: Sequence[Row] | None = None, interpreter: str = "/usr/bin/python3",
              on_row: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """Run each row once, in manifest order, and return the campaign report."""
+    if treatment.gate_state_protocol is not None:
+        raise CampaignRefused("gate-state treatment is fixture-only; this campaign does not support it")
     if treatment.gate_entrypoint is None:
         raise CampaignRefused("the treatment declares no gate_entrypoint; nothing would witness the gates")
     selected = list(manifest.rows if rows is None else rows)

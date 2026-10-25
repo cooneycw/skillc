@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "good": [
+    "fresh-controller-run",
+    "exact-consumed-generated-join",
+    "inspection-preserves",
+    "cleanup-keeps-facts"
+  ],
+  "refused": [
+    {
+      "id": "seeded"
+    },
+    {
+      "id": "other-attempt"
+    },
+    {
+      "id": "other-profile"
+    },
+    {
+      "id": "other-inventory"
+    },
+    {
+      "id": "other-producer"
+    },
+    {
+      "id": "other-plan"
+    },
+    {
+      "id": "other-repository"
+    },
+    {
+      "id": "other-source"
+    },
+    {
+      "id": "other-cwd"
+    },
+    {
+      "id": "missing-cwd"
+    },
+    {
+      "id": "tampered"
+    },
+    {
+      "id": "end-mismatch"
+    },
+    {
+      "id": "source-mutated"
+    },
+    {
+      "id": "export-unreadable"
+    },
+    {
+      "id": "timeout-none"
+    },
+    {
+      "id": "timeout-false"
+    },
+    {
+      "id": "timeout-true"
+    },
+    {
+      "id": "stop-false"
+    },
+    {
+      "id": "stop-malformed"
+    },
+    {
+      "id": "bool-exit"
+    },
+    {
+      "id": "missing-exit"
+    },
+    {
+      "id": "missing-output"
+    },
+    {
+      "id": "partial-output"
+    },
+    {
+      "id": "truncated-output"
+    },
+    {
+      "id": "duplicate-key"
+    },
+    {
+      "id": "duplicate-document"
+    },
+    {
+      "id": "unknown-version"
+    },
+    {
+      "id": "wrong-family"
+    },
+    {
+      "id": "unknown-field"
+    },
+    {
+      "id": "unsafe-file"
+    },
+    {
+      "id": "unreadable-generated"
+    },
+    {
+      "id": "contradictory-carry"
+    },
+    {
+      "id": "malformed-carry"
+    },
+    {
+      "id": "error-envelope"
+    },
+    {
+      "id": "compact-document"
+    },
+    {
+      "id": "duplicate-verdict"
+    },
+    {
+      "id": "indented-document"
+    },
+    {
+      "id": "missing-run-id"
+    },
+    {
+      "id": "unsafe-run-id"
+    },
+    {
+      "id": "mismatched-run-id"
+    }
+  ]
+}

@@ -433,3 +433,40 @@ pipelines CPP's cicd skills generate for a `/project:init` project, in the
 warmed layer of the task project's pinned ruff/pytest/mypy), and certifies that
 each required stage runs and rejects its own planted fault. See that task's
 README for what local execution does and does not model.
+
+### Optional fixture gate-state protocol
+
+The fixture-only `cpp-codex-flow-check-resume-v1` profile pins CPP commit
+`dd988219e056ddf23fb7ef5ba55e93979c07b61a` and declares this closed optional field:
+
+```json
+"gate_state_protocol": {
+  "version": 1,
+  "family": "cpp-run-state",
+  "state_path": ".git/cpp-runs",
+  "plan": "check",
+  "operations": {
+    "flow-check-plan": "runner",
+    "flow-check-summary": "inspection"
+  }
+}
+```
+
+Absent means legacy behavior and adds no inventory field. Null, empty, malformed,
+unknown or unsupported declarations refuse; they never silently become absent.
+The normal validator emits the field into the same inventory that binds the
+source and installed files. Treatment construction revalidates that inventory
+against the acquired pinned tree before creating the protocol identity.
+
+Only the fixture-live factory explicitly permits this capability; other factories
+and direct unsupported APIs refuse opted-in treatments. At dispatch the fixture
+must declare the exact two gate argument vectors, `check` stage plan, independent
+source digest and `.git/cpp-runs` state path. Summary remains inspection only.
+The new profile supplies no runtime descriptor, image receipt, live declaration
+or budget and does not retarget an old profile or regrade historical results.
+
+The validated declaration supplies the family and state directory, rather than
+subject-specific constants in core code. Family is a bounded safe identifier;
+state_path is exactly one safe directory immediately below .git. Both are
+mandatory and included in immutable protocol identity. Wire family and fixture
+state paths must exactly match that declaration; there is no implicit default.

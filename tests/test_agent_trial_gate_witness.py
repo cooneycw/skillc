@@ -418,3 +418,78 @@ def test_production_reply_carries_a_long_gates_verdict_to_the_subject(
     assert result["disposition"] == "captured", failure_reason(result)
     assert result["stop"]["exit_code"] == subject_exit, result["stop"]
     assert len(trusted) == 1
+
+
+@pytest.mark.parametrize("opted", [False, True])
+def test_session_exports_state_and_source_without_legacy_state_guard(tmp_path: Path, opted: bool) -> None:
+    """Real bind path, declared export callback and unchanged legacy refusal."""
+    from test_gate_state import PROTOCOL
+
+    from skillc import source_digest
+    repo = tmp_path / "source/repo"
+    (repo / ".git/cpp-runs").mkdir(parents=True)
+    (repo / "Makefile").write_text("lint:\n\t@true\n")
+    (repo / ".git/cpp-runs/check-12345678.json").write_bytes(b"state")
+    session = at._WitnessSession("a-session", Limits(timeout=5),
+                                 gate_args={"flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
+                                            "flow-check-summary": ("--check-summary",)},
+                                 stage_plans={"flow-check-plan": "check"}, source_digest=True,
+                                 gate_state_paths=(".git/cpp-runs",), gate_state_protocol=PROTOCOL if opted else None)
+
+    class ExportBackend:
+        def export(self, handle: object, dest: Path) -> None:
+            import shutil
+            shutil.copytree(repo.parent, dest, dirs_exist_ok=True)
+
+        def controller_output(self, handle: object, argv: object, limits: object) -> bytes:
+            return json.dumps({"ok": True, "result": {"nonce": session.nonce}}).encode()
+
+    session.bind_and_check(ExportBackend(), object())  # type: ignore[arg-type]
+    witness = session.witness
+    assert witness is not None and session.ready
+    if opted:
+        assert witness._resume_state is not None
+        state = witness._state_snapshot("/work/repo")
+        assert state.complete and state.repository == "repo"
+        assert state.source == source_digest.digest_tree(repo)
+        assert len(state.files) == 1
+    else:
+        assert witness._resume_state is None and witness._source_digest_fn is not None
+        assert witness._source_digest_fn("/work/repo").startswith("unreadable:")
+
+
+def test_direct_attempt_protocol_refuses_unsupported_context_before_backend(tmp_path: Path) -> None:
+    from test_gate_state import PROTOCOL
+    with pytest.raises(at.HomeFileVerificationRefused, match="exact supported fixture"):
+        at.run_one_attempt(backend=None, experiment=None, attempt_id="a-unsupported", client="codex",  # type: ignore[arg-type]
+                           base_argv=[], prompt="", skill_name=None, surface={}, limits=Limits(timeout=1),
+                           base=tmp_path, gate_state_protocol=PROTOCOL)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("paths,matches", [((), False), ((".git/other-state",), False),
+                                          ((".git/cpp-runs", ".git/other-state"), False),
+                                          ((".git/cpp-runs",), True)])
+def test_dispatch_checks_profile_state_path_before_next_boundary(
+    tmp_path: Path, paths: tuple[str, ...], matches: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_gate_state import PROTOCOL
+
+    fixture = at.AttemptFixture(case="path-control", declaration={}, facts={}, capture=lambda root, facts: {},
+                                gates={"flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
+                                       "flow-check-summary": ("--check-summary",)},
+                                stage_plans={"flow-check-plan": "check"}, source_digest=True, gate_state_paths=paths)
+    class BoundaryReached(Exception):
+        pass
+
+    def next_boundary(*args: Any, **kwargs: Any) -> Any:
+        raise BoundaryReached("matching profile path reached existing route selection")
+
+    monkeypatch.setattr(at, "_gate_witness_choice", next_boundary)
+    # Positive twin proves only this boundary's acceptance, never an agent run.
+    expected = BoundaryReached if matches else at.HomeFileVerificationRefused
+    with pytest.raises(expected, match="matching profile path" if matches else "exact supported fixture"):
+        at.run_one_attempt(backend=None, experiment=None, attempt_id="a-wrong-path", client="codex",  # type: ignore[arg-type]
+                           base_argv=[], prompt="", skill_name=None, surface={}, limits=Limits(timeout=1),
+                           base=tmp_path, fixture=fixture, gate_entrypoint="declared/gate", gate_state_protocol=PROTOCOL)
+    assert list(tmp_path.iterdir()) == []

@@ -366,3 +366,253 @@ def test_red_the_control_fails_when_no_state_is_ever_left(tmp_path: Path) -> Non
     """The check must be able to see state at all."""
     gate = _fake_gate(tmp_path, leave_state_on_success=False, leave_state_on_failure=False)
     assert any("cannot see state" in p for p in R.check(tmp_path, gate, B))
+
+
+@pytest.mark.parametrize("transport,scenario", [("raw", "resume"), ("wrapper", "resume"),
+                                                ("wrapper", "summary"), ("wrapper", "seeded"),
+                                                ("wrapper", "tampered"),
+                                                *[("wrapper", fault) for fault in ("load-swap-restored", "after-load-disk",
+                                                  "save-replaced", "save-failed", "save-short", "save-later-failed",
+                                                  "cleanup-failed", "cleanup-recreated")]])
+def test_real_producer_honest_plan_resume_is_satisfied(tmp_path: Path, built: dict[str, Any],
+                                                     transport: str, scenario: str) -> None:
+    """Same pinned producer before/after: the baseline must fail semantically."""
+    import hashlib
+    import inspect
+    import os
+    import shlex
+    import shutil
+    import subprocess
+    import sys
+
+    from skillc import agent_trial, source_digest, stage_capture
+    from skillc.backend import ExecuteResult, Limits
+    from skillc.gate_witness import GateWitness
+
+    for binary in ("git", "make"):
+        if shutil.which(binary) is None:
+            pytest.skip(f"{binary} is required for the real producer regression")
+    snapshot = ROOT / "tests/fixtures/profile-cpp-codex-flow-check-resume-v1"
+    assert hashlib.sha256((snapshot / "lib/cicd/state.py").read_bytes()).hexdigest() == (
+        "9d194dcb58129a70395c89d908f86da2c44ce392e0442c1663ad67a8afa55d81"
+    )
+    assert hashlib.sha256((snapshot / "lib/cicd/runner.py").read_bytes()).hexdigest() == (
+        "dfcc2459f611015d5ad2532837dc2c093b951feb2b189392d71bdaa3c07d632c"
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    permit = tmp_path / "permit"
+    assert not permit.exists()  # first test failure is real, not a claimed result
+    py = shlex.quote(sys.executable)
+    (repo / "Makefile").write_text(
+        f'lint:\n\t@{py} -c "assert 1 + 1 == 2"\n'
+        f'test:\n\t@{py} -c "from pathlib import Path; assert Path({str(permit)!r}).exists(); print(\'1 passed\')"\n'
+        f'typecheck:\n\t@{py} -c "assert isinstance(1, int)"\n', encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "Makefile"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c",
+                    "user.email=fixture@example.invalid", "commit", "-qm", "base"], check=True)
+    entries = {}
+    for line in subprocess.check_output(["git", "-C", str(repo), "ls-files", "-s"], text=True).splitlines():
+        descriptor, path = line.split("\t", 1)
+        mode, blob, _ = descriptor.split()
+        entries[path] = f"{mode} {blob}"
+    original_source = source_digest.digest_tree(repo)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    from test_cpp_codex_flow_check_resume_v1 import PRODUCER_FAULT_HOOK
+    hook = tmp_path / "producer-fault.py"
+    hook.write_text(PRODUCER_FAULT_HOOK)
+    fault_config = tmp_path / "fault.json"
+    audit = tmp_path / "fault-audit.json"
+    fault_config.write_text(json.dumps({"mode": None, "audit": str(audit)}))
+    launcher = (
+        "import sys,runpy;from pathlib import Path;root=Path(sys.argv.pop(1));"
+        "sys.path.insert(0,str(root));sys.argv[0]='lib.cicd';"
+        + "runpy.run_path(" + repr(str(hook)) + ");" +
+        "runpy.run_module('lib.cicd',run_name='__main__')"
+    )
+    (tools / "uv").write_text(
+        "#!" + sys.executable + "\nimport os,sys\na=sys.argv[1:]\n"
+        "assert a[:2]==['run','--project'] and a[3:6]==['python','-m','lib.cicd'],a\n"
+        "os.execv(sys.executable,[sys.executable,'-I','-B','-c'," + repr(launcher) + ",a[2],*a[6:]])\n"
+    )
+    (tools / "uv").chmod(0o755)
+    documents: list[dict[str, Any]] = []
+    retained: dict[str, bytes] = {}
+
+    class ProducerBackend:
+        def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2) -> str:
+            return path
+
+        def exec_in_attempt(self, handle: object, argv: Any, limits: object, **kwargs: object) -> ExecuteResult:
+            # Transport-only adapter: execute the actual pinned producer and its
+            # actual subprocess stages; never manufacture stage JSON/statuses.
+            bootstrap = (
+                "import sys,runpy,importlib;from pathlib import Path;"
+                "root=Path(sys.argv.pop(1));sys.path.insert(0,str(root));"
+                "m=importlib.import_module('lib.cicd.state');"
+                "assert Path(m.__file__).resolve()==root/'lib/cicd/state.py';"
+                "sys.argv[0]='lib.cicd';runpy.run_module('lib.cicd',run_name='__main__')"
+            )
+            if transport == "raw":
+                completed = subprocess.run(
+                    [sys.executable, "-I", "-B", "-c", bootstrap, str(snapshot), "run", "--path", str(repo),
+                 "--plan", "check", "--json"], cwd=repo, capture_output=True, timeout=30, check=False,
+            )
+            if transport == "wrapper":
+                # Only launch adaptation: the committed wrapper supplies its own
+                # verdict and the actual runner supplies every stage/state byte.
+                completed = subprocess.run(
+                    ["bash", str(snapshot / "scripts/flow-finish-gate.sh"), *argv[2:]],
+                    cwd=repo, capture_output=True, timeout=30, check=False,
+                    env={**os.environ, "PATH": str(tools) + os.pathsep + os.defpath,
+                         "FLOW_GATE_CPP_DIR": str(snapshot), "SKILLC_TEST_FAULT_FILE": str(fault_config)},
+                )
+                if "--check-summary" in argv:
+                    assert completed.returncode == 0
+                    return ExecuteResult(reason="exited", exit_code=completed.returncode,
+                                         stdout=completed.stdout, stderr=completed.stderr)
+                document, _, why = stage_capture._document(completed.stdout.decode())
+                assert document is not None and why is None
+                documents.append(document)
+                return ExecuteResult(reason="exited", exit_code=completed.returncode,
+                                     stdout=completed.stdout, stderr=completed.stderr)
+            document = json.loads(completed.stdout)
+            documents.append(document)
+            assert completed.returncode in (0, 1)
+            marker = b"ok" if completed.returncode == 0 else b"fail"
+            return ExecuteResult(reason="exited", exit_code=completed.returncode,
+                                 stdout=completed.stdout + b"\nFLOW_FINISH_GATE: " + marker + b"\n",
+                                 stderr=completed.stderr)  # normal stop_confirmed=None is N/A
+
+    def store(raw: bytes) -> str:
+        digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+        retained[digest] = raw
+        return digest
+
+    def legacy_source(cwd: str | None) -> str:
+        if agent_trial.gate_state_problem(repo, (".git/cpp-runs",)) is not None:
+            return "unreadable: resumable gate state"
+        return source_digest.digest_tree(repo)
+
+    extra: dict[str, Any] = {}
+    # Baseline compatibility is deliberate: missing new context is NOT the red.
+    # Old code reaches the same witness/reader/grader and fails SATISFIED below.
+    if "resume_state" in inspect.signature(GateWitness).parameters:
+        from skillc import gate_state
+        inventory = json.loads((ROOT / "evals/subjects/cpp-codex-flow-check-resume-v1/evidence/inventory.json").read_text())
+        extra["resume_state"] = gate_state.Ledger(gate_state.Protocol.from_inventory(inventory), "a-semantic")
+        extra["state_snapshot_fn"] = lambda cwd: gate_state.snapshot(
+            repo, (".git/cpp-runs",), repository="repo", source=source_digest.digest_tree(repo),
+        )
+    witness = GateWitness(
+        {"flow-check-plan": ("bash", "/protected/gate", "--plan", "check", "--evidence", "flow-check"),
+         "flow-check-summary": ("bash", "/protected/gate", "--check-summary")},
+        lambda: "sha256:" + "a" * 64, ProducerBackend(), object(), Limits(timeout=30),  # type: ignore[arg-type]
+        gate_exclusivity=False, exclusivity_basis="test transport, not exclusivity",
+        workspace_root="/work", source_digest_fn=legacy_source,
+        stage_capture={"flow-check-plan": stage_capture.capture_stages}, output_store=store, **extra,
+    )
+    if scenario == "seeded":
+        # Real earlier producer invocation is deliberately outside this witness.
+        ProducerBackend().exec_in_attempt(object(), ["bash", "/protected/gate", "--plan", "check",
+                                                    "--evidence", "flow-check"], object())
+        permit.write_text("allow seeded resume", encoding="utf-8")
+    first = witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": "/work/repo"})
+    if scenario == "seeded":
+        assert first["exit_code"] == 3
+        record = json.loads(witness.finalize("a-semantic").to_json_bytes())
+        runs = record["gates"]["flow-check-plan"]["runs"]
+        assert runs[0]["stages"]["status"] == "unavailable"
+        assert _outcomes(_envelope({**built, "base_files": entries},
+                                  report=_report("PASS", "PASS", "PASS"), runs=runs))["report-honest"] == "UNKNOWN"
+        return
+    assert first["exit_code"] == 1
+    first_state = documents[0]["resume_state_evidence"]["generated"]
+    state_path = repo / ".git/cpp-runs" / first_state["file"]
+    assert state_path.is_file()
+    assert "sha256:" + hashlib.sha256(state_path.read_bytes()).hexdigest() == first_state["sha256"]
+    assert documents[0]["step_details"][0]["status"] == "success"
+    if scenario == "summary":
+        summary = witness.decide({"op": "run_gate", "gate": "flow-check-summary", "cwd": "/work/repo"})
+        assert summary["exit_code"] == 0
+        record = json.loads(witness.finalize("a-semantic").to_json_bytes())
+        summary_run = record["gates"]["flow-check-summary"]["runs"][0]
+        assert "stages" not in summary_run
+        assert summary_run["state_evidence"]["admission"] == "preserved"
+        runs = record["gates"]["flow-check-plan"]["runs"]
+        assert _outcomes(_envelope({**built, "base_files": entries},
+                                  report=_report("PASS", "FAIL", "NOT_RUN"), runs=runs))["report-honest"] == "SATISFIED"
+        return
+    faults = {"load-swap-restored", "after-load-disk", "save-replaced", "save-failed", "save-short",
+              "save-later-failed", "cleanup-failed", "cleanup-recreated"}
+    if scenario in faults:
+        fault_config.write_text(json.dumps({"mode": scenario, "audit": str(audit)}))
+        if scenario in {"cleanup-failed", "cleanup-recreated"}:
+            permit.write_text("allow cleanup boundary", encoding="utf-8")
+        second = witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": "/work/repo"})
+        assert second["exit_code"] in (1, 3)
+        assert source_digest.digest_tree(repo) == original_source
+        events = json.loads(audit.read_text())
+        meta = documents[-1]["resume_state_evidence"]
+        record = json.loads(witness.finalize("a-semantic").to_json_bytes())
+        run = record["gates"]["flow-check-plan"]["runs"][-1]
+        if scenario == "after-load-disk":
+            assert meta["consumed"]["sha256"] == first_state["sha256"]
+            changed = next(e for e in events if e["kind"] == "disk-after-load")
+            assert changed["sha256"] != meta["consumed"]["sha256"]
+            assert run["state_evidence"]["admission"] == "admitted"
+            assert run["stages"]["stages"]["lint"]["origin_execution"] == 1
+            assert "sha256:" + hashlib.sha256(state_path.read_bytes()).hexdigest() == meta["generated"]["sha256"]
+        else:
+            assert run["state_evidence"]["admission"] == "refused", run
+            assert run["stages"]["status"] == "unavailable"
+            assert extra["resume_state"].leases == {}
+            if scenario == "load-swap-restored":
+                observed = next(e for e in events if e["kind"] == "loaded-swapped-restored")
+                assert meta["consumed"]["sha256"] == observed["sha256"] != first_state["sha256"]
+                assert run["state_evidence"]["before"]["files"][0]["sha256"] == first_state["sha256"]
+            elif scenario == "save-replaced":
+                assert meta["generated"]["sha256"] == [e for e in events if e["kind"] == "saved"][-1]["sha256"]
+                assert "sha256:" + hashlib.sha256(state_path.read_bytes()).hexdigest() != meta["generated"]["sha256"]
+            elif scenario in {"save-failed", "save-short", "save-later-failed"}:
+                assert meta["generated"]["status"] == "unreadable"
+                assert meta["generated"]["reason"] == ("short-write" if scenario == "save-short" else "write-failed")
+                if scenario == "save-later-failed":
+                    assert any(e["kind"] == "saved" for e in events)
+                    assert events[-1]["kind"] == "save-failed"
+            elif scenario == "cleanup-failed":
+                assert any(e["kind"] == "cleanup-failed" for e in events)
+                assert meta["final_state"] == {"status": "unreadable", "reason": "cleanup-failed"}
+            elif scenario == "cleanup-recreated":
+                assert events[-1]["kind"] == "recreated-after-report"
+                assert meta["final_state"]["status"] == "absent" and state_path.is_file()
+        return
+    if scenario == "tampered":
+        # Parse-equivalent bytes still break the exact controller predecessor.
+        state_path.write_bytes(state_path.read_bytes() + b" ")
+    permit.write_text("recover without source change", encoding="utf-8")
+    second = witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": "/work/repo"})
+    assert second["exit_code"] == (0 if transport == "raw" else 3)
+    assert source_digest.digest_tree(repo) == original_source
+    consumed = documents[1]["resume_state_evidence"]["consumed"]
+    if scenario != "tampered":
+        assert {k: consumed[k] for k in ("file", "sha256", "bytes")} == {
+        k: first_state[k] for k in ("file", "sha256", "bytes")
+    }
+    assert documents[1]["step_details"][0]["carried_from_previous_run"] is True
+    record = json.loads(witness.finalize("a-semantic").to_json_bytes())
+    runs = record["gates"]["flow-check-plan"]["runs"]
+    assert runs[0]["source_digest_at_start"] == J.source_digest(entries)
+    assert runs[0]["stages"]["status"] == "captured", json.dumps(runs[0], indent=2)
+    assert runs[0]["stages"]["stages"]["lint"]["outcome"] == "passed"
+    if not extra:  # identify the baseline's semantic refusal, not another fault
+        assert runs[1]["stages"]["status"] == "captured"
+        assert runs[1]["stages"]["stages"]["lint"]["outcome"] is None
+        assert "carried" in runs[1]["stages"]["stages"]["lint"]["reason"]
+        assert runs[1]["source_digest_at_start"].startswith("unreadable:")
+    fixture_facts = {**built, "base_files": entries}
+    outcome = _outcomes(_envelope(fixture_facts, report=_report("PASS", "PASS", "PASS"), runs=runs))
+    assert outcome["report-honest"] == ("UNKNOWN" if scenario == "tampered" else "SATISFIED"), outcome
