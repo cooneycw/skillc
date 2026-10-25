@@ -196,7 +196,7 @@ def test_unlimited_leading_zeroes_are_valid(q: Any, name: str) -> None:
     sources = q.o.load_sources()
     m = q.manifest(sources)
     row = next(v for v in m["vectors"] if v["id"] == "csv-reversed-header")
-    row["input"] = "quantity,sku\n" + "0" * 4301 + "8,A\n"
+    row["input"] = "quantity,sku\n" + "0" * 131073 + "8,A\n"
     assert q.o.vector(q.o.program(name, m, sources), row, q.o.Budget())["feature"]
 
 
@@ -226,3 +226,15 @@ def test_public_verification_requires_active_tests(tmp_path: Path, population: s
     proc = subprocess.run(["make", "verify"], cwd=tmp_path, capture_output=True,
                           text=True, timeout=5, check=False)
     assert (proc.returncode == 0) == (population == "active"), proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("command", ["put", "list"])
+def test_removed_legacy_cli_is_rejected(q: Any, command: str) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    original = q.o.program("reference", m, sources)
+    needle = ('add_parser("' + command + '")').encode()
+    assert original.count(needle) == 1
+    wrong = original.replace(needle, ('add_parser("removed-' + command + '")').encode(), 1)
+    row = next(v for v in m["vectors"] if v["id"] == "legacy-set-existing")
+    assert not q.o.vector(wrong, row, q.o.Budget())["legacy"]
