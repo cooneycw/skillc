@@ -90,3 +90,13 @@ standard. Zero does not claim that no existing controls covered those cases.
 The prior full make verify EXIT0 and original outer missing-receipt EXIT1 remain
 separate historical outcomes. Current-base integration and final CI remain held
 until the #563 prerequisite merges.
+
+Current main a924c5f00a9da21b87357764a979c9c6868340a5, including the merged
+#563 trigger-directory correction, integrated cleanly. Approved product/test
+bytes remain identical to the original reviewed head. Targeted integration
+checks pass284/284 exact collected/JUnit identities via make test; raw log
+/tmp/skillc-536-integration-check.txt. Original full make verify EXIT0 remains
+retained; no redundant full rerun for metadata/disjoint base. Actual merged-helper
+enrollment exits0 and audit-flow verifies the original captured prefix after
+integration. Final remote full required CI and fresh exact-head/root/base
+clearance remain necessary; no inherited merge permission.
