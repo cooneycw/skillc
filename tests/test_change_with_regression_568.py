@@ -216,6 +216,7 @@ def test_public_verification_requires_active_tests(tmp_path: Path, population: s
     shutil.copyfile(TASK / "fixture/Makefile", tmp_path / "Makefile")
     tests = tmp_path / "tests"
     tests.mkdir()
+    (tests / "__init__.py").write_text("")
     if population != "empty":
         decorator = "@unittest.skip('controlled skip')\n" if population == "skipped" else ""
         assertion = "self.fail('controlled failure')" if population == "failing" else "self.assertTrue(True)"
