@@ -1,0 +1,31 @@
+{
+  "branch": "issue-574-repair-offline-proof-controls-exposed-by-main-ci-p",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "b75a982b3538f5e7d87e0e5dd1b58387bd3884ca",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-39-48-01a16fdb-0b9d-7133-83ae-fd9718f95524.jsonl",
+    "thread_id": "01a16fdb-0b9d-7133-83ae-fd9718f95524"
+  },
+  "issue": "574",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-25T11:40:01Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/25/rollout-2026-10-25T07-37-43-01a172da-2bae-7e83-83bd-231c43b64d46.jsonl",
+    "thread_id": "01a172da-2bae-7e83-83bd-231c43b64d46"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}
