@@ -1,0 +1,6 @@
+{
+  "id": "coordination-quote", "revision": "1",
+  "criteria": ["delivery", "behavior"],
+  "probe": {"file": "quote_probe.py", "inputs": "inputs.json", "timeout": 2},
+  "judge": {"file": "quote_judge.py", "timeout": 2}
+}

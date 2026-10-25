@@ -94,3 +94,30 @@ oracle/population acceptance, and timeout/cancellation/cleanup misclassification
 
 Reviewed preparation plan SHA256:
 d2e42bb845f3fb9225204c08cad33192fce4a5a6758dfae7b0529467b3b83967.
+
+### Phase P checkpoint evidence (approved prefix preserved)
+
+The early complete-original-rollout identity preflight qualified this genuine571
+scope as codex/gpt-6.1-sol with measured initial cleanliness. Ordinary derivation
+still refused mixed historical models; that refusal was preserved. No review
+receipt was claimed. The workflow-only checkpoint is9bb6f26.
+
+Independent phase P now passes41 focused pytest identities with exact collection/
+JUnit equality, lint and types. The checker selftest discriminated31/31 rules.
+Each retained qualification report accounts for16 planned/executed cases and13
+oracle invocations, including100 public inputs per executed real behavior probe.
+Both real and four broken-grader reports plus actual captures are retained.
+Seven behavioral red inputs failed on the earlier draft before fixes: uncertain
+oracle cleanup, late failure credited as qualification, unrelated infrastructure
+loss substituted for the injected fault, readable missing delivered ref, symlink
+source materialization, and canonical/raw whole-patch byte bounds. Additional
+wrong-kind and unintended executable-mode controls also pass. No API-absence
+failure is presented as a regression. The official16-case population is unchanged.
+
+No full verification, counter-model development review, finish, remote CI, PR or
+live study has run for this phase. Per root, keep the verified phase P on this
+owned branch for one eventual combined review/full finish after dependency
+integration. Phase D still requires actual genuine569A main and a new exact gate.
+Existing verifier phase caps do not establish no-new-launch-after-expiry;
+absolute boundary recomputation and owned probe cleanup require the separately
+cleared shared-verifier prerequisite. Shared source and READINESS remain untouched.

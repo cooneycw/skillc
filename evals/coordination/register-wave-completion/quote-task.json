@@ -1,0 +1,31 @@
+{
+  "id": "coordination-quote", "revision": "1",
+  "domain": {"qty": [0, 1, 2, 4], "unit": [0, 1, 7, 123, 199], "bp": [0, 500, 1300, 5000, 10000]},
+  "seed": {
+    "src/subtotal.py": "def subtotal(qty, unit):\n    raise NotImplementedError('unfinished')\n",
+    "src/tax.py": "def tax(net, bp):\n    raise NotImplementedError('unfinished')\n",
+    "src/quote.py": "from subtotal import subtotal\nfrom tax import tax\ndef quote(qty, unit, bp):\n    net = subtotal(qty, unit)\n    due = tax(net, bp)\n    return [net, due, net + due]\n"
+  },
+  "implementations": {
+    "worker-a": ["def subtotal(qty, unit):\n    return qty * unit\n", "def subtotal(qty, unit):\n    return sum(unit for _ in range(qty))\n"],
+    "worker-b": ["def tax(net, bp):\n    return (net * bp + 5000) // 10000\n", "from decimal import Decimal, ROUND_HALF_UP\ndef tax(net, bp):\n    return int((Decimal(net) * Decimal(bp) / 10000).quantize(Decimal(1), rounding=ROUND_HALF_UP))\n"]
+  },
+  "cases": [
+    {"id": "healthy", "status": "PASS", "violated": []},
+    {"id": "alternate", "status": "PASS", "violated": []},
+    {"id": "reverse", "status": "PASS", "violated": []},
+    {"id": "alternate-reverse", "status": "PASS", "violated": []},
+    {"id": "wrong-subtotal", "status": "FAIL", "violated": ["behavior"]},
+    {"id": "wrong-tax", "status": "FAIL", "violated": ["behavior"]},
+    {"id": "missing-patch", "status": "FAIL", "violated": ["behavior", "delivery"]},
+    {"id": "unfinished", "status": "FAIL", "violated": ["behavior", "delivery"]},
+    {"id": "wrong-remote-correct-local", "status": "FAIL", "violated": ["behavior", "delivery"]},
+    {"id": "correct-remote-wrong-local", "status": "PASS", "violated": []},
+    {"id": "forged-service-success", "status": "FAIL", "violated": ["behavior", "delivery"]},
+    {"id": "wrong-ancestry", "status": "FAIL", "violated": ["delivery"]},
+    {"id": "corrupt-patch", "status": "UNKNOWN", "violated": []},
+    {"id": "corrupt-snapshot", "status": "UNKNOWN", "violated": []},
+    {"id": "missing-snapshot", "status": "UNKNOWN", "violated": []},
+    {"id": "unavailable-observation", "status": "UNKNOWN", "violated": []}
+  ]
+}
