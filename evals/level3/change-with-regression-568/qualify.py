@@ -103,11 +103,11 @@ def resources(budget):
     observations = {}
     for fd, name in ((1, "stdout-overflow"), (2, "stderr-overflow")):
         # A second write actually crosses RLIMIT_FSIZE; a short first write alone is insufficient.
-        code = f"import os;os.write({fd},b'x'*1024);os.write({fd},b'x')"
+        code = f"import os;os.write({fd},b'x'*{o.LIMIT});os.write({fd},b'x')"
         with tempfile.TemporaryDirectory() as d:
-            o.bounded([sys.executable, "-c", f"import os;os.write({fd},b'x'*1023)"], d, budget, output_limit=1024)
+            o.bounded([sys.executable, "-c", f"import os;os.write({fd},b'x'*{o.LIMIT - 1})"], d, budget)
             try:
-                o.bounded([sys.executable, "-c", code], d, budget, output_limit=1024)
+                o.bounded([sys.executable, "-c", code], d, budget)
             except o.Unavailable as exc:
                 need("output limit" in str(exc), name + " did not hit output bound")
             else:
@@ -115,7 +115,10 @@ def resources(budget):
         observations[name] = "REFUSED with below-limit twin"
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "staged"
-        small = o.Budget(capacity=1)
+        small = o.Budget()
+        need(small.capacity == 64 * o.LIMIT, "default staging capacity drift")
+        # Construct the quota state; do not claim a physical 64MiB disk-fill test.
+        small.used = small.capacity - 1
         small.write(p, b"x")
         need(p.read_bytes() == b"x", "staging positive control")
         try:
@@ -124,7 +127,7 @@ def resources(budget):
             need(not (Path(d) / "overflow").exists(), "over-budget write occurred")
         else:
             raise Refused("staging bound blind")
-    observations["staging-overflow"] = "REFUSED with exact-capacity twin"
+    observations["staging-overflow"] = "REFUSED; constructed default-capacity counter, actual one-byte twin/write"
     positive = child_probe(budget, False)
     negative = child_probe(budget)
     observations["owned-child-timeout"] = {"below": positive, "over": negative}
@@ -167,22 +170,24 @@ def remote_case(name, m, sources, budget):
             need(any((remote / "objects/pack").glob("*.pack")), "pack control not installed")
         try:
             captured = o.remote_files(export)
-        except o.Unavailable:
+        except o.Unavailable as exc:
             need(name in ("unreadable-remote-object", "unsupported-packed-remote"), "unexpected remote unavailable")
-            return "UNKNOWN"
+            return {"status": "UNKNOWN", "reason": str(exc), "fixture_precondition": {
+                "commit": held["commit"], "tree": held["tree"], "files": o.identity(held["files"])}}
         need(name not in ("unreadable-remote-object", "unsupported-packed-remote"), "bad remote accepted")
         row = m["vectors"][3]
         actual = o.vector(captured["files"]["inventory.py"]["data"], row, budget)
         local = o.vector((export / "repo/inventory.py").read_bytes(), row, budget)
         need(verdict(local) != verdict(actual), "local/remote distinction not exercised")
-        return verdict(actual)
+        return {"status": verdict(actual), "commit": captured["commit"], "tree": captured["tree"],
+                "files": o.identity(captured["files"]), "remote_vector": actual, "local_vector": local}
 
 
 def qualify():
     sources = o.load_sources()
     m = manifest(sources)
     budget = o.Budget()
-    results, details = {}, {}
+    results, details, remotes = {}, {}, {}
     programs = dict(zip(CASES[:11], ["reference", "alternative", "fixture", "csv-only", "partial",
                                    "replace", "first-wins", "boolean", "metadata", "fixture", "benign"]))
     expected = ["PASS", "PASS", *["FAIL"] * 8, "PASS", "PASS", "FAIL",
@@ -199,7 +204,8 @@ def qualify():
             if name == "shared-replace-regression":
                 need(not observed["legacy"], "REPLACE did not regress legacy behavior")
         elif name in CASES[11:15]:
-            results[name] = remote_case(name, m, sources, budget)
+            remotes[name] = remote_case(name, m, sources, budget)
+            results[name] = remotes[name]["status"]
         elif name == "missing-selected-python":
             with tempfile.TemporaryDirectory() as d:
                 absent = Path(d) / "no-python"
@@ -248,7 +254,10 @@ def qualify():
     return {"status": "CERTIFIED ARTIFACTS ONLY", "cases": results,
             "semantic": details, "protection": protection, "resource_probes": controls,
             "case_count": len(results), "valid_vector_count": 2 * len(VECTORS),
-            "process_count": budget.processes, "parent_owned_bytes": budget.used,
+            "remote_cases": remotes,
+            "executed_semantic_vectors": sum(len(r["vectors"]) for r in details.values()),
+            "managed_process_count": budget.processes, "parent_owned_bytes": budget.used,
+            "process_count_scope": "wrapper launches, excludes nested unittest CLI subcalls",
             "limits": "trusted host fixtures; no arbitrary candidate or paired/live calibration"}
 
 

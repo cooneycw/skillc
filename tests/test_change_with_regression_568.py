@@ -46,6 +46,11 @@ def test_fixed_population_discriminates_artifacts(certified: dict[str, Any]) -> 
     assert cases["remote-correct-local-wrong"] == "PASS"
     assert cases["remote-wrong-local-correct"] == "FAIL"
     assert cases["unreadable-remote-object"] == cases["unsupported-packed-remote"] == "UNKNOWN"
+    assert certified["executed_semantic_vectors"] == 11 * 24
+    remote = certified["remote_cases"]["remote-correct-local-wrong"]
+    assert remote["files"]["inventory.py"]["mode"] == "100644"
+    assert len(remote["files"]["inventory.py"]["sha256"]) == 64
+    assert remote["remote_vector"]["feature"] and not remote["local_vector"]["feature"]
     initial = certified["semantic"]["initial-missing-batch"]
     assert initial["legacy"] and not initial["feature"]
 
@@ -138,3 +143,19 @@ def test_no_arbitrary_candidate_cli(q: Any, tmp_path: Path) -> None:
                           capture_output=True, text=True, timeout=5, check=False)
     assert proc.returncode == 64
     assert "committed fixture cases only" in proc.stderr
+
+
+def test_capture_limit_cannot_be_called_a_valid_remote(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = q.o.load_sources()
+    m = q.manifest(sources)
+    real = q.o.remote_files
+    monkeypatch.setattr(q.o, "remote_files", lambda export: real(export, max_bytes=1))
+    with pytest.raises(q.o.Unavailable, match="capture budget"):
+        q.remote_case("remote-correct-local-wrong", m, sources, q.o.Budget())
+
+
+def test_uncommitted_source_is_not_host_executable(q: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert (TASK / "candidates/reference.py").read_bytes()
+    monkeypatch.setattr(q.o.subprocess, "check_output", lambda *a, **kw: b"not the committed source")
+    with pytest.raises(q.o.Unavailable, match="differs from HEAD"):
+        q.o.load_sources()

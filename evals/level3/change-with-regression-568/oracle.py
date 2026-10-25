@@ -202,14 +202,15 @@ def vector(code, row, budget):
         else:
             feature, legacy = True, bool(output_ok and after["items"] == expected and preserved)
         return {"id": row["id"], "feature": bool(feature), "legacy": legacy, "code": rc,
-                "stdout": stdout, "stderr": stderr, "items": after["items"], "audit": after["audit"]}
+                "stdout": stdout, "stderr": stderr, "items": after["items"], "audit": after["audit"],
+                "managed_steps": 1}
 
 
 def semantic(name, manifest, sources, budget):
     code = program(name, manifest, sources)
     results = [vector(code, row, budget) for row in manifest["vectors"]]
     return {"feature": all(r["feature"] for r in results), "legacy": all(r["legacy"] for r in results),
-            "vectors": results}
+            "vectors": results, "program_sha256": hashlib.sha256(code).hexdigest()}
 
 
 def project_tests(name, manifest, sources, budget):
@@ -237,7 +238,7 @@ def test_population(row):
         raise Unavailable("test population unavailable or skipped")
 
 
-def remote_files(export, remote=".remote/widget.git"):
+def remote_files(export, remote=".remote/widget.git", max_bytes=64 * LIMIT):
     """Read bytes of this supplied export's remote main, never its local working tree."""
     from skillc.git_snapshot import GitDir, SafeTree, Unreadable
     try:
@@ -246,6 +247,7 @@ def remote_files(export, remote=".remote/widget.git"):
         commit = git.refs()["refs/heads/main"]
         tree = git.tree_of(commit)
         result = {}
+        total = 0
         for path, entry in git.tree_files(tree).items():
             mode, blob = entry.split()
             if mode not in ("100644", "100755"):
@@ -253,6 +255,9 @@ def remote_files(export, remote=".remote/widget.git"):
             kind, data = git.object(blob)
             if kind != "blob":
                 raise Unavailable("remote file is not a blob")
+            total += len(data)
+            if total > max_bytes or len(result) >= 1024:
+                raise Unavailable("remote artifact capture budget")
             result[path] = {"mode": mode, "blob": blob, "data": data}
         if not result:
             raise Unavailable("empty remote artifact")
