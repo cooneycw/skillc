@@ -160,11 +160,12 @@ def state(db):
                 "audit": c.execute("SELECT * FROM audit ORDER BY event_id").fetchall() if "audit" in names else []}
 
 
-def seed(db, kind=None):
+def seed(db, kind=None, extra=()):
     if kind != "missing":
         with sqlite3.connect(db) as c:
             if kind != "empty":
                 c.executescript(SCHEMA)
+                c.executemany("INSERT INTO items VALUES (?,?,?,?)", extra)
 
 
 def vector(code, row, budget):
@@ -172,7 +173,7 @@ def vector(code, row, budget):
         d = Path(tmp)
         budget.write(d / "inventory.py", code)
         db, data = d / "db", d / "input"
-        seed(db, row.get("db"))
+        seed(db, row.get("db"), row.get("extra_items", ()))
         before = state(db)
         if not row.get("missing_input"):
             budget.write(data, bytes.fromhex(row["hex"]) if "hex" in row else row["input"].encode())
@@ -183,7 +184,12 @@ def vector(code, row, budget):
         else:
             action = {"set": "inventory.set_quantity('db','A',8);",
                       "new": "inventory.set_quantity('db','B',2);", "list": ""}[row["action"]]
-            argv = [sys.executable, "-c", "import inventory,json;" + action + "print(json.dumps(inventory.list_items('db')))"]
+            checks = ("for sku,quantity in [(' A',8),('A',True),('A',-1)]:\n"
+                      " try: inventory.set_quantity('db',sku,quantity)\n"
+                      " except ValueError: pass\n"
+                      " else: raise AssertionError('legacy validation lost')\n") if row["action"] == "set" else ""
+            argv = [sys.executable, "-c", "import inventory,json\n" + checks + action
+                    + "\nprint(json.dumps(inventory.list_items('db')))"]
         rc, stdout, stderr = bounded(argv, d, budget)
         after = state(db)
         try:
