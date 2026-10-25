@@ -377,7 +377,12 @@
     "pins-body",
     "pins-description",
     "pins-empty",
-    "hidden-skill"
+    "hidden-skill",
+    "wrong-client-surface"
   ],
-  "installed_body": "---\nname: tdd\ndescription: A synthetic test skill.\n---\n# tdd\n"
+  "installed_body": "---\nname: tdd\ndescription: A synthetic test skill.\n---\n# tdd\n",
+  "planner_reject": [
+    "treatment-digest",
+    "skill-pins"
+  ]
 }

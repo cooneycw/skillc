@@ -516,8 +516,8 @@ def _require_explicit_product(
     if installed_home_digest(treatment) != raw["installed_home_digest"]:
         raise CalibrationRefused("explicit_product installed_home_digest differs from actual delivered bytes/modes")
     surface = m.SURFACES.get(treatment.receipt_context.surface_name)
-    if surface is None:
-        raise CalibrationRefused("explicit_product receipt names an unsupported skill surface")
+    if surface is None or surface.client != declared_client(declaration)[0]:
+        raise CalibrationRefused("explicit_product receipt surface differs from the declared client")
     prefix = PurePosixPath(surface.home_skills_relpath)
     expected_paths = {str(prefix / name / "SKILL.md") for name in raw["selected_skills"]}
     installed_paths = {path for path in treatment.home_files

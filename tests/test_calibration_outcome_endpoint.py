@@ -658,6 +658,15 @@ def test_explicit_product_identity_refuses_before_side_effects(
         treatment = dataclasses.replace(treatment, home_modes={
             "extra" if change == "orphan-mode" else ".codex/skills/tdd/SKILL.md":
             "invalid" if change == "unknown-mode" else "100755"})
+    elif change == "wrong-client-surface":
+        assert treatment.receipt_context is not None
+        treatment = dataclasses.replace(
+            treatment, home_files={p.replace(".codex/", ".claude/"): b for p, b in treatment.home_files.items()},
+            receipt_context=dataclasses.replace(treatment.receipt_context, surface_name="claude-code-skills"),
+            skill_digests=tuple({**pin, "path": pin["path"].replace(".codex/", ".claude/")}
+                               for pin in treatment.skill_digests))
+        data["explicit_product"]["installed_home_digest"] = cr.installed_home_digest(treatment)
+        _approve(data)
     elif change.startswith("pins-"):
         pins = [dict(pin) for pin in treatment.skill_digests]
         if change == "pins-empty":
@@ -712,4 +721,22 @@ def test_explicit_product_direct_planner_reparses_mutated_endpoint(
         cr.plan_calibration(declaration, tmp_path / "store", root=ROOT,
                             treatment_digest="sha256:" + "ab" * 32,
                             image_digest="sha256:" + "cd" * 32, skill_digests=_TEST_PINS)
+    assert called == []
+
+
+@pytest.mark.parametrize("change", _EXPLICIT_CASES["planner_reject"])
+def test_explicit_product_direct_planner_arguments_are_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    declaration = calibration.parse_declaration(_EXPLICIT_CASES["valid"])
+    treatment = _explicit_treatment()
+    called = []
+    monkeypatch.setattr(trial, "plan", lambda *args: called.append(args))
+    with pytest.raises(cr.CalibrationRefused, match="planned treatment"):
+        cr.plan_calibration(
+            declaration, tmp_path / "store", root=ROOT, treatment=treatment,
+            treatment_digest="sha256:" + "e" * 64 if change == "treatment-digest" else treatment.digest,
+            image_digest="sha256:" + "cd" * 32,
+            skill_digests=_TEST_PINS if change == "skill-pins" else treatment.skill_digests,
+        )
     assert called == []
