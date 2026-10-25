@@ -54,7 +54,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Concatenate, ParamSpec, TypeVar
 
-from . import checks, records
+from . import checks, completion, records
 from .materialize import Refused as NotOwned
 from .materialize import cleanup as remove_owned
 from .materialize import create_root, forbidden_roots, refuse_protected
@@ -464,7 +464,51 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: picked up as the workspace record and crash with KeyError (confirmed) or, for a
 #: path/nonce-shaped forgery, silently misdirect cleanup.
 _DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
-                  "controller-turn", "transcript-retained", "gate-witness-retained")
+                  "controller-turn", "transcript-retained", "gate-witness-retained",
+                  "completion-opt-in", "completion-qualified", "owned-attempt", "owned-attempt-cleanup", "launch-suppressed")
+
+
+class OwnedAttemptIds(list[str]):
+    """Caller-visible IDs persisted before preparation; retention is not cleanup."""
+
+    def __init__(self, experiment: Experiment, parent_attempt: str) -> None:
+        super().__init__()
+        experiment.trial_of(parent_attempt)
+        self.experiment, self.parent_attempt = experiment, parent_attempt
+        self._ownership_lock = threading.RLock()
+        self._absent: dict[str, bool] = {}
+        self._journal_appends: list[bytes] = []
+
+    def bound_to(self, experiment: Experiment, attempt: str) -> bool:
+        return self.experiment.root.resolve() == experiment.root.resolve() and self.parent_attempt == attempt
+
+    def append(self, attempt: str) -> None:
+        with self._ownership_lock, experiment_lock(self.experiment.root):
+            if not isinstance(attempt, str) or not attempt or attempt == self.parent_attempt or attempt in self:
+                raise Refused("invalid or duplicate owned attempt identity")
+            if any(e.get("event") == "owned-attempt" and e.get("owned_id") == attempt
+                   for _, planned in self.experiment.attempts()
+                   for e in self.experiment.events(str(planned["attempt_id"]))):
+                raise Refused("owned attempt was already registered")
+            self._record("owned-attempt", owned_id=attempt)
+            super().append(attempt)
+            self._absent[attempt] = False
+
+    def confirm(self, attempt: str, absent: bool) -> None:
+        with self._ownership_lock:
+            if attempt not in self._absent:
+                raise Refused("cannot confirm an unregistered owned attempt")
+            self._record("owned-attempt-cleanup", owned_id=attempt, confirmed=absent)
+            self._absent[attempt] = absent
+
+    def _record(self, event: str, **detail: object) -> None:
+        at = _now()
+        self.experiment.record(self.parent_attempt, event, at=at, **detail)
+        self._journal_appends.append((json.dumps({"event": event, "at": at, **detail}, sort_keys=True) + "\n").encode())
+
+    def all_absent(self) -> bool:
+        with self._ownership_lock:
+            return all(self._absent.values())
 
 
 def _read_object(root: Path, digest: str) -> bytes:
@@ -803,6 +847,7 @@ def run_attempt(
     env: dict[str, str] | None = None,
     cancel: Callable[[], bool] | None = None,
     grace: float = 2.0,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> dict[str, object]:
     """Run the subject once and confirm it stopped.
 
@@ -824,6 +869,15 @@ def run_attempt(
     stop: dict[str, object]
     with open(out_path, "xb") as out, open(err_path, "xb") as err:
         try:
+            if completion_deadline is not None:
+                try:
+                    timeout = completion_deadline.remaining(timeout)
+                except completion.CompletionUnavailable as exc:
+                    experiment.record(attempt_id, "launch-suppressed", reason=str(exc))
+                    stop = {"reason": "launch-failed", "confirmed": True, "exit_code": None, "error": str(exc)}
+                    experiment.record(attempt_id, "stopped", **stop)
+                    experiment.record(attempt_id, "stop-confirmed")
+                    return stop
             proc = subprocess.Popen(
                 argv, cwd=cwd, env=env if env is not None else {"PATH": os.environ.get("PATH", os.defpath)},
                 stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True,
@@ -843,7 +897,13 @@ def run_attempt(
             deadline = time.monotonic() + timeout
             reason = "exited"
             while proc.poll() is None:
-                if time.monotonic() >= deadline:
+                try:
+                    if completion_deadline is not None:
+                        completion_deadline.remaining(timeout)
+                except completion.CompletionUnavailable:
+                    reason = "timeout"
+                    break
+                if completion_deadline is None and time.monotonic() >= deadline:
                     reason = "timeout"
                     break
                 if cancel is not None and cancel():

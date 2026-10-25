@@ -89,6 +89,7 @@ from pathlib import Path
 
 from . import (
     agent_trial,
+    completion,
     credential,
     degrade,
     demo,
@@ -713,6 +714,8 @@ def run_level1_agent_attempt(
     declared_model: str | None = None,
     extra_home_modes: Mapping[str, str] | None = None,
     project_gate: object = FROM_TASK,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -766,6 +769,7 @@ def run_level1_agent_attempt(
         cli_version=cli_version,
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
+        completion_deadline=completion_deadline, recorded_attempt_ids=recorded_attempt_ids,
         receipt_context=receipt_context,
         verify_home_files=verify_home_files,
         preflight_tools=preflight_tools,

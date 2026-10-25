@@ -26,7 +26,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from . import trial
+from . import completion, trial
 from .decide_reply_channel import ChannelRefusal, DecideReplyChannel
 
 ROLES = ("orchestrator", "worker-a", "worker-b")
@@ -216,7 +216,8 @@ def _captured_output(experiment: trial.Experiment, manifest: Mapping[str, Any],
 
 
 def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
-             *, clock: Callable[[], float] = time.monotonic) -> WaveResult:
+             *, clock: Callable[[], float] = time.monotonic,
+             completion_deadline: completion.CompletionDeadline | None = None) -> WaveResult:
     """Execute only controller-trusted pinned scripted participants.
 
     The common deadline includes setup/capture/cleanup and provisional evidence.
@@ -226,7 +227,12 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
     and Python threads have no hard interrupt guarantee. Teardown can exceed
     the deadline and never earns on-time success. No native wake is observed.
     """
-    started = clock()
+    shared_deadline = (completion.CompletionDeadline.after(plan.deadline, clock) if completion_deadline is None
+                       else completion_deadline.child(plan.deadline))
+    clock_kind = shared_deadline.marker("wave")["clock"]
+    clock = shared_deadline._clock.sample
+    started = shared_deadline.start
+    effective_deadline = shared_deadline.end - started
     source = _validate(plan, actor)
     store = trial.open_store(store, forbidden=[workspace_base])
     spec = dataclasses.asdict(plan)
@@ -290,7 +296,7 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
         record: dict[str, Any] = {"attempt_id": aid, "model": None, "client": "scripted-python"}
         try:
             workspace = trial.allocate_workspace(experiment, aid, workspace_base, [])
-            remaining = plan.deadline - (clock() - started)
+            remaining = effective_deadline - (clock() - started)
             if controller.cancel.is_set():
                 return
             if remaining <= 0:
@@ -300,7 +306,8 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
             config.update(wave=experiment.root.name, mode=plan.mode)
             result = trial.run_attempt(experiment, aid,
                                        [sys.executable, "-I", str(staged_actor), str(socket_path), json.dumps(config)],
-                                       workspace, remaining, grace=0.2, cancel=controller.cancel.is_set)
+                                       workspace, remaining, grace=0.2, cancel=controller.cancel.is_set,
+                                       completion_deadline=shared_deadline)
             record["stop"] = result
             stopped = result.get("confirmed") is True
             if result.get("reason") == "launch-failed":
@@ -390,7 +397,7 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
             thread.start()
         while any(t.is_alive() for t in threads):
             with controller.lock:
-                if clock() - started >= plan.deadline:
+                if clock() - started >= effective_deadline:
                     controller.cancel_for_deadline()
             for thread in threads:
                 thread.join(timeout=0.01)
@@ -484,16 +491,16 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
             raise
 
     events_digest = publish(experiment.root / "wave-events.json", controller.events)
-    if clock() - started > plan.deadline and not controller.unknown:
+    if clock() - started > effective_deadline and not controller.unknown:
         controller.fail("deadline")
     report: dict[str, Any] = {"version": 1, "primary": {"unit": "wave", "planned": 1},
                               "status": "FAIL" if controller.failures else "UNKNOWN" if controller.unknown else "PASS",
                               "failures": sorted(controller.failures), "unknown": sorted(controller.unknown),
-                              "elapsed": clock() - started, "deadline": plan.deadline,
+                              "elapsed": clock() - started, "deadline": effective_deadline, "declared_deadline": plan.deadline,
                               "roles": diagnostics, "plan_digest": plan_digest, "events_digest": events_digest,
                               "channel_digests": channel_digests,
                               "outputs": dict(controller.outputs), "native_wake": "UNOBSERVED"}
-    report["clock"] = "monotonic" if clock is time.monotonic else "injected-policy-only"
+    report["clock"] = clock_kind
     report["primary"]["completed"] = int(report["status"] == "PASS")
     provisional = {**report, "status": "UNKNOWN", "primary": {**report["primary"], "completed": 0},
                    "unknown": sorted(controller.unknown | {"decision-publication-pending"})}
@@ -502,7 +509,7 @@ def run_wave(plan: WavePlan, actor: Path, store: Path, workspace_base: Path,
     report.update(elapsed=completion_elapsed, completion_elapsed=completion_elapsed,
                   deadline_scope="through-verified-cleanup-and-provisional-evidence",
                   final_decision_emission="outside-completion-deadline")
-    if completion_elapsed > plan.deadline and not controller.unknown:
+    if completion_elapsed > effective_deadline and not controller.unknown:
         report.update(status="FAIL", failures=sorted(controller.failures | {"deadline"}))
         report["primary"]["completed"] = 0
     late = experiment.root / "wave-report-late.json"  # Staged candidate, never authoritative.

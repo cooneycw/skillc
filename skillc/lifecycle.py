@@ -110,7 +110,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from . import trial
+from . import completion, trial
 from .backend import (
     BackendUnavailable,
     Confirmation,
@@ -250,6 +250,7 @@ def _run_turns(
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None],
     order: Order | None = None,
     before_stop: Callable[[ExecutionBackend, object], None] | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> ExecuteResult:
     """#279: one attempt as controller-delivered turns, each in the SAME
     still-running container (`TurnCapableBackend.execute_turn`). A further turn
@@ -273,6 +274,8 @@ def _run_turns(
 
     started_at = time.monotonic()
     try:
+        if completion_deadline is not None:
+            limits = dataclasses.replace(limits, timeout=completion_deadline.remaining(limits.timeout))
         result = backend.execute_turn(handle, argv, limits, cancel)
         assert isinstance(result, ExecuteResult)
         turn = 1
@@ -288,7 +291,14 @@ def _run_turns(
             nxt = next_turn(backend, handle, turn, result)
             if nxt is None:
                 break
-            remaining = limits.timeout - (time.monotonic() - started_at)
+            try:
+                remaining = (completion_deadline.remaining(limits.timeout) if completion_deadline is not None
+                             else limits.timeout - (time.monotonic() - started_at))
+            except completion.CompletionUnavailable:
+                experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
+                                  reason="completion unavailable before next turn", **stamp())
+                result = dataclasses.replace(result, reason="timeout")
+                break
             if remaining <= 0:
                 experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
                                   reason="the attempt's wall budget was spent before this turn", **stamp())
@@ -330,6 +340,7 @@ def run_through_backend(
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None] | None = None,
     order: Order | None = None,
     before_stop: Callable[[ExecutionBackend, object], None] | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -491,7 +502,11 @@ def run_through_backend(
                     before = {}
 
                 experiment.record(attempt_id, "dispatched")
-                experiment.record(attempt_id, "started")
+                started_at = trial._now()
+                if completion_deadline is None:
+                    experiment.record(attempt_id, "started")
+                else:
+                    limits = dataclasses.replace(limits, timeout=completion_deadline.remaining(limits.timeout))
                 if next_turn is None and (before_stop is None or not isinstance(backend, TurnCapableBackend)):
                     # A backend that cannot keep the container up gets its
                     # `before_stop` after the stop: the hook then fails to
@@ -507,8 +522,11 @@ def run_through_backend(
                     # the subject exits, which only the turn path keeps - a
                     # single turn is the turn path with no next turn.
                     result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel,
-                                        next_turn or (lambda *_: None), order=order, before_stop=before_stop)
+                                        next_turn or (lambda *_: None), order=order, before_stop=before_stop,
+                                        completion_deadline=completion_deadline)
                 assert isinstance(result, ExecuteResult)
+                if completion_deadline is not None and result.reason not in _NEVER_STARTED:
+                    experiment.record(attempt_id, "started", at=started_at)
                 if result.reason != "exited":
                     experiment.record(attempt_id, "stop-requested", reason=result.reason)
 
@@ -586,6 +604,12 @@ def run_through_backend(
                                 )
                             except trial.Refused:
                                 pass  # capture() already recorded capture-failed; nothing more here
+    except completion.CompletionUnavailable as exc:
+        unavailable_reason = str(exc)
+        experiment.record(attempt_id, "launch-suppressed", reason=str(exc))
+        if any(e.get("event") == "dispatched" for e in experiment.events(attempt_id)):
+            experiment.record(attempt_id, "stopped", reason="launch-failed", confirmed=True, exit_code=None)
+            experiment.record(attempt_id, "stop-confirmed")
     finally:
         # TEARDOWN FAILURE IS ITS OWN FAILURE PATH (#79), never a reason to
         # skip accounting. Before this fix, an exception from `destroy()` or
