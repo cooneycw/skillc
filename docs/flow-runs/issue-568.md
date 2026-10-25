@@ -635,3 +635,33 @@ No image build, physical Docker, profile installation, full repository check,
 independent review, receipt, CI or live study has run at this checkpoint. Actual
 cold controls, consuming missing-sibling red, resource/cleanup evidence and later
 review remain owed. Full flow capability remains UNPROVEN.
+
+### Read-only audit corrections before Docker slot
+
+AA supplied source support on6dad3f9, not a different-model review or physical
+execution. Accepted cleanup/absence, active-test-cause, root-readonly control and
+identity-retention gaps were corrected within the existing lane. Normal work now
+reserves120s of the same1800s endpoint for cleanup; no fresh cleanup timer extends
+completion credit. Every resource is accounted despite an earlier cleanup error;
+uncertain absence needs owned rescue. Owned names are journaled before allocation,
+cleanup outcomes after each resource, and a bounded UNKNOWN diagnostic retains
+identities/partial cases/events outside completion time without claiming success.
+
+The expired-cleanup regression ran against the exact unmodified6dad3f9 Budget
+implementation: it launched after expiry and the new assertion failed with
+DID NOT RAISE RuntimeError. Corrected implementation passes. New population,
+root-readonly and cleanup controls discriminate known-bad/healthy inputs; these
+are instrument controls, not API-absence regression claims. The committed120-file
+input removes only the preferred sibling declaration and exercises the same
+actual consumer/oracle before the121-file positive. Its physical outcome and all
+ten cold cases remain unexecuted pending Docker slot. Expected substeps are
+explicit; a mere nonzero runner exit cannot satisfy the failing-test control.
+
+Root's cleanup-retention follow-up also discriminated on actual pre-fix code:
+a controlled cleanup.json write failure raised OSError and skipped later owned
+resources. The preimage and red log are retained. The corrected same-path input
+continues all three resources, marks the first retention failure unconfirmed,
+and cannot yield all-absent success. Final focused selection32passed/1explicit
+physical skip,33collection/JUnit identities matched; lint and two-module types
+pass. Authored added+deleted1454/1500; pinned-source bytes/modes unchanged.
+Physical Docker/120-declaration consuming result remain pending actual slot.

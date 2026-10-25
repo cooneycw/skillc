@@ -22,6 +22,9 @@ No image tag or prospective source inventory substitutes for that report.
 
 One 1800s budget covers staging/build/cases/evidence/cleanup. Builds are capped
 at 300s, cases at 60s, other commands at 30s; each uses original remaining time.
+Normal work reserves the final120s of that SAME1800s endpoint for cleanup.
+Cleanup accounts every owned resource; expiry suppresses new daemon launches
+and requires an UNKNOWN handoff for owned rescue, never late success.
 Streams are file-backed, limited to 1MiB each; parent staging/retention 64MiB.
 Runtime containers use network none, read-only root, 512MiB memory and combined
 memory+swap, CPU1 and pids128. Writable tmpfs maxima are home256MiB, work/cache256MiB,

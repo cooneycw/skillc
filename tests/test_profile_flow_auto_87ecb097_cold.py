@@ -21,12 +21,21 @@ from typing import Any
 CASES = ("source-valid-closure", "source-missing-dependency", "cold-install-clean",
          "cold-sibling-route", "cold-content-drift", "cold-mode-drift", "cold-offline-runner",
          "cold-cache-unavailable", "cold-forbidden-mount", "cold-review-evidence-absent")
+EXPECTED_SUBSTEPS = dict(zip(CASES, (1, 1, 7, 13, 7, 7, 11, 7, 1, 9), strict=True))
 LIMIT = 1024 * 1024
 
 
 def need(value: Any, reason: str) -> None:
     if not value:
         raise RuntimeError(reason)
+
+
+def case_population(rows: list[dict[str, Any]]) -> None:
+    need([r["case"] for r in rows] == list(CASES), "cold expected/executed population")
+    for row in rows:
+        row["executed_substeps"] = len(row.get("observations", []))
+        row["expected_substeps"] = EXPECTED_SUBSTEPS[row["case"]]
+        need(not row.get("skipped") and row["executed_substeps"] == row["expected_substeps"], "case substep population")
 
 
 def settings(info: dict[str, Any], synthetic: bool = False) -> None:
@@ -41,8 +50,9 @@ def settings(info: dict[str, Any], synthetic: bool = False) -> None:
 
 
 class Budget:
-    def __init__(self, root: Path, seconds: float = 1800) -> None:
+    def __init__(self, root: Path, seconds: float = 1800, reserve: float = 0) -> None:
         self.root, self.deadline = root, time.monotonic() + seconds
+        self.work_deadline = self.deadline - reserve
         self.used, self.calls = 0, 0
         self.events: list[dict[str, Any]] = []
 
@@ -68,12 +78,16 @@ class Budget:
                 cwd: Path | None = None, env: dict[str, str] | None = None) -> tuple[int, str, str]:
         if not cleanup:
             self.check()
-        remaining = min(cap, 30 if cleanup else self.deadline - time.monotonic())
+        remaining = min(cap, (self.deadline if cleanup else self.work_deadline) - time.monotonic())
         need(remaining > 0, "no launch after expiry")
+        self.used = sum(p.stat().st_size for p in self.root.rglob("*") if p.is_file())
+        need(self.used + 2 * LIMIT <= 63 * LIMIT, "parent streams/diagnostic reserve")
         self.calls += 1
         paths = [self.root / f"command-{self.calls}.{s}" for s in ("out", "err")]
         launcher = "import resource,os,sys;resource.setrlimit(resource.RLIMIT_FSIZE,(int(sys.argv[1]),)*2);os.execvp(sys.argv[2],sys.argv[2:])"
         with paths[0].open("xb") as out, paths[1].open("xb") as err:
+            remaining = min(cap, (self.deadline if cleanup else self.work_deadline) - time.monotonic())
+            need(remaining > 0, "no launch after expiry")
             p = subprocess.Popen([sys.executable, "-c", launcher, str(LIMIT), *argv],
                                  cwd=cwd, env=env, stdout=out, stderr=err, start_new_session=True)
             try:
@@ -88,6 +102,41 @@ class Budget:
         if not cleanup:
             self.check()
         return p.returncode, paths[0].read_text(), paths[1].read_text()
+
+
+def failure_diagnostic(path: Path, value: dict[str, Any]) -> None:
+    value = {**value, "status": "UNKNOWN diagnostic; not completion evidence",
+             "publication_scope": "outside completion budget; failure retention only"}
+    payload = json.dumps(value, indent=2) + "\n"
+    need(len(payload.encode()) <= LIMIT, "failure diagnostic limit")
+    path.write_text(payload)
+
+
+def cleanup_owned(budget: Budget, containers: list[str], tags: list[str], nonce: str) -> list[dict[str, Any]]:
+    outcomes = []
+    for kind, names in (("container", containers), ("image", tags)):
+        for name in reversed(names):
+            row: dict[str, Any] = {"kind": kind, "name": name, "absent": False}
+            prefix = ["docker"] + (["image"] if kind == "image" else [])
+            try:
+                rc, out, err = budget.command([*prefix, "inspect", name], cleanup=True)
+                if rc:
+                    need("No such" in err, "ownership/absence unavailable")
+                else:
+                    need(json.loads(out)[0]["Config"]["Labels"]["skillc.b3a"] == nonce, "refuse foreign cleanup")
+                    remove = [*prefix, "rm"] + (["-f"] if kind == "container" else [])
+                    need(budget.command([*remove, name], cleanup=True)[0] == 0, "owned removal failed")
+                    rc, _, err = budget.command([*prefix, "inspect", name], cleanup=True)
+                    need(rc != 0 and "No such" in err, "absence unconfirmed")
+                row["absent"] = True
+            except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+                row["error"] = str(exc)
+            outcomes.append(row)
+            try:
+                (budget.root / "cleanup.json").write_text(json.dumps(outcomes, indent=2) + "\n")
+            except OSError as exc:
+                row.update(absent=False, retention_error=str(exc))
+    return outcomes
 
 
 # Everything below actor() runs inside the isolated disposable container.
@@ -119,10 +168,35 @@ def actor(case: str) -> dict[str, Any]:
     need(call(["git", "commit", "-qm", "seed"], project)[0] == 0, "seed commit")
     preferred = home / ".claude/scripts"
     bundled = home / ".codex/skills/flow-auto/scripts"
+    if case == "cold-install-clean":
+        rc, versions = call(["bash", "-c", "python --version; uv --version; dpkg-query -W git make bash"], project)
+        need(rc == 0 and "Python 3." in versions and "uv 0.9.7" in versions
+             and all(name + "\t" in versions for name in ("git", "make", "bash")), "actual runtime tool versions")
     if case == "cold-sibling-route":
+        # Committed pre-fix input: exactly the preferred sibling declaration is absent.
+        raw = json.loads(decl.read_text())
+        dep = next(d for d in raw["dependencies"] if d["id"] == "helper-flow-auto")
+        dep["paths"].remove("stash-worktree-guard.sh")
+        before = profile.validate(profile.Profile.from_dict(raw, decl.parent), profile.DirTree(source))
+        need(len(profile.installed_home_files(before, profile.DirTree(source))) == 120, "pre-fix population")
+        old_home = home / "before"
+        old_home.mkdir()
+        profile.install(before, profile.DirTree(source), old_home)
+        observations.append({"pre_fix_installed_files": 120})
+        def route_verdict(rc: int, text: str) -> None:
+            need(rc == 0 and ("STASH_GUARD=current" in text or "STASH_GUARD=installed" in text), "actual sibling positive")
+        rc, text = call(["bash", str(old_home / ".claude/scripts/flow-start-resolve.sh"), "--verify", "42", "issue-42-cold"], project)
+        need(rc == 0 and "STASH_GUARD=unknown" in text, "specific pre-fix sibling absence reached")
+        try:
+            route_verdict(rc, text)
+        except RuntimeError as exc:
+            need(str(exc) == "actual sibling positive", "unrelated pre-fix cause")
+            observations.append({"pre_fix_consumer": "RED: unknown stash guard"})
+        else:
+            raise RuntimeError("120-file consuming control blind")
         for directory in (preferred, bundled):
             rc, text = call(["bash", str(directory / "flow-start-resolve.sh"), "--verify", "42", "issue-42-cold"], project)
-            need(rc == 0 and ("STASH_GUARD=current" in text or "STASH_GUARD=installed" in text), "actual sibling positive")
+            route_verdict(rc, text)
             guard = directory / "stash-worktree-guard.sh"
             original = guard.read_bytes()
             guard.unlink()
@@ -138,6 +212,7 @@ def actor(case: str) -> dict[str, Any]:
             target.chmod(0o644)
         rows = profile.verify_installed(inv, home)["files"]
         need(any(r["status"] == "violated" for r in rows), "installed drift refused")
+        need(next(r for r in rows if r["destination"] == ".claude/scripts/flow-start-resolve.sh")["status"] == "violated", "mutated path cause")
         observations.append({"drift": rows})
     elif case in ("cold-offline-runner", "cold-cache-unavailable"):
         checkout = home / "Projects/claude-power-pack"
@@ -175,7 +250,10 @@ def actor(case: str) -> dict[str, Any]:
                 if not passing:
                     test.write_text(test.read_text().replace("assertTrue(True)", "assertTrue(False)"))
                 rc, text = call([python, "-m", "lib.cicd", "run", "--plan", "check", "--path", str(project)], project, env)
-                need((rc == 0) == passing, "real check-plan active/failing twin")
+                need((rc == 0) == passing and "test_active" in text and "Ran 1 test" in text,
+                     "real check-plan must execute the selected active test")
+                need(("OK" in text) if passing else ("FAIL: test_active" in text and "AssertionError" in text),
+                     "runner verdict must come from the actual active test")
     elif case == "cold-review-evidence-absent":
         (project / "docs/measurements/counter-model").mkdir(parents=True)
         rc, text = call(["bash", str(preferred / "flow-finish-gate.sh"), "--enrolment-only"], project)
@@ -194,13 +272,18 @@ def actor(case: str) -> dict[str, Any]:
 
 def cold_proof(tmp: Path) -> dict[str, Any]:
     import test_profile_flow_auto_87ecb097 as spec
-    budget = Budget(tmp)
+    budget = Budget(tmp, reserve=120)
     nonce = uuid.uuid4().hex
     containers: list[str] = []
     images: list[str] = []
     tags: list[str] = []
     rows: list[dict[str, Any]] = []
     cleanup: list[Any] = []
+    identities: dict[str, Any] = {"images": [], "build_dispositions": {}}
+    def ownership() -> None:
+        (tmp / "owned.json").write_text(json.dumps({"nonce": nonce, "containers": containers,
+            "tags": tags, "images": images, "identities": identities}, indent=2) + "\n")
+    ownership()
     context = tmp / "context"
     context.mkdir()
     try:
@@ -212,9 +295,13 @@ def cold_proof(tmp: Path) -> dict[str, Any]:
         for name in paths:
             rc, out, _ = budget.command(["git", "status", "--porcelain", "--", name])
             need(rc == 0 and not out, "build source must be committed and clean")
+        rc, head, _ = budget.command(["git", "rev-parse", "HEAD"])
+        need(rc == 0, "source commit unavailable")
+        rc, tree_id, _ = budget.command(["git", "rev-parse", "HEAD^{tree}"])
+        need(rc == 0, "source tree unavailable")
+        identities.update(commit=head.strip(), tree=tree_id.strip())
         archive = tmp / "context.tar"
-        with archive.open("wb") as archive_stream:
-            subprocess.run(["git", "archive", "HEAD", *paths], stdout=archive_stream, check=True, timeout=30)
+        need(budget.command(["git", "archive", "--output", str(archive), "HEAD", *paths])[0] == 0, "source archive")
         budget.check()
         import tarfile
         with tarfile.open(archive) as tar:
@@ -228,29 +315,37 @@ def cold_proof(tmp: Path) -> dict[str, Any]:
         for target in ("cached", "uncached"):
             tag = f"skillc-b3a-{nonce}:{target}"
             tags.append(tag)
+            ownership()
+            identities["build_dispositions"][target] = "active or cancellation unconfirmed"
+            ownership()
             rc, _, err = budget.command(["docker", "build", "--target", target, "--label", f"skillc.b3a={nonce}",
                                         "-t", tag, "-f", str(context / "docker/profile-flow-auto-568/Dockerfile"), str(context)], 300)
             need(rc == 0, "purpose image build unavailable: " + err[-500:])
+            identities["build_dispositions"][target] = "command completed"
             rc, output, _ = budget.command(["docker", "image", "inspect", tag])
             info = json.loads(output)[0]
             need(rc == 0 and info["Config"]["Labels"]["skillc.b3a"] == nonce, "owned image identity")
             images.append(info["Id"])
+            identities["images"].append({"target": target, "tag": tag, "id": info["Id"], "label": nonce})
+            ownership()
         spec.check_source()
+        identities["source_manifest_sha256"] = hashlib.sha256((json.dumps(spec.source_manifest(), indent=2) + "\n").encode()).hexdigest()
         inv, tree = spec.inventory()
         need(len(spec.profile.installed_home_files(inv, tree)) == 121, "normal source closure")
-        rows.append({"case": CASES[0], "source_files": 388, "installed_plan": 121})
+        rows.append({"case": CASES[0], "observations": [{"source_files": 388, "installed_plan": 121}]})
         raw = json.loads(spec.DECLARATION.read_text())
         raw["dependencies"] = [d for d in raw["dependencies"] if d["id"] != "helper-gate-lib"]
         try:
             spec.profile.validate(spec.profile.Profile.from_dict(raw, spec.DECLARATION.parent), tree)
         except spec.profile.Refused:
-            rows.append({"case": CASES[1], "negative": "normal validator REFUSED"})
+            rows.append({"case": CASES[1], "observations": [{"negative": "normal validator REFUSED"}]})
         else:
             raise RuntimeError("missing dependency accepted")
         for case in CASES[2:]:
             case_end = min(budget.deadline, time.monotonic() + 60)
             name = f"skillc-b3a-{nonce}-{len(containers)}"
             containers.append(name)  # Ownership name recorded BEFORE daemon allocation.
+            ownership()
             cmd = ["docker", "create", "--name", name, "--label", f"skillc.b3a={nonce}", "--network", "none",
                    "--read-only", "--memory", "512m", "--memory-swap", "512m", "--cpus", "1", "--pids-limit", "128",
                    "--tmpfs", "/home/proof:rw,size=256m", "--tmpfs", "/work:rw,size=256m",
@@ -273,7 +368,7 @@ def cold_proof(tmp: Path) -> dict[str, Any]:
                     need(str(exc) == "forbidden bind", "unrelated containment error")
                 else:
                     raise RuntimeError("bind classifier blind")
-                rows.append({"case": case, "negative": "actual synthetic bind REFUSED"})
+                rows.append({"case": case, "observations": [{"negative": "actual synthetic bind REFUSED"}]})
                 continue
             settings(info)
             rc, output, err = budget.command(["docker", "start", "-a", name], min(60, case_end - time.monotonic()))
@@ -282,30 +377,15 @@ def cold_proof(tmp: Path) -> dict[str, Any]:
             need(row["case"] == case and time.monotonic() < case_end, "case identity/deadline")
             rows.append(row)
     finally:
-        for name in reversed(containers):
-            rc, out, err = budget.command(["docker", "inspect", name], cleanup=True)
-            if rc:
-                need("No such" in err, "cannot establish owned container absence")
-                cleanup.append({"container": name, "absent": True})
-                continue
-            need(json.loads(out)[0]["Config"]["Labels"]["skillc.b3a"] == nonce, "refuse foreign cleanup")
-            need(budget.command(["docker", "rm", "-f", name], cleanup=True)[0] == 0, "container cleanup")
-            rc, _, err = budget.command(["docker", "inspect", name], cleanup=True)
-            need(rc != 0 and "No such" in err, "container absence unconfirmed")
-            cleanup.append({"container": name, "absent": True})
-        for tag in reversed(tags):
-            rc, out, err = budget.command(["docker", "image", "inspect", tag], cleanup=True)
-            if rc:
-                need("No such" in err, "owned image state unavailable")
-                continue
-            need(json.loads(out)[0]["Config"]["Labels"]["skillc.b3a"] == nonce, "refuse foreign image cleanup")
-            need(budget.command(["docker", "image", "rm", tag], cleanup=True)[0] == 0, "owned image tag cleanup")
+        cleanup = cleanup_owned(budget, containers, tags, nonce)
+        failure_diagnostic(tmp / "cold-diagnostic.json", {"identities": identities, "containers": containers,
+            "tags": tags, "cleanup": cleanup, "commands": budget.events,
+            "partial_cases": [{"case": r["case"], "observed_substeps": len(r.get("observations", []))} for r in rows]})
+        need(all(r["absent"] for r in cleanup), "cleanup unconfirmed; owned rescue required")
     budget.check()
-    for row in rows:
-        row["executed_substeps"] = len(row.get("observations", []))
-    need([r["case"] for r in rows] == list(CASES), "cold expected/executed population")
+    case_population(rows)
     report = {"cases": rows, "cleanup": cleanup, "commands": budget.events,
-              "parent_bytes": budget.used, "status": "BOUNDED COLD PROOF; full flow UNPROVEN"}
+              "identities": identities, "parent_bytes": budget.used, "status": "BOUNDED COLD PROOF; full flow UNPROVEN"}
     budget.publish(tmp / "cold-report.json", report)
     return report
 
@@ -328,14 +408,14 @@ else:
             (tmp_path / "cold-failure.json").write_text(json.dumps({"status": "UNKNOWN", "reason": str(exc)}) + "\n")
             raise
 
-    @pytest.mark.parametrize("fault", ["network", "memory", "swap", "cpu", "pids", "tmpfs", "bind"])
+    @pytest.mark.parametrize("fault", ["network", "root", "memory", "swap", "cpu", "pids", "tmpfs", "bind"])
     def test_containment_classifier_has_positive_and_negative(tmp_path: Path, fault: str) -> None:
         info: dict[str, Any] = {"HostConfig": {"NetworkMode": "none", "ReadonlyRootfs": True,
             "Memory": 512 * LIMIT, "MemorySwap": 512 * LIMIT, "NanoCpus": 1_000_000_000,
             "PidsLimit": 128, "Tmpfs": {"/home/proof": "rw,size=256m", "/work": "rw,size=256m",
                                       "/project": "rw,size=32m", "/tmp": "rw,size=64m"}}, "Mounts": []}
         settings(info)
-        field = {"network": "NetworkMode", "memory": "Memory", "swap": "MemorySwap",
+        field = {"network": "NetworkMode", "root": "ReadonlyRootfs", "memory": "Memory", "swap": "MemorySwap",
                  "cpu": "NanoCpus", "pids": "PidsLimit", "tmpfs": "Tmpfs"}.get(fault)
         if field:
             del info["HostConfig"][field]
@@ -376,3 +456,80 @@ else:
         with pytest.raises(RuntimeError, match="whole cold proof deadline"):
             budget.publish(target, {"status": "must not publish"})
         assert not target.exists()
+
+    @pytest.mark.parametrize("fault", ["early-error", "expired", "image-still-present"])
+    def test_cleanup_accounts_every_resource(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
+        budget = Budget(tmp_path)
+        seen: list[str] = []
+        if fault == "expired":
+            budget.deadline = time.monotonic() - 1
+        else:
+            def command(argv: list[str], **kw: Any) -> tuple[int, str, str]:
+                seen.append(argv[-1])
+                if fault == "early-error" and argv[-1] == "first":
+                    raise OSError("controlled first cleanup failure")
+                if fault == "image-still-present":
+                    return 0, json.dumps([{"Config": {"Labels": {"skillc.b3a": "owned"}}}]), ""
+                return 1, "", "No such container"
+            monkeypatch.setattr(budget, "command", command)
+        rows = cleanup_owned(budget, ["second", "first"], ["tag"], "owned")
+        assert len(rows) == 3
+        if fault == "early-error":
+            assert not rows[0]["absent"] and rows[1]["absent"] and rows[2]["absent"]
+            assert seen == ["first", "second", "tag"]
+        else:
+            assert not any(r["absent"] for r in rows)
+        if fault == "expired":
+            assert budget.calls == 0
+
+    def test_expired_cleanup_never_launches(tmp_path: Path) -> None:
+        budget = Budget(tmp_path, -1)
+        marker = tmp_path / "must-not-launch"
+        with pytest.raises(RuntimeError, match="no launch after expiry"):
+            budget.command([sys.executable, "-c", f"open({str(marker)!r},'w').write('launched')"], cleanup=True)
+        assert not marker.exists() and budget.calls == 0
+
+    @pytest.mark.parametrize("fault", ["empty", "missing", "duplicate", "extra", "skipped", "substep"])
+    def test_physical_population_refuses_incomplete_inputs(fault: str) -> None:
+        rows: list[dict[str, Any]] = [{"case": case, "observations": [{} for _ in range(EXPECTED_SUBSTEPS[case])]} for case in CASES]
+        case_population(rows)
+        if fault == "empty":
+            rows.clear()
+        elif fault == "missing":
+            rows.pop()
+        elif fault in ("duplicate", "extra"):
+            rows.append(rows[-1] if fault == "duplicate" else {"case": "undeclared"})
+        elif fault == "skipped":
+            rows[0]["skipped"] = True
+        else:
+            rows[0]["observations"] = []
+        with pytest.raises(RuntimeError):
+            case_population(rows)
+
+    def test_failure_diagnostic_retains_owned_rescue_fields(tmp_path: Path) -> None:
+        value = {"identities": {"build_disposition": "cancellation unconfirmed"},
+                 "containers": ["owned"], "tags": ["owned-tag"], "cleanup": [{"absent": False}],
+                 "commands": [{"returncode": 1}], "partial_cases": [{"case": CASES[0]}]}
+        failure_diagnostic(tmp_path / "unknown.json", value)
+        observed = json.loads((tmp_path / "unknown.json").read_text())
+        assert all(observed[k] == v for k, v in value.items())
+        assert "UNKNOWN" in observed["status"] and "outside completion budget" in observed["publication_scope"]
+
+    def test_cleanup_continues_after_retention_write_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        budget, seen = Budget(tmp_path), []
+        def command(argv: list[str], **kw: Any) -> tuple[int, str, str]:
+            seen.append(argv[-1])
+            return 1, "", "No such container"
+        write = Path.write_text
+        failed: list[bool] = []
+        def unavailable(path: Path, data: str, **kw: Any) -> int:
+            if path.name == "cleanup.json" and not failed:
+                failed.append(True)
+                raise OSError("controlled diagnostic retention failure")
+            return write(path, data, **kw)
+        monkeypatch.setattr(budget, "command", command)
+        monkeypatch.setattr(Path, "write_text", unavailable)
+        rows = cleanup_owned(budget, ["second", "first"], ["tag"], "owned")
+        assert seen == ["first", "second", "tag"] and failed
+        assert not rows[0]["absent"] and rows[1]["absent"] and rows[2]["absent"]
+        assert "retention_error" in rows[0]
