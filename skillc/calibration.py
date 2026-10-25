@@ -89,7 +89,8 @@ UNKNOWN = "UNKNOWN"
 #: baseline-vs-treatment-vs-provided design, never renamed, just now
 #: nameable. This module only adds validation for `expanded-instruction`;
 #: `explicit-contract` is #273's own statistics, not implemented here.
-LANES = ("explicit-contract", "matched-outcome", "expanded-instruction")
+EXPLICIT_PRODUCT_LANE = "explicit-product"
+LANES = ("explicit-contract", "matched-outcome", "expanded-instruction", EXPLICIT_PRODUCT_LANE)
 DEFAULT_LANE = "matched-outcome"
 EXPANDED_INSTRUCTION_LANE = "expanded-instruction"
 
@@ -201,9 +202,11 @@ def _outcome_endpoint(data: Mapping[str, object]) -> OutcomeEndpoint | None:
         raise _refuse("task_content must bind goal, grader and fixture digests (and a declared project gate's) "
                       "under version 1")
     arms = data.get("arms")
-    if data.get("kind") != "calibration-declaration" or data.get("lane", DEFAULT_LANE) != DEFAULT_LANE \
+    explicit = data.get("lane") == EXPLICIT_PRODUCT_LANE
+    if data.get("kind") != "calibration-declaration" \
+            or data.get("lane", DEFAULT_LANE) not in (DEFAULT_LANE, EXPLICIT_PRODUCT_LANE) \
             or not isinstance(arms, list) or len(arms) != 2 \
-            or any(not isinstance(a, dict) or "instruction" in a for a in arms):
+            or any(not isinstance(a, dict) or (not explicit and "instruction" in a) for a in arms):
         raise _refuse("common-task-outcome requires a two-arm matched-outcome declaration without instructions")
     return OutcomeEndpoint(tuple(criteria))
 
@@ -542,6 +545,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     lane = data.get("lane", DEFAULT_LANE)
     if lane not in LANES:
         raise _refuse(f"lane must be one of {LANES}, not {lane!r}")
+    explicit = lane == EXPLICIT_PRODUCT_LANE
+    if not explicit and "explicit_product" in data:
+        raise _refuse("explicit_product belongs only to the explicit-product lane")
+    if explicit and _outcome_endpoint(data) is None:
+        raise _refuse("explicit-product requires common-task-outcome")
     arms_raw = data.get("arms")
     if not isinstance(arms_raw, list) or len(arms_raw) not in (2, 3) \
             or not all(isinstance(a, dict) for a in arms_raw):
@@ -634,9 +642,14 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     elif expanded:
         raise _refuse("the expanded-instruction lane needs both treated arms (S and E) declared; "
                       "one alone cannot be the contrast protocol.md 10.1 names")
-    elif PROVIDED_KEYS & set(treated[0]):
+    elif not explicit and PROVIDED_KEYS & set(treated[0]):
         raise _refuse("a provided-skill arm needs a natural arm beside it, installing the same subject "
                       "without the instruction; alone it confounds value with the instruction")
+
+    if explicit:
+        if len(treated) != 1 or not PROVIDED_KEYS <= set(treated[0]):
+            raise _refuse("explicit-product requires exactly one explicitly instructed treated arm")
+        _explicit_product(data, names, treated[0]["named_skills"])
 
     fields = _parse_schedule_and_identities(data, names)
     tolerance = _parse_tolerance(data, required=_outcome_endpoint(data) is not None)
@@ -649,6 +662,25 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         data=dict(data), lane=str(lane), task_fixture=fields.task_fixture,
         tolerance_non_evaluable_per_arm=tolerance,
     )
+
+
+def _explicit_product(data: Mapping[str, object], names: Sequence[str], named: Sequence[str]) -> None:
+    """The closed, approval-bound base-prompt and installed-population identity."""
+    raw = data.get("explicit_product")
+    if not isinstance(raw, dict) or set(raw) != {
+        "version", "prompt_digests", "selected_skills", "installed_home_digest",
+    } or type(raw.get("version")) is not int or raw["version"] != 1:
+        raise _refuse("explicit_product must follow the closed version 1 schema")
+    prompts, selected = raw["prompt_digests"], raw["selected_skills"]
+    if not isinstance(prompts, dict) or set(prompts) != set(names) \
+            or not all(isinstance(v, str) and _SHA256_DIGEST_RE.fullmatch(v) for v in prompts.values()) \
+            or not isinstance(raw["installed_home_digest"], str) \
+            or not _SHA256_DIGEST_RE.fullmatch(raw["installed_home_digest"]):
+        raise _refuse("explicit_product must bind exactly every arm prompt and the installed home digest")
+    if not isinstance(selected, list) or not selected \
+            or not all(isinstance(s, str) and re.fullmatch(r"[\w-]+", s) for s in selected) \
+            or selected != sorted(set(selected)) or not set(named) <= set(selected):
+        raise _refuse("explicit_product.selected_skills must be sorted distinct names including named_skills")
 
 
 def _parse_tolerance(data: Mapping[str, object], *, required: bool) -> int | None:
@@ -671,7 +703,7 @@ _PLACEHOLDER = re.compile(r"\b(?:" + "|".join(PLACEHOLDER_MARKERS) + r")\b")
 #: The declaration's IDENTITY: what a run is launched with and bound to. A
 #: placeholder token anywhere in one of these leaves is refused (C1).
 IDENTITY_ROOTS = ("shared", "arms", "task", "task_content", "run_store", "attempts_per_arm", "tolerance",
-                  "arm_order", "skill_pins", "outcome_endpoint")
+                  "arm_order", "skill_pins", "outcome_endpoint", "explicit_product")
 #: Prose inside the identity roots: commentary, bound by the whole-declaration
 #: digest, never parsed as an identity (`_`-prefixed keys too). Never a
 #: REQUIRED_IDENTITY field (`tools`, `permissions` and `public_requirements` are
