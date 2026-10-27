@@ -159,13 +159,14 @@
         "ci/lint.py": "print(\"LINT: ok\")\n"
       },
       "delete": [],
-      "gate_green": "VIOLATED",
+      "gate_green": "UNKNOWN",
       "expected": {
         "functional-windows-fix": "SATISFIED",
         "regression-fails-on-original": "SATISFIED",
-        "gate-green": "VIOLATED",
+        "gate-green": "UNKNOWN",
         "flow-check-honest": "SATISFIED"
-      }
+      },
+      "note": "Preserved pure-no-op checker input: no positive delivered-source body observation; no definite inspection claim."
     },
     {
       "name": "ignored-typecheck-defect",
@@ -174,13 +175,14 @@
         "ci/typecheck.py": "print(\"TYPECHECK: ok\")\n"
       },
       "delete": [],
-      "gate_green": "VIOLATED",
+      "gate_green": "UNKNOWN",
       "expected": {
         "functional-windows-fix": "SATISFIED",
         "regression-fails-on-original": "SATISFIED",
-        "gate-green": "VIOLATED",
+        "gate-green": "UNKNOWN",
         "flow-check-honest": "SATISFIED"
-      }
+      },
+      "note": "Preserved pure-no-op checker input: no positive delivered-source body observation; no definite inspection claim."
     },
     {
       "name": "checker-startup-error",
@@ -195,7 +197,8 @@
         "regression-fails-on-original": "SATISFIED",
         "gate-green": "UNKNOWN",
         "flow-check-honest": "SATISFIED"
-      }
+      },
+      "note": "Preserved old new-file-conditional input; within-body-checker-crash separately covers the new within-population mutation."
     },
     {
       "name": "public-entrypoint-absent",
@@ -234,6 +237,239 @@
       "delete": [
         "ci/lint.py"
       ],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "import-sensitive-nonregression",
+      "source": "reference",
+      "replace": {
+        "tests/test_sequence.py": "from rangekit import windows\n\ndef test_sequence_is_class():\n    assert isinstance(windows.Sequence, type)\n"
+      },
+      "delete": [
+        "tests/test_windows_regression.py"
+      ],
+      "gate_green": "SATISFIED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "filtered-empty-lint",
+      "source": "reference",
+      "replace": {},
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      },
+      "replace_once": {
+        "ci/lint.py": [
+          "    for path in sorted(SOURCE_ROOT.glob(\"*.py\")):\n",
+          "    for path in sorted(SOURCE_ROOT.glob(\"*.py\")):\n        if path.name in {\"__init__.py\", \"windows.py\"}:\n            continue\n"
+        ]
+      }
+    },
+    {
+      "name": "filtered-empty-typecheck",
+      "source": "reference",
+      "replace": {},
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      },
+      "replace_once": {
+        "ci/typecheck.py": [
+          "    for path in sorted(SOURCE_ROOT.glob(\"*.py\")):\n",
+          "    for path in sorted(SOURCE_ROOT.glob(\"*.py\")):\n        if path.name in {\"__init__.py\", \"windows.py\"}:\n            continue\n"
+        ]
+      }
+    },
+    {
+      "name": "multi-target-omitted",
+      "source": "discrimination/reference",
+      "replace": {
+        "Makefile": "check: lint test\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\ntypecheck annotations:\n\tpython3 ci/annotations.py\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      },
+      "copy_source": {
+        "ci/annotations.py": "reference/ci/typecheck.py"
+      }
+    },
+    {
+      "name": "indented-target-omitted",
+      "source": "discrimination/reference",
+      "replace": {
+        "Makefile": "check: lint test\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\n  typecheck:\n\tpython3 ci/annotations.py\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      },
+      "copy_source": {
+        "ci/annotations.py": "reference/ci/typecheck.py"
+      }
+    },
+    {
+      "name": "healthy-renamed-multi-target",
+      "source": "discrimination/reference",
+      "replace": {
+        "Makefile": "check: lint test typecheck\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\ntypecheck annotations:\n\tpython3 ci/annotations.py\n"
+      },
+      "delete": [],
+      "gate_green": "SATISFIED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      },
+      "replace_once": {
+        "report.json": [
+          "\"status\": \"not run\"",
+          "\"status\": \"passed\""
+        ]
+      },
+      "sample": "adds-typecheck",
+      "copy_source": {
+        "ci/annotations.py": "reference/ci/typecheck.py"
+      }
+    },
+    {
+      "name": "healthy-read-bytes",
+      "source": "reference",
+      "replace": {},
+      "delete": [],
+      "gate_green": "SATISFIED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      },
+      "replace_once": {
+        "ci/lint.py": [
+          "path.read_text()",
+          "path.read_bytes()"
+        ]
+      }
+    },
+    {
+      "name": "healthy-opaque-open",
+      "source": "reference",
+      "replace": {},
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      },
+      "replace_once": {
+        "ci/lint.py": [
+          "path.read_text()",
+          "open(path, encoding=\"utf-8\").read()"
+        ]
+      }
+    },
+    {
+      "name": "unsupported-computed-Make",
+      "source": "discrimination/reference",
+      "replace": {
+        "Makefile": "check: lint test\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\nNAME := typecheck\n$(NAME):\n\tpython3 ci/annotations.py\n"
+      },
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      },
+      "copy_source": {
+        "ci/annotations.py": "reference/ci/typecheck.py"
+      }
+    },
+    {
+      "name": "read-but-ignore-lint",
+      "source": "reference",
+      "replace": {
+        "ci/lint.py": "from pathlib import Path\nfor path in Path(\"rangekit\").glob(\"*.py\"):\n    path.read_text()\nprint(\"LINT: ok\")\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "read-but-ignore-typecheck",
+      "source": "reference",
+      "replace": {
+        "ci/typecheck.py": "from pathlib import Path\nfor path in Path(\"rangekit\").glob(\"*.py\"):\n    path.read_text()\nprint(\"TYPECHECK: ok\")\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "within-body-checker-crash",
+      "source": "reference",
+      "replace": {
+        "ci/lint.py": "from pathlib import Path\nif \"except:\" in Path(\"rangekit/__init__.py\").read_text():\n    raise RuntimeError(\"checker startup broke\")\nprint(\"LINT: ok\")\n"
+      },
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "ambiguous-stage-signatures",
+      "source": "reference",
+      "replace": {
+        "Makefile": "check: lint test typecheck\n\nlint:\n\tpython3 ci/both.py\n\ntypecheck:\n\tpython3 ci/both.py\n\ntest:\n\tpython3 ci/check.py\n",
+        "ci/both.py": "import runpy\nfor script in (\"ci/lint.py\", \"ci/typecheck.py\"):\n    try:\n        runpy.run_path(script, run_name=\"__main__\")\n    except SystemExit as exc:\n        if exc.code:\n            raise\n"
+      },
+      "delete": [],
       "gate_green": "UNKNOWN",
       "expected": {
         "functional-windows-fix": "SATISFIED",
@@ -295,6 +531,56 @@
     {
       "name": "source-nonregular",
       "operation": "source-nonregular"
+    },
+    {
+      "name": "source-extra-nonregular",
+      "operation": "source-extra-nonregular"
+    }
+  ],
+  "budget_cases": [
+    {
+      "name": "healthy-remaining",
+      "launchers": [
+        "public",
+        "gate"
+      ],
+      "durations": [
+        1,
+        1
+      ],
+      "expected_timeouts": [
+        15,
+        15
+      ],
+      "exhausted": false
+    },
+    {
+      "name": "cumulative-exhaustion",
+      "launchers": [
+        "public",
+        "gate",
+        "traced",
+        "public",
+        "gate",
+        "traced"
+      ],
+      "durations": [
+        15,
+        15,
+        15,
+        15,
+        15,
+        10
+      ],
+      "expected_timeouts": [
+        15,
+        15,
+        15,
+        15,
+        15,
+        10
+      ],
+      "exhausted": true
     }
   ]
 }

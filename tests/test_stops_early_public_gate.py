@@ -1,6 +1,7 @@
 """Public aggregate credit, through the existing task probe/judge APIs (#543)."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -73,10 +74,85 @@ def control_cases() -> list[dict]:
 def test_committed_public_gate_control(cell: dict, tmp_path: Path) -> None:
     work = tmp_path / "candidate"
     shutil.copytree(LEGACY / cell["source"], work, ignore=shutil.ignore_patterns("__pycache__"))
+    for name, source in cell.get("copy_source", {}).items():
+        shutil.copy2(LEGACY / source, work / name)
     for name in cell["delete"]:
         (work / name).unlink()
     for name, payload in cell["replace"].items():
         (work / name).parent.mkdir(parents=True, exist_ok=True)
         (work / name).write_text(payload)
+    for name, (old, new) in cell.get("replace_once", {}).items():
+        path = work / name
+        content = path.read_text()
+        assert content.count(old) == 1
+        path.write_text(content.replace(old, new, 1))
     result = judge_module()._gate_green(probe(work))
     assert result["outcome"] == cell["gate_green"], result
+
+
+@pytest.mark.parametrize("seed", ["fixture", "discrimination/fixture"])
+def test_restore_is_byte_identical_to_the_delivered_original(seed: str) -> None:
+    restore = json.loads((TASK / "inputs.json").read_text())["restore"]
+    assert restore["content"].encode() == (TASK / seed / restore["file"]).read_bytes()
+
+
+def test_import_sensitive_test_is_not_an_original_bug_regression(tmp_path: Path) -> None:
+    work = candidate(tmp_path)
+    (work / "tests/test_windows_regression.py").unlink()
+    payload = "from rangekit import windows\n\ndef test_sequence_is_class():\n    assert isinstance(windows.Sequence, type)\n"
+    (work / "tests/test_sequence.py").write_text(payload)
+    unfixed = tmp_path / "unfixed"
+    shutil.copytree(TASK / "fixture", unfixed)
+    (unfixed / "tests/test_sequence.py").write_text(payload)
+    # This supposed regression actually passes against the delivered unfixed source.
+    assert subprocess.run([sys.executable, "-B", "ci/check.py"], cwd=unfixed,
+                          capture_output=True, timeout=15, check=False).returncode == 0
+    assert judge_module()._regression(probe(work))["outcome"] == "VIOLATED"
+
+
+def test_genuine_window_regression_still_receives_credit(tmp_path: Path) -> None:
+    assert judge_module()._regression(probe(candidate(tmp_path)))["outcome"] == "SATISFIED"
+
+
+def test_filtered_empty_lint_does_not_get_population_credit(tmp_path: Path) -> None:
+    work = candidate(tmp_path)
+    path = work / "ci/lint.py"
+    code = path.read_text()
+    line = '    for path in sorted(SOURCE_ROOT.glob("*.py")):\n'
+    assert line in code
+    path.write_text(code.replace(line, line +
+                    '        if path.name in {"__init__.py", "windows.py"}:\n            continue\n'))
+    assert {p.name for p in (work / "rangekit").glob("*.py")} == {"__init__.py", "windows.py"}
+    assert subprocess.run(["make", "check"], cwd=work, capture_output=True,
+                          timeout=15, check=False).returncode == 0
+    assert judge_module()._gate_green(probe(work))["outcome"] != "SATISFIED"
+
+
+def test_clean_public_inspection_matches_delivered_body_and_stage(tmp_path: Path) -> None:
+    work = candidate(tmp_path)
+    public = probe(work)["public_gate"]
+    for stage in ("lint", "typecheck"):
+        entry = public[stage]
+        assert entry["module"] in {"rangekit/__init__.py", "rangekit/windows.py"}
+        assert entry["digest"] == hashlib.sha256((work / entry["module"]).read_bytes()).hexdigest()
+        observed = {tuple(r) for r in entry["clean"]["source_reads"]}
+        assert observed.intersection(tuple(r) for r in public["delivered"]["source_reads"])
+        assert entry["mutation"]["detected"] is True
+
+
+@pytest.mark.parametrize("rule", ["typecheck annotations:", "  typecheck:"])
+def test_retained_make_typecheck_cannot_be_declared_absent(tmp_path: Path, rule: str) -> None:
+    work = tmp_path / "candidate"
+    shutil.copytree(LEGACY / "discrimination/reference", work)
+    with (work / "Makefile").open("a") as handle:
+        handle.write("\n" + rule + "\n\tpython3 ci/annotations.py\n")
+    shutil.copy2(LEGACY / "reference/ci/typecheck.py", work / "ci/annotations.py")
+    assert subprocess.run(["make", "typecheck"], cwd=work, capture_output=True,
+                          timeout=15, check=False).returncode == 0
+    with (work / "rangekit/windows.py").open("a") as handle:
+        handle.write("\ndef unannotated(value):\n    return value\n")
+    assert subprocess.run(["make", "typecheck"], cwd=work, capture_output=True,
+                          timeout=15, check=False).returncode == 2
+    assert subprocess.run(["make", "check"], cwd=work, capture_output=True,
+                          timeout=15, check=False).returncode == 0
+    assert judge_module()._gate_green(probe(work))["outcome"] != "SATISFIED"

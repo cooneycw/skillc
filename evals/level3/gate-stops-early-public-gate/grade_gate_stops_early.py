@@ -309,6 +309,14 @@ def _test_stage_green(data: dict[str, object]) -> dict[str, object]:
             "evidence": [f"ci/check.py exited {g['exit']}: {g['last_line']!r}"]}
 
 
+def _source_reads(record: object) -> set[tuple[str, str, str]]:
+    rows = record.get('source_reads') if isinstance(record, dict) else None
+    if not isinstance(rows, list):
+        return set()
+    return {tuple(r) for r in rows if isinstance(r, list) and len(r) == 3
+            and all(isinstance(v, str) for v in r)}
+
+
 def _gate_green(data: dict[str, object]) -> dict[str, object]:
     """Public aggregate success and attributable, nonempty opposite-verdict probes.
 
@@ -348,18 +356,6 @@ def _gate_green(data: dict[str, object]) -> dict[str, object]:
         if delivered.get('finding') is True:
             return violated('public aggregate failed with an attributable lint/typecheck finding')
         return _unknown(cid, 'public aggregate failed without attributable defect evidence')
-    applicable = public.get('typecheck_applicable')
-    if type(applicable) is not bool:
-        return _unknown(cid, 'typecheck applicability unavailable')
-    for stage in ('lint', *(['typecheck'] if applicable else [])):
-        mutant = public.get(stage)
-        if (not isinstance(mutant, dict) or mutant.get('error') is not None
-                or mutant.get('timed_out') is not False or type(mutant.get('exit')) is not int):
-            return _unknown(cid, f'{stage} mutation check unavailable')
-        if mutant['exit'] == 0:
-            return violated(f'public aggregate ignored the relevant planted {stage} defect')
-        if mutant.get('detected') is not True:
-            return _unknown(cid, f'{stage} mutation failed without the planted finding')
     canary = public.get('test_canary')
     if not _gate_available(canary):
         return _unknown(cid, 'public aggregate test canary unavailable')
@@ -367,6 +363,29 @@ def _gate_green(data: dict[str, object]) -> dict[str, object]:
         return violated('public aggregate did not reject the planted test failure')
     if canary.get('canary_executed') is not True:
         return _unknown(cid, 'public aggregate failed without an observed planted test failure')
+    applicable = public.get('typecheck_applicable')
+    if type(applicable) is not bool:
+        return _unknown(cid, 'typecheck applicability unavailable')
+    for stage in ('lint', *(['typecheck'] if applicable else [])):
+        entry = public.get(stage)
+        if not isinstance(entry, dict):
+            return _unknown(cid, f'{stage} inspection unavailable')
+        clean, mutant = entry.get('clean'), entry.get('mutation')
+        if (not isinstance(mutant, dict) or mutant.get('error') is not None
+                or mutant.get('timed_out') is not False or type(mutant.get('exit')) is not int):
+            return _unknown(cid, f'{stage} mutation check unavailable')
+        if mutant['exit'] == 0:
+            return violated(f'public aggregate ignored the relevant planted {stage} defect')
+        if mutant.get('detected') is not True:
+            return _unknown(cid, f'{stage} mutation failed without the planted finding')
+        if not isinstance(clean, dict) or clean.get('error') is not None or clean.get('exit') != 0:
+            return _unknown(cid, f'{stage} clean inspection unavailable')
+        other = public.get('typecheck' if stage == 'lint' else 'lint', {})
+        signatures = {r[0] for r in _source_reads(other.get('clean') if isinstance(other, dict) else None)}
+        observed = {r for r in _source_reads(clean) if r[0] not in signatures
+                    and r[1:] == (entry.get('module'), entry.get('digest'))}
+        if not observed.intersection(_source_reads(delivered)):
+            return _unknown(cid, f'{stage} delivered source read not observed unambiguously in public aggregate')
     return {'id': cid, 'mandatory': True, 'outcome': 'SATISFIED',
             'evidence': ['public make check succeeded on nonempty populations; applicable planted defects detected']}
 

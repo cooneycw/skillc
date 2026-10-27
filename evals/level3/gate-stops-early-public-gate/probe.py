@@ -38,6 +38,7 @@ evaluator's environment or user site.
 """
 
 import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -68,55 +69,101 @@ def public_environment() -> dict:
                 PYTHONDONTWRITEBYTECODE='1')
 
 
+def public_result(proc, expected: str = '') -> dict:
+    stdout = proc.stdout.decode('utf-8', errors='replace')
+    stderr = proc.stderr.decode('utf-8', errors='replace')
+    finding = bool(re.search(r'^rangekit/[^\n]+:\d+: (?:bare except|[^\n]+ has no (?:return|parameter) annotation)',
+                             stdout, re.MULTILINE))
+    return {'missing': False, 'exit': proc.returncode, 'timed_out': False, 'error': None,
+            'finding': finding, 'detected': bool(expected and expected in stdout and proc.returncode != 0),
+            'output': (stdout + stderr)[-8192:]}
+
+
 def run_public_gate(tree: str, expected: str = '') -> dict:
     if not (Path(tree) / 'Makefile').is_file():
         return {'missing': True, 'exit': None, 'timed_out': False, 'error': None}
     try:
         proc = subprocess.run(['make', '-j1', 'check'], cwd=tree,
-                              env=public_environment(), capture_output=True, text=True,
+                              env=public_environment(), capture_output=True,
                               timeout=command_timeout(), check=False)
     except subprocess.TimeoutExpired:
         return {'missing': False, 'exit': None, 'timed_out': True, 'error': None}
     except OSError as exc:
         return {'missing': False, 'exit': None, 'timed_out': False, 'error': type(exc).__name__}
-    # Candidate-process diagnostics are positive probe evidence, never protected history.
-    finding = bool(re.search(r'^rangekit/[^\n]+:\d+: (?:bare except|[^\n]+ has no (?:return|parameter) annotation)',
-                             proc.stdout, re.MULTILINE))
-    return {'missing': False, 'exit': proc.returncode, 'timed_out': False, 'error': None,
-            'finding': finding, 'detected': bool(expected and expected in proc.stdout and proc.returncode != 0),
-            'output': (proc.stdout + proc.stderr)[-8192:]}
+    return public_result(proc, expected)
+
+
+def typecheck_applicable(tree: str, text: str) -> bool | None:
+    """Literal declarations only. Unsupported syntax never proves absence."""
+    if Path(tree, 'ci/typecheck.py').is_file():
+        return True
+    present = False
+    for raw in text.splitlines():
+        if raw.startswith('\t'):
+            continue
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        if '$' in line or '\\' in line:
+            return None
+        if re.match(r'^[\w.-]+\s*(?:::=|::=|:=|\?=|\+=|!=|=)', line):
+            continue
+        match = re.fullmatch(r'([\w./ -]+?)(?:&:|::|:)(.*)', line)
+        if match is None:
+            return None
+        targets = match[1].split()
+        if not targets or any(not re.fullmatch(r'[\w./-]+', t) for t in targets):
+            return None
+        present = present or 'typecheck' in targets or (targets == ['.PHONY'] and
+                                                       'typecheck' in match[2].split())
+    return present
 
 
 def public_observations(candidate: str, baseline_tests: list) -> dict:
     with tempfile.TemporaryDirectory() as work:
         tree = _copy(candidate, work)
-        source = sorted(Path(tree, 'rangekit').glob('*.py'))
+        source = {p.relative_to(tree).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in sorted(Path(tree, 'rangekit').glob('*.py'))}
         makefile = Path(tree, 'Makefile')
         text = makefile.read_text(encoding='utf-8') if makefile.is_file() else ''
-        typecheck = (Path(tree, 'ci/typecheck.py').is_file()
-                     or bool(re.search(r'^typecheck\s*:', text, re.MULTILINE)))
-        result = {'source_files': [p.name for p in source], 'typecheck_applicable': typecheck,
-                  'delivered': run_public_gate(tree)}
+        applicable = typecheck_applicable(tree, text)
+        delivered = run_traced_gate(tree, public=True)
+        result = {'source_files': list(source), 'typecheck_applicable': applicable,
+                  'delivered': {**delivered, 'error': delivered.get('execution_error'),
+                                'missing': not makefile.is_file()}}
     result['test_canary'] = gate_canary(candidate, baseline_tests, public=True)
-    for stage in ('lint', 'typecheck'):
-        if stage == 'typecheck' and not typecheck:
-            continue
+    for stage in ('lint', *(['typecheck'] if applicable is True else [])):
         with tempfile.TemporaryDirectory() as work:
             tree = _copy(candidate, work)
-            name = '_skillc_' + stage + '_mutant.py'
-            if stage == 'lint':
-                payload = 'try:\n    pass\nexcept:\n    pass\n'
-                expected = f'rangekit/{name}:3: bare except'
-            else:
-                payload = 'def skillc_untyped(value):\n    return value\n'
-                expected = f'rangekit/{name}:1: skillc_untyped has no return annotation'
-            target = Path(tree, 'rangekit', name)
-            if not target.parent.is_dir() or target.exists():
-                result[stage] = {'error': 'mutant target unavailable'}
+            clean = run_traced_gate(tree, public=True, target=stage)
+            reads = clean.get('source_reads') or []
+            eligible = sorted({name for _signature, name, sha in reads if source.get(name) == sha})
+            entry = {'clean': clean, 'mutation': None}
+            result[stage] = entry
+            if not eligible:
                 continue
-            ast.parse(payload)  # A well-formed relevant mutation, not a startup syntax crash.
-            target.write_text(payload, encoding='utf-8')
-            result[stage] = run_public_gate(tree, expected)
+            relative = eligible[0]
+            original = Path(candidate, relative).read_text(encoding='utf-8')
+            entry.update(module=relative, digest=source[relative])
+            payload = ('try:\n    pass\nexcept:\n    pass\n' if stage == 'lint' else
+                       'def skillc_untyped(value):\n    return value\n')
+            mutated = original + '\n' + payload
+            module = ast.parse(mutated)
+            if stage == 'lint':
+                line = next(n.lineno for n in ast.walk(module) if isinstance(n, ast.ExceptHandler)
+                            and n.lineno > len(original.splitlines()))
+                expected = f'{relative}:{line}: bare except'
+            else:
+                definitions = [n for n in module.body if isinstance(n, ast.FunctionDef)
+                               and n.name == 'skillc_untyped']
+                if len(definitions) != 1:
+                    continue
+                expected = f'{relative}:{definitions[0].lineno}: skillc_untyped has no return annotation'
+            # The clean run may have written files: restore a fresh identical tree for the opposite.
+            shutil.rmtree(tree)
+            tree = _copy(candidate, work)
+            Path(tree, relative).write_text(mutated, encoding='utf-8')
+            entry['mutation'] = run_public_gate(tree, expected)
     return result
 
 
@@ -250,15 +297,30 @@ def run_gate(tree: str) -> dict:
 # These call observations live in candidate-controlled processes. They are
 # positive probe evidence, not controller-protected proof. Silence is UNKNOWN.
 _TRACE_SOURCE = r'''
-import atexit, dis, json, os, sys, threading
+import atexit, dis, hashlib, json, os, pathlib, sys, threading
 _root = os.environ['_SKILLC_GATE_TRACE_ROOT']
 _out = os.environ['_SKILLC_GATE_TRACE_OUT']
 _marker = os.environ.get('_SKILLC_GATE_CANARY', '')
 _seen, _failed, _pending = set(), set(), {}
+_reads, _overflow = set(), False
+_read_codes = {pathlib.Path.read_text.__code__, pathlib.Path.read_bytes.__code__}
 _canary_executed = False
 def _trace(frame, event, arg):
-    global _canary_executed
+    global _canary_executed, _overflow
     code = frame.f_code
+    if event == 'return' and code in _read_codes and isinstance(arg, (str, bytes)) and arg:
+        path = os.path.realpath(frame.f_locals['self'])
+        entry = os.path.relpath(os.path.realpath(sys.argv[0]), _root)
+        if (os.path.dirname(path) == os.path.join(_root, 'rangekit') and path.endswith('.py')
+                and not entry.startswith('../') and os.path.isfile(os.path.join(_root, entry))
+                and len(entry) < 512 and len(sys.argv) <= 64):
+            args = json.dumps([s.replace(_root, '<tree>') for s in sys.argv[1:]])
+            signature = entry + ':' + hashlib.sha256(args.encode()).hexdigest()
+            data = arg.encode('utf-8', errors='surrogatepass') if isinstance(arg, str) else arg
+            if len(_reads) < 512:
+                _reads.add((signature, os.path.relpath(path, _root), hashlib.sha256(data).hexdigest()))
+            else:
+                _overflow = True
     if not code.co_filename.startswith(_root + os.sep + 'tests' + os.sep):
         return _trace
     identity = (os.path.relpath(code.co_filename, _root), code.co_name, code.co_firstlineno)
@@ -282,6 +344,7 @@ def _trace(frame, event, arg):
 def _flush():
     with open(_out, 'a', encoding='utf-8') as handle:
         handle.write(json.dumps({'calls': sorted(_seen), 'failures': sorted(_failed),
+                                 'source_reads': sorted(_reads), 'overflow': _overflow,
                                  'canary_executed': _canary_executed}) + '\n')
 def install():
     sys.settrace(_trace)
@@ -295,7 +358,8 @@ _TRACE_WRAPPER = (
 )
 
 
-def run_traced_gate(tree: str, *, canary_marker: str = "", public: bool = False) -> dict:
+def run_traced_gate(tree: str, *, canary_marker: str = "", public: bool = False,
+                    target: str = 'check') -> dict:
     with tempfile.TemporaryDirectory() as trace_dir:
         root = Path(trace_dir)
         (root / '_gate_trace.py').write_text(_TRACE_SOURCE)
@@ -305,18 +369,20 @@ def run_traced_gate(tree: str, *, canary_marker: str = "", public: bool = False)
                    _SKILLC_GATE_TRACE_OUT=str(output), _SKILLC_TRACER_DIR=trace_dir,
                    PYTHONPATH=trace_dir, _SKILLC_GATE_CANARY=canary_marker)
         try:
-            argv = (['make', '-j1', 'check'] if public else
+            argv = (['make', '-j1', target] if public else
                     [sys.executable, '-E', '-s', '-B', '-c', _TRACE_WRAPPER, os.path.join(tree, GATE_FILE)])
             proc = subprocess.run(argv, cwd=tree, env=env,
                                   capture_output=True, timeout=command_timeout(), check=False)
         except (subprocess.TimeoutExpired, OSError) as exc:
-            return {'exit': None, 'calls': None, 'error': type(exc).__name__}
+            return {'exit': None, 'calls': None, 'error': type(exc).__name__,
+                    'execution_error': type(exc).__name__, 'timed_out': isinstance(exc, subprocess.TimeoutExpired)}
+        execution = {**public_result(proc), 'execution_error': None}
         try:
             with output.open('rb') as handle:
                 raw = handle.read(128 * 1024 + 1)
             if len(raw) > 128 * 1024:
                 raise ValueError('call observations exceed 128KiB')
-            calls, failures = set(), set()
+            calls, failures, source_reads = set(), set(), set()
             canary_executed = False
             for line in raw.decode('utf-8').splitlines():
                 observation = json.loads(line)
@@ -324,7 +390,18 @@ def run_traced_gate(tree: str, *, canary_marker: str = "", public: bool = False)
                         or type(observation.get('canary_executed')) is not bool):
                     raise ValueError('malformed trace observation')
                 canary_executed = canary_executed or observation['canary_executed']
-                for key, target in (('calls', calls), ('failures', failures)):
+                if observation.get('overflow') is not False:
+                    raise ValueError('source observation overflow or missing marker')
+                reads = observation.get('source_reads')
+                if not isinstance(reads, list):
+                    raise TypeError('source observations unavailable')
+                for entry in reads:
+                    if (not isinstance(entry, list) or len(entry) != 3
+                            or not all(isinstance(v, str) for v in entry)
+                            or not re.fullmatch(r'[0-9a-f]{64}', entry[2])):
+                        raise ValueError('malformed source observation')
+                    source_reads.add(tuple(entry))
+                for key, identities in (('calls', calls), ('failures', failures)):
                     entries = observation.get(key)
                     if not isinstance(entries, list):
                         raise TypeError('trace observations are not a list')
@@ -333,11 +410,13 @@ def run_traced_gate(tree: str, *, canary_marker: str = "", public: bool = False)
                                 or not all(isinstance(v, str) for v in entry[:2])
                                 or type(entry[2]) is not int):
                             raise ValueError('malformed trace identity')
-                        target.add(tuple(entry))
+                        identities.add(tuple(entry))
         except (OSError, UnicodeError, ValueError, TypeError) as exc:
-            return {'exit': proc.returncode, 'calls': None, 'failures': None,
+            return {**execution, 'calls': None, 'failures': None,
+                    'source_reads': None,
                     'canary_executed': False, 'error': type(exc).__name__}
-        return {'exit': proc.returncode, 'calls': sorted(calls), 'failures': sorted(failures),
+        return {**execution, 'calls': sorted(calls), 'failures': sorted(failures),
+                'source_reads': sorted(source_reads),
                 'canary_executed': canary_executed, 'error': None}
 
 
@@ -369,7 +448,7 @@ def gate_canary(candidate: str, baseline_tests: list, *, public: bool = False) -
         traced = run_traced_gate(tree, canary_marker=marker, public=public)
         return {'missing': False, 'exit': traced['exit'],
                 'timed_out': traced.get('error') == 'TimeoutExpired',
-                'error': traced.get('error'), 'last_line': '',
+                'error': traced.get('execution_error') if public else traced.get('error'), 'last_line': '',
                 'canary_executed': traced.get('canary_executed') is True}
 
 

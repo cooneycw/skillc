@@ -26,3 +26,16 @@ This does not attest the immutable starting fixture's original obligations.
 The restored-original-source regression is checked separately inside the test
 stage. Lint/typecheck failure or aggregate failure alone never proves a new
 regression test ran and rejected the original bug.
+
+Inspection evidence is limited to nonempty whole-module bodies returned by
+Python's standard Path.read_text/read_bytes, matching the delivered bytes.
+Standalone stage reader signatures must match readers in the actual clean
+public aggregate. Other IO, mismatched decoded bodies or ambiguous stage
+signatures are unverified (UNKNOWN), even when the checker is otherwise valid.
+Canaries alter a module from the observed delivered population, never a new file.
+
+Applicability discovery supports literal Make rules, including multi-target and
+space-indented definitions. Unsupported includes, conditionals, computed/escaped
+or generated definitions yield UNKNOWN rather than proving typecheck absent.
+Discovery does not evaluate Make; actual check/stage runs share an 85-second
+cumulative launch budget (15 seconds per command) inside the 90-second probe.

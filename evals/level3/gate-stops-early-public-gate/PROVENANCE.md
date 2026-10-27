@@ -1,7 +1,7 @@
 # Public-gate successor (#543)
 
 Independent task path: evals/level3/gate-stops-early-public-gate.
-Grader: gate-stops-early revision 6. Offline controls cover 29 candidates, 16 task mutations and 13 source-integrity
+Grader: gate-stops-early revision 6. Offline controls cover 29 candidates, 29 task mutations and 14 source-integrity
 corruptions; no study approval is granted.
 
 The runtime starts from revision-5 probe/judge code and two runnable seeds at
@@ -24,5 +24,7 @@ content identities and approval; no model, paid or live study is authorized here
 Known limit: conditional typecheck reflects delivered capability. Deleting both
 optional checker and target cannot establish what the original fixture required.
 Regression attribution remains the independent restored-source test-stage path.
+The same normal exact predicate rejects the five broken judges; two controlled
+clock inputs cover shared-budget exhaustion and healthy remaining time.
 Bytecode freshness, canary timing, relative tracer support, auto6 and held-out
 verify-stops-early changes are outside this successor slice.

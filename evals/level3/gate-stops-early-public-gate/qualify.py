@@ -63,7 +63,12 @@ def members(directory: Path) -> set[str]:
     for path in directory.rglob('*'):
         if path.is_symlink():
             raise ValueError('symlink in qualification source')
-        if path.is_file() and not (path.parent.name == '__pycache__' and path.suffix == '.pyc'):
+        mode = path.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            continue
+        if not stat.S_ISREG(mode):
+            raise ValueError('nonregular member in qualification source')
+        if not (path.parent.name == '__pycache__' and path.suffix == '.pyc'):
             found.add(path.relative_to(directory).as_posix())
     return found
 
@@ -206,22 +211,30 @@ def outcomes(result) -> dict:
     return {c['id']: c['outcome'] for c in result.criteria}
 
 
+def exact_match(row: dict, result) -> bool:
+    return result.category == 'verdict' and outcomes(result) == row['expected']
+
+
 def certify(root: Path, control: str | None = None) -> bool:
     sources, rows = load_sources(root), load_rows(root)
     ok = True
+    rejected = 0
     for row in rows:
         result = grade(row, surface(row, sources), sources, control)
-        held = ((result.status, result.category) == CONTROLS[control] if control else
-                result.category == 'verdict' and outcomes(result) == row['expected'])
+        normal = exact_match(row, result)
+        rejected += not normal
+        held = (result.status, result.category) == CONTROLS[control] if control else normal
         print(row['name'], result.status, result.category, outcomes(result), 'ok' if held else 'BAD', flush=True)
         ok = held and ok
-    return ok
+    if control:
+        print('normal exact predicate rejected', rejected, 'of', len(rows), 'for', control, flush=True)
+    return ok and (control is None or rejected > 0)
 
 
 def mutation_cases() -> list[dict]:
     data = json.loads((HERE / 'public-gate-controls.json').read_text())
     cases = data['cases']
-    if data.get('schema') != 1 or len(cases) != 16 or len({c['name'] for c in cases}) != 16:
+    if data.get('schema') != 1 or len(cases) != 29 or len({c['name'] for c in cases}) != 29:
         raise ValueError('mutation population changed')
     return cases
 
@@ -232,10 +245,18 @@ def mutations(root: Path) -> bool:
     for cell in mutation_cases():
         row = dict(next(r for r in rows if r['name'] == cell['source']))
         files = surface(row, sources)
+        for name, source in cell.get('copy_source', {}).items():
+            files[str(relative(name))] = sources[PREFIX + str(relative(source))]
         for name in cell['delete']:
             del files[str(relative(name))]
         for name, content in cell['replace'].items():
             files[str(relative(name))] = (content.encode(), files.get(name, (b'', False))[1])
+        for name, (old, new) in cell.get('replace_once', {}).items():
+            content, executable = files[str(relative(name))]
+            if content.count(old.encode()) != 1:
+                raise ValueError('exact mutation precondition failed')
+            files[name] = (content.replace(old.encode(), new.encode(), 1), executable)
+        row['sample'] = cell.get('sample', row['sample'])
         if cell['name'] == 'honest-lint-failure':
             row['sample'] = 'lint-failed'
         if cell['name'] == 'honest-typecheck-failure':
@@ -285,6 +306,8 @@ def integrity_case(root: Path, cell: dict) -> bool:
         elif operation == 'source-nonregular':
             target.unlink()
             os.mkfifo(target)
+        elif operation == 'source-extra-nonregular':
+            os.mkfifo(scratch / PREFIX / 'reference/unlisted.py')
         elif operation == 'expectation-drop':
             rows = json.loads((HERE / 'qualification-expectations.json').read_text())
             rows['cases'].pop()
@@ -302,7 +325,7 @@ def integrity_case(root: Path, cell: dict) -> bool:
 
 def validity(root: Path) -> bool:
     cases = json.loads((HERE / 'public-gate-controls.json').read_text())['integrity_cases']
-    if len(cases) != 13 or len({c['name'] for c in cases}) != 13:
+    if len(cases) != 14 or len({c['name'] for c in cases}) != 14:
         raise ValueError('integrity-control population changed')
     held = [integrity_case(root, cell) for cell in cases]
     for cell, result in zip(cases, held, strict=True):

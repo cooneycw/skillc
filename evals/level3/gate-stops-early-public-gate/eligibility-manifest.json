@@ -2,7 +2,8 @@
   "task": {
     "path": "evals/level3/gate-stops-early-public-gate",
     "grader_id": "gate-stops-early",
-    "grader_revision": "6"
+    "grader_revision": "6",
+    "grader_digest": "sha256:bf72782f7484f04db131da94e71e995397d89d8828f675d71f5887e52177ecf8"
   },
   "fixtures": [
     "fixture",
@@ -13,6 +14,6 @@
   "qualification_inputs": {
     "qualification-sources.sha256": "69dfd87f72a0fa9cf302a70327fbd4bb95a2e442669eb6367001c8fda5a60354",
     "qualification-expectations.json": "6be0e40cb4ebdf490207b8e0f82389fccd7c3ca5ad49137e7959330a513c172e",
-    "public-gate-controls.json": "42536584acfa87b554e3e334ea744a4aed4b98b5ef03f63ec7ffb46fef12e41c"
+    "public-gate-controls.json": "310b14c891945aab0ecdd5fcdc178737608efc6b9ade59352a242d0f6c082cfa"
   }
 }
