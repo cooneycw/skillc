@@ -48,7 +48,8 @@ steps:
       # --durations=0 (#412): every test's wall time survives to this log, so
       # a timing red can be placed against its own deadline from CI alone.
       - uv run --no-sync pytest -n auto --maxprocesses=8 --dist=loadgroup -rA --durations=0 --junit-xml=pytest-report.xml
-      - uv run --no-sync ruff check .
+      # Match local lint: nested project caches must stay outside frozen fixtures.
+      - uv run --no-sync ruff check --cache-dir .ruff_cache .
       - uv run --no-sync mypy
 
   # Independent collection plus a committed short-report negative control (#364).
