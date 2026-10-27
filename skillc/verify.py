@@ -119,7 +119,7 @@ _GRADER_KEYS = {"id", "revision", "criteria", "probe", "judge"}
 #: every one of its criteria simply reports "unclassified" (`outcome_report.
 #: py`), which is the honest answer for a task family that predates this
 #: vocabulary or does not use it (Level 1, L4, L5 today).
-_OPTIONAL_GRADER_KEYS = {"dimensions"}
+_OPTIONAL_GRADER_KEYS = {"dimensions", "optional_criteria"}
 _PROBE_KEYS = {"file", "inputs", "timeout"}
 _JUDGE_KEYS = {"file", "timeout"}
 #: The fixed, closed vocabulary `dimensions` values must be drawn from -
@@ -299,6 +299,9 @@ class GraderDef:
     #: `OUTCOME_DIMENSIONS` for the closed vocabulary each value must be one
     #: of. Empty for a grader that declares none.
     dimensions: dict[str, str]
+    #: None preserves the exact legacy pin; an explicit list declares allowed
+    #: diagnostic rows, which may be omitted and never contribute to status.
+    optional_criteria: tuple[str, ...] | None = None
 
     @classmethod
     def load(cls, root: Path) -> GraderDef:
@@ -328,6 +331,13 @@ class GraderDef:
             raise Refused(f"{where}: criteria must be a non-empty list of unique names")
         if READINESS_CRITERION in criteria:
             raise Refused(f"{where}: {READINESS_CRITERION!r} is the verifier's criterion, not a grader's")
+        optional = data.get("optional_criteria", [])
+        if (not isinstance(optional, list)
+                or not all(isinstance(c, str) and c.strip() for c in optional)
+                or len(set(optional)) != len(optional)):
+            raise Refused(f"{where}: optional_criteria must be a list of unique nonblank names")
+        if set(optional) & {*criteria, READINESS_CRITERION}:
+            raise Refused(f"{where}: optional_criteria overlaps required or verifier criteria")
         probe, judge = data["probe"], data["judge"]
         if not isinstance(probe, dict) or set(probe) != _PROBE_KEYS:
             raise Refused(f"{where}: probe must carry exactly {sorted(_PROBE_KEYS)}")
@@ -352,6 +362,7 @@ class GraderDef:
             probe_timeout=_timeout(probe["timeout"], where),
             judge_timeout=_timeout(judge["timeout"], where),
             dimensions=dict(dimensions),
+            optional_criteria=tuple(optional) if "optional_criteria" in data else None,
         )
 
     def with_judge(self, judge: Path) -> GraderDef:
@@ -375,7 +386,7 @@ class GraderDef:
         bytes of the files it runs (read now, unless `loaded` supplies the bytes that
         will actually run). A change to `grader.json` alone changes it too."""
         data = loaded if loaded is not None else self.read()
-        return trial.sha256_bytes(trial.canonical({
+        pin: dict[str, object] = {
             "definition": trial.sha256_bytes(data["definition"]),
             "files": [self.probe.name, self.inputs.name, self.judge.name],
             "id": self.id, "revision": self.revision, "criteria": list(self.criteria),
@@ -383,7 +394,10 @@ class GraderDef:
             "inputs": trial.sha256_bytes(data["inputs"]),
             "judge": trial.sha256_bytes(data["judge"]),
             "probe_timeout": self.probe_timeout, "judge_timeout": self.judge_timeout,
-        }))
+        }
+        if self.optional_criteria is not None:
+            pin["optional_criteria"] = list(self.optional_criteria)
+        return trial.sha256_bytes(trial.canonical(pin))
 
     def identity(self) -> dict[str, str]:
         """What a ledger pins: `{"grader": grader.identity()}` in the plan."""
@@ -405,7 +419,8 @@ class Graded:
 
     @property
     def violated(self) -> frozenset[str]:
-        return frozenset(str(c["id"]) for c in self.criteria if c.get("outcome") == "VIOLATED")
+        return frozenset(str(c["id"]) for c in self.criteria
+                         if c.get("mandatory") is True and c.get("outcome") == "VIOLATED")
 
 
 def _env(home: Path) -> dict[str, str]:
@@ -843,8 +858,11 @@ def _judge(grader: GraderDef, loaded: dict[str, bytes], work: Path,
     return "verdict", "", report
 
 
-def criteria_problem(criteria: object, required: tuple[str, ...]) -> str | None:
-    """Why a report's criteria are not exactly the grader's required set, or None."""
+def criteria_problem(criteria: object, required: tuple[str, ...],
+                     optional: tuple[str, ...] = ()) -> str | None:
+    """Require every mandatory ID; allow only explicitly declared diagnostics."""
+    if not required:
+        return "no required criteria"
     if not isinstance(criteria, list):
         return "no criteria list"
     ids = [c.get("id") for c in criteria if isinstance(c, dict)]
@@ -852,19 +870,21 @@ def criteria_problem(criteria: object, required: tuple[str, ...]) -> str | None:
         return "a criterion is not an object with a string id"
     if len(set(ids)) != len(ids):
         return "criterion ids are not unique"
-    if set(ids) != set(required):
+    if not set(required) <= set(ids) or set(ids) - set(required) - set(optional):
         missing = sorted(set(required) - set(map(str, ids)))
-        extra = sorted(set(map(str, ids)) - set(required))
+        extra = sorted(set(map(str, ids)) - set(required) - set(optional))
         return f"criteria differ from the required set (missing {missing}, extra {extra})"
-    if not all(c.get("mandatory") is True for c in criteria):
+    if not all(c.get("mandatory") is True for c in criteria if c["id"] in required):
         return "a required criterion is not mandatory"
+    if not all(c.get("mandatory") is False for c in criteria if c["id"] in optional):
+        return "an optional criterion is not optional"
     return None
 
 
 def _assemble(grader: GraderDef, report: object, digests: list[str]) -> tuple[str, str, list[dict[str, object]] | None]:
     """Stage 3: the judge's criteria, if and only if they are a verdict on this task."""
     assert isinstance(report, dict)
-    shape = criteria_problem(report.get("criteria"), grader.criteria)
+    shape = criteria_problem(report.get("criteria"), grader.criteria, grader.optional_criteria or ())
     if shape:
         return "criteria-set", f"the report is not a verdict on this task: {shape}", None
     probe = records.Record(path=Path("<judge report>"), data={
@@ -992,7 +1012,8 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
             containment["completion_on_time"] = True
     status = _status(criteria)
     if category == "verdict":
-        unmet = [str(c["id"]) for c in criteria if c.get("outcome") != "SATISFIED"]
+        unmet = [str(c["id"]) for c in criteria
+                 if c.get("mandatory") is True and c.get("outcome") != "SATISFIED"]
         detail = "all mandatory criteria satisfied" if not unmet else "not satisfied: " + ", ".join(unmet)
     return Graded(status=status, category=category, detail=detail, criteria=criteria, containment=containment)
 
