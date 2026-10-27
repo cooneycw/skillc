@@ -148,7 +148,8 @@ def combine(raw: str | None, record: Mapping[str, object]) -> str | None:
         elapsed = number(final.get("elapsed"))
         if end <= start or allowance != end - start or not 0 <= elapsed <= allowance:
             return "UNKNOWN"
-        if final.get("on_time") is not True or final.get("cleanup_confirmed") is not True:
+        if (final.get("on_time") is not True or final.get("cleanup_confirmed") is not True
+                or final.get("publication_confirmed") is not True):
             return "UNKNOWN"
         original = {k: v for k, v in marker.items() if k != "budget_id"}
         if marker.get("budget_id") != hashlib.sha256(json.dumps(original, sort_keys=True).encode()).hexdigest():

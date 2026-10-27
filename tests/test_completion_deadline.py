@@ -198,20 +198,28 @@ def test_bound_collector_is_same_before_failed_probe_prepare(
 ) -> None:
     import test_matched_pilot_run as helpers
 
-    from skillc import agent_trial
+    from skillc import agent_trial, collection_conformance
     from skillc.backend import BackendUnavailable
     ticks = [0.0]
     original_pilot, original_agent = mp.run_pilot, agent_trial.run_one_attempt
+    original_wrapper = collection_conformance.run_level1_agent_attempt
     original_prepare = docker.DockerBackend.prepare
     holders: list[trial.OwnedAttemptIds] = []
     witnessed: list[str] = []
+    supplied: list[tuple[object, object]] = []
 
     def pilot(*args: Any, **kwargs: Any) -> Any:
         kwargs["clock"] = lambda: ticks[0]
         return original_pilot(*args, **kwargs)
 
+    def wrapper(**kwargs: Any) -> Any:
+        supplied.append((kwargs["completion_deadline"], kwargs["recorded_attempt_ids"]))
+        return original_wrapper(**kwargs)
+
     def agent(**kwargs: Any) -> Any:
         ids = kwargs["recorded_attempt_ids"]
+        assert kwargs["completion_deadline"] is supplied[-1][0]
+        assert ids is supplied[-1][1]
         assert isinstance(ids, trial.OwnedAttemptIds)
         holders.append(ids)
         record = original_agent(**kwargs)
@@ -228,6 +236,7 @@ def test_bound_collector_is_same_before_failed_probe_prepare(
         return original_prepare(self, aid)
 
     monkeypatch.setattr(mp, "run_pilot", pilot)
+    monkeypatch.setattr(collection_conformance, "run_level1_agent_attempt", wrapper)
     monkeypatch.setattr(agent_trial, "run_one_attempt", agent)
     monkeypatch.setattr(docker.DockerBackend, "prepare", prepare)
     _, outcomes, _ = helpers._run_fake_pilot(tmp_path, total_seconds=100)
@@ -363,6 +372,7 @@ def test_actual_turn_primitive_shares_endpoint_and_always_ends(
 
     class Turns(FakeBackend):
         def execute_turn(self, handle: Any, argv: Any, limits: Any, cancel: Any = None) -> Any:
+            assert limits.completion_deadline is deadline
             caps.append(limits.timeout)
             return ExecuteResult("exited", 0)
 
@@ -421,13 +431,13 @@ def test_wave_inherits_clock_domain_and_preserves_cleanup_on_invalid_time(
 
 @pytest.mark.parametrize("field,value", [
     ("elapsed", float("nan")), ("elapsed", True), ("elapsed", 11),
-    ("on_time", False), ("cleanup_confirmed", False), ("marker", {}),
+    ("on_time", False), ("cleanup_confirmed", False), ("publication_confirmed", False), ("marker", {}),
 ])
 def test_completion_evidence_requires_valid_finite_matching_healthy_data(field: str, value: Any) -> None:
     from skillc.completion import CompletionDeadline, combine, normalize
     deadline = CompletionDeadline.after(10, lambda: 0.0)
     marker = deadline.marker("attempt")
-    final = deadline.qualify(marker, True)
+    final = {**deadline.qualify(marker, True), "publication_confirmed": True}
     record = {"attempt_id": "attempt", "completion_required": True,
               "completion_marker": marker, "completion": final}
     assert combine("PASS", record) == "PASS"
@@ -442,10 +452,10 @@ def test_malformed_marker_clock_is_unknown(clock_value: Any) -> None:
     deadline = CompletionDeadline.after(10, lambda: 0.0)
     marker = deadline.marker("attempt")
     record = {"attempt_id": "attempt", "completion_required": True,
-              "completion_marker": marker, "completion": deadline.qualify(marker, True)}
+              "completion_marker": marker, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
     assert combine("PASS", record) == "PASS"
     marker["clock"] = clock_value
-    record["completion"] = deadline.qualify(marker, True)
+    record["completion"] = {**deadline.qualify(marker, True), "publication_confirmed": True}
     assert combine("PASS", record) == "UNKNOWN"
     assert combine("FAIL", record) == "FAIL"
 
@@ -539,3 +549,532 @@ def test_wave_first_cause_survives_shared_expiry_and_cleanup_loss(
                     os.killpg(int(str(event["pid"])), 0)
             if event["event"] == "workspace":
                 assert not Path(str(event["path"])).exists()
+
+
+@pytest.mark.parametrize("fault", ["healthy", "scratch", "observation", "qualification-fail"])
+def test_completion_requires_cleanup_and_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    import test_matched_pilot_run as helpers
+
+    from skillc import agent_trial, verify
+
+    ticks = [0.0]
+    run, observe, remove, record = (
+        mp.run_pilot,
+        agent_trial.write_observation_record,
+        verify.remove_owned,
+        trial.Experiment.record,
+    )
+
+    def pilot(*args: Any, **kwargs: Any) -> Any:
+        kwargs["clock"] = lambda: ticks[0]
+        return run(*args, **kwargs)
+
+    def publication(*args: Any, **kwargs: Any) -> str:
+        ticks[0] = 101.0
+        return "write-failed" if fault == "observation" else observe(*args, **kwargs)
+
+    def cleanup(*args: Any, **kwargs: Any) -> Any:
+        value = remove(*args, **kwargs)
+        return {**value, "status": "partial"} if fault == "scratch" else value
+
+    def journal(self: Any, aid: str, event: str, **detail: Any) -> None:
+        if event == "completion-qualified" and fault == "qualification-fail":
+            ticks[0] = 101.0
+            raise OSError("controlled qualification publication failure")
+        record(self, aid, event, **detail)
+
+    monkeypatch.setattr(mp, "run_pilot", pilot)
+    monkeypatch.setattr(agent_trial, "write_observation_record", publication)
+    monkeypatch.setattr(verify, "remove_owned", cleanup)
+    monkeypatch.setattr(trial.Experiment, "record", journal)
+    experiment, outcomes, run_dir = helpers._run_fake_pilot(
+        tmp_path,
+        total_seconds=100,
+        solve_arms=() if fault == "qualification-fail" else (mp.TREATMENT,),
+    )
+    first = outcomes[0].record
+    expected = (
+        "FAIL" if fault == "qualification-fail" else "PASS" if fault == "healthy" else "UNKNOWN"
+    )
+    if fault == "qualification-fail":
+        import json
+
+        stored = [json.loads(f.read_text()) for f in experiment.root.glob("result-*.json")]
+        assert any(r["attempt_id"] == outcomes[0].scheduled.attempt_id and r["status"] == "FAIL" for r in stored)
+    assert mp.graded_status(first) == expected
+    recovered = mp.reconcile(experiment, outcomes)[0].record
+    assert mp.graded_status(recovered) == expected
+    _, disk = mp.read_outcomes(run_dir)
+    assert mp.graded_status(disk[0].record) == expected
+    assert len(outcomes) == len(list(experiment.attempts()))
+    if fault != "qualification-fail":
+        grade = first["graded"]
+        assert isinstance(grade, dict) and grade["status"] == "PASS"
+
+
+@pytest.mark.parametrize("fault", ["journal", "local"])
+def test_turn_dispatch_resamples_and_consumes_local_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    from types import SimpleNamespace
+
+    from test_agent_trial import _planned
+    from test_lifecycle import FakeBackend
+
+    from skillc import completion, lifecycle
+    from skillc.backend import ExecuteResult, Limits
+
+    ticks = [0.0]
+    experiment, aid = _planned(trial.open_store(tmp_path / "store", []))
+    caps: list[float] = []
+    ended: list[bool] = []
+
+    class Turns(FakeBackend):
+        def execute_turn(self, handle: Any, argv: Any, limits: Any, cancel: Any = None) -> Any:
+            caps.append(limits.timeout)
+            if fault == "local":
+                ticks[0] = 4.0
+            return ExecuteResult("exited", 0)
+
+        def end_attempt(self, handle: Any) -> None:
+            ended.append(True)
+
+    def next_turn(*args: Any) -> Any:
+        if len(caps) == 1:
+            if fault == "journal":
+                ticks[0] = 9.0
+            return ["second"]
+        return None
+
+    original_record = trial.Experiment.record
+
+    def record(self: Any, attempt: str, event: str, **detail: Any) -> None:
+        original_record(self, attempt, event, **detail)
+        if fault == "journal" and event == "controller-turn" and detail.get("dispatched"):
+            ticks[0] = 11.0
+
+    monkeypatch.setattr(trial.Experiment, "record", record)
+    monkeypatch.setattr(lifecycle, "time", SimpleNamespace(monotonic=lambda: ticks[0]))
+    endpoint = completion.CompletionDeadline.after(
+        10 if fault == "journal" else 60, lambda: ticks[0]
+    )
+    result = lifecycle._run_turns(
+        Turns(tmp_path / "backend"),
+        object(),
+        experiment,
+        aid,
+        ["first"],
+        Limits(timeout=20 if fault == "journal" else 5),
+        None,
+        next_turn,
+        completion_deadline=endpoint,
+    )
+    assert ended == [True]
+    assert caps == ([10] if fault == "journal" else [5, 1])
+    if fault == "journal":
+        assert result.reason == "timeout"
+
+
+@pytest.mark.parametrize("spent", [True, False])
+def test_shared_endpoint_keeps_host_local_wall_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    spent: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    from test_agent_trial import _planned
+
+    from skillc import completion
+
+    experiment, aid = _planned(trial.open_store(tmp_path / "store", []))
+    ticks = [0.0]
+
+    class Process:
+        pid, returncode, polls = 123456, 0, 0
+
+        def poll(self) -> int | None:
+            self.polls += 1
+            return None if self.polls <= 2 else 0
+
+        def wait(self, timeout: float) -> int:
+            return 0
+
+    stopped: list[bool] = []
+    original = trial.Experiment.record
+
+    def record(self: Any, attempt: str, event: str, **detail: Any) -> None:
+        original(self, attempt, event, **detail)
+        if spent and event == "started":
+            ticks[0] = 2.0
+
+    monkeypatch.setattr(trial.Experiment, "record", record)
+    monkeypatch.setattr(
+        trial, "time", SimpleNamespace(monotonic=lambda: ticks[0], sleep=lambda _: None)
+    )
+    monkeypatch.setattr(trial.subprocess, "Popen", lambda *a, **kw: Process())
+    monkeypatch.setattr(trial, "_group_alive", lambda _: False)
+
+    def stop(*args: Any) -> bool:
+        stopped.append(True)
+        return True
+
+    monkeypatch.setattr(trial, "_stop_group", stop)
+    # Finite process-state control, independent wall clock and constant policy time.
+    endpoint = completion.CompletionDeadline.after(10, lambda: 0.0)
+    result = trial.run_attempt(
+        experiment, aid, ["controlled"], tmp_path, 1, completion_deadline=endpoint
+    )
+    assert result["confirmed"] is True
+    assert result["reason"] == ("timeout" if spent else "exited")
+    assert stopped == ([True] if spent else [])
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "healthy",
+        "docker-prelaunch",
+        "docker-inspection",
+        "docker-probe",
+        "docker-poison",
+        "docker-remaining",
+        "docker-environment",
+        "partial-qualification",
+        "short-write",
+        "replace-fail",
+    ],
+)
+def test_remaining_dispatch_and_publication_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    import dataclasses
+    import json
+
+    import test_matched_pilot_run as helpers
+
+    from skillc import agent_trial, completion
+
+    ticks = [0.0]
+    late: list[Any] = []
+    samples: list[float] = []
+    launches: list[float] = []
+    replacements: list[bool] = []
+    prefixes: list[tuple[Path, bytes]] = []
+    failed_publication = fault in ("partial-qualification", "short-write", "replace-fail")
+    real_remaining, real_replace = completion.CompletionDeadline.remaining, trial.os.replace
+
+    def remaining(self: Any, cap: float) -> float:
+        value = real_remaining(self, cap)
+        samples.append(value)
+        return value
+
+    def replace(src: Any, dst: Any) -> None:
+        if fault == "replace-fail" and Path(dst).parent.name == "journal":
+            replacements.append(True)
+            raise OSError("controlled atomic replacement failure")
+        real_replace(src, dst)
+
+    run, observe, original_record = mp.run_pilot, agent_trial.write_observation_record, trial.Experiment.record
+    original_agent = agent_trial.run_one_attempt
+
+    def record(self: Any, aid: str, event: str, **detail: Any) -> None:
+        if event == "completion-qualified":
+            prefixes.append((self.journal(aid), self.journal(aid).read_bytes()))
+        original_record(self, aid, event, **detail)
+
+    def environment() -> dict[str, str]:
+        ticks[0] = 101.0
+        return {}
+
+    def agent(**kwargs: Any) -> Any:
+        if fault == "docker-environment":
+            kwargs["backend"] = dataclasses.replace(kwargs["backend"], agent_exec_env=environment)
+        return original_agent(**kwargs)
+    forwarding, popen, fdopen = (
+        docker.DockerBackend._forwarding_available,
+        docker.subprocess.Popen,
+        trial.os.fdopen,
+    )
+    original_inspect = docker.DockerBackend._inspect
+
+    def inspect(*args: Any) -> Any:
+        value = original_inspect(*args)
+        if fault == "docker-inspection":
+            for path in tmp_path.rglob(f"{args[1].attempt_id}.jsonl"):
+                if any(json.loads(line).get("event") == "dispatched" for line in path.read_text().splitlines()):
+                    ticks[0] = 101.0
+        return value
+
+    def pilot(*args: Any, **kwargs: Any) -> Any:
+        kwargs["clock"] = lambda: ticks[0]
+        return run(*args, **kwargs)
+
+    def publish(*args: Any, **kwargs: Any) -> str:
+        ticks[0] = 101.0
+        return observe(*args, **kwargs)
+
+    def forward(*args: Any, **kwargs: Any) -> Any:
+        value = forwarding(*args, **kwargs)
+        if fault == "docker-probe" and str(args[1].attempt_id).startswith("probe-") or fault == "docker-prelaunch":
+            ticks[0] = 101.0
+        elif fault == "docker-poison":
+            ticks[0] = float("nan")
+        elif fault == "docker-remaining":
+            ticks[0] = 3.0
+        return value
+
+    def launch(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        if any(str(x).startswith(docker._EXEC_TOKEN_PREFIX) for x in argv):
+            launches.append(samples[-1])
+            if ticks[0] == 101 or fault == "docker-poison":
+                late.append(list(argv))
+        return popen(argv, *args, **kwargs)
+
+    class PartialWrite:
+        def __init__(self, handle: Any):
+            self.handle = handle
+
+        def __enter__(self) -> Any:
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args: object) -> Any:
+            return self.handle.__exit__(*args)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.handle, name)
+
+        def write(self, data: Any) -> Any:
+            needle = (
+                b'"event": "completion-qualified"'
+                if isinstance(data, bytes)
+                else '"event": "completion-qualified"'
+            )
+            if fault in ("partial-qualification", "short-write") and needle in data:
+                stored = [json.loads(f.read_text()) for f in tmp_path.rglob("result-*.json")]
+                assert any(r["status"] == "FAIL" for r in stored)
+                self.handle.write(data[: len(data) // 2])
+                self.handle.flush()
+                if fault == "short-write":
+                    return len(data) // 2
+                raise OSError("controlled partial qualification write")
+            return self.handle.write(data)
+
+    monkeypatch.setattr(completion.CompletionDeadline, "remaining", remaining)
+    monkeypatch.setattr(trial.os, "replace", replace)
+    monkeypatch.setattr(mp, "run_pilot", pilot)
+    monkeypatch.setattr(trial.Experiment, "record", record)
+    monkeypatch.setattr(agent_trial, "run_one_attempt", agent)
+    monkeypatch.setattr(agent_trial, "write_observation_record", publish)
+    monkeypatch.setattr(docker.DockerBackend, "_forwarding_available", forward)
+    monkeypatch.setattr(docker.DockerBackend, "_inspect", inspect)
+    monkeypatch.setattr(docker.subprocess, "Popen", launch)
+    monkeypatch.setattr(trial.os, "fdopen", lambda *a, **kw: PartialWrite(fdopen(*a, **kw)))
+    try:
+        experiment, outcomes, run_dir = helpers._run_fake_pilot(
+            tmp_path, total_seconds=100, solve_arms=() if failed_publication else (mp.TREATMENT,)
+        )
+    except Exception:
+        if failed_publication:
+            stored = [json.loads(f.read_text()) for f in tmp_path.rglob("result-*.json")]
+            assert any(r["status"] == "FAIL" for r in stored)
+        raise
+    assert late == []
+    if fault == "replace-fail":
+        assert replacements
+    if fault == "docker-remaining":
+        assert launches[0] == 97
+    if failed_publication:
+        assert mp.graded_status(outcomes[0].record) == "FAIL"
+        _, disk = mp.read_outcomes(run_dir)
+        assert mp.graded_status(disk[0].record) == "FAIL"
+        assert prefixes and all(path.read_bytes() == data for path, data in prefixes)
+        assert not list((experiment.root / trial.JOURNAL).glob(".*.tmp"))
+    assert outcomes[0].record["backend_teardown"] == "confirmed"
+    if fault in ("docker-prelaunch", "docker-inspection", "docker-poison", "docker-environment"):
+        assert outcomes[0].record["disposition"] == "unavailable"
+        assert "started" not in [e["event"] for e in experiment.events(outcomes[0].scheduled.attempt_id)]
+    assert len(outcomes) == len(list(experiment.attempts()))
+
+
+def test_qualification_publication_serializes_same_journal_appends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from test_agent_trial import _planned
+
+    experiment, aid = _planned(trial.open_store(tmp_path / "store", []))
+    journal = experiment.journal(aid)
+    prefix = journal.read_bytes()
+    entered, waiting, release = threading.Event(), threading.Event(), threading.Event()
+    replace, flock = trial._replace, trial.fcntl.flock
+
+    def blocked_replace(path: Path, data: bytes, **kwargs: Any) -> None:
+        if path == journal:
+            entered.set()
+            assert release.wait(10)
+        replace(path, data, **kwargs)
+
+    def observed_flock(fd: int, operation: int) -> Any:
+        if (
+            threading.current_thread().name == "journal-appender"
+            and operation == trial.fcntl.LOCK_EX
+        ):
+            waiting.set()
+        return flock(fd, operation)
+
+    def append() -> None:
+        threading.current_thread().name = "journal-appender"
+        experiment.record(aid, "launch-suppressed", reason="legitimate concurrent append")
+
+    monkeypatch.setattr(trial, "_replace", blocked_replace)
+    monkeypatch.setattr(trial.fcntl, "flock", observed_flock)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        final = pool.submit(experiment.record, aid, "completion-qualified", qualification={})
+        try:
+            assert entered.wait(10)
+            writer = pool.submit(append)
+            assert waiting.wait(10)
+        finally:
+            release.set()
+        final.result(timeout=10)
+        writer.result(timeout=10)
+    assert journal.read_bytes().startswith(prefix)
+    assert [e["event"] for e in experiment.events(aid)][-2:] == [
+        "completion-qualified",
+        "launch-suppressed",
+    ]
+
+
+@pytest.mark.parametrize("mode", ["healthy", "local", "shared", "legacy"])
+def test_actual_turn_preparation_keeps_local_endpoint_and_started_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    import json
+    import time
+    from types import SimpleNamespace
+
+    from test_agent_trial import _backend, _planned
+
+    from skillc import completion, lifecycle
+    from skillc.backend import Limits
+
+    wall, policy = [0.0], [0.0]
+    clock = SimpleNamespace(
+        monotonic=lambda: wall[0], sleep=time.sleep, time=time.time, time_ns=time.time_ns
+    )
+    experiment, aid = _planned(trial.open_store(tmp_path / "store", []))
+    base = tmp_path / "work"
+    base.mkdir()
+    backend = _backend(base, tmp_path / "fake-state")
+    endpoint = completion.CompletionDeadline.after(60, lambda: policy[0])
+    forward, popen = docker.DockerBackend._forwarding_available, docker.subprocess.Popen
+    forwarded, launches = [], []
+
+    def forwarding(*args: Any, **kwargs: Any) -> Any:
+        value = forward(*args, **kwargs)
+        forwarded.append(True)
+        if len(forwarded) == 2:
+            if mode == "local":
+                wall[0] = 6
+            if mode == "shared":
+                policy[0] = 61
+        return value
+
+    def launch(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        if any(str(a).startswith(docker._EXEC_TOKEN_PREFIX) for a in argv):
+            launches.append(True)
+        return popen(argv, *args, **kwargs)
+
+    argv = [
+        "sh",
+        "-c",
+        "printf touched:control > .skillc-canary-result; printf done > delivered.txt",
+    ]
+
+    def next_turn(_backend: Any, _handle: Any, done: int, _result: Any) -> Any:
+        wall[0] = 4
+        return argv if done == 1 else None
+
+    monkeypatch.setattr(docker.DockerBackend, "_forwarding_available", forwarding)
+    monkeypatch.setattr(docker.subprocess, "Popen", launch)
+    monkeypatch.setattr(docker, "time", clock)
+    monkeypatch.setattr(lifecycle, "time", clock)
+    record = lifecycle.run_through_backend(
+        backend,
+        experiment,
+        aid,
+        argv,
+        {"seed.txt": b"initial"},
+        Limits(timeout=5),
+        base,
+        next_turn=next_turn,
+        completion_deadline=None if mode == "legacy" else endpoint,
+        nonce="control",
+    )
+    assert record["backend_teardown"] == "confirmed"
+    assert len(launches) == (2 if mode in ("healthy", "legacy") else 1)
+    assert "started" in [e["event"] for e in experiment.events(aid)]
+    assert record["disposition"] == "captured"
+    assert json.loads((experiment.root / f"lifecycle-{aid}.json").read_text())["disposition"] == "captured"
+    manifest = json.loads((experiment.root / f"manifest-{aid}.json").read_text())
+    assert any(a["path"] == "delivered.txt" for a in manifest["artifacts"])
+
+
+def test_finalized_sibling_confirmation_does_not_refuse_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+
+    from test_verify import GRADER, REFERENCE, _freeze, _plan_two, _run
+
+    from skillc import verify
+
+    store = trial.open_store(tmp_path / "store", [])
+    base = tmp_path / "work"
+    base.mkdir()
+    experiment, first, second = _plan_two(store)
+    _freeze(experiment, first, _run(experiment, first, base, REFERENCE))
+    _freeze(experiment, second, _run(experiment, second, base, REFERENCE))
+    owned = trial.OwnedAttemptIds(experiment, second)
+    owned.append("discovery-owned")
+    progress = threading.Event()
+    grade, record, lock = verify.grade_files, trial.Experiment.record, trial.experiment_lock
+
+    @contextmanager
+    def observed_lock(root: Any) -> Any:
+        if threading.current_thread().name == "sibling-confirm":
+            progress.set()
+        with lock(root):
+            yield
+
+    def observed_record(self: Any, aid: str, event: str, **detail: Any) -> None:
+        record(self, aid, event, **detail)
+        if event == "owned-attempt-cleanup" and aid == second:
+            progress.set()
+
+    def confirm() -> None:
+        threading.current_thread().name = "sibling-confirm"
+        owned.confirm("discovery-owned", True)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+
+        def during_grade(*args: Any, **kwargs: Any) -> Any:
+            value = grade(*args, **kwargs)
+            pool.submit(confirm)
+            assert progress.wait(10)
+            return value
+
+        monkeypatch.setattr(verify, "grade_files", during_grade)
+        monkeypatch.setattr(trial, "experiment_lock", observed_lock)
+        monkeypatch.setattr(trial.Experiment, "record", observed_record)
+        result = verify.grade(experiment, first, GRADER, tmp_path / "grading")
+    assert result["status"] == "PASS"
+    assert owned.all_absent()

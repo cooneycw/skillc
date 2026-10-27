@@ -417,7 +417,8 @@ def run_subject_discovery(
     argv = ["env", f"CODEX_HOME={codex_home}", *client_argv, *materialize.CANARY_ARGV, materialize.CANARY_PROMPT]
     if completion_deadline is not None:
         try:
-            limits = replace(limits, timeout=completion_deadline.remaining(limits.timeout))
+            limits = replace(limits, timeout=completion_deadline.remaining(limits.timeout),
+                             completion_deadline=completion_deadline)
         except completion.CompletionUnavailable as exc:
             return unmeasured(str(exc))
     result = backend.execute(handle, argv, limits)

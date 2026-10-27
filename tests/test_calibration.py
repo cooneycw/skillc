@@ -846,10 +846,10 @@ def test_both_primary_endpoint_branches_combine_after_raw_criteria() -> None:
         assert calibration.primary_endpoint(raw, endpoint=endpoint)["status"] == "PASS"
         opted = {**raw, "completion_required": True, "completion_marker": marker}
         assert calibration.primary_endpoint(opted, endpoint=endpoint)["status"] == "UNKNOWN"
-        qualified = {**opted, "completion": deadline.qualify(marker, True)}
+        qualified = {**opted, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
         assert calibration.primary_endpoint(qualified, endpoint=endpoint)["status"] == "PASS"
         clock[0] = deadline.end + 1
-        late = {**opted, "completion": deadline.qualify(marker, True)}
+        late = {**opted, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
         assert calibration.primary_endpoint(late, endpoint=endpoint)["status"] == "UNKNOWN"
         assert calibration.raw_primary_endpoint(late, endpoint=endpoint)["status"] == "PASS"
         failed = {**late, "graded": {"criteria": [

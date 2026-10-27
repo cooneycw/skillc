@@ -681,11 +681,11 @@ def run_calibration(
     one every time; a test's scripted client needs the attempt id), to which
     the declared model and effort are added. `total_seconds` overrides the
     declared total cap - for tests only; the CLI never sets it."""
+    if treatment is not None and treatment.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
     declared_total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
     completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
                            else completion_deadline.child(declared_total))
-    if treatment is not None and treatment.gate_state_protocol is not None:
-        raise CalibrationRefused("gate-state treatment is fixture-only")
     # ADR 0005: nothing - no store, no plan, no container - before this.
     declaration = _launch_declaration(declaration)
     calibration.require_approved(declaration, root)
@@ -1293,11 +1293,11 @@ def run_discrimination(
     approval, derivation, planning, the store, the cap-enforcing schedule and
     reconciliation are the real ones, so a rehearsal accounts for every slot a
     live run would. `total_seconds` overrides the declared cap (tests only)."""
+    if intact is not None and intact.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
     declared_total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
     completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
                            else completion_deadline.child(declared_total))
-    if intact is not None and intact.gate_state_protocol is not None:
-        raise CalibrationRefused("gate-state treatment is fixture-only")
     calibration.require_approved_discrimination(declaration, root)
     require_precondition(declaration, precondition_report, root, rehearse=rehearse)  # #287 option 1, ruling (A)
     if image_digest != _shared_str(declaration, "image", "digest"):

@@ -3092,6 +3092,7 @@ def run_one_attempt(
                 "status": graded_result.status, "category": graded_result.category,
                 "detail": graded_result.detail, "criteria": graded_result.criteria,
                 "result_id": stored["result_id"], "result_status": stored["status"],
+                "cleanup": graded_result.containment.get("cleanup"),
             }
 
     result: dict[str, object] = {
@@ -3133,12 +3134,22 @@ def run_one_attempt(
         cleanup = result.get("cleanup")
         cleaned = (isinstance(cleanup, dict) and cleanup.get("status") in {"removed", "not-needed"}
                    and result.get("backend_teardown") == Confirmation.CONFIRMED.value
+                   and (graded is None or graded.get("cleanup") == "removed")
                    and recorded_attempt_ids.all_absent())
         qualification = completion_deadline.qualify(completion_marker, cleaned)
-        result.update(completion_required=True, completion_marker=completion_marker, completion=qualification)
-        experiment.record(attempt_id, "completion-qualified", qualification=qualification)
+        result.update(completion_required=True, completion_marker=completion_marker, completion=None)
     result["observation_record"] = write_observation_record(
         experiment, attempt_id,
         build_observation_record(result, client=client, grader_supplied=grader is not None),
     )
+    if completion_deadline is not None:
+        # Publication success is separate from the already frozen timing sample.
+        qualification["publication_confirmed"] = result["observation_record"] == "written"
+        try:
+            experiment.record(attempt_id, "completion-qualified", qualification=qualification)
+        except OSError as exc:
+            # Retain the verified raw task grade; missing final evidence cannot PASS.
+            result["completion_publication_error"] = type(exc).__name__
+        else:
+            result["completion"] = qualification
     return result

@@ -48,7 +48,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -203,16 +203,20 @@ def _write_new(path: Path, data: bytes, mode: int = FILE_MODE) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _replace(path: Path, data: bytes) -> None:
-    """Atomically replace `path` (the ledger, on an append-only revision only)."""
+def _replace(path: Path, data: bytes, *, mode: int = FILE_MODE) -> None:
+    """Publish complete controller bytes atomically; clean failed temporaries."""
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, FILE_MODE)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            if handle.write(data) != len(data):
+                raise OSError("short atomic publication write")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _append(path: Path, entry: dict[str, object]) -> None:
@@ -320,7 +324,27 @@ class Experiment:
     def record(self, attempt_id: str, event: str, **detail: object) -> None:
         if event not in records.LIFECYCLE_EVENTS and event not in _DETAIL_EVENTS:
             raise ValueError(f"unknown lifecycle event {event!r}")
-        _append(self.journal(attempt_id), {"event": event, "at": _now(), **detail})
+        entry = {"event": event, "at": _now(), **detail}
+        final = event == "completion-qualified"
+        with experiment_lock(self.root) if final else nullcontext():
+            # A stable directory lock survives journal replacement. Every writer
+            # opens the journal AFTER this lock, so no append targets an old inode.
+            fd = os.open(self.root / JOURNAL, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                path = self.journal(attempt_id)
+                if final:
+                    old = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                    with os.fdopen(old, "rb") as stream:
+                        prefix = stream.read()
+                    _replace(path, prefix + (json.dumps(entry, sort_keys=True) + "\n").encode(), mode=0o600)
+                else:
+                    _append(path, entry)
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(fd)
 
     @classmethod
     def open(cls, root: Path) -> Experiment:
@@ -415,8 +439,9 @@ def experiment_lock(root: Path) -> Iterator[None]:
     `verify.grade` from its first snapshot to its stored result, so a sibling
     attempt's commit waits for a grade instead of reading to it as tampering.
     An attempt's journal and spool are written while it RUNS, for minutes,
-    and are not locked; `verify.grade` scopes them out of its comparison
-    instead.
+    and are not held behind this experiment lock; `verify.grade` scopes them
+    out of its comparison instead. A short journal-directory lock serializes
+    individual event writes and atomic qualification replacement.
 
     The `flock` is on the experiment DIRECTORY's own descriptor (the
     precedent is `cli._export_pilot_evidence`), so taking it creates no file
@@ -483,7 +508,7 @@ class OwnedAttemptIds(list[str]):
         return self.experiment.root.resolve() == experiment.root.resolve() and self.parent_attempt == attempt
 
     def append(self, attempt: str) -> None:
-        with self._ownership_lock, experiment_lock(self.experiment.root):
+        with experiment_lock(self.experiment.root), self._ownership_lock:
             if not isinstance(attempt, str) or not attempt or attempt == self.parent_attempt or attempt in self:
                 raise Refused("invalid or duplicate owned attempt identity")
             if any(e.get("event") == "owned-attempt" and e.get("owned_id") == attempt
@@ -495,7 +520,7 @@ class OwnedAttemptIds(list[str]):
             self._absent[attempt] = False
 
     def confirm(self, attempt: str, absent: bool) -> None:
-        with self._ownership_lock:
+        with experiment_lock(self.experiment.root), self._ownership_lock:
             if attempt not in self._absent:
                 raise Refused("cannot confirm an unregistered owned attempt")
             self._record("owned-attempt-cleanup", owned_id=attempt, confirmed=absent)
@@ -878,6 +903,7 @@ def run_attempt(
                     experiment.record(attempt_id, "stopped", **stop)
                     experiment.record(attempt_id, "stop-confirmed")
                     return stop
+            deadline = time.monotonic() + timeout
             proc = subprocess.Popen(
                 argv, cwd=cwd, env=env if env is not None else {"PATH": os.environ.get("PATH", os.defpath)},
                 stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True,
@@ -894,7 +920,6 @@ def run_attempt(
         # group, record what can be recorded, then re-raise.
         try:
             experiment.record(attempt_id, "started", pid=proc.pid)
-            deadline = time.monotonic() + timeout
             reason = "exited"
             while proc.poll() is None:
                 # Preserve cancellation already witnessed by the controller before
@@ -908,7 +933,7 @@ def run_attempt(
                 except completion.CompletionUnavailable:
                     reason = "timeout"
                     break
-                if completion_deadline is None and time.monotonic() >= deadline:
+                if time.monotonic() >= deadline:
                     reason = "timeout"
                     break
                 if completion_deadline is None and cancel is not None and cancel():

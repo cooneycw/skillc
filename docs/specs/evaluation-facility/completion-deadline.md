@@ -36,6 +36,23 @@ backend result. Failed prepare without a handle retains the ID but leaves
 absence UNKNOWN. Cache hits create no new ID; host probes create no backend ID.
 This collector supplies evidence, not a global reaper.
 
+Selected in-process Docker dispatch carries the same endpoint in optional
+`backend.Limits.completion_deadline` and resamples after inspection, forwarding,
+environment and argv preparation, before actual Popen. None retains legacy
+behavior. Runtime clock objects are not serialized; managed/native/remote
+deadline enforcement is not qualified by this selected path.
+`Limits.execution_deadline` separately carries the unchanged physical local
+endpoint across turn preparation. Both endpoints constrain actual launch and
+the physical watchdog; a refused continuation cannot erase an earlier executed
+turn's started/capture evidence. Ownership changes serialize in experiment,
+collector, then journal order, including legitimate finalized-sibling cleanup.
+
+The selected agent path also checks its final grading scratch root, including
+both probe and judge scratch, independently of backend absence. Discovery owns
+backend IDs rather than a second grading scratch phase. A future attached
+grading phase must retain its own cleanup evidence; a clean last grade cannot
+certify an earlier phase's cleanup.
+
 The verifier preserves its evidence-store snapshot check. During owned grading,
 only exact bytes appended by that bound collector may extend the original
 parent journal prefix. An unauthorized prefix/suffix or another store change
@@ -56,6 +73,14 @@ The completion sample is immutable. Final qualification journal, observation and
 private-outcome publication are outside that interval. This excludes their
 duration from the measured promise; missing final publication cannot recover as
 PASS. There is no hard total publication-duration guarantee.
+
+Successful observation publication is bound into the final qualification
+separately from that frozen timing sample. A failed final journal append leaves
+completion unavailable while retaining the actual verified task grade. Shared
+endpoints also retain the shorter cumulative local execution limit and a physical
+host process watchdog. Later-turn dispatch resamples after its journal write.
+Qualification publication replaces the complete journal atomically; a stable
+journal-directory lock serializes all writers without losing a concurrent append.
 
 Supplied outcomes, lifecycle-only recovery, generic outcome readback and direct
 reports join private completion data against the actual durable opt-in and final

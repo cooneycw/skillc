@@ -132,7 +132,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import IO
 
@@ -147,6 +147,7 @@ from .backend import (
     ExecuteResult,
     Limits,
 )
+from .completion import CompletionUnavailable, number
 from .decide_reply_channel import DecideFn, DecideReplyChannel, LoggedDecision
 from .lifecycle import CANARY_NONCE_KEY
 from .verify import SURFACE_EXECUTABLE_KEY
@@ -2006,6 +2007,19 @@ class DockerBackend:
         exec_argv += list(argv)
 
         try:
+            if limits.completion_deadline is not None:
+                limits = replace(limits, timeout=limits.completion_deadline.remaining(limits.timeout))
+            if limits.execution_deadline is not None:
+                left = number(limits.execution_deadline) - number(time.monotonic())
+                if left <= 0:
+                    raise CompletionUnavailable("local execution deadline exhausted")
+                limits = replace(limits, timeout=min(limits.timeout, left))
+        except CompletionUnavailable as exc:
+            return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+        deadline = time.monotonic() + limits.timeout
+        if limits.execution_deadline is not None:
+            deadline = min(deadline, limits.execution_deadline)
+        try:
             proc = subprocess.Popen(
                 exec_argv, env=handle.env,
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
@@ -2046,7 +2060,6 @@ class DockerBackend:
 
             threading.Thread(target=_feed_stdin, daemon=True).start()
 
-        deadline = time.monotonic() + limits.timeout
         reason = "exited"
         while proc.poll() is None:
             if time.monotonic() >= deadline:
@@ -2160,6 +2173,8 @@ class DockerBackend:
         container - see that field's own docstring for the forgeability
         reasoning."""
         assert isinstance(handle, _Handle)
+        if limits.completion_deadline is not None and limits.execution_deadline is None:
+            limits = replace(limits, execution_deadline=time.monotonic() + limits.timeout)
         reachable, absent, status = self._inspect(handle)
         if reachable and (absent or status != "running"):
             # #304: a second `execute()` against an already-stopped handle
@@ -2211,6 +2226,8 @@ class DockerBackend:
             exec_env=dict(self.agent_exec_env()) if self.agent_exec_env is not None else None,
         )
         if isinstance(launched, ExecuteResult):
+            if limits.completion_deadline is not None or limits.execution_deadline is not None:
+                self._kill_container(handle, "KILL")
             # Launch itself failed (`OSError` from `Popen`) - `_launch_and_wait`
             # already built the `launch-failed` result; add the one piece of
             # context only THIS caller has (whether the wrap prefix it asked

@@ -1830,6 +1830,14 @@ def test_receipt_discovery_and_ordinary_grading_share_caller_collector_and_cache
     from skillc import calibration_run
     original_agent, original_run = at.run_one_attempt, calibration_run.run_calibration
     observed: list[t.OwnedAttemptIds] = []
+    deadlines: list[object] = []
+    executed: set[str] = set()
+    original_execute = d.DockerBackend.execute
+
+    def execute(self: object, *args: object, **kwargs: object) -> object:
+        assert getattr(args[2], "completion_deadline", None) is deadlines[-1]
+        executed.add(str(getattr(args[0], "attempt_id", None)))
+        return original_execute(self, *args, **kwargs)  # type: ignore[arg-type]
 
     def run(*args: object, **kwargs: object) -> object:
         kwargs["clock"] = lambda: 0.0
@@ -1839,14 +1847,18 @@ def test_receipt_discovery_and_ordinary_grading_share_caller_collector_and_cache
         ids = kwargs["recorded_attempt_ids"]
         assert isinstance(ids, t.OwnedAttemptIds)
         observed.append(ids)
+        deadlines.append(kwargs["completion_deadline"])
         return original_agent(**kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(calibration_run, "run_calibration", run)
     monkeypatch.setattr(at, "run_one_attempt", agent)
+    monkeypatch.setattr(d.DockerBackend, "execute", execute)
     _, outcomes, _, _ = helpers._run(tmp_path, monkeypatch, total_seconds=100)
     assert len(observed) == len(outcomes) == 6
     assert sorted(map(len, observed)) == [1, 1, 1, 1, 1, 3]
     assert all(ids.all_absent() for ids in observed)
+    assert executed == {aid for ids in observed for aid in [ids.parent_attempt, *ids]}
+    assert Limits(timeout=1).completion_deadline is None
     for ids in observed:
         registered = [e["owned_id"] for e in ids.experiment.events(ids.parent_attempt)
                       if e.get("event") == "owned-attempt"]

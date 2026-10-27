@@ -746,6 +746,10 @@ def run_level1_agent_attempt(
     guard_kwargs: dict[str, object] = (
         {"codex_guard": True, "nested_codex_policy": nested_codex_policy, "declared_model": declared_model}
         if codex_guard else {})
+    if completion_deadline is not None:
+        guard_kwargs["completion_deadline"] = completion_deadline
+    if recorded_attempt_ids is not None:
+        guard_kwargs["recorded_attempt_ids"] = recorded_attempt_ids
     if extra_home_modes is not None:
         # #505: each installed file's source mode, forwarded only when known,
         # so every other caller's call is unchanged.
@@ -769,7 +773,6 @@ def run_level1_agent_attempt(
         cli_version=cli_version,
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
-        completion_deadline=completion_deadline, recorded_attempt_ids=recorded_attempt_ids,
         receipt_context=receipt_context,
         verify_home_files=verify_home_files,
         preflight_tools=preflight_tools,

@@ -403,7 +403,7 @@ def test_completion_readback_joins_supplied_recovered_and_direct_reports(tmp_pat
     mp.write_outcomes(run, experiment, [supplied])
     _, read = mp.read_outcomes(run)
     assert mp.graded_status(read[0].record) == "UNKNOWN"
-    final = deadline.qualify(marker, True)
+    final = {**deadline.qualify(marker, True), "publication_confirmed": True}
     experiment.record(first.attempt_id, "completion-qualified", qualification=final)
     qualified = replace(supplied, record={**raw, "completion": final})
     assert mp.graded_status(mp.reconcile(experiment, [qualified])[0].record) == "PASS"

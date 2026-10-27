@@ -729,7 +729,7 @@ def _probe_via_backend(
             probe_cap = (grader.probe_timeout if completion_deadline is None
                          else completion_deadline.remaining(grader.probe_timeout))
             result = backend.execute(
-                handle, argv, Limits(timeout=probe_cap), stdin=loaded["inputs"],
+                handle, argv, Limits(timeout=probe_cap, completion_deadline=completion_deadline), stdin=loaded["inputs"],
             )
             stop_confirmation = backend.confirm_stopped(handle)
             confirmed = stop_confirmation is Confirmation.CONFIRMED
