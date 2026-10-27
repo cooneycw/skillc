@@ -6,9 +6,11 @@ run (#10), exactly as `docker_backend.py` itself states.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
@@ -39,6 +41,18 @@ def _run(docker_state: Path, name: str, labels: dict[str, str]) -> None:
 
 def _owned_labels(attempt_id: str) -> dict[str, str]:
     return {OWNER_LABEL_KEY: OWNER_LABEL_VALUE, ATTEMPT_LABEL_KEY: attempt_id}
+
+
+def test_network_only_residue_is_removed_by_public_reap(docker_state: Path) -> None:
+    argv = [*_docker_bin(docker_state), "network", "create", "--internal"]
+    for key, value in _owned_labels("att-network").items():
+        argv += ["--label", f"{key}={value}"]
+    subprocess.run([*argv, "selected-egress"], check=True, capture_output=True)
+    network = docker_state / "networks/selected-egress.json"
+    assert network.is_file(), "the unhealthy population must actually exist"
+    report = reap.reap(_docker_bin(docker_state), ["att-network"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
+    assert not network.exists(), "successful container-only absence must not hide network residue"
+    assert report.outcome_for("att-network") == "reaped"
 
 
 # --------------------------------------------------------------- snapshot()
@@ -170,21 +184,14 @@ def test_unknown_never_reaps_when_the_daemon_is_unreachable(docker_state: Path) 
     assert "orphan" in still.owned  # nothing was actually removed
 
 
-def test_unknown_and_left_running_are_kept_distinct_in_one_call(
+def test_later_initial_uncertainty_prevents_mutating_earlier_attempt(
     docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Orchestrator review of this PR: reporting `left-running` for BOTH
-    "the daemon confirms something is still there" and "the daemon could
-    not be asked" made the two indistinguishable per attempt - a caller
-    processing a mixed batch could not tell "known to be running" from
-    "unknown" for any individual attempt id, even though the report-level
-    `daemon_reachable` flag went false. This drives one `reap()` call over
-    two attempts at once: one whose container genuinely cannot be removed
-    (confirmed `left-running`) and one whose OWN listing call times out
-    (`unknown`), and asserts both outcomes land correctly in the SAME
-    report. Confirmed red on the pre-fix code (2495473): that build has no
-    `unknown` outcome at all, so `report.outcome_for("att-unreachable")`
-    returned `"left-running"` there instead.
+    """An uncertain initial inventory for a later ID prevents ALL mutations.
+
+    The old per-attempt sweep could mutate earlier IDs before discovering that
+    the batch inventory was incomplete. The selected network contract requires
+    a complete preflight, while preserving UNKNOWN as distinct from known residue.
     """
     _run(docker_state, "stuck-one", _owned_labels("att-stuck"))
     (docker_state / ".stuck-stuck-one").touch()
@@ -203,10 +210,11 @@ def test_unknown_and_left_running_are_kept_distinct_in_one_call(
     monkeypatch.setattr(reap.subprocess, "run", _flaky_run)
     report = reap.reap(_docker_bin(docker_state), ["att-stuck", "att-unreachable"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
-    assert report.outcome_for("att-stuck") == "left-running"
+    assert report.outcome_for("att-stuck") == "unknown"
     assert report.outcome_for("att-unreachable") == "unknown"
-    assert report.left_running == ("att-stuck",)
-    assert report.unknown == ("att-unreachable",)
+    assert report.left_running == ()
+    assert report.unknown == ("att-stuck", "att-unreachable")
+    assert "stuck-one" in reap.snapshot(_docker_bin(docker_state)).owned
 
 
 def test_a_container_that_cannot_be_confirmed_removed_is_left_running(docker_state: Path) -> None:
@@ -265,7 +273,7 @@ def test_reap_removes_by_container_id_never_by_name(
     assert len(rm_calls) == 1
     target = rm_calls[0][-1]
     assert target != "att-1-container"  # never the declared name
-    assert len(target) == 12 and all(ch in "0123456789abcdef" for ch in target)  # the fake's own id shape
+    assert len(target) == 64 and all(ch in "0123456789abcdef" for ch in target)  # the fake's own id shape
 
 
 # --------------------------------------------------- declared host paths
@@ -371,3 +379,245 @@ def test_a_declaration_added_between_snapshots_is_reported_not_ignored(tmp_path:
     result = reap.diff_host_paths(before, after)
     assert result.changed == (str(watched),)
     assert result.unresolved == ()
+
+
+# #549: public recovery and bad/good protocol populations, never a real daemon.
+def _network(state: Path, name: str, attempt: str, labels: dict[str, str] | None = None) -> Path:
+    argv = [*_docker_bin(state), "network", "create", "--internal"]
+    for k, v in (_owned_labels(attempt) if labels is None else labels).items():
+        argv += ["--label", f"{k}={v}"]
+    subprocess.run([*argv, name], capture_output=True, check=True)
+    return state / "networks" / f"{name}.json"
+
+
+def _state(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text())  # type: ignore[no-any-return]
+
+
+def test_dual_recovery_preserves_unselected_and_partial_label_sentinels(docker_state: Path) -> None:
+    _run(docker_state, "selected", _owned_labels("a"))
+    _run(docker_state, "proxy", _owned_labels("a"))
+    network = _network(docker_state, "ours", "a")
+    for name in ("selected", "proxy"):
+        subprocess.run([*_docker_bin(docker_state), "network", "connect", "ours", name], check=True)
+    _run(docker_state, "second", _owned_labels("b"))
+    second = _network(docker_state, "second-net", "b")
+    keep = [_network(docker_state, "other", "other"),
+            _network(docker_state, "owner-only", "a", {OWNER_LABEL_KEY: OWNER_LABEL_VALUE}),
+            _network(docker_state, "attempt-only", "a", {ATTEMPT_LABEL_KEY: "a"})]
+    _run(docker_state, "foreign", _owned_labels("live-unknown-owner"))
+    keep.append(docker_state / "foreign.json")
+    before = {p: p.read_bytes() for p in keep}
+    report = reap.reap(_docker_bin(docker_state), ["a", "a", "b"])
+    assert report.clean and len(report.outcomes) == 2 and not network.exists() and not second.exists()
+    assert not (docker_state / "selected.json").exists() and not (docker_state / "proxy.json").exists()
+    assert all(p.read_bytes() == b for p, b in before.items())
+    assert reap.reap(_docker_bin(docker_state), ["a"]).outcome_for("a") == "already-absent"
+
+
+def test_foreign_endpoint_is_preserved_without_disconnect(docker_state: Path) -> None:
+    network = _network(docker_state, "ours", "a")
+    _run(docker_state, "foreign", _owned_labels("unselected"))
+    subprocess.run([*_docker_bin(docker_state), "network", "connect", "ours", "foreign"], check=True)
+    sentinel = (docker_state / "foreign.json").read_bytes()
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    assert report.outcome_for("a") == "left-present" and not report.clean
+    assert network.is_file() and (docker_state / "foreign.json").read_bytes() == sentinel
+    assert report.outcomes[0].actions == () and report.nonclean == ("a",)
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize("fault", ["nonzero", "timeout", "oserror", "garbage", "truncated", "no-newline", "duplicate"])
+def test_any_initial_inventory_fault_means_zero_actions_for_all_selected(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, kind: str, fault: str,
+) -> None:
+    _run(docker_state, "first", _owned_labels("first"))
+    _run(docker_state, "later", _owned_labels("later"))
+    net = _network(docker_state, "later-net", "later")
+    identity = _state(net)["id"] if kind == "network" else _state(docker_state / "later.json")["id"]
+    calls: list[list[str]] = []
+    real = subprocess.run
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        listing = ("ps" in argv) if kind == "container" else ("network" in argv and "ls" in argv)
+        if listing and f"label={ATTEMPT_LABEL_KEY}=later" in argv:
+            if fault == "timeout":
+                raise subprocess.TimeoutExpired(argv, 1)
+            if fault == "oserror":
+                raise OSError("controlled inventory failure")
+            text = {"garbage": "garbage\n", "truncated": identity[:12] + "\n",
+                    "no-newline": identity, "duplicate": identity + "\n" + identity + "\n"}.get(fault, "")
+            return subprocess.CompletedProcess(argv, 1 if fault == "nonzero" else 0, text, "")
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["first", "later"])
+    assert report.unknown == ("first", "later") and not report.clean
+    assert not any("rm" in c or "disconnect" in c for c in calls)
+    assert (docker_state / "first.json").exists() and (docker_state / "later.json").exists() and net.exists()
+    assert any("ls" in c for c in calls) and any("ps" in c for c in calls)
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize("fault", ["bad-json", "duplicate-key", "wrong-id", "bad-labels", "bad-endpoints", "wrong-labels"])
+def test_metadata_is_independent_scope_and_completeness_evidence(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str, kind: str,
+) -> None:
+    if kind == "network":
+        net = _network(docker_state, "ours", "a")
+    else:
+        _run(docker_state, "ours", _owned_labels("a"))
+        net = docker_state / "ours.json"
+    real = subprocess.run
+    mutations: list[list[str]] = []
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if "rm" in argv:
+            mutations.append(argv)
+        p = real(argv, **kw)
+        if "{{json .}}" in argv:
+            data = json.loads(p.stdout)
+            if fault == "bad-json":
+                return subprocess.CompletedProcess(argv, 0, "{", "")
+            if fault == "duplicate-key":
+                return subprocess.CompletedProcess(argv, 0, '{"Id":"a","Id":"b"}', "")
+            if fault == "wrong-id":
+                data["Id"] = "0" * 64
+            elif fault == "bad-labels":
+                data["Labels"] = [] if kind == "network" else data.get("Labels")
+                if kind == "container":
+                    data["Config"]["Labels"] = []
+            elif fault == "bad-endpoints":
+                data["Containers"] = {"short": {}}
+                if kind == "container":
+                    data["Config"] = []
+            elif fault == "wrong-labels":
+                labels = {OWNER_LABEL_KEY: OWNER_LABEL_VALUE}  # candidate listing alone is not authority
+                if kind == "network":
+                    data["Labels"] = labels
+                else:
+                    data["Config"]["Labels"] = labels
+            return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+        return p
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    assert not mutations and net.exists()
+    assert report.clean if fault == "wrong-labels" else report.unknown == ("a",)
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize("effect", ["lie", "reply-error-after-removal", "replace", "relabel"])
+def test_identity_confirmation_and_replacements_are_not_chased(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, kind: str, effect: str,
+) -> None:
+    if kind == "network":
+        path = _network(docker_state, "target", "a")
+    else:
+        _run(docker_state, "target", _owned_labels("a"))
+        path = docker_state / "target.json"
+    original = _state(path)["id"]
+    calls: list[list[str]] = []
+    real = subprocess.run
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if "rm" not in argv:
+            return real(argv, **kw)
+        calls.append(argv)
+        assert argv[-1] == original and len(argv[-1]) == 64
+        if effect == "lie":
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if effect == "relabel":
+            data = _state(path); data["labels"] = {}; path.write_text(json.dumps(data))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        p = real(argv, **kw)
+        if effect == "replace":
+            data = {"internal": True, "labels": _owned_labels("a"), "id": "f" * 64} if kind == "network" else {
+                "status": "running", "labels": _owned_labels("a"), "id": "f" * 64}
+            path.write_text(json.dumps(data))
+        return subprocess.CompletedProcess(argv, 1, "", "lost reply") if effect == "reply-error-after-removal" else p
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    assert len(calls) == 1
+    if effect == "reply-error-after-removal":
+        assert report.clean and not path.exists() and report.outcomes[0].errors
+    else:
+        assert not report.clean and path.exists()
+        assert report.outcome_for("a") == ("left-present" if kind == "network" else "left-running")
+        if effect == "replace":
+            assert _state(path)["id"] != original
+
+
+@pytest.mark.parametrize("fault", ["nonzero", "timeout", "oserror"])
+def test_action_error_stops_remaining_mutations_and_retains_prior_actions(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    for name in ("one", "two", "three"):
+        _run(docker_state, name, _owned_labels("a"))
+    _network(docker_state, "ours", "a")
+    real = subprocess.run
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if "rm" in argv:
+            calls.append(argv)
+            if len(calls) == 2:
+                if fault == "timeout":
+                    raise subprocess.TimeoutExpired(argv, 1)
+                if fault == "oserror":
+                    raise OSError("controlled action failure")
+                return subprocess.CompletedProcess(argv, 1, "", "refused")
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    row = report.outcomes[0]
+    assert len(calls) == len(row.actions) == 2 and len(row.errors) == 1
+    assert len(row.remaining_containers) == 2 and len(row.remaining_networks) == 1 and not report.clean
+    assert len(list(docker_state.glob("*.json"))) == 2
+
+
+@pytest.mark.parametrize("phase", ["selected-inventory", "target-identity"])
+def test_confirmation_uncertainty_does_not_erase_successful_actions(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    net = _network(docker_state, "ours", "a")
+    real = subprocess.run
+    lists = 0
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal lists
+        if "network" in argv and "ls" in argv:
+            lists += 1
+            if lists == 2 and phase == "selected-inventory":
+                raise subprocess.TimeoutExpired(argv, 1)
+        if "{{.Id}}" in argv and phase == "target-identity":
+            raise subprocess.TimeoutExpired(argv, 1)
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    assert report.unknown == ("a",) and report.outcomes[0].actions and not report.clean and not net.exists()
+
+
+def test_foreign_endpoint_arriving_after_preflight_refuses_removal_without_disconnect(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    net = _network(docker_state, "ours", "a")
+    _run(docker_state, "foreign", _owned_labels("unselected"))
+    real = subprocess.run
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if "network" in argv and "rm" in argv:
+            real([*_docker_bin(docker_state), "network", "connect", "ours", "foreign"], check=True)
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    assert report.outcome_for("a") == "left-present" and report.outcomes[0].errors
+    assert net.exists() and (docker_state / "foreign.json").exists() and not report.clean
+    assert not any("disconnect" in c for c in calls)

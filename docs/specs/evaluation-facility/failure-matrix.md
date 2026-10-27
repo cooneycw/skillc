@@ -84,56 +84,53 @@ never one substituting for the other.
 
 ## Label-scoped reaping (`skillc/reap.py`)
 
-Reaping is by label ONLY, never by name - `docker ps --filter
-label=skillc.managed=true --filter label=skillc.attempt-id=<id>` selects the
-candidates, so a foreign container that merely looks like one of ours can
-never appear in that list; it is not merely unlikely to be touched, it is
-structurally unreachable to `reap()`.
+Recovery is for explicitly selected attempt IDs whose caller is authorized to
+stop them. Both ownership labels must match independently inspected metadata.
+Labels, age, empty endpoints and local PID absence do not prove a dead owner.
+There is no automatic owner discovery, image sweep or forced disconnection.
 
-**Four outcomes, not three - `unknown` is distinct from `left-running`**
-(orchestrator review of this PR): `already-absent` (nothing found, an
-ordinary idempotent no-op), `reaped` (found, removed, confirmed gone),
-`left-running` (found, removal attempted, the daemon CONFIRMS something with
-these labels is still there), and `unknown` (the daemon could not be asked
-at all - `docker ps` itself failed, at either the initial list or the
-confirming re-list). UNKNOWN NEVER REAPS: nothing is removed for an attempt
-in that state. The first cut folded `unknown` into `left-running`, which
-asserted a container was confirmed running when the truth was that nothing
-could be confirmed either way - exactly the distinction `Confirmation` keeps
-everywhere else in this codebase.
-`test_unknown_and_left_running_are_kept_distinct_in_one_call` drives one
-`reap()` call over two attempts at once - one confirmed still running, one
-whose own listing call times out - and asserts both land correctly in the
-SAME report, never collapsed into the same outcome.
+Before any removal, complete container AND network inventories for ALL selected
+IDs, including full immutable 64-hex IDs and network endpoint metadata. Failed,
+malformed, conflicting or truncated observations produce UNKNOWN with ZERO
+actions for the batch. An empty requested population is refused. An empty
+resource population is confirmed only after both queries succeed.
 
-**Register-before-fail is already true, by construction, not something this
-module adds.** `compose_run_argv` (#77) writes both labels onto a container
-at `docker run` time - the very first step of an attempt's lifecycle, before
-anything that can fail. There is no separate "intend to clean this up"
-bookkeeping for a crash to lose, because the label IS that bookkeeping and it
-already exists on the daemon by the time `reap()` ever runs. `reap()` is
-idempotent for the same reason: asking the daemon "does anything with this
-label still exist" is idempotent, and removing something already gone is
-success (`already-absent`), never an error.
+Remove selected containers/proxies first, then ordinary network removal by ID.
+Foreign/unselected endpoints preserve a network; if an endpoint arrives after
+preflight, Docker's ordinary removal refusal preserves it. No resource is
+removed by name. Confirm original target IDs independently, even if labels
+changed, and query both selected populations again. New arrivals/replacements
+are reported as remaining, never chased by this call.
 
-**Acts and confirms by container ID, never by name** (cross-model review of
-this PR, HIGH). `reap()` lists, removes, and re-lists - three separate round
-trips to a daemon nothing prevents from changing between them. A NAME can be
-taken by a brand-new, different container the instant the original is
-removed; an ID cannot, because it is unique to one container's lifetime and
-is never reused. `reap()` therefore lists container IDs, issues `docker rm
--f <id>`, and confirms by checking that those SPECIFIC ids are gone - not
-merely that the label filter now returns nothing, which a fresh container
-that picked up the same attempt id's label in the interim would satisfy
-without ever having been touched
-(`test_reap_removes_by_container_id_never_by_name` asserts the actual `rm`
-argv targets an id, not the declared name).
+Five outcomes stay distinct: `already-absent` (none found and none remain),
+`reaped` (found and confirmed absent), legacy `left-running` (known container
+residue), `left-present` (known network residue), and `unknown` (uncertain
+inventory/confirmation). Mixed residue retains both sets of IDs. Initial UNKNOWN
+never acts; confirmation UNKNOWN can follow recorded successful actions.
 
-**Refuses an empty attempt population** (cross-model review, MEDIUM):
-`reap(docker_bin, [])` used to report `daemon_reachable=True` having checked
-nothing at all - an unexamined population is not the same fact as a
-checked-and-clean one. `reap()` now raises `ValueError`
-(`test_reap_refuses_an_empty_attempt_population`).
+The first action error stops further mutations. Actual action attempts and
+errors are retained; subsequent read-only confirmation reports observed absence,
+known residue or uncertainty. A failed action reply can coexist with confirmed
+absence; this never implies rollback or that no earlier action occurred.
+`ReapReport.clean` requires reachable, NONEMPTY outcomes, exclusively success
+verdicts and no remaining resources/uncertainty. `nonclean` includes invalid
+verdicts and contradictory success/residue details. Both demo acceptance builders
+consume this complete verdict; normal CLI failure and interrupt failure remain
+visible. Container-only snapshot/diff and declared host-path observations retain
+their existing scope.
+
+Remaining IDs, actions and errors are retained in the returned `ReapOutcome`;
+demo paste-back and interrupt summaries still emit only the outcome. Target-ID
+absence recognizes two exact missing-object/network stderr forms, modeled by the
+fake CLI. Different or additional real-daemon error text stays UNKNOWN; these
+tests do not establish compatibility with every Docker version or error format.
+
+The producers already label containers and per-attempt egress networks before
+risky allocation. This stage adds recovery, not a new producer/liveness protocol.
+Fake-CLI controls prove the bounded protocol, not the real daemon boundary.
+Live-test image ownership and automatic interrupted-owner discovery remain owed;
+comparative CPP cleanup is an independently preregistered endpoint, not certified
+by this operational repair. Protected #540 residue is not selected or removed.
 
 **Committed controls** (`tests/test_reap.py`):
 

@@ -425,12 +425,20 @@ def cmd_ps(state_dir: Path, rest: list[str]) -> int:
         data = json.loads(path.read_text(encoding="utf-8"))
         labels = data.get("labels", {})
         if all(labels.get(k) == v for k, v in wanted.items()):
-            print(data.get("id", name) if want_id else name)
+            print((data.get("id", name) if "--no-trunc" in rest else data.get("id", name)[:12]) if want_id else name)
     return 0
 
 
 def cmd_inspect(state_dir: Path, rest: list[str]) -> int:
     name = rest[-1]
+    if "{{json .}}" in rest or "{{.Id}}" in rest:
+        resolved = _resolve_name(state_dir, name)
+        if resolved is None:
+            print("Error: No such object: " + name, file=sys.stderr)
+            return 1
+        data = json.loads(_state_file(state_dir, resolved).read_text())
+        print(data["id"] if "{{.Id}}" in rest else json.dumps({"Id": data["id"], "Config": {"Labels": data["labels"]}}))
+        return 0
     delay_file = state_dir / f".inspect-delay-{name}"
     if delay_file.is_file():
         # skillc#174 fault injection: block this call for the given number of
@@ -997,7 +1005,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     # later run reuses the same --name (#79): reap.py acts and confirms by
     # this id, never by name, so a foreign replacement under a reused name
     # is never mistaken for the container an earlier reap() call targeted.
-    container_id = uuid.uuid4().hex[:12]
+    container_id = uuid.uuid4().hex + uuid.uuid4().hex
 
     if detached:
         hang = state_dir / ".hang-run"
@@ -1096,70 +1104,81 @@ def _network_file(state_dir: Path, network: str) -> Path:
     return state_dir / "networks" / f"{network}.json"
 
 
+def _resolve_network(state_dir: Path, ref: str) -> Path | None:
+    direct = _network_file(state_dir, ref)
+    if direct.is_file():
+        return direct
+    for p in (state_dir / "networks").glob("*.json"):
+        if json.loads(p.read_text()).get("id") == ref:
+            return p
+    return None
+
+
+def _network_endpoints(state_dir: Path, name: str) -> dict[str, object]:
+    return {d["id"]: {} for p in state_dir.glob("*.json")
+            if name in (d := json.loads(p.read_text())).get("networks", [])}
+
+
 def cmd_network(state_dir: Path, rest: list[str]) -> int:
-    """#442: `network create [--internal] [--label K=V ...] NAME`,
-    `network connect NAME CONTAINER`, `network rm NAME`, `network inspect
-    NAME`. A network is a JSON file under `networks/`. `.refuse-network-create`,
-    `.refuse-network-connect` and `.refuse-network-rm` make those calls fail
-    outright; `.hang-network-create` (content: seconds) CREATES the network and
-    then sleeps before answering, so a caller's timeout fires after the create
-    took effect."""
+    """Selected-network recovery protocol; no image/exec/path emulation changes."""
     if not rest:
-        print("fake_docker: network requires a subcommand", file=sys.stderr)
         return 2
     verb, args = rest[0], rest[1:]
+    if (state_dir / f".refuse-network-{verb}").exists():
+        print("Error response from daemon: network operation refused", file=sys.stderr)
+        return 1
+    if verb == "ls":
+        wanted = [args[i + 1][6:].partition("=") for i, a in enumerate(args) if a == "--filter"]
+        for p in sorted((state_dir / "networks").glob("*.json")):
+            data = json.loads(p.read_text())
+            if all(data["labels"].get(k) == v for k, _, v in wanted):
+                print(data["id"] if "--no-trunc" in args else data["id"][:12])
+        return 0
     if verb == "create":
-        if (state_dir / ".refuse-network-create").exists():
-            print("Error response from daemon: network create refused (fault injection)", file=sys.stderr)
-            return 1
-        internal = "--internal" in args
         labels = {args[i + 1].partition("=")[0]: args[i + 1].partition("=")[2]
                   for i, a in enumerate(args) if a == "--label"}
-        name = args[-1]
-        target = _network_file(state_dir, name)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(target, {"internal": internal, "labels": labels})
+        created = _network_file(state_dir, args[-1])
+        if created.exists():
+            return 1
+        created.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(created, {"internal": "--internal" in args, "labels": labels,
+                                    "id": uuid.uuid4().hex + uuid.uuid4().hex})
         hang = state_dir / ".hang-network-create"
         if hang.exists():
             time.sleep(float(hang.read_text(encoding="utf-8").strip() or "2"))
         return 0
+    ref = args[0] if verb in {"connect", "rm"} else args[-1]
+    target = _resolve_network(state_dir, ref)
+    if target is None:
+        print(f"Error response from daemon: network {ref} not found", file=sys.stderr)
+        return 1
     if verb == "connect":
-        if (state_dir / ".refuse-network-connect").exists():
-            print("Error response from daemon: network connect refused (fault injection)", file=sys.stderr)
-            return 1
-        network, container = args[0], args[1]
-        if not _network_file(state_dir, network).is_file():
-            print(f"Error response from daemon: network {network} not found", file=sys.stderr)
-            return 1
-        path = _state_file(state_dir, container)
+        path = _state_file(state_dir, _resolve_name(state_dir, args[1]) or args[1])
         if not path.is_file():
-            print("Error: No such container: " + container, file=sys.stderr)
             return 1
-        data = json.loads(path.read_text(encoding="utf-8"))
-        data["networks"] = [*data.get("networks", []), network]
+        data = json.loads(path.read_text())
+        data["networks"] = [*data.get("networks", []), target.stem]
         _atomic_write_json(path, data)
         return 0
+    data = json.loads(target.read_text())
     if verb == "inspect":
-        name = args[-1]
-        if not _network_file(state_dir, name).is_file():
-            print(f"Error response from daemon: network {name} not found", file=sys.stderr)
-            return 1
-        if "-f" in args:
-            print("192.0.2.0/24")  # the only template asked of a network: its subnet
+        if "{{.Id}}" in args:
+            print(data["id"])
+        elif "{{json .}}" in args:
+            print(json.dumps({"Id": data["id"], "Labels": data["labels"],
+                              "Containers": _network_endpoints(state_dir, target.stem)}))
+        elif "-f" in args:
+            print("192.0.2.0/24")
         else:
-            print(_network_file(state_dir, name).read_text(encoding="utf-8"))
+            print(json.dumps(data))
         return 0
     if verb == "rm":
-        if (state_dir / ".refuse-network-rm").exists():
-            print("Error response from daemon: network has active endpoints (fault injection)", file=sys.stderr)
+        if _network_endpoints(state_dir, target.stem):
+            print("Error response from daemon: network has active endpoints", file=sys.stderr)
             return 1
-        target = _network_file(state_dir, args[0])
-        if not target.is_file():
-            print(f"Error response from daemon: network {args[0]} not found", file=sys.stderr)
-            return 1
-        target.unlink()
+        if not (state_dir / f".stuck-network-{target.stem}").exists():
+            target.unlink()
         return 0
-    print(f"fake_docker: unimplemented network subcommand {verb!r}", file=sys.stderr)
     return 2
 
 

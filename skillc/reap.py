@@ -1,69 +1,22 @@
-"""Label-scoped container reaping and resource snapshots (#79, sub-issue of #10).
+"""Explicitly selected attempt recovery; container snapshots and host observations.
 
-`docker_backend.py`'s own driver already tears down every attempt's container
-through `destroy()`/`confirm_absent()` (#77). This module is the SECOND,
-INDEPENDENT layer #79 asks for: a sweep that finds and removes containers by
-label alone, for the case that per-attempt teardown itself did not run or did
-not finish - a crash mid-lifecycle, a killed controller process, an operator
-running this by hand against a daemon nobody has looked at in a while.
-
-REAPING IS BY LABEL ONLY, NEVER BY NAME (issue #77's own docstring, #79's
-scope). A container is a candidate for this module's `reap()` only if the
-daemon itself reports it carrying BOTH `docker_backend.OWNER_LABEL_KEY` and
-the specific attempt id's `docker_backend.ATTEMPT_LABEL_KEY` value - `docker
-ps --filter label=...` does the matching, not a name comparison this module
-performs itself. A foreign container that merely LOOKS like one of ours
-(a similar name, no matching labels) can never appear in that filtered list,
-so it is structurally unreachable to `reap()`, not merely unlikely to be hit.
-
-UNKNOWN NEVER REAPS, the same rule `ExecutionBackend.confirm_absent` already
-states for a single attempt (`backend.py`), generalized to a sweep over many.
-If the daemon cannot even be asked (`docker ps` itself fails - an unreachable
-daemon, a timeout), nothing is removed and every requested attempt id is
-reported `"unknown"` - a FOURTH, DISTINCT outcome from `"left-running"`
-(orchestrator review of this PR: the first cut folded both into
-`"left-running"`, conflating "we asked and it confirms something is still
-there" with "we could not ask at all"). An unconfirmable absence is not a
-confirmed one, and guessing "probably already gone" here is exactly the
-guess `Confirmation` exists to forbid elsewhere in this codebase - so is
-guessing "probably still running", which is what collapsing `"unknown"`
-into `"left-running"` would silently assert about a daemon that was never
-actually reached.
-
-REGISTER-BEFORE-FAIL IS ALREADY TRUE, BY CONSTRUCTION, NOT SOMETHING THIS
-MODULE ADDS. `compose_run_argv` (docker_backend.py) writes both labels onto a
-container at `docker run` time - the very first step of an attempt's
-lifecycle, before install/execute/anything that can fail. So a container that
-exists on the daemon at all is already durably marked as skillc's own and
-already carries the one attempt id it belongs to; there is no separate
-"intend to clean this up" bookkeeping for a crash to lose, because the
-label IS that bookkeeping and it was written before anything risky ran.
-`reap()` therefore needs no journal, no lock file and no state of its own -
-it is idempotent because asking the daemon "does anything with this label
-still exist" is idempotent, and removing something already gone is defined
-here as success (`already-absent`), never an error.
-
-RESOURCE SNAPSHOTS ARE TWO-DIRECTIONAL (#79's own wording: "flagged in BOTH
-directions"). `snapshot()` partitions every container the daemon reports into
-`owned` (carries the fixed ownership label) and `foreign` (everything else);
-`diff()` compares a before/after pair and reports BOTH an unexpected LEAK
-(an owned container present after that was not present before - something
-skillc left running) AND an unexpected DISAPPEARANCE (a foreign container
-present before that is gone after - evidence a sweep reached outside its own
-label scope, which a correctly-scoped `reap()` cannot do, but the comparison
-does not assume that and checks anyway). A diff computed across an
-unreachable snapshot is refused, never silently treated as "no change" -
-absence of evidence is not evidence of absence.
-
-Stdlib only (AGENTS.md). Tested here only against the fake `docker` CLI
-(`tests/fixtures/docker-backend/fake_docker.py`); the real daemon boundary
-remains owed to the operator's live run (#10), exactly as `docker_backend.py`
-itself states.
+The caller authorizes stopping its selected attempts; labels, age, endpoint
+emptiness and local PID absence do not establish that an owner is dead.
+Before mutation, BOTH resource inventories for ALL selected IDs must succeed.
+Only full immutable IDs with independently inspected matching labels are acted
+on. Foreign endpoints are preserved; new resources are reported, never chased.
+An action error stops further mutations. Read-only confirmation reports what
+actually remains, retaining prior actions/errors rather than implying rollback.
+Snapshots/diffs below remain container-only, with identity by name; they are
+observations, not authority for selecting resources to remove. Tested with a
+fake CLI; this module's tests do not certify the real daemon boundary.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -100,23 +53,6 @@ def _list_names(
     label_filters: Sequence[tuple[str, str]],
 ) -> list[str] | None:
     return _list(docker_bin, env, timeout, label_filters, "{{.Names}}")
-
-
-def _list_ids(
-    docker_bin: Sequence[str], env: Mapping[str, str] | None, timeout: float,
-    label_filters: Sequence[tuple[str, str]],
-) -> list[str] | None:
-    """Container IDs, not names (codex review of this PR): a NAME can be
-    reused by a different, later container the instant the original one is
-    removed - real docker refuses two SIMULTANEOUS containers sharing a name,
-    but says nothing about a name being taken by a brand-new container
-    milliseconds after the old one is gone. `reap()` lists, then acts, then
-    re-lists - three separate round trips - so acting and confirming BY NAME
-    could target or "confirm absent" a container that only coincidentally
-    shares the name of the one this call actually meant. An ID is unique to
-    ONE container's lifetime and is never reused, so it is immune to that
-    race in a way a name is not."""
-    return _list(docker_bin, env, timeout, label_filters, "{{.ID}}")
 
 
 @dataclass(frozen=True)
@@ -190,28 +126,21 @@ def diff(before: Snapshot, after: Snapshot) -> SnapshotDiff:
     )
 
 
-#: One attempt id's outcome from a `reap()` call.
-#: - "already-absent": nothing with this attempt's labels was found - an
-#:   ordinary, idempotent no-op, not evidence anything was ever removed.
-#: - "reaped": something was found, `docker rm -f` was issued, and a
-#:   follow-up label-filtered list confirms nothing with those labels remains.
-#: - "left-running": the daemon COULD be asked, and it CONFIRMS something
-#:   with these labels is still there after the removal attempt - a known
-#:   fact, not a guess.
-#: - "unknown": the daemon could not be asked at all, at EITHER the initial
-#:   list or the confirming re-list (orchestrator review of this PR: the
-#:   first cut folded this into "left-running", conflating "we know
-#:   something is still there" with "we don't know anything" - exactly the
-#:   distinction `Confirmation` keeps everywhere else in this codebase).
-#:   UNKNOWN never reaps, but it is also never asserted as a running
-#:   container the way "left-running" is.
-REAP_OUTCOMES = ("already-absent", "reaped", "left-running", "unknown")
+# Known container residue keeps the legacy spelling; networks are left-present.
+REAP_OUTCOMES = ("already-absent", "reaped", "left-running", "left-present", "unknown")
+_SUCCESS = ("reaped", "already-absent")
+_ID = re.compile(r"[0-9a-f]{64}\Z")
 
 
 @dataclass(frozen=True)
 class ReapOutcome:
     attempt_id: str
     outcome: str
+    remaining_containers: tuple[str, ...] = ()
+    remaining_networks: tuple[str, ...] = ()
+    actions: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+    uncertain: bool = False
 
 
 @dataclass(frozen=True)
@@ -220,10 +149,7 @@ class ReapReport:
     outcomes: tuple[ReapOutcome, ...]
 
     def outcome_for(self, attempt_id: str) -> str | None:
-        for entry in self.outcomes:
-            if entry.attempt_id == attempt_id:
-                return entry.outcome
-        return None
+        return next((e.outcome for e in self.outcomes if e.attempt_id == attempt_id), None)
 
     @property
     def reaped(self) -> tuple[str, ...]:
@@ -237,75 +163,169 @@ class ReapReport:
     def unknown(self) -> tuple[str, ...]:
         return tuple(e.attempt_id for e in self.outcomes if e.outcome == "unknown")
 
+    @property
+    def nonclean(self) -> tuple[str, ...]:
+        return tuple(e.attempt_id for e in self.outcomes if not self.daemon_reachable
+                     or e.outcome not in _SUCCESS or e.remaining_containers
+                     or e.remaining_networks or e.uncertain)
+
+    @property
+    def clean(self) -> bool:
+        return self.daemon_reachable and bool(self.outcomes) and not self.nonclean
+
+
+def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for k, v in pairs:
+        if k in result:
+            raise ValueError("conflicting duplicate metadata key")
+        result[k] = v
+    return result
+
+
+def _inventory(
+    docker_bin: Sequence[str], ids: list[str], env: Mapping[str, str] | None, timeout: float,
+) -> tuple[dict[str, dict[str, tuple[str, ...]]], set[str]] | None:
+    found: dict[str, dict[str, tuple[str, ...]]] = {a: {} for a in ids}
+    endpoints: dict[str, set[str]] = {}
+    seen: set[tuple[str, str]] = set()
+    valid = True
+    for attempt in ids:
+        filters = ["--filter", f"label={OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}",
+                   "--filter", f"label={ATTEMPT_LABEL_KEY}={attempt}"]
+        for kind, command in (("container", ["ps", "-a"]), ("network", ["network", "ls"])):
+            try:
+                p = subprocess.run([*docker_bin, *command, "--no-trunc", *filters, "--format", "{{.ID}}"],
+                                   capture_output=True, text=True, env=env, timeout=timeout, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                valid = False
+                continue
+            lines = p.stdout.splitlines()
+            if p.returncode or (p.stdout and not p.stdout.endswith("\n")) or any(not _ID.fullmatch(i) for i in lines):
+                valid = False
+                continue
+            selected: list[str] = []
+            for identity in lines:
+                try:
+                    argv = [*docker_bin, *( ["network", "inspect"] if kind == "network" else ["inspect"]),
+                            "--format", "{{json .}}", identity]
+                    meta = subprocess.run(argv, capture_output=True, text=True, env=env,
+                                          timeout=timeout, check=False)
+                    if meta.returncode:
+                        raise ValueError("metadata unavailable")
+                    data = json.loads(meta.stdout, object_pairs_hook=_json_object)
+                    if not isinstance(data, dict) or data.get("Id") != identity:
+                        raise ValueError("identity mismatch")
+                    labels = data.get("Labels") if kind == "network" else data.get("Config", {}).get("Labels")
+                    if not isinstance(labels, dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                                              for k, v in labels.items()):
+                        raise ValueError("invalid labels")
+                    if labels.get(OWNER_LABEL_KEY) != OWNER_LABEL_VALUE or labels.get(ATTEMPT_LABEL_KEY) != attempt:
+                        continue  # candidate filters are not independent ownership proof
+                    if (kind, identity) in seen:
+                        raise ValueError("duplicate selected identity")
+                    seen.add((kind, identity))
+                    if kind == "network":
+                        attached = data.get("Containers")
+                        if not isinstance(attached, dict) or any(
+                            not _ID.fullmatch(k) or not isinstance(v, dict) for k, v in attached.items()
+                        ):
+                            raise ValueError("invalid endpoints")
+                        endpoints[identity] = set(attached)
+                    selected.append(identity)
+                except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError, TypeError):
+                    valid = False
+            found[attempt][kind] = tuple(selected)
+    if not valid:
+        return None
+    owned = {i for a in found.values() for i in a["container"]}
+    blocked = {i for i, attached in endpoints.items() if attached - owned}
+    return found, blocked
+
+
+def _target_present(
+    docker_bin: Sequence[str], kind: str, identity: str, env: Mapping[str, str] | None, timeout: float,
+) -> bool | None:
+    """Independent target-ID confirmation even if its labels changed meanwhile."""
+    argv = [*docker_bin, *(["network", "inspect"] if kind == "network" else ["inspect"]),
+            "--format", "{{.Id}}", identity]
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode == 0:
+        return True if p.stdout == identity + "\n" else None
+    absent = (f"Error: No such object: {identity}" if kind == "container" else
+              f"Error response from daemon: network {identity} not found")
+    return False if p.stderr.strip() == absent else None
+
 
 def reap(
     docker_bin: Sequence[str], attempt_ids: Iterable[str],
     env: Mapping[str, str] | None = None, timeout: float = DAEMON_TIMEOUT,
 ) -> ReapReport:
-    """Remove every container labeled as belonging to one of `attempt_ids`,
-    by label alone (see the module docstring). Idempotent: an attempt id
-    with nothing left to remove is `already-absent`, not an error, so calling
-    this twice - or calling it for an attempt that tore itself down cleanly -
-    costs nothing beyond the list/inspect round trips.
+    """Recover caller-selected attempts, never discover abandoned owners.
 
-    ACTS AND CONFIRMS BY CONTAINER ID, NEVER BY NAME (codex review, HIGH):
-    this function lists, then removes, then re-lists - three separate round
-    trips to a daemon nothing prevents from changing between them. A NAME
-    can be taken by a brand-new, different container the instant the
-    original is removed; an ID cannot, because it is unique to one
-    container's lifetime and is never reused. Confirmation re-checks that
-    the SPECIFIC ids this call targeted are gone, not merely that the label
-    filter now returns nothing - a fresh container that picked up the same
-    attempt id's label between the two lists would otherwise be silently
-    read as "yes, reaped", when what actually happened is a new leak this
-    call never touched (which `snapshot()`/`diff()` above would separately
-    catch as `leaked`, since it is a container this call did not act on).
-
-    An EMPTY `attempt_ids` is refused (`ValueError`), never silently
-    reported as `daemon_reachable=True` with nothing outstanding - an
-    unexamined population is not the same fact as a checked-and-clean one
-    (codex review; the same rule this codebase applies to `check-records` on
-    an empty record set).
+    Initial inventory uncertainty means UNKNOWN and ZERO actions for the entire
+    batch. Actions use immutable IDs; their first error stops later mutations.
+    Confirmation describes the observed result even if an action reply failed.
+    New selected arrivals remain nonclean and are never removed by this call.
     """
-    ids = list(attempt_ids)
-    if not ids:
-        raise ValueError(
-            "reap() refuses an empty attempt_ids: nothing would be checked, and reporting "
-            "daemon_reachable=True for a call that asked the daemon nothing would read as "
-            "a clean sweep rather than as the no-op it actually was"
-        )
-    outcomes: list[ReapOutcome] = []
-    daemon_reachable = True
-    for attempt_id in ids:
-        label_filters = [(OWNER_LABEL_KEY, OWNER_LABEL_VALUE), (ATTEMPT_LABEL_KEY, attempt_id)]
-        target_ids = _list_ids(docker_bin, env, timeout, label_filters)
-        if target_ids is None:
-            # UNKNOWN, not "left-running" (orchestrator review of this PR): we
-            # do not know whether anything is there at all, which is a
-            # different fact from knowing something confirmed still is.
-            daemon_reachable = False
-            outcomes.append(ReapOutcome(attempt_id, "unknown"))
-            continue
-        if not target_ids:
-            outcomes.append(ReapOutcome(attempt_id, "already-absent"))
-            continue
-        for container_id in target_ids:
-            try:
-                subprocess.run(
-                    [*docker_bin, "rm", "-f", container_id],
-                    capture_output=True, env=env, check=False, timeout=timeout,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                pass  # best-effort; the follow-up list below is what actually confirms it
-        still_there = _list_ids(docker_bin, env, timeout, label_filters)
-        if still_there is None:
-            daemon_reachable = False
-            outcomes.append(ReapOutcome(attempt_id, "unknown"))
-        elif any(target_id in still_there for target_id in target_ids):
-            outcomes.append(ReapOutcome(attempt_id, "left-running"))
+    ids = list(dict.fromkeys(attempt_ids))
+    if not ids or any(not isinstance(a, str) or not a.strip() for a in ids):
+        raise ValueError("reap() refuses an empty or invalid attempt_ids population")
+    before = _inventory(docker_bin, ids, env, timeout)
+    if before is None:
+        return ReapReport(False, tuple(ReapOutcome(a, "unknown", uncertain=True) for a in ids))
+    targets, blocked = before
+    actions: dict[str, list[str]] = {a: [] for a in ids}
+    errors: dict[str, list[str]] = {a: [] for a in ids}
+    stopped = False
+    for kind in ("container", "network"):
+        for attempt in ids:
+            for identity in targets[attempt][kind]:
+                if stopped or (kind == "network" and identity in blocked):
+                    continue
+                action = f"{kind}:{identity}"
+                actions[attempt].append(action)
+                try:
+                    argv = [*docker_bin, *( ["network", "rm"] if kind == "network" else ["rm", "-f"]), identity]
+                    p = subprocess.run(argv, capture_output=True, text=True, env=env,
+                                       timeout=timeout, check=False)
+                    if p.returncode:
+                        errors[attempt].append(f"{action}:exit-{p.returncode}")
+                        stopped = True
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    errors[attempt].append(f"{action}:{type(exc).__name__}")
+                    stopped = True
+    after = _inventory(docker_bin, ids, env, timeout)
+    if after is not None:
+        for attempt in ids:
+            for kind in ("container", "network"):
+                for identity in targets[attempt][kind]:
+                    present = _target_present(docker_bin, kind, identity, env, timeout)
+                    if present is None:
+                        after = None
+                        break
+                    if present and identity not in after[0][attempt][kind]:
+                        after[0][attempt][kind] += (identity,)
+                if after is None:
+                    break
+            if after is None:
+                break
+    outcomes = []
+    for attempt in ids:
+        containers: tuple[str, ...] = ()
+        networks: tuple[str, ...] = ()
+        if after is None:
+            verdict = "unknown"
         else:
-            outcomes.append(ReapOutcome(attempt_id, "reaped"))
-    return ReapReport(daemon_reachable=daemon_reachable, outcomes=tuple(outcomes))
+            containers, networks = after[0][attempt]["container"], after[0][attempt]["network"]
+            verdict = ("left-running" if containers else "left-present" if networks else
+                       "reaped" if any(targets[attempt].values()) else "already-absent")
+        outcomes.append(ReapOutcome(attempt, verdict, containers, networks, tuple(actions[attempt]),
+                                    tuple(errors[attempt]), uncertain=after is None))
+    return ReapReport(after is not None, tuple(outcomes))
 
 
 # --------------------------------------------------- declared host paths (#79)
