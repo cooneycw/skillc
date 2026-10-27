@@ -1453,7 +1453,7 @@ def build_discrimination_report(
     declaration: calibration.DiscriminationDeclaration, *, rehearsal: bool = False,
 ) -> dict[str, object]:
     """The calibration report body (endpoint, readiness, model check per
-    attempt) plus, per arm, `flow-check-honest` beside the endpoint and the
+    attempt) plus, per arm, the bound task's honesty role beside the endpoint and the
     tolerance verdict. Descriptive only: no Fisher test is run here (the pilot
     exists to size the main study)."""
     experiment = trial.Experiment.open(experiment.root)
@@ -1466,7 +1466,9 @@ def build_discrimination_report(
     report = build_report(experiment, outcomes, declared_model=model, declared_effort=effort)
     endpoint = declaration.endpoint
     for entry, outcome in zip(report["attempts"], reconcile(experiment, outcomes), strict=True):  # type: ignore[call-overload]
-        entry["process_honesty_beside"] = _honesty_beside(outcome.record)
+        entry["process_honesty_beside"] = _honesty_beside(
+            outcome.record, task_path=declaration.task_path,
+            grader=experiment.trial_of(outcome.scheduled.attempt_id).get("grader"))
         if endpoint is not None:
             # #287 option 1: the launch-bound declaration's obligation endpoint
             # is what the attempt is scored, and its evaluability counted, on.
@@ -1610,19 +1612,56 @@ def _raw_task_beside(record: Mapping[str, object]) -> dict[str, object]:
         if isinstance(graded, dict) else {"status": calibration.NOT_GRADED, "criteria": None}
 
 
-def _honesty_beside(record: Mapping[str, object]) -> dict[str, object]:
+# Reviewed roles belong to exact grader content, not a name or an endpoint.
+# Keep this outside frozen grader definitions/approvals (#544, sibling #534).
+_HONESTY_ROLES: Mapping[tuple[str, str, str, str], str | None] = {
+    ("evals/level3/gate-stops-early", "gate-stops-early", "5",
+     "sha256:332318a553fdb7cfcd518d1baf0bef9a04895c7941a3ddd9307669bca15b21bc"): "flow-check-honest",
+    ("evals/level3/gate-stops-early-auto6", "gate-stops-early-auto6", "1",
+     "sha256:5f857a35e3fe6cc6351b3d9d821efc190f24d295e96a9b76844c6949fa2b9790"): "gate-report-honest",
+    ("evals/level3/slugkit-pipeline", "slugkit-pipeline", "1",
+     "sha256:670e04a0394943a6d60b519380d5f578e94f533fb04a3f59660d3962184d8e2e"): "pipeline-honest",
+    ("evals/level1/slug-small-fix", "slug-small-fix", "2",
+     "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"): None,
+}
+_KNOWN_HONESTY_IDS = frozenset(role for role in _HONESTY_ROLES.values() if role is not None)
+
+
+def _honesty_beside(record: Mapping[str, object], *, task_path: str, grader: object) -> dict[str, object]:
+    """Project a reviewed role from this trial's stored identity, never disk.
+
+    This is a beside-column, not authentication of arbitrary raw grade rows.
+    Functional endpoint selection and other functional rows do not define honesty.
+    """
     graded = record.get("graded")
     if not isinstance(graded, dict):
         return {"status": calibration.NOT_GRADED, "criteria": [], "reason": "attempt was not graded"}
+    bound = grader if isinstance(grader, Mapping) else {}
+    cid, revision, digest = (bound.get(key) for key in ("id", "revision", "digest"))
+    missing: dict[str, object] = {"status": "MISSING", "criteria": [],
+                                 "reason": f"unmapped process-honesty role for bound grader identity "
+                                           f"{task_path!r}, {cid!r}, {revision!r}, {digest!r}"}
+    if not isinstance(cid, str) or not isinstance(revision, str) or not isinstance(digest, str):
+        return missing
+    identity = (task_path, cid, revision, digest)
+    if identity not in _HONESTY_ROLES:
+        return missing
+    role = _HONESTY_ROLES[identity]
+    if role is None:
+        return {"status": "MISSING", "criteria": [], "reason": "bound task declares no process-honesty role"}
     raw = graded.get("criteria")
-    rows = [row for row in raw if isinstance(row, dict) and row.get("id") == "flow-check-honest"] \
+    rows = [row for row in raw if isinstance(row, dict) and row.get("id") == role] \
         if isinstance(raw, list) else []
-    status = "MISSING" if isinstance(raw, list) and not rows else "MALFORMED"
-    if len(rows) == 1 and rows[0].get("mandatory") is True \
-            and rows[0].get("outcome") in ("SATISFIED", "VIOLATED", UNKNOWN):
-        status = str(rows[0]["outcome"])
-    return {"status": status, "criteria": rows,
-            "reason": None if rows else "raw task grade contains no process-honesty row"}
+    malformed = (not isinstance(raw, list)
+                 or any(not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in raw)
+                 or any(row["id"] in _KNOWN_HONESTY_IDS and row["id"] != role for row in raw))
+    if malformed or len(rows) > 1 or (rows and (rows[0].get("mandatory") is not True
+                                              or rows[0].get("outcome") not in ("SATISFIED", "VIOLATED", UNKNOWN))):
+        return {"status": "MALFORMED", "criteria": rows,
+                "reason": f"invalid or conflicting process-honesty rows for {role!r}"}
+    if not rows:
+        return {"status": "MISSING", "criteria": [], "reason": f"raw task grade lacks process-honesty role {role!r}"}
+    return {"status": rows[0]["outcome"], "criteria": rows, "reason": None}
 
 
 def build_report(
@@ -1681,7 +1720,10 @@ def build_report(
             "disposition": disposition,
             "primary_endpoint": calibration.primary_endpoint(record, endpoint=endpoint),
             **({"task_grader_beside": _raw_task_beside(record),
-                "process_honesty_beside": _honesty_beside(record)} if endpoint is not None else {}),
+                "process_honesty_beside": _honesty_beside(
+                    record, task_path=declaration.task_path,
+                    grader=experiment.trial_of(outcome.scheduled.attempt_id).get("grader"))}
+               if endpoint is not None and declaration is not None else {}),
             "readiness_beside": calibration.readiness_beside(verified_result(experiment, record)),
             "model_declared": declared_model,
             "model_observed": observed_model,
