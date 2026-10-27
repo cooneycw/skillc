@@ -698,6 +698,44 @@ def test_synthetic_account_cache_is_recomputed_after_reset(
     assert list(leak.scan_text(text, frozenset())) == []
 
 
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+@pytest.mark.parametrize("tail", ["", "/checkout"])
+@pytest.mark.parametrize("ending", ["", "/", "\\", " ", "'", '"', "`", ")", "]", "}", ",", ";", ":", ">", ".", ". "])
+def test_live_synthetic_home_and_cwd_survive_token_delimiters(
+    monkeypatch: pytest.MonkeyPatch, name: str, tail: str, ending: str,
+) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda candidate: False)
+    host = f"/home/{name}{tail}"
+    findings = list(leak.scan_text(f"see `{host}{ending}", frozenset(), frozenset({host})))
+    assert [detail for _, kind, detail in findings if kind == "host-path"] == [
+        f"this host's own path: {host}",
+    ]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+@pytest.mark.parametrize("tail", ["", "/checkout"])
+@pytest.mark.parametrize("continuation", ["x", "-operator", "_operator", ".cache", ".txt", ".cache "])
+def test_live_synthetic_home_and_cwd_reject_neighboring_prefixes(
+    monkeypatch: pytest.MonkeyPatch, name: str, tail: str, continuation: str,
+) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda candidate: False)
+    host = f"/home/{name}{tail}"
+    findings = list(leak.scan_text(f"`{host}{continuation}`", frozenset(), frozenset({host})))
+    assert not [finding for finding in findings if finding[1] == "host-path"]
+
+
+@pytest.mark.parametrize("mount", ["/workspace", "/root", "/opt", "/srv", "/tmp"])
+@pytest.mark.parametrize("ending", ["", "/", "\\", " ", "'", '"', "`", ")", "]", "}", ",", ";", ":", ">", ".", ". "])
+def test_explicit_host_paths_require_specificity_at_each_delimiter(mount: str, ending: str) -> None:
+    specific = f"{mount}/checkout"
+    host_paths = frozenset({mount, specific})
+    assert list(leak.scan_text(f"`{mount}{ending}", frozenset(), host_paths)) == []
+    findings = list(leak.scan_text(f"`{specific}{ending}", frozenset(), host_paths))
+    assert findings == [(1, "host-path", f"this host's own path: {specific}")]
+
+
 # --- #470: the encoded home form, Claude scratchpads and session-id segments
 
 def _kinds(text: str) -> set[str]:

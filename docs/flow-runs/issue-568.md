@@ -1721,3 +1721,38 @@ One already authorized current distinct-model review now covers exactly seven
 fresh product files (the previous four plus these three), with inherited source
 readable as context; original two B3a review scopes remain unchanged. New receipt
 needs an exact path grant. Full finish, physical proof, push/PR remain held.
+
+
+### Authorized #581 live-path review repair - root gate28
+
+Fresh limited review pass1 on1fab5b58bf found one accepted MEDIUM: conditional
+homes suppress the old fallback finding while live-path matching misses closing
+punctuation. Root independently expanded reproduction across ordinary delimiter
+family; the proposed two-character fix was insufficient. Repair in the SAME
+leak.py/test_leak.py paths using established complete delimiter vocabulary,
+retaining exact-prefix rejection for letters/hyphen/underscore/dot continuations.
+Target<=70 added+deleted lines including controls/docs, combinedcap2250 unchanged.
+
+Add committed existingAPI red controls on1fab for bare home/cwd for user/u/proof
+and all documented delimiters; retain longer-name/adjacent-text controls and the
+original15 account/cache/live-descendant cases. Then fix and retain actualgreen,
+ordinary/unsafeCLI distinction and focusedidentitymatch, lint/types. Exactly ONE
+followup independent review is authorized after source freeze (freshpass2 with
+prioroneMEDIUM), separate from the TWO historical B3a reviews. Further findings
+return for disposition; no third fresh pass. Exactreceiptpath/full/physical/push
+remain held. Previous runs/as-read are retained byte-identically.
+
+
+### Authorized #581 explicit bare-mount contract closure - root gate29
+
+Actual focused323 population reconciled321PASS/1FAIL/1physicalSKIP: existing bare
+mount control exposed explicit host_paths accepting /workspace before a comma.
+Retain this failing result; do not weaken existingtest. Root authorized applying
+existing _is_specific_enough at compiled host candidate boundary and documenting
+that existing API requirement, preserving default/HOME/other classes. Commit
+bare /workspace,/root,/opt,/srv,/tmp versus /checkout twins across recognized
+closing delimiters, actualred on unfiltered_END then green. Retain original147
+controls. Combined entire delimiter/filter repair<=70AD, totalcap2250 unchanged.
+The pending ONE freshfollowup remainspass2, now covers completed boundary/filter
+repair and context; previousoneMEDIUM and oldtwohistoricalB3areviews preserved.
+No extra round or newpaths. Full/physical/push/exactreceiptgrant remainheld.
