@@ -1342,7 +1342,8 @@ def _prompt_launched(events: list[dict[str, object]], index: int, finalized: boo
                     and any(other.get("event") == "controller-turn" and other.get("index") == e["index"]
                             and "ended" in other for other in events)
                     for e in events)
-        if finalized and not dispatched:
+        if (finalized and not dispatched and not started and not stopped
+                and not any(e.get("event") == "controller-turn" for e in events)):
             return False
     else:
         turns = [e for e in events if e.get("event") == "controller-turn"

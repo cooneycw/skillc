@@ -85,7 +85,7 @@ def test_actual_descriptor_bytes_must_match(attempt: tuple[t.Experiment, str], c
     elif change == "fifo":
         os.mkfifo(path)
     elif change != "missing":
-        blob = b"modified!" if change == "modified" else b"x" * 11
+        blob = b"modified!!" if change == "modified" else b"x" * 11
         if change in {"encoding", "nul"}:
             blob = b"\xff" if change == "encoding" else b"\x00"
             digest = t.sha256_bytes(blob)
@@ -276,6 +276,10 @@ def test_public_retained_export_withholds_new_prompt_bytes_and_rejects_corruptio
     metadata = json.loads((source["out"] / "metadata/export.json").read_text())
     assert {"digest": digest, "size": len(payload), "exported": False} in metadata["withheld_objects"]
     assert t.read_prompt_inputs(e, aid).inputs[0].data == payload
+    bad_public = source["out"] / "private-control"
+    bad_public.write_bytes(payload)
+    with pytest.raises(AssertionError):
+        assert all(payload not in f.read_bytes() for f in [*files, bad_public])
     path = e.object_path(digest)
     path.chmod(0o600)
     path.write_bytes(b"corrupt")
@@ -335,3 +339,40 @@ def test_multibyte_overflow_refuses_after_bounded_encoding(attempt: tuple[t.Expe
     trace = t.read_prompt_inputs(e, aid)
     assert trace.coverage == "missing" and trace.inputs[0].reason == "capacity"
     assert not e.object_path(t.sha256_bytes(("\u03bb" * 5).encode())).exists()
+
+
+@pytest.mark.parametrize("state", ["launched", "not-run", "initial-never-started", "legacy-resume-never-started",
+                                   "missing-dispatch", "missing-start", "missing-stop", "conflicting-start"])
+def test_initial_launch_requires_consistent_execution_evidence(attempt: tuple[t.Experiment, str], state: str) -> None:
+    e, aid = attempt
+    retain(e, aid, ("initial", "resume") if state == "legacy-resume-never-started" else ("initial",))
+    if state != "not-run":
+        e.record(aid, "dispatched")
+        e.record(aid, "started")
+        e.record(aid, "stopped", reason="launch-failed" if "never-started" in state else "exited",
+                 exit_code=None if "never-started" in state else 0, confirmed=True)
+        e.record(aid, "stop-confirmed")
+    if state == "legacy-resume-never-started":
+        e.record(aid, "controller-turn", index=2, dispatched=True)
+        e.record(aid, "controller-turn", index=2, ended="launch-failed", delivered=False)
+    t.finalize(e, aid)
+    raw = (e.root / f"lifecycle-{aid}.json").read_bytes()
+    if state.startswith("missing-"):
+        event = {"missing-dispatch": "dispatched", "missing-start": "started", "missing-stop": "stopped"}[state]
+        rewrite(e, aid, lambda rows: rows.__setitem__(slice(None), [v for v in rows if v["event"] != event]))
+    if state == "conflicting-start":
+        e.record(aid, "started")
+    expected = True if state in {"launched", "legacy-resume-never-started"} else (
+        False if state in {"not-run", "initial-never-started"} else None)
+    trace = t.read_prompt_inputs(e, aid)
+    assert trace.coverage == "complete" and trace.inputs[0].data == b"initial"
+    assert trace.inputs[0].launched is expected
+    assert (e.root / f"lifecycle-{aid}.json").read_bytes() == raw
+
+
+def test_prompt_detail_allowlist_refuses_a_typo(attempt: tuple[t.Experiment, str]) -> None:
+    e, aid = attempt
+    with pytest.raises(ValueError, match="unknown lifecycle event"):
+        e.record(aid, "prompt-input-typo")
+    retain(e, aid, ("safe",))
+    assert t.read_prompt_inputs(e, aid).coverage == "complete"
