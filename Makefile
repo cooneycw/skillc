@@ -46,7 +46,8 @@ test: sync
 	python3 ci/check_pytest_population.py $(PYTEST_REPORT_DIR)/pytest-collected.txt $(PYTEST_REPORT_DIR)/pytest-report.xml
 
 lint: sync
-	uv run --no-sync ruff check .
+	# Override nested project cache roots to preserve immutable vendored fixtures.
+	uv run --no-sync ruff check --cache-dir .ruff_cache .
 
 typecheck: sync
 	uv run --no-sync mypy
