@@ -87,3 +87,20 @@ def test_literal_missing_dependency_refuses_normal_validator() -> None:
     raw["dependencies"] = [d for d in raw["dependencies"] if d["id"] != "helper-gate-lib"]
     with pytest.raises(profile.Refused):
         profile.validate(profile.Profile.from_dict(raw, DECLARATION.parent), profile.DirTree(SOURCE))
+
+
+def test_mypy_snapshot_exemption_is_exact(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+    (tmp_path / "pyproject.toml").write_text((ROOT / "pyproject.toml").read_text())
+    prefix = SOURCE.relative_to(ROOT).as_posix()
+    paths = [f"{prefix}/snapshot_probe.py", f"{prefix}x/sibling_probe.py",
+             f"tests/{Path(__file__).name}", "tests/test_profile_flow_auto_87ecb097_cold.py"]
+    for path in paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("probe: int = 'not an int'\n")
+    result = subprocess.run([sys.executable, "-m", "mypy", "tests"], cwd=tmp_path,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert [p for p in paths if f"{p}:1: error:" in result.stdout] == paths[1:]

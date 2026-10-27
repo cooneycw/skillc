@@ -115,6 +115,7 @@ EXCLUDED_PREFIXES = (
     "tests/fixtures/profile-cpp-codex-flow-auto-86641e8/",
     # #279: its re-pin to ca3030d, the same kind of byte-for-byte snapshot.
     "tests/fixtures/profile-cpp-codex-flow-auto-ca3030d/",
+    "tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/",
 )
 
 #: This repository holds several hundred files today. A count far below this
@@ -401,3 +402,7 @@ def test_the_upstream_snapshot_exemption_is_exact() -> None:
     assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-86641e8x/scripts/flow-plan-record.py")
     assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-check-86641e8/scripts/flow-plan-record.py")
     assert not _is_excluded("tests/test_cpp_codex_flow_auto_86641e8.py")
+    assert _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-plan-record.py")
+    assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-87ecb097x/scripts/flow-plan-record.py")
+    assert not _is_excluded("tests/test_profile_flow_auto_87ecb097.py")
+    assert not _is_excluded("tests/test_profile_flow_auto_87ecb097_cold.py")
