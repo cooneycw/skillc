@@ -238,6 +238,15 @@ with the same modes (helper parity), and a reviewer audits E's text against the
 contract before approval. The prompt bytes and startup context of both arms are
 recorded in full, so instruction length is measured, not assumed.
 
+The private controller-input trace (#547) supplies the exact post-nonce initial
+prompt and each actually prepared resume argument, with measured UTF-8 byte
+sizes. It is a bounded precursor to this requirement: it does not supply all
+system/tool messages, startup context or interactive clarification. Declared
+prompt fingerprints alone do not supply these runtime bytes. Missing/refused
+inputs or absent/conflicting terminal population deny a complete trace; backend
+launch and transcript-confirmed reception remain separate facts. A study that
+requires this evidence must check it explicitly before making that claim.
+
 ### 10.2 Where obligations come from
 
 An obligation is admissible only if it has a public source:

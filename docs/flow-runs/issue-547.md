@@ -116,3 +116,80 @@ Per the orchestrator's validation ruling, the combined tree uses affected local
 suites plus required exact-head full CI instead of repeating the complete local
 suite while the other worker owns that slot. Final check evidence is recorded
 in the PR and the wave ledger; no new paid evaluation was run.
+
+<!-- flow-run n=2 id=4de641e636f84d66aeca12423bd7b3a0 -->
+## Run 2
+
+- Run-id:            4de641e636f84d66aeca12423bd7b3a0
+- Run-start:         1c7c4c73b22c666131d0bb38a3a7ccc79999b756
+
+- Issue: #547
+- Base SHA: 1c7c4c73b22c666131d0bb38a3a7ccc79999b756
+- Necessity verdict: Partially addressed
+- Approval: granted
+- Approver: skillc-update root orchestrator, native thread 01a17ce7-0301-7621-8b1f-bf330eed8b5d; actual Section C ruling 2026-10-27
+- Recorded at: 2026-10-27T14:53:39.757758+00:00
+
+### Section B evidence
+Verdict: **Partially addressed**. Implement only independent controller-issued input retention and record explicit bounded dispositions for the remaining checklist items.
+
+Issue filed 2026-10-24T11:56:23Z, OPEN at the fresh read. Global and scoped post-filing logs, all returned merged PR metadata and both duplicate searches are saved beside this report. Scoped post-filing commits inspected: c80455538d4412391a375b76202f8c4ec6338be7 (#559, first three retention slices); 1fcf690621d6d8fb091abafa17b56a134614e786 (#567, resumed fixture-state attribution); 6b78522a9e16baca33254dfc448a8cbc59e166d1 (#570, frozen declaration/pre-nonce prompt fingerprints); 1c7c4c73b22c666131d0bb38a3a7ccc79999b756 (#583, shared completion/ownership endpoint). None supplies an independent actual post-nonce initial/final-resume input trace.
+
+All returned post-filing merged PR metadata, explicitly enumerated (not a claim every diff was read):
+- #583: 1c7c4c73b22c666131d0bb38a3a7ccc79999b756 - Preserve shared completion deadlines through Docker dispatch and grading
+- #582: 5d04193feaa17194172ae37740ed5d4480b0b711 - Prepare offline flow-auto profile and strict synthetic-path leak checks
+- #579: 028dde512f2f43f1c47cb77abff6740b4cf86ca6 - fix(controls): target authored tests and require exact uv version (Refs #542)
+- #578: 1e7ae69f9af60d096d771218e1a6c0898b8e84c9 - Support bounded owner-triggered real-Docker opt-ins
+- #575: 29d702d8cc7cc24620c64d9275d286b4f34cfefd - fix(tests): make offline publication proofs discriminate (Refs #574)
+- #573: 357095af692b72565e4273a14d0aab6a3c8fae04 - feat(coordination): certify bounded scripted register waves (Refs #569)
+- #572: b2464354b16d0cc28b1c2ffcd6f133715e38c2d6 - feat(eval): certify atomic inventory artifact task (Refs #568)
+- #570: 6b78522a9e16baca33254dfc448a8cbc59e166d1 - Add bound explicit-product calibration comparisons
+- #567: 1fcf690621d6d8fb091abafa17b56a134614e786 - Attribute resumed fixture gates to witnessed state
+- #566: 08a6887053eb7bcf3c7d3fc6545a7aa7aad2ec74 - test(evals): replay source-linked historical helper failure (#28)
+- #565: a924c5f00a9da21b87357764a979c9c6868340a5 - fix(backend): validate concurrent trigger directory winner (#563)
+- #564: 79fbaaffe5c22606d5356d268d0b42b74201f885 - test(controls): label nested pytest child outcomes (#489)
+- #562: 9a62b80979bf3e374049d0933f7e6822bb9d9cda - fix(fixture): preflight live opt-in and retain scan facts (#536)
+- #561: 7373a5b4c6245a20a2cbff74e3dfba51e240f9f4 - Run and audit the historical 18-attempt calibration repeat (#557)
+- #560: a3e9ba8049c6dd3a97c64fd8d9d35e7296cd3835 - Export retained fixture-live evidence without another trial (Refs #556)
+- #559: c80455538d4412391a375b76202f8c4ec6338be7 - feat(retention): keep failed-attempt diagnostics and fixture finalization (Refs #547)
+- #558: 237ab8fb6198c61f4dd687ef3179906aca5b6e3f - test: isolate make-shim roundtrip from inherited make variables
+
+#559/c804555 and issue comment 6390273375 already delivered failed-attempt transcript retention, bounded gate stdout, and the fixture-finalization latch. Complete safe transcripts can already retain initial/resume text; no claim that prompt bytes are absent everywhere. #560 preserves withholding of private retained objects, and #582 tightened synthetic-path leak handling. #583 is now shipped, #580 closed, and separate actual main push 1125 succeeded; no longer a prospective dependency.
+
+Related-issue search hits considered by number/title/state: prompt/retention #547,#26,#287,#568,#203,#434,#20,#376,#375,#288; vocabulary/selection #547,#548,#247,#26,#249,#286,#553,#255,#279,#203,#287,#20,#568,#525,#530,#529,#334,#505,#39,#266,#101,#237,#78,#55,#332,#11,#270,#288,#10,#271,#315. #547 and #548 bodies were inspected; most other hits were title/state triage, not full-body inspection. #568/#571 are downstream study/attachment consumers, not delivered controller-input retention. Shipped #354/#424 per-skill pinning and #272 stale-identity binding narrow the original ask. No search result was treated as a duplicate merely because its title overlaps.
+
+Host check: all 19 listed worktrees were readable; scoped dirty paths were empty. One sibling has a relevant commit on no remote: skillc-348-qualify-stdout-compat, HEAD d3ea7029b89b6358ff0ed2e8b2e3952d018b92d5, commit 9caf33c452efb9c1da5b3b0714677d2e9f1db5d6. Its relevant agent_trial/test_agent_trial diff was inspected: runtime/witness readiness, trusted stdout, finalization/grading wiring, not independent controller input retention. #348 closed 2026-10-24T09:35:06Z, before #547 filing. The other 18 had no unreachable scoped commits or dirty scoped paths at the recorded check. This is this host's evidence only; not a statement about other hosts or all future sibling changes.
+
+Fresh source proof: source-facts.json records file SHA256 and 49 named function extents/hashes; all 28 functions compared with the previous prospective preparation are byte-identical at actual delivered base 1c7. Extraction controls found a known function and rejected an absent name; actual plan_calibration is also present. The hash method matches the earlier AST source-segment method, excluding decorators. Lock decorators were separately inspected in source. Important source facts:
+
+- agent_trial.py:2758 builds full_prompt after the actual runtime nonce; :2762 appends it to initial argv. Its next_turn closure constructs final resume_argv after header/session/steward checks. controller_turns.resume_argv appends the literal resume text. Only that prompt argument is selected for retention, never the full argv/session/environment.
+- Fresh lifecycle.py:321/:531 dispatch details contain no argv; resume ended/delivered fields describe backend launch. trial.run also journals dispatch without argv. agent_trial's turn-record projection keeps status/index/order, not prompt text. Thus existing journals do not secretly fill the proposed independent-text gap. Agent-observation remains closed and text-free.
+- trial._locked/experiment_lock and retain_transcript provide the existing locking pattern. The new terminal writer needs deliberate post-finalization detail permission under the SAME lock; calling retain_transcript after finalization would refuse. No lifecycle.py edit is proposed.
+- Existing trial._read_object uses unbounded read_bytes. The new strict prompt reader must use the existing _read_bounded O_NOFOLLOW/fstat/bounded-descriptor pattern with canonical digest/ref, size and strict UTF-8 verification. Do not stat then read unbounded, or silently trust object membership.
+- matched_pilot.export_bundle copies records/report only; objects and journals remain private in the source store. retained_export lists raw objects as withheld. Neither gets a raw-prompt export feature.
+
+Proposed remaining-item dispositions:
+
+- Item 4: implement the bounded independent controller-issued text trace; healthy transcripts remain complementary evidence. No claim to capture all startup context, manual intervention, system/tool messages or all protocol 10.1 requirements.
+- Item 5: already addressed for the planned per-path/version selection in pinned trials. records.md:164-178 explicitly explains trial.skill_digests and why outside-bundle inventory no longer leaves that pinning gap. profile.skill_digest_pins, calibration_run._installed_skill_pins (same captured installed bytes), calibration/discrimination, fixture_live and uptake_study planners were inspected. Historical/unpinned absence stays unknown. level3_campaign and fixture_campaign, matched_pilot and collection_conformance remain unpinned routes; #548 owns its selected level3 remedy, not proof all other routes are fixed. coverage reports still require separate DeclaredInventory; no duplicate inventory or automatic inference added here.
+- Item 6: accepted bounded validation for general witness citations: captured-digest membership plus structure/internal consistency, not universal path/type/semantic authenticity. Stale-identity already separately binds receipt identity under #272 and rejects wrong witness kind. Stronger source-specific semantics need a separately authorized contract and accepted/refused populations.
+- Item 7: explicitly rule out adding declared-skill-not-installed under the current schema. records.py:204-207 keeps two reasons; _skill_evidence_binding rejects an uninstalled skill.path unconditionally. There is no legitimate accepted bundle for that extra reason without an independent externally claimed identity/new field. Do not add dead vocabulary just to check a box.
+
+These last three are proposed bounded dispositions requiring the actual source/control reason to be recorded on #547 before whole-issue closure, not a claim it is already closed. Existing pin controls test_a_skill_digests_pin_is_kept_in_the_ledger and test_every_treated_trial_is_planned_with_the_installed_skills_digests were located; no new execution is claimed.
+
+
+### Section C - the approved plan
+1. `skillc/trial.py` - bounded store-local prompt-input marker and ordered turn entries, private CAS/journal publication, strict actual-byte/state reader, and terminal prepared-population detail under the existing experiment lock. Separate per-turn availability from whole-trace coverage and launch/transcript facts.
+2. `skillc/agent_trial.py` - capture exact initial argv prompt after nonce assembly and exact final resume argv prompt when actually prepared; integrate existing leak/secret checks, bounded class-only refusal, terminal evidence before grading, and inherited completion/cleanup behavior.
+3. `tests/test_prompt_retention.py (new)` - committed accepted/refused inputs for byte, identity, ordering, terminal, privacy, allocation/cap, CAS/journal failures, locking and public withholding claims. Include prospective export controls without calling them old-code regressions.
+4. `tests/test_trial.py` - CAS/journal integration and frozen attempt binding using the actual existing store machinery.
+5. `tests/test_agent_trial.py` - existing production entrypoint with synthetic nonce/scripted backend: no usable transcript, mismatch and failure retain independently bound exact initial text; raw task facts remain intact when diagnostic retention refuses.
+6. `tests/test_controller_turns.py` - actual final resume text and prepared-but-suppressed, never-started, cancelled, healthy and legacy distinctions; no launched-equals-read assertion.
+7. `docs/specs/evaluation-facility/records.md` - store-local detail/read contract and explicit pin/witness/vocabulary/historical bounds; no public record-kind/schema expansion.
+8. `docs/specs/evaluation-facility/protocol.md` - exact controller input versus full startup context and observed reception; privacy/length/unknown limits without weakening existing requirements.
+9. `changelog.d/547.md` - describe only the selected retention change and recorded bounded dispositions.
+
+Scope: nine product paths, estimated 700-1000 authored added/deleted lines; ceiling 1100 inclusive later genuine receipt at separately root-granted path. Workflow records are excluded from product compliance.
+Risks: full startup-context capture, public raw-byte export and downstream study readiness are not supplied. Exact bounded descriptor reads, shared experiment lock including post-final terminal writes, independent prepared population and UNKNOWN incomplete coverage are required. Missing diagnostics preserve raw task facts.
+
+Root approval conditions: existing-API behavioral red on actual pre-fix first; committed accepted/refused reader/privacy/terminal/cap inputs; bounded item5-7 dispositions before any proposed closure; no whole-issue closure or heavy/full/review/receipt/PR/merge without later gates. No lifecycle/backend/public-schema/CLI/inventory changes.
