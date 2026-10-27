@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
 import random
 import shutil
 import subprocess
@@ -134,6 +135,7 @@ def test_qualify_script_certifies(script: Path, part: str | None, timeout_second
         [sys.executable, str(script), *(["--part", part] if part is not None else [])],
         capture_output=True, text=True,
         timeout=timeout_seconds, check=False, cwd=script.parent,
+        env={**os.environ, "SKILLC_QUALIFY_SOURCE_ROOT": str(EVALS_ROOT.parent)},
     )
     tail = "\n".join(proc.stdout.strip().splitlines()[-8:])
     name = _param_id(script, part)

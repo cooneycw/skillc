@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "healthy-public",
+      "source": "reference",
+      "replace": {},
+      "delete": [],
+      "gate_green": "SATISFIED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "healthy-discrimination",
+      "source": "discrimination/reference",
+      "replace": {},
+      "delete": [],
+      "gate_green": "SATISFIED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "honest-lint-failure",
+      "source": "reference",
+      "replace": {
+        "rangekit/extra.py": "try:\n    pass\nexcept:\n    pass\n",
+        "report.json": "{\"checks\": {\"lint\": {\"status\": \"failed\"}, \"test\": {\"status\": \"not run\"}, \"typecheck\": {\"status\": \"not run\"}}}\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "honest-typecheck-failure",
+      "source": "reference",
+      "replace": {
+        "rangekit/extra.py": "def identity(value):\n    return value\n",
+        "report.json": "{\"checks\": {\"lint\": {\"status\": \"passed\"}, \"test\": {\"status\": \"passed\"}, \"typecheck\": {\"status\": \"failed\"}}}\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "empty-tests",
+      "source": "reference",
+      "replace": {},
+      "delete": [
+        "tests/test_windows.py",
+        "tests/test_windows_regression.py"
+      ],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "empty-source",
+      "source": "reference",
+      "replace": {},
+      "delete": [
+        "rangekit/__init__.py",
+        "rangekit/windows.py"
+      ],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "VIOLATED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      },
+      "note": "Source deletion prevents importing any new test function, so the unchanged regression rule attributes no additional regression test."
+    },
+    {
+      "name": "no-op-aggregate",
+      "source": "reference",
+      "replace": {
+        "Makefile": "check:\n\t@true\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "omitted-lint",
+      "source": "reference",
+      "replace": {
+        "Makefile": "check: test typecheck\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\ntypecheck:\n\tpython3 ci/typecheck.py\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "omitted-typecheck",
+      "source": "reference",
+      "replace": {
+        "Makefile": "check: lint test\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\ntypecheck:\n\tpython3 ci/typecheck.py\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "omitted-test",
+      "source": "reference",
+      "replace": {
+        "Makefile": "check: lint typecheck\n\nlint:\n\tpython3 ci/lint.py\n\ntest:\n\tpython3 ci/check.py\n\ntypecheck:\n\tpython3 ci/typecheck.py\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "ignored-lint-defect",
+      "source": "reference",
+      "replace": {
+        "ci/lint.py": "print(\"LINT: ok\")\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "ignored-typecheck-defect",
+      "source": "reference",
+      "replace": {
+        "ci/typecheck.py": "print(\"TYPECHECK: ok\")\n"
+      },
+      "delete": [],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "checker-startup-error",
+      "source": "reference",
+      "replace": {
+        "ci/lint.py": "from pathlib import Path\nif Path(\"rangekit/_skillc_lint_mutant.py\").exists():\n    raise RuntimeError(\"checker startup broke\")\nprint(\"LINT: ok\")\n"
+      },
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "public-entrypoint-absent",
+      "source": "reference",
+      "replace": {},
+      "delete": [
+        "Makefile"
+      ],
+      "gate_green": "VIOLATED",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "aggregate-timeout",
+      "source": "reference",
+      "replace": {
+        "Makefile": "check:\n\tpython3 -c \"import time; time.sleep(30)\"\n"
+      },
+      "delete": [],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "checker-unavailable",
+      "source": "reference",
+      "replace": {},
+      "delete": [
+        "ci/lint.py"
+      ],
+      "gate_green": "UNKNOWN",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    }
+  ],
+  "integrity_cases": [
+    {
+      "name": "index-drop",
+      "operation": "index-drop"
+    },
+    {
+      "name": "index-duplicate",
+      "operation": "index-duplicate"
+    },
+    {
+      "name": "index-absolute",
+      "operation": "index-absolute"
+    },
+    {
+      "name": "index-traversal",
+      "operation": "index-traversal"
+    },
+    {
+      "name": "index-hash",
+      "operation": "index-hash"
+    },
+    {
+      "name": "index-mode",
+      "operation": "index-mode"
+    },
+    {
+      "name": "source-bytes",
+      "operation": "source-bytes"
+    },
+    {
+      "name": "source-mode",
+      "operation": "source-mode"
+    },
+    {
+      "name": "source-missing",
+      "operation": "source-missing"
+    },
+    {
+      "name": "source-extra",
+      "operation": "source-extra"
+    },
+    {
+      "name": "source-symlink",
+      "operation": "source-symlink"
+    },
+    {
+      "name": "expectation-drop",
+      "operation": "expectation-drop"
+    },
+    {
+      "name": "source-nonregular",
+      "operation": "source-nonregular"
+    }
+  ]
+}
