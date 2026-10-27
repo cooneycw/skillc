@@ -759,3 +759,60 @@ def test_network_action_failure_stops_across_selected_attempts(
     assert [o.outcome for o in report.outcomes] == ["reaped", "left-present", "left-present"]
     assert report.outcomes[0].actions and report.outcomes[1].errors and report.outcomes[2].actions == ()
     assert not report.clean
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize("mode", ["same-absent", "cross-present", "cross-absent", "cross-absent-arrival",
+                                   "cross-absent-uncertain", "cross-absent-opposite-kind"])
+def test_exact_absence_clears_same_identity_across_selected_buckets_only(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, kind: str, mode: str,
+) -> None:
+    if kind == "network":
+        original = _network(docker_state, "original", "a")
+    else:
+        _run(docker_state, "original", _owned_labels("a"))
+        original = docker_state / "original.json"
+    identity = _state(original)["id"]
+    real = subprocess.run
+    actions: list[str] = []
+    arrival: Path | None = None
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal arrival
+        if "rm" in argv:
+            actions.append(argv[-1])
+            assert argv[-1] == identity, "a new arrival must never become a removal target"
+            data = _state(original)
+            data["labels"] = _owned_labels("a" if mode == "same-absent" else "b")
+            original.write_text(json.dumps(data))
+            if mode in {"cross-absent-arrival", "cross-absent-opposite-kind"}:
+                arrival_kind = kind if mode == "cross-absent-arrival" else ("container" if kind == "network" else "network")
+                if arrival_kind == "network":
+                    arrival = _network(docker_state, "arrival", "b")
+                else:
+                    _run(docker_state, "arrival", _owned_labels("b"))
+                    arrival = docker_state / "arrival.json"
+                if mode == "cross-absent-opposite-kind":
+                    other = _state(arrival); other["id"] = identity; arrival.write_text(json.dumps(other))
+                else:
+                    assert _state(arrival)["id"] != identity
+            return subprocess.CompletedProcess(argv, 1, "", "controlled refusal")
+        if (actions and mode == "cross-absent-uncertain" and f"label={ATTEMPT_LABEL_KEY}=b" in argv
+                and ((kind == "container" and "ls" in argv) or (kind == "network" and "ps" in argv))):
+            return subprocess.CompletedProcess(argv, 1, "", "incomplete fresh population")
+        if "{{.Id}}" in argv and argv[-1] == identity and mode != "cross-present":
+            original.unlink()  # original vanishes AFTER confirming inventory, before exact query
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a", "b"])
+    same_kind = {i for row in report.outcomes for i in (
+        row.remaining_containers if kind == "container" else row.remaining_networks)}
+    assert (identity in same_kind) is (mode == "cross-present")
+    assert actions == [identity] and report.outcomes[0].actions and report.outcomes[0].errors
+    assert report.clean is (mode in {"same-absent", "cross-absent"})
+    assert all(row.uncertain for row in report.outcomes) is (mode == "cross-absent-uncertain")
+    if arrival is not None:
+        assert arrival.exists()
+        reported = {i for row in report.outcomes for i in (*row.remaining_containers, *row.remaining_networks)}
+        assert _state(arrival)["id"] in reported

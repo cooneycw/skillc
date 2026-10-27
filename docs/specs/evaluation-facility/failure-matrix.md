@@ -109,7 +109,9 @@ inventory/confirmation). Mixed residue retains both sets of IDs. Initial UNKNOWN
 never acts; confirmation UNKNOWN can follow recorded successful actions.
 Positive observations remain in the API details alongside uncertainty; a failed
 query does not erase them or skip other original-target checks. Later exact
-absence clears only that original ID's earlier presence, preserving new arrivals.
+absence clears only that original ID's earlier presence across selected buckets
+of the same resource kind, including cross-attempt relabelling. Distinct arrivals
+and opposite-kind resources remain preserved.
 Incomplete fresh population queries still prevent clean. These are bounded
 observations at different times, not a transaction or a guarantee against arrivals.
 

@@ -307,8 +307,9 @@ def reap(
                 elif present and identity not in after[attempt][kind]:
                     after[attempt][kind] += (identity,)
                 elif not present:
-                    # Later exact absence supersedes only this original ID's stale observation.
-                    after[attempt][kind] = tuple(i for i in after[attempt][kind] if i != identity)
+                    # The same immutable original may have appeared under another selected label.
+                    for selected in ids:
+                        after[selected][kind] = tuple(i for i in after[selected][kind] if i != identity)
     outcomes = []
     for attempt in ids:
         containers, networks = after[attempt]["container"], after[attempt]["network"]
