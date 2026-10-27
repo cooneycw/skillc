@@ -1653,6 +1653,8 @@ diff/lane check; an empty run-only diff cannot certify inherited work.
 401. `tests/test_leak.py` - Actual absent/present-account, longer sibling, unsafe same-line neighbor, live-home/cwd and cache-reset behavioral controls; red before policy fix.
 402. `changelog.d/581.md` - Document strict conditional synthetic-home policy repair.
 
+403. `docs/measurements/counter-model/2026-10-27T123222Z-issue-568.json` - Copy exact generated receipt bytes under root grant30; measured models/access and two fresh limited passes, one accepted MEDIUM fixed.
+
 Scope: 401 known custody paths plus one later exact generated receipt, final402.
 The integration across pyproject/citation/profile test is at most25 added-plus-
 deleted lines TOTAL, estimated24-25; changelog heading/blank removal2 lines.
@@ -1756,3 +1758,23 @@ controls. Combined entire delimiter/filter repair<=70AD, totalcap2250 unchanged.
 The pending ONE freshfollowup remainspass2, now covers completed boundary/filter
 repair and context; previousoneMEDIUM and oldtwohistoricalB3areviews preserved.
 No extra round or newpaths. Full/physical/push/exactreceiptgrant remainheld.
+
+
+### Exact fresh receipt grant - root gate30 and accounting correction
+
+Known custody405 includes only the exact generated receipt above, unchanged from
+/tmp/skillc-568-581-receipt/2026-10-27T123222Z-issue-568.json. Stage immediately.
+Measured implementer codex/gpt-6.1-sol, reviewer codex/gpt-6-astra, two freshpasses,
+one accepted MEDIUM fixed; nine proposed/eight already-covered behavioral pairs.
+Freshpass1 reviewed seven integration/policy files; cleanfreshpass2 reviewed only
+the50AD boundary/specificity repair plus relevantcontext. Originaltwohistorical
+B3areviews remain separate. Receipt scopefull is repositoryREADaccess, not full
+semantic branch review; actual DNS failure/withdrawn env/localcredential-key
+absence do not establish absence of credentials elsewhere. Do not describe the
+reviewer's48in-memory corroborating combinations as committed cases.
+
+Actual sourcecharge1804+actual31receiptlines=1835 within2250;42 was the receipt
+ceiling, not actual count (root explicitly corrected). No debtreset/reformatting.
+NEXT heavyfullslot only after worker01terminalrelease AND explicitrootclearance.
+No fullrun now; physical remainsseparatelyheld. Push/PR requiresnextdeliverygate.
+Whole568 remainsopen; finalPR Fixes581/Refs568 with truthful remainingboundaries.

@@ -1,0 +1,31 @@
+{
+  "branch": "issue-568-b3a-resume-20261027",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "44d725e20ce6ca83c6b3dcc2f162a153ceddb9c0",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-34-27-01a17cec-fab5-7860-b0e9-aeef446e1806.jsonl",
+    "thread_id": "01a17cec-fab5-7860-b0e9-aeef446e1806"
+  },
+  "issue": "568",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-27T12:32:22Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 9
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T08-29-46-01a17d56-8bf1-7410-92b5-e0ec212b0706.jsonl",
+    "thread_id": "01a17d56-8bf1-7410-92b5-e0ec212b0706"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
