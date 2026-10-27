@@ -1155,7 +1155,7 @@ This completes #4's contract versioning. What it deliberately does not do:
 
 ### Diagnostic retention independent of artifact capture (#547)
 
-The controller's raw journal now also permits two **detail** events. These are
+The controller's raw journal permits diagnostic **detail** events. These are
 not lifecycle transitions, do not satisfy `captured`, and do not change any v2
 ledger, manifest, lifecycle or agent-observation schema:
 
@@ -1198,3 +1198,54 @@ replay even with `--assume-fixture-finalized`. Only **historical absence** can u
 that explicit assumption. Replay labels list the attempts whose finalization was
 established and those whose historical finalization was assumed. Historical D3
 stores are unchanged and do not acquire evidence of successful finalization.
+
+### Private controller-issued input retention (#547)
+
+`agent_trial.run_one_attempt` records the exact prompt argument after runtime
+nonce assembly and each final resume argument when actually prepared. Healthy
+client transcripts can already contain these messages; this is independent
+controller evidence when those transcripts are absent or unusable. It does not
+record argv, session IDs, credentials, environment or model reception.
+
+Three private journal detail events bind evidence by `attempt`:
+
+- `prompt-inputs`: `version: 1`, `declared` (initial plus zero to three resumes)
+  and `limit` (the existing capture stream default, 8 MiB aggregate).
+- `prompt-input`: consecutive `index` (1 initial, 2-4 resume), `role`, and
+  `coverage: complete` with canonical object `ref`, SHA-256 `digest` and actual
+  UTF-8 `size`, or `coverage: missing` with a bounded refusal class. Text is
+  never normalized, redacted or truncated into a complete claim. Character
+  length is bounded before encoding, then actual aggregate bytes are checked.
+  Existing raw/decoded leak and secret checks must accept bytes before storage.
+- `prompt-inputs-ended`: the actual consecutive `prepared` indices and a safe
+  stop class (`lifecycle-ended`, `declared-complete`, `header-unavailable` or
+  `resume-precondition`). This ordinary-return detail may follow lifecycle
+  finalization; it takes the same experiment lock as retention and verification.
+  A declared maximum does not establish which turns were actually prepared.
+
+`trial.read_prompt_inputs` returns actual verified bytes and an independent
+launch status per prepared turn. Descriptor reads reject links/nonregular files,
+size/digest/encoding mismatch and over-cap objects before unbounded allocation.
+Identity, role, order, schema and prepared population must agree. Missing or
+conflicting terminal evidence makes whole-trace coverage `unknown`; verified
+individual bytes can remain available. Recorded byte refusal is `missing`;
+historical marker absence is `not-recorded`. None upgrades old task grades.
+Launch status follows separate existing dispatch/started/turn outcomes and is
+unknown when those facts do not establish it. Backend launch does not prove the
+model read anything. Existing transcript-delivery observations stay separate.
+
+Private CAS objects and journals stay in the source store. Records-only bundle
+export does not copy them; retained public export withholds raw object bytes.
+Storage/scanner failures never erase raw task outcomes or bypass cleanup. A
+future consumer requiring this trace must refuse its retention claim on missing,
+unknown or malformed required evidence. This adds no public v2 record kind.
+
+The remaining #547 bounds are explicit: per-path `skill_digests` already retain
+planned versions for pinned trials; historical/unpinned absence remains unknown,
+and coverage reports still require their separate declared inventory. General
+witness citations establish captured-digest membership/internal consistency,
+not universal semantic authenticity; stale-identity retains its separate #272
+receipt binding. The current schema has no independent external claimed-skill
+identity that could support an accepted `declared-skill-not-installed` case;
+its vocabulary remains unchanged. These bounds do not close every unpinned
+planner, capture all startup context or certify downstream study readiness.

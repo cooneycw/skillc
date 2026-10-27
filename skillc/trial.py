@@ -490,6 +490,7 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: path/nonce-shaped forgery, silently misdirect cleanup.
 _DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
                   "controller-turn", "transcript-retained", "gate-witness-retained",
+                  "prompt-inputs", "prompt-input", "prompt-inputs-ended",
                   "completion-opt-in", "completion-qualified", "owned-attempt", "owned-attempt-cleanup", "launch-suppressed")
 
 
@@ -1181,6 +1182,237 @@ def read_retained_transcript(experiment: Experiment, attempt_id: str) -> dict[st
     else:
         raise Refused("retained transcript coverage is invalid")
     return dict(entry)
+
+
+# Controller-issued inputs are private detail evidence, not public observations.
+_PROMPT_EVENTS = ("prompt-inputs", "prompt-input", "prompt-inputs-ended")
+_PROMPT_REASONS = {"capacity", "encoding", "unsafe-text", "scanner", "storage"}
+_PROMPT_STOPS = {"lifecycle-ended", "declared-complete", "header-unavailable", "resume-precondition"}
+
+
+@dataclass(frozen=True)
+class PromptInput:
+    index: int
+    data: bytes | None
+    reason: str | None
+    launched: bool | None
+
+
+@dataclass(frozen=True)
+class PromptInputs:
+    coverage: str
+    inputs: tuple[PromptInput, ...] = ()
+
+
+def _prompt_details(experiment: Experiment, attempt_id: str) -> list[dict[str, object]]:
+    return [e for e in experiment.events(attempt_id) if e.get("event") in _PROMPT_EVENTS]
+
+
+def _prompt_shape(entry: dict[str, object], keys: set[str], attempt_id: str) -> None:
+    if set(entry) != keys | {"event", "at", "attempt"} or entry.get("attempt") != attempt_id:
+        raise Refused("invalid prompt input identity or schema")
+
+
+def _prompt_marker(entries: list[dict[str, object]], attempt_id: str) -> int:
+    if not entries or entries[0].get("event") != "prompt-inputs":
+        raise Refused("missing prompt input expectation")
+    marker = entries[0]
+    _prompt_shape(marker, {"version", "declared", "limit"}, attempt_id)
+    declared = marker.get("declared")
+    if (type(marker.get("version")) is not int or marker["version"] != 1
+            or type(declared) is not int or not 1 <= declared <= 4
+            or type(marker.get("limit")) is not int or marker["limit"] != Limits().max_stream_bytes):
+        raise Refused("invalid prompt input expectation")
+    return declared
+
+
+@_locked
+def begin_prompt_inputs(experiment: Experiment, attempt_id: str, resumes: int) -> None:
+    if type(resumes) is not int or not 0 <= resumes <= 3 or _prompt_details(experiment, attempt_id):
+        raise Refused("invalid or repeated prompt input expectation")
+    if (experiment.root / _lifecycle_name(attempt_id)).exists():
+        raise Refused("cannot prepare inputs for a finalized attempt")
+    experiment.record(attempt_id, "prompt-inputs", attempt=attempt_id, version=1,
+                      declared=resumes + 1, limit=Limits().max_stream_bytes)
+
+
+def _prompt_bytes(experiment: Experiment, digest: object, size: object, ref: object, remaining: int) -> bytes:
+    if (not isinstance(digest, str) or not _OBJECT_DIGEST.fullmatch(digest)
+            or type(size) is not int or not 0 <= size <= remaining
+            or ref != f"{OBJECTS}/{digest.removeprefix('sha256:')}"):
+        raise Refused("invalid prompt byte reference")
+    try:
+        objects = os.open(experiment.root / OBJECTS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            fd = os.open(digest.removeprefix("sha256:"), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=objects)
+        finally:
+            os.close(objects)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size != size:
+                raise Refused("prompt object type or size differs")
+            data = stream.read(size + 1)
+        if data is None or len(data) != size or sha256_bytes(data) != digest:
+            raise Refused("prompt bytes do not match their reference")
+        data.decode("utf-8", errors="strict")
+        if b"\x00" in data:
+            raise Refused("invalid prompt encoding")
+    except (OSError, UnicodeError) as exc:
+        raise Refused("prompt bytes unavailable or invalid") from exc
+    return data
+
+
+@_locked
+def retain_prompt_input(
+    experiment: Experiment, attempt_id: str, index: int, text: str,
+    check: Callable[[bytes], list[str]],
+) -> None:
+    """Bound before encoding; failed diagnostics never manufacture exact bytes."""
+    entries = _prompt_details(experiment, attempt_id)
+    declared = _prompt_marker(entries, attempt_id)
+    if (type(index) is not int or index != len(entries) or index > declared
+            or any(e.get("event") != "prompt-input" for e in entries[1:])
+            or (experiment.root / _lifecycle_name(attempt_id)).exists()):
+        raise Refused("prompt input order is frozen")
+    remaining = Limits().max_stream_bytes - sum(
+        len(i.data) for i in read_prompt_inputs(experiment, attempt_id).inputs if i.data is not None)
+    entry: dict[str, object] = {"index": index, "role": "initial" if index == 1 else "resume"}
+    reason = None
+    data = b""
+    if len(text) > remaining:
+        reason = "capacity"
+    else:
+        try:
+            data = text.encode("utf-8", errors="strict")
+        except UnicodeError:
+            reason = "encoding"
+        if reason is None and len(data) > remaining:
+            reason = "capacity"
+        if reason is None:
+            try:
+                if b"\x00" in data or check(data):
+                    reason = "unsafe-text"
+            except Exception:  # noqa: BLE001 - no unsafe exception text in diagnostics
+                reason = "scanner"
+    if reason is None:
+        digest = sha256_bytes(data)
+        ref = f"{OBJECTS}/{digest.removeprefix('sha256:')}"
+        try:
+            try:
+                _write_new(experiment.object_path(digest), data)
+            except Refused:  # existing objects must pass the SAME bounded read
+                _prompt_bytes(experiment, digest, len(data), ref, remaining)
+            entry.update(coverage="complete", digest=digest, ref=ref, size=len(data))
+        except Exception:  # noqa: BLE001 - storage cannot skip execution/accounting
+            reason = "storage"
+    if reason is not None:
+        entry.update(coverage="missing", reason=reason)
+    experiment.record(attempt_id, "prompt-input", attempt=attempt_id, **entry)
+
+
+@_locked
+def finish_prompt_inputs(experiment: Experiment, attempt_id: str, prepared: list[int], reason: str) -> None:
+    """A post-finalization DETAIL write; freeze actual preparation, not the maximum."""
+    entries = _prompt_details(experiment, attempt_id)
+    declared = _prompt_marker(entries, attempt_id)
+    if (not prepared or any(type(i) is not int for i in prepared)
+            or prepared != list(range(1, len(prepared) + 1)) or len(prepared) > declared
+            or reason not in _PROMPT_STOPS or any(e.get("event") == "prompt-inputs-ended" for e in entries)):
+        raise Refused("invalid or repeated prompt terminal population")
+    experiment.record(attempt_id, "prompt-inputs-ended", attempt=attempt_id, prepared=prepared, reason=reason)
+
+
+def _prompt_launched(events: list[dict[str, object]], index: int, finalized: bool) -> bool | None:
+    ran = {"exited", "timeout", "operator-cancelled"}
+    never = {"launch-failed", "attempt-not-running"}
+    if index == 1:
+        stopped = [e for e in events if e.get("event") == "stopped"]
+        started = [e for e in events if e.get("event") == "started"]
+        dispatched = [e for e in events if e.get("event") == "dispatched"]
+        if len(stopped) == len(started) == len(dispatched) == 1:
+            reason = stopped[0].get("reason")
+            if isinstance(reason, str) and reason in ran:
+                return True
+            if isinstance(reason, str) and reason in never:
+                # Legacy final stop may describe a never-started resume.
+                return any(
+                    e.get("event") == "controller-turn" and type(e.get("index")) is int
+                    and isinstance(index_value := e["index"], int) and 2 <= index_value <= 4 and e.get("dispatched") is True
+                    and any(other.get("event") == "controller-turn" and other.get("index") == e["index"]
+                            and "ended" in other for other in events)
+                    for e in events)
+        if finalized and not dispatched:
+            return False
+    else:
+        turns = [e for e in events if e.get("event") == "controller-turn"
+                 and type(e.get("index")) is int and e["index"] == index]
+        outcomes = [e for e in turns if type(e.get("delivered")) is bool]
+        dispatches = [e for e in turns if e.get("dispatched") is True]
+        if len(outcomes) == 1:
+            outcome = outcomes[0]
+            ended = outcome.get("ended")
+            if (outcome["delivered"] is False and len(dispatches) <= 1
+                    and ("ended" not in outcome or len(dispatches) == 1 and isinstance(ended, str) and ended in never)):
+                return False
+            if len(dispatches) == 1 and outcome["delivered"] is True and isinstance(ended, str) and ended in ran:
+                return True
+    return None
+
+
+@_locked
+def read_prompt_inputs(experiment: Experiment, attempt_id: str) -> PromptInputs:
+    """Read private exact bytes. Launch is separate; model reception is unproven.
+
+    Historical absence and missing terminal population cannot claim a complete
+    trace. The controller host is trusted, as with the existing journal/CAS.
+    """
+    events = experiment.events(attempt_id)
+    entries = [e for e in events if e.get("event") in _PROMPT_EVENTS]
+    if not entries:
+        return PromptInputs("not-recorded")
+    declared = _prompt_marker(entries, attempt_id)
+    inputs: list[PromptInput] = []
+    remaining = Limits().max_stream_bytes
+    terminals: list[dict[str, object]] = []
+    finalized = (experiment.root / _lifecycle_name(attempt_id)).exists()
+    for entry in entries[1:]:
+        if entry.get("event") == "prompt-inputs-ended":
+            terminals.append(entry)
+            continue
+        if terminals or entry.get("event") != "prompt-input":
+            raise Refused("prompt input order or expectation is ambiguous")
+        index = len(inputs) + 1
+        if (type(entry.get("index")) is not int or entry["index"] != index or index > declared
+                or entry.get("role") != ("initial" if index == 1 else "resume")):
+            raise Refused("invalid prompt turn identity")
+        keys = {"index", "role", "coverage"}
+        data: bytes | None = None
+        reason: str | None = None
+        if entry.get("coverage") == "complete":
+            _prompt_shape(entry, keys | {"digest", "ref", "size"}, attempt_id)
+            data = _prompt_bytes(experiment, entry["digest"], entry["size"], entry["ref"], remaining)
+            remaining -= len(data)
+        elif entry.get("coverage") == "missing":
+            _prompt_shape(entry, keys | {"reason"}, attempt_id)
+            value = entry.get("reason")
+            if not isinstance(value, str) or value not in _PROMPT_REASONS:
+                raise Refused("invalid prompt refusal class")
+            reason = value
+        else:
+            raise Refused("invalid prompt input coverage")
+        inputs.append(PromptInput(index, data, reason, _prompt_launched(events, index, finalized)))
+    coverage = "unknown"
+    if len(terminals) == 1:
+        terminal = terminals[0]
+        _prompt_shape(terminal, {"prepared", "reason"}, attempt_id)
+        prepared = terminal.get("prepared")
+        if (isinstance(prepared, list) and prepared and all(type(i) is int for i in prepared)
+                and prepared == list(range(1, len(inputs) + 1)) and len(prepared) <= declared
+                and isinstance(terminal.get("reason"), str) and terminal["reason"] in _PROMPT_STOPS
+                and (terminal["reason"] != "declared-complete" or len(prepared) == declared)):
+            coverage = "complete" if all(i.data is not None for i in inputs) else "missing"
+    return PromptInputs(coverage, tuple(inputs))
 
 
 def _claimed_attempts(value: object) -> Iterator[str]:

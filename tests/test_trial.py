@@ -895,3 +895,19 @@ def test_transcript_storage_failure_is_recorded_without_bytes(store: Path, monke
     retained = t.read_retained_transcript(experiment, attempt_id)
     assert retained is not None and retained["coverage"] == "missing"
     assert "storage refused" in str(retained["reason"]) and "digest" not in retained
+
+
+def test_547_terminal_detail_after_finalization_cannot_reopen_prompt_bytes(store: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    aid = _only(experiment)
+    t.begin_prompt_inputs(experiment, aid, 0)
+    t.retain_prompt_input(experiment, aid, 1, "synthetic exact input", lambda _: [])
+    raw = t.finalize(experiment, aid)
+    before = (experiment.root / f"lifecycle-{aid}.json").read_bytes()
+    t.finish_prompt_inputs(experiment, aid, [1], "lifecycle-ended")
+    assert t.read_prompt_inputs(experiment, aid).coverage == "complete"
+    assert t.read_prompt_inputs(experiment, aid).inputs[0].launched is False
+    assert raw["disposition"] == "not-run"
+    assert (experiment.root / f"lifecycle-{aid}.json").read_bytes() == before
+    with pytest.raises(t.Refused):
+        t.retain_prompt_input(experiment, aid, 1, "replacement", lambda _: [])
