@@ -185,8 +185,9 @@ def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _inventory(
     docker_bin: Sequence[str], ids: list[str], env: Mapping[str, str] | None, timeout: float,
-) -> tuple[dict[str, dict[str, tuple[str, ...]]], set[str]] | None:
-    found: dict[str, dict[str, tuple[str, ...]]] = {a: {} for a in ids}
+) -> tuple[dict[str, dict[str, tuple[str, ...]]], set[str], bool]:
+    # Partial positive observations survive a failed confirmation elsewhere.
+    found: dict[str, dict[str, tuple[str, ...]]] = {a: {"container": (), "network": ()} for a in ids}
     endpoints: dict[str, set[str]] = {}
     seen: set[tuple[str, str]] = set()
     valid = True
@@ -236,11 +237,9 @@ def _inventory(
                 except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError, TypeError):
                     valid = False
             found[attempt][kind] = tuple(selected)
-    if not valid:
-        return None
     owned = {i for a in found.values() for i in a["container"]}
     blocked = {i for i, attached in endpoints.items() if attached - owned}
-    return found, blocked
+    return found, blocked, valid
 
 
 def _target_present(
@@ -275,9 +274,9 @@ def reap(
     if not ids or any(not isinstance(a, str) or not a.strip() for a in ids):
         raise ValueError("reap() refuses an empty or invalid attempt_ids population")
     before = _inventory(docker_bin, ids, env, timeout)
-    if before is None:
+    if not before[2]:
         return ReapReport(False, tuple(ReapOutcome(a, "unknown", uncertain=True) for a in ids))
-    targets, blocked = before
+    targets, blocked, _ = before
     actions: dict[str, list[str]] = {a: [] for a in ids}
     errors: dict[str, list[str]] = {a: [] for a in ids}
     stopped = False
@@ -298,34 +297,29 @@ def reap(
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     errors[attempt].append(f"{action}:{type(exc).__name__}")
                     stopped = True
-    after = _inventory(docker_bin, ids, env, timeout)
-    if after is not None:
-        for attempt in ids:
-            for kind in ("container", "network"):
-                for identity in targets[attempt][kind]:
-                    present = _target_present(docker_bin, kind, identity, env, timeout)
-                    if present is None:
-                        after = None
-                        break
-                    if present and identity not in after[0][attempt][kind]:
-                        after[0][attempt][kind] += (identity,)
-                if after is None:
-                    break
-            if after is None:
-                break
+    after, _, complete = _inventory(docker_bin, ids, env, timeout)
+    for attempt in ids:
+        for kind in ("container", "network"):
+            for identity in targets[attempt][kind]:
+                present = _target_present(docker_bin, kind, identity, env, timeout)
+                if present is None:
+                    complete = False  # retain positives, and still query every other target
+                elif present and identity not in after[attempt][kind]:
+                    after[attempt][kind] += (identity,)
+                elif not present:
+                    # Later exact absence supersedes only this original ID's stale observation.
+                    after[attempt][kind] = tuple(i for i in after[attempt][kind] if i != identity)
     outcomes = []
     for attempt in ids:
-        containers: tuple[str, ...] = ()
-        networks: tuple[str, ...] = ()
-        if after is None:
+        containers, networks = after[attempt]["container"], after[attempt]["network"]
+        if not complete:
             verdict = "unknown"
         else:
-            containers, networks = after[0][attempt]["container"], after[0][attempt]["network"]
             verdict = ("left-running" if containers else "left-present" if networks else
                        "reaped" if any(targets[attempt].values()) else "already-absent")
         outcomes.append(ReapOutcome(attempt, verdict, containers, networks, tuple(actions[attempt]),
-                                    tuple(errors[attempt]), uncertain=after is None))
-    return ReapReport(after is not None, tuple(outcomes))
+                                    tuple(errors[attempt]), uncertain=not complete))
+    return ReapReport(complete, tuple(outcomes))
 
 
 # --------------------------------------------------- declared host paths (#79)

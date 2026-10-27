@@ -460,7 +460,8 @@ def test_any_initial_inventory_fault_means_zero_actions_for_all_selected(
 
 
 @pytest.mark.parametrize("kind", ["container", "network"])
-@pytest.mark.parametrize("fault", ["bad-json", "duplicate-key", "wrong-id", "bad-labels", "bad-endpoints", "wrong-labels"])
+@pytest.mark.parametrize("fault", ["bad-json", "duplicate-key", "wrong-id", "bad-labels", "bad-endpoints",
+                                    "wrong-labels", "wrong-managed", "wrong-attempt", "nonzero", "timeout", "oserror"])
 def test_metadata_is_independent_scope_and_completeness_evidence(
     docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str, kind: str,
 ) -> None:
@@ -469,14 +470,22 @@ def test_metadata_is_independent_scope_and_completeness_evidence(
     else:
         _run(docker_state, "ours", _owned_labels("a"))
         net = docker_state / "ours.json"
+    target_id = _state(net)["id"]
+    _run(docker_state, "healthy-first", _owned_labels("healthy"))
     real = subprocess.run
     mutations: list[list[str]] = []
 
     def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         if "rm" in argv:
             mutations.append(argv)
+        if "{{json .}}" in argv and argv[-1] == target_id and fault in {"nonzero", "timeout", "oserror"}:
+            if fault == "timeout":
+                raise subprocess.TimeoutExpired(argv, 1)
+            if fault == "oserror":
+                raise OSError("controlled metadata failure")
+            return subprocess.CompletedProcess(argv, 1, "", "refused")
         p = real(argv, **kw)
-        if "{{json .}}" in argv:
+        if "{{json .}}" in argv and argv[-1] == target_id:
             data = json.loads(p.stdout)
             if fault == "bad-json":
                 return subprocess.CompletedProcess(argv, 0, "{", "")
@@ -492,8 +501,12 @@ def test_metadata_is_independent_scope_and_completeness_evidence(
                 data["Containers"] = {"short": {}}
                 if kind == "container":
                     data["Config"] = []
-            elif fault == "wrong-labels":
-                labels = {OWNER_LABEL_KEY: OWNER_LABEL_VALUE}  # candidate listing alone is not authority
+            elif fault in {"wrong-labels", "wrong-managed", "wrong-attempt"}:
+                labels = {OWNER_LABEL_KEY: OWNER_LABEL_VALUE} if fault == "wrong-labels" else _owned_labels("a")
+                if fault == "wrong-managed":
+                    labels[OWNER_LABEL_KEY] = "false"
+                elif fault == "wrong-attempt":
+                    labels[ATTEMPT_LABEL_KEY] = "different-attempt"  # candidate listing alone is not authority
                 if kind == "network":
                     data["Labels"] = labels
                 else:
@@ -502,9 +515,14 @@ def test_metadata_is_independent_scope_and_completeness_evidence(
         return p
 
     monkeypatch.setattr(reap.subprocess, "run", run)
-    report = reap.reap(_docker_bin(docker_state), ["a"])
-    assert not mutations and net.exists()
-    assert report.clean if fault == "wrong-labels" else report.unknown == ("a",)
+    report = reap.reap(_docker_bin(docker_state), ["healthy", "a"])
+    assert net.exists() and not any(c[-1] == target_id for c in mutations)
+    if fault in {"wrong-labels", "wrong-managed", "wrong-attempt"}:
+        assert report.clean and report.reaped == ("healthy",) and mutations
+        assert not (docker_state / "healthy-first.json").exists()
+    else:
+        assert not mutations and report.unknown == ("healthy", "a")
+        assert (docker_state / "healthy-first.json").exists()
 
 
 @pytest.mark.parametrize("kind", ["container", "network"])
@@ -621,3 +639,123 @@ def test_foreign_endpoint_arriving_after_preflight_refuses_removal_without_disco
     assert report.outcome_for("a") == "left-present" and report.outcomes[0].errors
     assert net.exists() and (docker_state / "foreign.json").exists() and not report.clean
     assert not any("disconnect" in c for c in calls)
+
+
+@pytest.mark.parametrize("phase", ["healthy-present", "fully-absent", "selected-inventory", "first-target", "last-target"])
+def test_confirmation_keeps_positive_observations_while_continuing_after_uncertainty(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    _run(docker_state, "ours", _owned_labels("a"))
+    net = _network(docker_state, "ours-net", "a")
+    container_id, network_id = _state(docker_state / "ours.json")["id"], _state(net)["id"]
+    real = subprocess.run
+    network_lists = 0
+    target_queries: list[str] = []
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal network_lists
+        if "rm" in argv and phase != "fully-absent":
+            return subprocess.CompletedProcess(argv, 1, "", "controlled refusal")
+        if "network" in argv and "ls" in argv:
+            network_lists += 1
+            if network_lists == 2 and phase == "selected-inventory":
+                raise subprocess.TimeoutExpired(argv, 1)
+        if "{{.Id}}" in argv:
+            target_queries.append(argv[-1])
+            if (phase == "first-target" and argv[-1] == container_id
+                    or phase == "last-target" and argv[-1] == network_id):
+                raise subprocess.TimeoutExpired(argv, 1)
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    row = report.outcomes[0]
+    if phase == "fully-absent":
+        assert report.clean and row.remaining_containers == row.remaining_networks == ()
+    else:
+        assert container_id in row.remaining_containers and network_id in row.remaining_networks
+        assert row.actions and row.errors and not report.clean
+        assert row.uncertain is (phase != "healthy-present")
+    assert set(target_queries) == {container_id, network_id}, "an uncertain observation must not skip other targets"
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize("vanishes", [False, True])
+def test_later_exact_absence_clears_only_original_stale_inventory(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, kind: str, vanishes: bool,
+) -> None:
+    if kind == "network":
+        path = _network(docker_state, "ours", "a")
+    else:
+        _run(docker_state, "ours", _owned_labels("a"))
+        path = docker_state / "ours.json"
+    real = subprocess.run
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if "rm" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "controlled refusal")
+        if "{{.Id}}" in argv and vanishes:
+            path.unlink()  # another actor finishes cleanup after the selected inventory observed it
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a"])
+    assert report.clean is vanishes
+    assert report.outcomes[0].errors
+    assert bool(report.outcomes[0].remaining_containers or report.outcomes[0].remaining_networks) is not vanishes
+
+
+@pytest.mark.parametrize("kind", ["container", "network"])
+@pytest.mark.parametrize(("case", "expected"), [
+    ("present", True), ("exact-missing", False), ("extra-error", None), ("unrelated", None),
+    ("wrong-id", None), ("nonzero", None), ("oserror", None), ("timeout", None), ("bad-success", None),
+])
+def test_target_absence_classifier_discriminates_exact_evidence(
+    monkeypatch: pytest.MonkeyPatch, kind: str, case: str, expected: bool | None,
+) -> None:
+    identity = "a" * 64
+    missing = (f"Error: No such object: {identity}" if kind == "container" else
+               f"Error response from daemon: network {identity} not found")
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        assert argv[-1] == identity and "{{.Id}}" in argv
+        if case == "oserror":
+            raise OSError("controlled absence-query failure")
+        if case == "timeout":
+            raise subprocess.TimeoutExpired(argv, 1)
+        if case in {"present", "bad-success"}:
+            return subprocess.CompletedProcess(argv, 0, (identity if case == "present" else "b" * 64) + "\n", "")
+        errors = {"exact-missing": missing, "extra-error": missing + "\npermission denied", "unrelated": "denied",
+                  "wrong-id": missing.replace(identity, "b" * 64), "nonzero": ""}
+        return subprocess.CompletedProcess(argv, 1, "", errors[case])
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    assert reap._target_present([], kind, identity, None, 1) is expected
+
+
+@pytest.mark.parametrize("fault", ["nonzero", "timeout", "oserror"])
+def test_network_action_failure_stops_across_selected_attempts(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    paths = {a: _network(docker_state, a, a) for a in ("a", "b", "c")}
+    fail_id = _state(paths["b"])["id"]
+    real = subprocess.run
+    actions: list[str] = []
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if "rm" in argv:
+            actions.append(argv[-1])
+            if argv[-1] == fail_id:
+                if fault == "timeout":
+                    raise subprocess.TimeoutExpired(argv, 1)
+                if fault == "oserror":
+                    raise OSError("controlled network action failure")
+                return subprocess.CompletedProcess(argv, 1, "", "refused")
+        return real(argv, **kw)
+
+    monkeypatch.setattr(reap.subprocess, "run", run)
+    report = reap.reap(_docker_bin(docker_state), ["a", "b", "c"])
+    assert len(actions) == 2 and not paths["a"].exists() and paths["b"].exists() and paths["c"].exists()
+    assert [o.outcome for o in report.outcomes] == ["reaped", "left-present", "left-present"]
+    assert report.outcomes[0].actions and report.outcomes[1].errors and report.outcomes[2].actions == ()
+    assert not report.clean

@@ -107,6 +107,11 @@ Five outcomes stay distinct: `already-absent` (none found and none remain),
 residue), `left-present` (known network residue), and `unknown` (uncertain
 inventory/confirmation). Mixed residue retains both sets of IDs. Initial UNKNOWN
 never acts; confirmation UNKNOWN can follow recorded successful actions.
+Positive observations remain in the API details alongside uncertainty; a failed
+query does not erase them or skip other original-target checks. Later exact
+absence clears only that original ID's earlier presence, preserving new arrivals.
+Incomplete fresh population queries still prevent clean. These are bounded
+observations at different times, not a transaction or a guarantee against arrivals.
 
 The first action error stops further mutations. Actual action attempts and
 errors are retained; subsequent read-only confirmation reports observed absence,
