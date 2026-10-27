@@ -30,6 +30,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 REAL = f"{sys.executable} -m mypy"
 SCOPE = 'files = ["skillc", "tests", "ci"]'
+INCLUDED_FIXTURE = "tests/fixtures/000_typecheck_probe/test_probe.py"
+EXCLUDED_FIXTURE = "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/test_000_probe.py"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None or shutil.which("tar") is None, reason="needs bash and tar"
@@ -37,7 +39,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def run_in_copy(
-    tmp_path: Path, *, scope: str = SCOPE, mypy: str = REAL
+    tmp_path: Path, *, scope: str = SCOPE, mypy: str = REAL,
+    fixture: str | None = None, remove_tests: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     repo = tmp_path / "repo"
     shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", ".venv", ".mypy_cache"))
@@ -45,6 +48,13 @@ def run_in_copy(
     text = pyproject.read_text()
     assert text.count(SCOPE) == 1, "the declared typecheck scope moved; update SCOPE"
     pyproject.write_text(text.replace(SCOPE, scope))
+    if remove_tests:
+        for test_file in (repo / "tests").glob("test_*.py"):
+            test_file.unlink()
+    if fixture is not None:
+        path = repo / fixture
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("fixture_only: int = 1\n")
     env = {**os.environ, "MYPY": mypy}
     return subprocess.run(
         ["bash", str(repo / "ci" / "typecheck-control.sh")],
@@ -52,10 +62,23 @@ def run_in_copy(
     )
 
 
-def test_the_declared_scope_passes(tmp_path: Path) -> None:
-    result = run_in_copy(tmp_path)
+@pytest.mark.parametrize("fixture", [None, INCLUDED_FIXTURE, EXCLUDED_FIXTURE])
+def test_the_declared_scope_passes(tmp_path: Path, fixture: str | None) -> None:
+    result = run_in_copy(tmp_path, fixture=fixture)
     assert result.returncode == 0, result.stderr
     assert "typecheck-control: ok" in result.stdout
+    target = result.stdout.rsplit("error planted at ", 1)[1].split(":", 1)[0]
+    assert Path(target).parent == Path("tests"), result.stdout
+
+
+def test_a_fixture_cannot_stand_in_for_authored_tests(tmp_path: Path) -> None:
+    """The old recursive target certified this scope with no authored tests."""
+    result = run_in_copy(
+        tmp_path, fixture=INCLUDED_FIXTURE,
+        scope='files = ["skillc", "tests/fixtures/000_typecheck_probe", "ci"]',
+    )
+    assert result.returncode == 1, f"fixture-only scope passed\n{result.stdout}"
+    assert "mypy exited 0 with an error planted in tests/test_" in result.stderr
 
 
 def test_a_scope_that_drops_tests_turns_the_step_red(tmp_path: Path) -> None:
@@ -92,20 +115,16 @@ def test_a_red_that_names_another_file_turns_the_step_red(tmp_path: Path) -> Non
     assert "mypy exited 1 without reporting tests/" in result.stderr, result.stderr
 
 
-def test_an_empty_test_population_turns_the_step_red(tmp_path: Path) -> None:
+@pytest.mark.parametrize("fixture", [None, INCLUDED_FIXTURE, EXCLUDED_FIXTURE])
+def test_an_empty_test_population_turns_the_step_red(
+    tmp_path: Path, fixture: str | None,
+) -> None:
     """#134 item 3: the script's own empty-population guard (line ~52, "no
     tests/test_*.py to plant an error in") had no committed case - the guard
     is implemented, but nothing proved it fires, so a future edit could break
     it silently. Delete every tests/test_*.py from the copy the script makes
     its OWN internal copy from, leaving nowhere to plant the probe line."""
-    repo = tmp_path / "repo"
-    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", ".venv", ".mypy_cache"))
-    for test_file in (repo / "tests").glob("test_*.py"):
-        test_file.unlink()
-    result = subprocess.run(
-        ["bash", str(repo / "ci" / "typecheck-control.sh")],
-        env={**os.environ, "MYPY": REAL}, capture_output=True, text=True, check=False,
-    )
+    result = run_in_copy(tmp_path, fixture=fixture, remove_tests=True)
     assert result.returncode == 1, f"empty test population passed\n{result.stdout}"
     assert "no tests/test_*.py to plant an error in" in result.stderr, result.stderr
 
