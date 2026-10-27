@@ -931,6 +931,59 @@ def test_a_captured_eligible_attempt_goes_through_the_real_judge(tmp_path: Path)
     assert "graded_status" not in entry and "grading_blocked_reason" not in entry  # never called a grade
 
 
+@pytest.mark.parametrize(("versions", "expected"), [([], "UNKNOWN"), (["A", "A"], "A"),
+                                                      (["wrong"], "wrong"), (["A", "B", "A"], "UNKNOWN")])
+@pytest.mark.parametrize("original", ["adapter", "other", "graded"])
+def test_548_live_and_replay_version_facts_do_not_redecide_carried_grades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, versions: list[str], expected: str, original: str,
+) -> None:
+    from test_matched_pilot import _548_manifest
+
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    reason = _CANARY_REASON if original == "adapter" else "not credited: server-side tool observed (web_search_call)"
+    aid = _plant_captured(run_dir, declaration, original_reason=reason)
+    experiment = _experiment(run_dir)
+    manifest_path = experiment.root / f"manifest-{aid}.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    entry = manifest["observations"][0]
+    raw = trial.read_object(experiment, entry["digest"])
+    headers = "\n".join(json.dumps({"type": "session_meta", "payload": {"cli_version": v}}) for v in versions)
+    changed = (headers + "\n").encode() + raw
+    digest = trial.put_object(experiment, changed)
+    entry.update(digest=digest, ref="objects/" + digest[7:], size=len(changed), attempt_id=aid, origin="client-reported")
+    manifest = _548_manifest(experiment, aid, entry)
+    _overwrite(manifest_path, manifest)
+    if original == "graded":
+        path = experiment.root / f"observation-{aid}.json"
+        observation = json.loads(path.read_bytes())
+        observation["grading"] = {"graded_status": "PASS", "blocked_reason": None}
+        _overwrite(path, observation)
+    before = fl._tree_digest(experiment.root), (run_dir / fl.REPORT_FILENAME).read_bytes()
+    source = json.loads(before[1])
+    outcomes = [mp.AttemptOutcome(mp.ScheduledAttempt(a["attempt_id"], a["trial_id"], a["case"], a["repeat"]),
+                                  _clean_record(), 1.0) for a in source["attempts"]]
+    live = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse="dry", approved=False)
+    assert live["attempts"][0]["cli_version_observed"] == expected
+    assert all(a["graded_status"] == "PASS" and a["model_eligible"] is True for a in live["attempts"])
+    called: list[bool] = []
+    judge = fl._run_judge
+
+    def counted(*args: Any, **kwargs: Any) -> dict[str, object]:
+        called.append(True)
+        return judge(*args, **kwargs)
+
+    monkeypatch.setattr(fl, "_run_judge", counted)
+    replay = _replay(run_dir, declaration)[1]
+    result = next(a for a in replay["attempts"] if a["attempt_id"] == aid)
+    assert result["cli_version_observed"] == expected
+    assert result["client_declared"] == experiment.trial_of(aid)["client"]
+    assert result["re_decided"] is (original == "adapter")
+    assert bool(called) is (original == "adapter")
+    assert result["replay_blocked_reason"] == (None if original == "adapter" else reason if original == "other"
+                                              else "carried over: graded by the live run; not replayed")
+    assert (fl._tree_digest(experiment.root), (run_dir / fl.REPORT_FILENAME).read_bytes()) == before
+
+
 def test_a_replay_report_cannot_certify_a_run_and_writes_no_verified_result(tmp_path: Path) -> None:
     declaration, run_dir = _dry_run_with_report(tmp_path)
     _plant_captured(run_dir, declaration)

@@ -1,0 +1,1 @@
+- Report a transcript client version only when its version-bearing records agree; re-derive pilot and fixture-live diagnostics from retained bytes beside each attempt's declared client identity, preserving task grades and eligibility rules.

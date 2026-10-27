@@ -554,6 +554,15 @@ def _run_metadata(record: Mapping[str, object]) -> dict[str, object]:
     return meta if isinstance(meta, dict) else {}
 
 
+def client_version_facts(experiment: trial.Experiment, attempt_id: str) -> dict[str, object]:
+    """Declaration and retained transcript observation, never qualification."""
+    from . import agent_trial
+
+    client = experiment.trial_of(attempt_id)["client"]
+    return {"client_declared": dict(client) if isinstance(client, dict) else UNKNOWN,
+            "cli_version_observed": agent_trial.retained_client_version(experiment, attempt_id) or UNKNOWN}
+
+
 def graded_status(record: Mapping[str, object]) -> str | None:
     graded = record.get("graded")
     status = graded.get("status") if isinstance(graded, dict) else None
@@ -745,7 +754,7 @@ def build_report(
                 UNKNOWN if declared_effort is None or observed_effort == UNKNOWN
                 else observed_effort == declared_effort
             ),
-            "cli_version_observed": meta.get("cli_version") or UNKNOWN,
+            **client_version_facts(experiment, attempt_id),
             "prompt_delivered": obs.get("prompt_delivered", UNKNOWN),
             "canary_satisfied": obs.get("canary_satisfied", UNKNOWN),
             "skill_invocations": obs.get("skill_invocations", UNKNOWN),

@@ -301,7 +301,6 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
     rule has been grounded for it yet (#124 is the Claude Code arm) - `None`
     means "not assessed", never "no drift"."""
     line_types: dict[str, int] = {}
-    client_version: str | None = None
     model: str | None = None
     unrecognized: set[str] = set()
     response_items = 0
@@ -323,8 +322,6 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
         key = f"{top}/{payload_type}" if payload_type is not None else top
         line_types[key] = line_types.get(key, 0) + 1
         if client == "codex":
-            if top == "session_meta" and isinstance(payload, dict) and isinstance(payload.get("cli_version"), str):
-                client_version = client_version or payload["cli_version"]
             if top == "turn_context" and isinstance(payload, dict) and isinstance(payload.get("model"), str):
                 model = model or payload["model"]
             if top == "response_item":
@@ -337,13 +334,11 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
                 elif payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
                     unrecognized.add(payload_type)
         else:
-            if isinstance(obj.get("version"), str):
-                client_version = client_version or obj["version"]
             message = obj.get("message")
             if top == "assistant" and isinstance(message, dict) and isinstance(message.get("model"), str):
                 model = model or message["model"]
     return {
-        "transcript_client_version": client_version,
+        "transcript_client_version": ta.observed_client_version(client, raw),
         "transcript_model": model,
         "transcript_line_types": dict(sorted(line_types.items())),
         "transcript_response_items_inspected": response_items if client == "codex" else None,
@@ -1677,6 +1672,73 @@ def transcript_retention(experiment: trial.Experiment, attempt_id: str, disposit
         "coverage": entry.get("coverage"), "digest": entry.get("digest"), "size": entry.get("size"),
         "reason": entry.get("reason"),
     }
+
+
+def retained_client_version(experiment: trial.Experiment, attempt_id: str) -> str | None:
+    """Re-derive a transcript fact, never certify a historical scalar or binary.
+
+    Only this attempt's complete, digest-checked retained bytes count. Missing,
+    incompatible or damaged evidence is unknown without changing task results.
+    """
+    planned = experiment.trial_of(attempt_id)
+    client = planned["client"]
+    if not isinstance(client, dict) or client.get("name") not in CLIENT_SPECS:
+        return None
+    binding_keys = ("attempt_id", "stream", "origin", "coverage", "ref", "digest", "size")
+    try:
+        journal = experiment.journal(attempt_id)
+        for line in journal.read_text().splitlines() if journal.exists() else ():
+            if not line.strip():
+                continue
+            event = ta.diagnostic_json(line)
+            if ta.duplicate_members(event, ("event",)):
+                return None
+            if (isinstance(event, dict) and event.get("event") == "transcript-retained"
+                    and (ta.duplicate_members(event, ("observation",))
+                         or ta.duplicate_members(event.get("observation"), binding_keys))):
+                return None
+        independent = trial.read_retained_transcript(experiment, attempt_id)
+        entry = independent
+        manifest = experiment.root / f"manifest-{attempt_id}.json"
+        if manifest.is_symlink():
+            return None
+        if manifest.exists():
+            if not manifest.is_file():
+                return None
+            metadata = ta.diagnostic_json(manifest.read_bytes())
+            if (not isinstance(metadata, dict)
+                    or ta.duplicate_members(metadata, ("version", "kind", "producer", "attempt_id", "trial_id", "observations"))
+                    or metadata.get("version") != 2
+                    or metadata.get("kind") != records.ARTIFACT_MANIFEST or metadata.get("producer") != "controller"
+                    or metadata.get("attempt_id") != attempt_id or metadata.get("trial_id") != planned["trial_id"]):
+                return None
+            entries = metadata.get("observations", [])
+            if not isinstance(entries, list):
+                return None
+            if any(ta.duplicate_members(e, ("stream",)) for e in entries):
+                return None
+            transcripts = [e for e in entries if isinstance(e, dict) and e.get("stream") == records.CLIENT_TRANSCRIPT]
+            if len(transcripts) > 1:
+                return None
+            if transcripts:
+                entry = transcripts[0]
+        if entry is None or entry.get("coverage") != "complete":
+            return None
+        if independent is not None and any(independent.get(k) != entry.get(k) for k in ("digest", "coverage")):
+            return None
+        digest, size = entry.get("digest"), entry.get("size")
+        if (ta.duplicate_members(entry, binding_keys)
+                or entry.get("attempt_id") != attempt_id or entry.get("origin") != "client-reported"
+                or not isinstance(digest, str) or type(size) is not int or size <= 0
+                or entry.get("ref") != f"{trial.OBJECTS}/{digest.removeprefix('sha256:')}"):
+            return None
+        raw = trial.read_object(experiment, digest)
+        if size != len(raw):
+            return None
+        value = transcript_census(str(client["name"]), raw.decode("utf-8"))["transcript_client_version"]
+        return value if isinstance(value, str) else None
+    except (OSError, ValueError, TypeError, AttributeError, trial.Refused):
+        return None
 
 
 def recompute_skill_invocations(experiment: trial.Experiment, attempt_id: str, client: str) -> tuple[str, ...]:
