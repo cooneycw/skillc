@@ -25,16 +25,14 @@ ONLY in `extra_home_files`: the treatment gets the subject's selected skill
 files, the baseline gets `{}`. A second copy of the wiring could differ from
 the first in a way that would read as a treatment effect.
 
-TIME CAPS ARE ENFORCED HERE, not only stated. Each attempt's agent limit
-(`Limits.timeout`) is the SMALLER of the per-attempt cap and what remained of
-the total cap WHEN THE ATTEMPT STARTED. An attempt that would start with
-nothing left is finalized `not-run` with that reason - reported, never
-dropped (`ledger_binding` refuses a report that omits a scheduled attempt).
-The allowance is computed before the attempt's setup (prepare, install,
-credential delivery), and the agent's clock starts only at launch, so the
-last attempt can pass the total by its own setup, grading and teardown time -
-seconds, not a second agent run. Carrying an absolute deadline into the
-backend's `execute()` would close that; it is not done here.
+TIME CAPS ARE ENFORCED HERE. Built-in controllers create one completion
+endpoint before planning/setup and pass shortened children through actual
+agent, discovery and grading dispatches. Task correctness stays beside whole
+completion through result storage and confirmed cleanup; final qualification
+publication is outside the frozen sample. The explicit deadline-aware callback
+route is selected by these controllers. Legacy custom two-argument scheduler
+callbacks retain their original start-gate/relative-agent-limit contract.
+
 
 MISSING IS EXPLICIT. Anything the run cannot measure is the literal
 `"UNKNOWN"` (the `pilot-report` rule's own convention), never a zero:
@@ -62,11 +60,11 @@ import re
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import demo, outcome_report, records, trial, verify
+from . import completion, demo, outcome_report, records, trial, verify
 from .lifecycle import RealAgentBlocked
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -358,12 +356,14 @@ class AttemptOutcome:
 def run_schedule(
     experiment: trial.Experiment,
     schedule: Sequence[ScheduledAttempt],
-    run_attempt: Callable[[ScheduledAttempt, float], dict[str, object]],
+    run_attempt: Callable[[ScheduledAttempt, float], dict[str, object]] | None,
     *,
     total_seconds: float,
     per_attempt_seconds: float,
     clock: Callable[[], float] = time.monotonic,
     on_outcome: Callable[[AttemptOutcome], None] | None = None,
+    run_attempt_with_deadline: Callable[[ScheduledAttempt, float, completion.CompletionDeadline], dict[str, object]] | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> list[AttemptOutcome]:
     """Run every scheduled attempt in order, enforcing the total cap as a
     start gate and as each attempt's agent limit: `run_attempt` receives the
@@ -376,10 +376,20 @@ def run_schedule(
     started) with the error as its reason - unless it was finalized already,
     whose record then stands - and the run moves on. The one exception is
     `RealAgentBlocked` - no opt-in - which aborts the run outright."""
-    started = clock()
+    selected = run_attempt_with_deadline is not None
+    if selected and completion_deadline is None:
+        completion_deadline = completion.CompletionDeadline.after(total_seconds, clock)
+    started = completion_deadline.start if selected and completion_deadline is not None else clock()
     outcomes: list[AttemptOutcome] = []
     for scheduled in schedule:
-        elapsed = clock() - started
+        elapsed = clock() - started if not selected else 0.0
+        child = None
+        if selected:
+            assert completion_deadline is not None
+            try:
+                child = completion_deadline.child(per_attempt_seconds)
+            except completion.CompletionUnavailable:
+                elapsed = total_seconds
         if elapsed >= total_seconds:
             reason = (
                 f"total time cap reached before this attempt could start "
@@ -388,10 +398,16 @@ def run_schedule(
             record = trial.finalize(experiment, scheduled.attempt_id, reason=reason)
             outcome = AttemptOutcome(scheduled, record, 0.0, runner_note=reason)
         else:
-            attempt_started = clock()
-            budget = min(per_attempt_seconds, total_seconds - elapsed)
+            attempt_started = child.start if child is not None else clock()
+            budget = child.end - child.start if child is not None else min(per_attempt_seconds, total_seconds - elapsed)
             try:
-                record = run_attempt(scheduled, budget)
+                if child is not None:
+                    completion.mark(experiment, scheduled.attempt_id, child)
+                    assert run_attempt_with_deadline is not None
+                    record = run_attempt_with_deadline(scheduled, budget, child)
+                else:
+                    assert run_attempt is not None
+                    record = run_attempt(scheduled, budget)
                 note = None if budget >= per_attempt_seconds else (
                     f"agent limit cut to {budget:.0f}s by the total time cap"
                 )
@@ -404,7 +420,16 @@ def run_schedule(
             except Exception as exc:  # noqa: BLE001 - one attempt's crash must not drop the rest of the schedule
                 note = f"runner error: {type(exc).__name__}: {exc}"
                 record = _finalize_after_error(experiment, scheduled.attempt_id, note)
-            outcome = AttemptOutcome(scheduled, record, clock() - attempt_started, runner_note=note)
+            if selected:
+                assert completion_deadline is not None
+                record = completion.normalize(record, experiment.events(scheduled.attempt_id))
+                try:
+                    elapsed_attempt: float | None = completion_deadline._clock.sample() - attempt_started
+                except completion.CompletionUnavailable:
+                    elapsed_attempt = None
+            else:
+                elapsed_attempt = clock() - attempt_started
+            outcome = AttemptOutcome(scheduled, record, elapsed_attempt, runner_note=note)
         outcomes.append(outcome)
         if on_outcome is not None:
             on_outcome(outcome)
@@ -532,7 +557,7 @@ def _run_metadata(record: Mapping[str, object]) -> dict[str, object]:
 def graded_status(record: Mapping[str, object]) -> str | None:
     graded = record.get("graded")
     status = graded.get("status") if isinstance(graded, dict) else None
-    return status if isinstance(status, str) else None
+    return completion.combine(status if isinstance(status, str) else None, record)
 
 
 def claim_accuracy(claim: str, status: str | None) -> object:
@@ -605,7 +630,7 @@ def reconcile(
                 else trial.finalize(experiment, scheduled.attempt_id, reason=note)
             )
             outcome = AttemptOutcome(scheduled, record, None, runner_note=note)
-        reconciled.append(outcome)
+        reconciled.append(replace(outcome, record=completion.normalize(outcome.record, experiment.events(scheduled.attempt_id))))
     return reconciled
 
 
@@ -648,6 +673,8 @@ def build_report(
     `dimensions`: the caller's own lookup failed, not "the grader declares
     nothing" - review ruling, PR #13. When set, every bucket reports
     `unavailable` instead, and `dimensions` is ignored."""
+    outcomes = [replace(o, record=completion.normalize(o.record, experiment.events(o.scheduled.attempt_id)))
+                for o in outcomes]
     entries: list[dict[str, object]] = []
     for outcome in outcomes:
         record = outcome.record
@@ -899,7 +926,10 @@ def read_outcomes(run_dir: Path) -> tuple[trial.Experiment, list[AttemptOutcome]
     data = json.loads((run_dir / OUTCOMES_FILENAME).read_text(encoding="utf-8"))
     root = Path(str(data["experiment_root"]))
     ledger = json.loads((root / trial.LEDGER).read_text(encoding="utf-8"))
-    return trial.Experiment(root, ledger), [AttemptOutcome.from_json(o) for o in data["outcomes"]]
+    experiment = trial.Experiment(root, ledger)
+    outcomes = [AttemptOutcome.from_json(o) for o in data["outcomes"]]
+    return experiment, [replace(o, record=completion.normalize(o.record, experiment.events(o.scheduled.attempt_id)))
+                        for o in outcomes]
 
 
 def run_pilot(
@@ -914,6 +944,7 @@ def run_pilot(
     credential_explicit_path: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
     total_seconds: float | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[trial.Experiment, list[AttemptOutcome]]:
     """Plan and run the whole schedule. `backends()` returns a fresh
     `(agent backend, grading backend)` pair per attempt; `argv_for` gives the
@@ -921,6 +952,9 @@ def run_pilot(
     every time; a test's scripted client needs the attempt id), to which
     `launch_argv` adds the declared model and effort. `total_seconds`
     overrides the declared total cap - for tests only; the CLI never sets it."""
+    total = declaration.total_seconds if total_seconds is None else total_seconds
+    completion_deadline = (completion.CompletionDeadline.after(total, clock) if completion_deadline is None
+                           else completion_deadline.child(total))
     from . import collection_conformance as cc
 
     # Refuse before anything is planned: a declaration with no effort to pin
@@ -936,7 +970,9 @@ def run_pilot(
     # still leave `pilot-report` a store to reconcile against.
     write_outcomes(run_dir, experiment, outcomes, declaration)
 
-    def run_attempt(scheduled: ScheduledAttempt, budget: float) -> dict[str, object]:
+    def run_attempt(scheduled: ScheduledAttempt, budget: float,
+                    deadline: completion.CompletionDeadline) -> dict[str, object]:
+        owned = trial.OwnedAttemptIds(experiment, scheduled.attempt_id)
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
@@ -944,6 +980,7 @@ def run_pilot(
             base=run_dir, base_argv=launch_argv(declaration, argv_for(scheduled)),
             extra_home_files=treatment_home_files if scheduled.arm == TREATMENT else {},
             cli_version=declaration.client_version, timeout=budget,
+            completion_deadline=deadline, recorded_attempt_ids=owned,
             credential_explicit_path=credential_explicit_path,
         )
 
@@ -952,9 +989,10 @@ def run_pilot(
         write_outcomes(run_dir, experiment, outcomes, declaration)
 
     run_schedule(
-        experiment, schedule, run_attempt,
+        experiment, schedule, None,
         total_seconds=declaration.total_seconds if total_seconds is None else total_seconds,
         per_attempt_seconds=declaration.per_attempt_seconds, clock=clock, on_outcome=on_outcome,
+        run_attempt_with_deadline=run_attempt, completion_deadline=completion_deadline,
     )
     return experiment, outcomes
 

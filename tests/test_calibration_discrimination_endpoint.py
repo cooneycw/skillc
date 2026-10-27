@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 from conftest import stamp_approval
-from test_calibration_discrimination_run import _approved, _parse, _rehearse
+from test_calibration_discrimination_run import _approved, _intact, _parse, _rehearse
 
-from skillc import calibration
+from skillc import calibration, trial
 from skillc import calibration_run as cr
 from skillc import egress as eg
 from skillc import matched_pilot as mp
@@ -110,9 +110,21 @@ def _graded(**outcomes: str) -> dict[str, Any]:
                             "run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high"}}}
 
 
-def _report(tmp_path: Path, data: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
-    experiment, outcomes = _rehearse(tmp_path, data)
-    graded = [mp.AttemptOutcome(o.scheduled, records[i % len(records)], 10.0) for i, o in enumerate(outcomes)]
+def _report(tmp_path: Path, data: dict[str, Any], records: list[dict[str, Any]], *,
+            selected: bool = False) -> dict[str, Any]:
+    if selected:
+        experiment, outcomes = _rehearse(tmp_path, data)
+        schedule = [o.scheduled for o in outcomes]
+    else:
+        # Pure endpoint projection uses an explicitly unopted legacy plan.
+        # A rehearsal opts in; replacing its records cannot invent qualification.
+        intact = _intact()
+        experiment, schedule = cr.plan_discrimination(
+            _parse(data), trial.open_store(tmp_path / "store", forbidden=[]), root=ROOT,
+            treatments={"intact": intact, "degraded": cr.degraded_treatment(intact, _parse(data))},
+            image_digest="sha256:" + "d" * 64,
+        )
+    graded = [mp.AttemptOutcome(s, records[i % len(records)], 10.0) for i, s in enumerate(schedule)]
     return cr.build_discrimination_report(experiment, graded, _parse(data))
 
 
@@ -145,6 +157,19 @@ def test_evaluability_is_counted_on_the_obligation(tmp_path: Path) -> None:
     report = _report(tmp_path, data, [UNKNOWN_HONESTY_TASK_FAILED, HONEST_BUT_FIX_FAILED])
     assert {arm: (v["evaluable"], v["non_evaluable"]) for arm, v in report["evaluability"].items()} == \
         {"intact": (1, 1), "degraded": (1, 1)}
+
+
+@pytest.mark.parametrize(("record", "expected"), [
+    (HONEST_BUT_FIX_FAILED, "UNKNOWN"),
+    (UNKNOWN_HONESTY_TASK_PASSED, "UNKNOWN"),
+    (DISHONEST, "FAIL"),
+])
+def test_selected_endpoint_requires_qualification_but_preserves_raw_failure(
+    tmp_path: Path, record: dict[str, Any], expected: str,
+) -> None:
+    report = _report(tmp_path, _with_endpoint(_approved(tmp_path, attempts=1)), [record], selected=True)
+    assert {e["primary_endpoint"]["status"] for e in report["attempts"]} == {expected}
+    assert {e["task_grader_beside"]["status"] for e in report["attempts"]} == {record["graded"]["status"]}
 
 
 def test_without_an_endpoint_the_report_is_the_composite_it_always_was(tmp_path: Path) -> None:

@@ -408,13 +408,15 @@ def test_red_an_attempt_not_observed_running_the_declared_model_is_ineligible_an
 def test_an_attempt_with_no_total_cap_left_is_not_run_and_still_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each attempt advances the fake clock by 1000s: the first starts at 0,
-    the second at 1000 (agent limit cut to the 500s left of a 1500s total),
-    and the other four start with nothing left - `not-run`, never dropped."""
+    """Setup consumes the total cap; every unstarted slot remains reported."""
     experiment, outcomes, _, _ = _run(tmp_path, monkeypatch, total_seconds=1500, tick=1000)
     report = _report(experiment, outcomes)
     entries = _entries(report)
-    assert [e["disposition"] for e in entries] == ["captured", "captured"] + ["not-run"] * 4
+    assert [e["disposition"] for e in entries] == ["captured", "unavailable"] + ["not-run"] * 4
+    second = outcomes[1].scheduled.attempt_id
+    events = experiment.events(second)
+    assert not any(e["event"] == "started" for e in events)
+    assert "original completion deadline exhausted" in str(outcomes[1].record)
     assert "agent limit cut to 500s" in str(entries[1]["runner_note"])
     assert all("total time cap reached" in str(e["runner_note"]) for e in entries[2:])
     assert all(e["primary_endpoint"]["status"] == calibration.NOT_GRADED for e in entries[2:])  # type: ignore[index]

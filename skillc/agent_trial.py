@@ -93,8 +93,8 @@ from typing import Any
 
 from . import attempt_guard as ag
 from . import codex_guard as cg
-from . import controller_turns as ct
 from . import (
+    completion,
     credential,
     demo,
     gate_overlay,
@@ -109,6 +109,7 @@ from . import (
     verify,
     witness_capture,
 )
+from . import controller_turns as ct
 from . import credential_steward as cs
 from . import egress as eg
 from . import fixture_overlay as fo
@@ -2184,6 +2185,8 @@ def _measure_discovery(
     backend: DockerBackend, id_prefix: str, client_argv: Sequence[str],
     extra_home_files: Mapping[str, bytes], selected: frozenset[str],
     limits: Limits, base: Path,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> _DiscoveryMeasurement:
     """Prepare a fresh, dedicated, throwaway container - NEVER the agent's
     own. `DockerBackend.execute()`'s own docstring is explicit: "Intended to
@@ -2201,6 +2204,8 @@ def _measure_discovery(
     way an unobtainable listing does - never SATISFIED."""
     unmeasured = {name: "UNMEASURED" for name in selected}
     attempt_id = f"{id_prefix}-{secrets.token_hex(4)}"
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(attempt_id)
     try:
         handle = backend.prepare(attempt_id)
     except BackendUnavailable as exc:
@@ -2213,6 +2218,7 @@ def _measure_discovery(
         image_digest = backend.image_id(handle)
         listing, unexpected, reason = demo.run_subject_discovery(
             backend, handle, list(client_argv), set(selected), limits, base,
+            completion_deadline=completion_deadline,
         )
         result = _DiscoveryMeasurement(listing, unexpected, reason, image_digest)
     except BackendUnavailable as exc:
@@ -2222,6 +2228,8 @@ def _measure_discovery(
     finally:
         backend.destroy(handle)
         absent = backend.confirm_absent(handle)
+        if recorded_attempt_ids is not None:
+            recorded_attempt_ids.confirm(attempt_id, absent is Confirmation.CONFIRMED)
     if absent != Confirmation.CONFIRMED:
         # Overrides whatever was measured above (review point 3): an
         # unconfirmed teardown means this container's own state - and so its
@@ -2293,6 +2301,8 @@ def _build_discovery_receipt(
     limits: Limits,
     base: Path,
     context: InstallationReceiptContext,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> dict[str, object] | None:
     """Measure (or reuse a cached measurement of) discovery before and after
     delivering `extra_home_files` into fresh throwaway containers, and build
@@ -2330,10 +2340,10 @@ def _build_discovery_receipt(
     key: DiscoveryCacheKey = (planned_image_digest, context.tree_digest)
     if key not in context.cache:
         baseline = _measure_discovery(
-            backend, f"{attempt_id}-baseline", client_argv, {}, context.declared, limits, base,
+            backend, f"{attempt_id}-baseline", client_argv, {}, context.declared, limits, base, completion_deadline, recorded_attempt_ids,
         )
         discovery = _measure_discovery(
-            backend, f"{attempt_id}-discovery", client_argv, extra_home_files, context.declared, limits, base,
+            backend, f"{attempt_id}-discovery", client_argv, extra_home_files, context.declared, limits, base, completion_deadline, recorded_attempt_ids,
         )
         context.cache[key] = (baseline, discovery)
     baseline, discovery = context.cache[key]
@@ -2486,6 +2496,8 @@ def run_one_attempt(
     declared_model: str | None = None,
     extra_home_modes: Mapping[str, str] | None = None,
     gate_state_protocol: gate_state.Protocol | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2577,6 +2589,13 @@ def run_one_attempt(
     record, a nested-codex count that is not zero), and grading receives the
     controller-held evidence as `verify`'s `trusted_extras`. `None` (the
     default) changes nothing for any other caller."""
+    if recorded_attempt_ids is not None and not recorded_attempt_ids.bound_to(experiment, attempt_id):
+        raise trial.Refused("owned IDs belong to a different experiment or parent")
+    completion_marker = None
+    if completion_deadline is not None:
+        completion_marker = completion.mark(experiment, attempt_id, completion_deadline)
+        if recorded_attempt_ids is None:
+            recorded_attempt_ids = trial.OwnedAttemptIds(experiment, attempt_id)
     if nested_codex_policy is not None and nested_codex_policy not in cg.NESTED_POLICIES:
         raise ValueError(f"nested_codex_policy must be one of {cg.NESTED_POLICIES}, not {nested_codex_policy!r}")
     if extra_home_modes is not None:
@@ -2945,7 +2964,7 @@ def run_one_attempt(
         transcript_for_capture=transcript_for_capture,
         imports_for_capture=imports_for_capture,
         next_turn=next_turn if declared_turns else None,
-        order=attempt_order,
+        order=attempt_order, completion_deadline=completion_deadline,
     )
     delivered = sum(1 for e in experiment.events(attempt_id)
                     if e.get("event") == "controller-turn" and e.get("delivered") is True)
@@ -3014,7 +3033,8 @@ def run_one_attempt(
                         client=client, client_version=resolved_cli_version,
                         client_argv=receipt_context.listing_client_argv or [client],
                         extra_home_files=extra_home_files or {}, limits=limits, base=base,
-                        context=receipt_context,
+                        context=receipt_context, completion_deadline=completion_deadline,
+                        recorded_attempt_ids=recorded_attempt_ids,
                     ) if receipt_context is not None else None
                 )
                 if receipt is not None:
@@ -3036,6 +3056,7 @@ def run_one_attempt(
                         experiment, attempt_id, grader, base, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
                         trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
+                        recorded_attempt_ids=recorded_attempt_ids, completion_deadline=completion_deadline,
                     )
                 else:
                     # The observation stands in for the installation receipt
@@ -3046,6 +3067,7 @@ def run_one_attempt(
                         experiment, attempt_id, grader, base, observation, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
                         trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
+                        recorded_attempt_ids=recorded_attempt_ids, completion_deadline=completion_deadline,
                     )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
@@ -3070,6 +3092,7 @@ def run_one_attempt(
                 "status": graded_result.status, "category": graded_result.category,
                 "detail": graded_result.detail, "criteria": graded_result.criteria,
                 "result_id": stored["result_id"], "result_status": stored["status"],
+                "cleanup": graded_result.containment.get("cleanup"),
             }
 
     result: dict[str, object] = {
@@ -3106,8 +3129,27 @@ def run_one_attempt(
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -
     # lost it for good.
+    if completion_deadline is not None:
+        assert completion_marker is not None and recorded_attempt_ids is not None
+        cleanup = result.get("cleanup")
+        cleaned = (isinstance(cleanup, dict) and cleanup.get("status") in {"removed", "not-needed"}
+                   and result.get("backend_teardown") == Confirmation.CONFIRMED.value
+                   and (graded is None or graded.get("cleanup") == "removed")
+                   and recorded_attempt_ids.all_absent())
+        qualification = completion_deadline.qualify(completion_marker, cleaned)
+        result.update(completion_required=True, completion_marker=completion_marker, completion=None)
     result["observation_record"] = write_observation_record(
         experiment, attempt_id,
         build_observation_record(result, client=client, grader_supplied=grader is not None),
     )
+    if completion_deadline is not None:
+        # Publication success is separate from the already frozen timing sample.
+        qualification["publication_confirmed"] = result["observation_record"] == "written"
+        try:
+            experiment.record(attempt_id, "completion-qualified", qualification=qualification)
+        except OSError as exc:
+            # Retain the verified raw task grade; missing final evidence cannot PASS.
+            result["completion_publication_error"] = type(exc).__name__
+        else:
+            result["completion"] = qualification
     return result
