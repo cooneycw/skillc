@@ -1,0 +1,169 @@
+"""Data models for security scanning.
+
+Provides:
+- Severity: Enum for finding severity levels
+- Finding: A single security issue detected by a scanner
+- ScanResult: Aggregated results from all scanners
+- Suppression: Configuration to suppress known findings
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from enum import IntEnum
+from typing import Optional
+
+
+class Severity(IntEnum):
+    """Severity levels for security findings, ordered by importance."""
+
+    CRITICAL = 4
+    HIGH = 3
+    MEDIUM = 2
+    LOW = 1
+
+    @property
+    def icon(self) -> str:
+        icons = {
+            Severity.CRITICAL: "\U0001f534",  # red circle
+            Severity.HIGH: "\U0001f7e1",  # yellow circle
+            Severity.MEDIUM: "\U0001f7e0",  # orange circle
+            Severity.LOW: "\u26aa",  # white circle
+        }
+        return icons[self]
+
+    @property
+    def label(self) -> str:
+        return self.name
+
+
+@dataclass
+class Finding:
+    """A single security issue detected by a scanner module."""
+
+    id: str
+    severity: Severity
+    title: str
+    file_path: Optional[str] = None
+    line_number: Optional[int] = None
+    why: str = ""
+    fix: str = ""
+    command: Optional[str] = None
+    time_estimate: Optional[str] = None
+    scanner: str = "native"
+    raw_match: Optional[str] = None
+    #: The FULL matched value, used only to evaluate a suppression's `secret:`
+    #: pattern (issue #1299). `raw_match` is masked and cannot be matched
+    #: against. This must never be printed: `repr=False` keeps it out of the
+    #: dataclass repr, and no output formatter reads it.
+    secret_value: Optional[str] = field(default=None, repr=False, compare=False)
+
+    @property
+    def location(self) -> str:
+        if self.file_path and self.line_number:
+            return f"{self.file_path}:{self.line_number}"
+        if self.file_path:
+            return self.file_path
+        return ""
+
+    def mask_secret(self, value: str) -> str:
+        """Mask a secret value, showing only a prefix."""
+        if len(value) <= 4:
+            return "****"
+        return value[:4] + "*" * min(16, len(value) - 4)
+
+
+@dataclass
+class Suppression:
+    """A suppression rule for known/accepted findings."""
+
+    id: str
+    path: Optional[str] = None
+    reason: str = ""
+    #: Exact-value pattern (issue #1299), matched with `re.fullmatch` against the
+    #: finding's FULL value. With it, a suppression covers one known test value
+    #: rather than every finding of this id in the path - a real key committed
+    #: beside a planted canary still blocks.
+    secret: Optional[str] = None
+
+    def matches(self, finding: Finding) -> bool:
+        if finding.id != self.id:
+            return False
+        if self.path:
+            if not finding.file_path or not re.match(self.path, finding.file_path):
+                return False
+        if self.secret is not None:
+            # FAIL CLOSED: a finding that carries no value cannot be shown to be
+            # the declared one, so it is not suppressed.
+            if finding.secret_value is None:
+                return False
+            return re.fullmatch(self.secret, finding.secret_value) is not None
+        return True
+
+
+@dataclass
+class ScanResult:
+    """Aggregated results from all scanner modules."""
+
+    findings: list[Finding] = field(default_factory=list)
+    passed: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    # How many source files the scan actually examined (issue #1027). Finding
+    # counts cannot answer this: a clean scan of 575 files and a scan that found
+    # no files to open both report zero findings, and the gate line built from
+    # them reads identically. ``None`` means no module stated a number - which
+    # is UNKNOWN, deliberately not 0, so "said nothing" stays distinguishable
+    # from "said none".
+    units_scanned: Optional[int] = None
+
+    @property
+    def critical_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
+
+    @property
+    def high_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.HIGH)
+
+    @property
+    def medium_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.MEDIUM)
+
+    @property
+    def low_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.LOW)
+
+    @property
+    def has_blockers(self) -> bool:
+        return self.critical_count > 0
+
+    @property
+    def has_warnings(self) -> bool:
+        return self.high_count > 0
+
+    def summary_line(self) -> str:
+        parts = []
+        if self.critical_count:
+            parts.append(f"{self.critical_count} critical")
+        if self.high_count:
+            parts.append(f"{self.high_count} high")
+        if self.medium_count:
+            parts.append(f"{self.medium_count} medium")
+        if self.low_count:
+            parts.append(f"{self.low_count} low")
+        if not parts:
+            return "No issues found"
+        return ", ".join(parts)
+
+    def merge(self, other: ScanResult) -> None:
+        self.findings.extend(other.findings)
+        self.passed.extend(other.passed)
+        self.skipped.extend(other.skipped)
+        self.errors.extend(other.errors)
+        # Summed, and None-preserving on BOTH sides (issue #1027): a module that
+        # stated no count must not erase one that did, and two modules that both
+        # stated none must not add up to a confident 0. Only an actual number
+        # from some module makes the total a number.
+        if other.units_scanned is not None:
+            self.units_scanned = (self.units_scanned or 0) + other.units_scanned
