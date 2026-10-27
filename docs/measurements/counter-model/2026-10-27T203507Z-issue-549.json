@@ -1,0 +1,31 @@
+{
+  "branch": "issue-549-docker-residue-egress-networks-live-test-images-in",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "43b8bfaa38ad4bd96862758508655bede6fe4c09",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-34-27-01a17cec-fab5-7860-b0e9-aeef446e1806.jsonl",
+    "thread_id": "01a17cec-fab5-7860-b0e9-aeef446e1806"
+  },
+  "issue": "549",
+  "local_credentials": "absent",
+  "network": "unverified",
+  "passes": 2,
+  "recorded_at": "2026-10-27T20:35:07Z",
+  "red_cases": {
+    "already_covered": 1,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T16-17-18-01a17f02-9885-7a50-ac16-4ac3873b421f.jsonl",
+    "thread_id": "01a17f02-9885-7a50-ac16-4ac3873b421f"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}
