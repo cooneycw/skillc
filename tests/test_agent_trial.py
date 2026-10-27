@@ -1156,6 +1156,60 @@ def test_census_does_not_assess_claude_drift() -> None:
     assert census["transcript_unrecognized_types"] is None  # not assessed, never "no drift"
 
 
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize("versions", [("A", "B"), ("B", "A"), ("A", "B", "A")])
+def test_548_census_never_selects_a_version_from_a_conflicting_population(
+    client: str, versions: tuple[str, ...],
+) -> None:
+    rows = [{"type": "session_meta", "payload": {"cli_version": v}} if client == "codex"
+            else {"type": "system", "version": v} for v in versions]
+    assert at.transcript_census(client, "\n".join(map(json.dumps, rows)))["transcript_client_version"] is None
+
+
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize(("versions", "expected"), [
+    ([], None), (["A"], "A"), (["A", "A"], "A"), (["wrong"], "wrong"),
+    ([None], None), ([""], None), ([" "], None), (["A", None], None),
+    ([None, "A"], None), (["A", 42], None), ([42, "A"], None), ([{}, "A"], None),
+])
+def test_548_version_uncertainty_keeps_prompt_canary_and_credit_facts(
+    client: str, versions: list[object], expected: str | None,
+) -> None:
+    from test_transcript_adapter import CLAUDE_NONCE, CODEX_NONCE, PROMPT_FOR_NONCE
+
+    fixture = _CODEX_FIXTURES if client == "codex" else _CLAUDE_FIXTURES
+    original = (fixture / "live-canary.jsonl").read_text()
+    rows = [{"type": "session_meta", "payload": {"cli_version": v}} if client == "codex"
+            else {"type": "system", "version": v} for v in versions]
+    raw = ("\n".join(map(json.dumps, rows)) + "\n" + original).encode()
+    prompt = PROMPT_FOR_NONCE[CODEX_NONCE if client == "codex" else CLAUDE_NONCE]
+    observation, census, metadata = at.observe_transcript_bytes(
+        at.CLIENT_SPECS[client], raw, expected_prompt=prompt, skill_name="demo-skill")
+    assert census["transcript_client_version"] == expected
+    assert "transcript_census_error" not in census
+    fields = {"status": "observed", **observation.to_fields(), **census}
+    assert observation.prompt_delivered and observation.canary_satisfied
+    assert at.credit_block(fields, client=client, disposition="captured") is None
+    if client == "codex":
+        assert metadata is not None and metadata["cli_version"] == expected
+        pure = _pure_observation(raw, prompt)
+        live = _live_hook_observation(raw, prompt)
+        assert {k: live[k] for k in pure} == pure
+
+
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize("bad", ['{"type":"session_meta"', "null", "[]", "not-json"])
+def test_548_malformed_population_cannot_observe_a_version(client: str, bad: str) -> None:
+    header = {"type": "session_meta", "payload": {"cli_version": "A"}} if client == "codex" else {
+        "type": "system", "version": "A"}
+    raw = json.dumps(header) + "\n" + bad
+    census = at.transcript_census(client, raw)
+    assert census["transcript_client_version"] is None
+    if client == "codex":
+        read_metadata = at.CLIENT_SPECS[client].run_metadata
+        assert read_metadata is not None and read_metadata(raw)["cli_version"] is None
+
+
 @pytest.mark.parametrize("raw", ["", "not json\n", '{"type": "session_meta", "payload": {"cli_version": "0.157.1"}}\n'])
 def test_census_with_no_response_items_is_not_assessed(raw: str) -> None:
     """Codex review, red on the first census: an empty, malformed or

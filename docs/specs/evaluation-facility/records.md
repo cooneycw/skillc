@@ -406,6 +406,29 @@ knows, then leak-checks the record twice: each string as it reads once parsed,
 and the serialized text. A record that fails is not written, and the attempt
 says `observation_record: refused-leak`.
 
+The census's `client_version` is a transcript observation, not an executable
+measurement. Current readers return the exact unique nonblank version across
+the version-bearing records, or null for missing, malformed or conflicting
+evidence. Identical duplicates are allowed; matching-wrong-matching is unknown.
+Ordinary Claude messages without a version field do not invalidate a header.
+This uses the existing text/null field; version uncertainty adds no census
+error and changes no task grade or eligibility decision.
+
+Pilot and fixture-live reports derive `cli_version_observed` from this attempt's
+complete retained transcript bytes, checked through the existing object reader.
+Legacy captured manifests and independent failure-retention journals are both
+supported. A manifest and its selected stream must bind to the attempt's ledger
+identities, canonical object reference and actual recorded size; malformed,
+foreign or conflicting bindings yield no version fact.
+Missing, partial, damaged, incompatible or ambiguous bytes read `UNKNOWN`.
+An old scalar or agreement between old first/last metadata fields cannot
+establish population consistency. `client_declared` separately copies this
+attempt's ledger client name/version; it supplies no match or qualification
+boolean. A wrong but consistently observed version remains observable beside
+the declaration. Existing grades, model eligibility, comparisons and carried
+replay decisions remain unchanged. Historical reports retain their original
+meaning and bytes; generating these diagnostics does not re-certify them.
+
 Three facts must agree inside the record:
 
 - **Eligibility:** `grading_eligible` is exactly `prompt_delivered AND canary_satisfied`.

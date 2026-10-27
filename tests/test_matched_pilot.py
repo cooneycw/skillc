@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from skillc import cost_estimate as ce
 from skillc import trial as t
 
@@ -414,3 +416,162 @@ def test_completion_readback_joins_supplied_recovered_and_direct_reports(tmp_pat
     failed = replace(supplied, record={**raw, "graded": {"status": "FAIL"}})
     assert mp.graded_status(mp.reconcile(experiment, [failed])[0].record) == "FAIL"
     assert mp.graded_status(raw) == "PASS"  # Unopted primitive legacy interpretation.
+
+
+@pytest.mark.parametrize(("versions", "expected"), [
+    (["A"], "A"), (["A", "A"], "A"), (["wrong"], "wrong"),
+    (["A", "B", "A"], "UNKNOWN"), ([None, "A"], "UNKNOWN"), ([], "UNKNOWN"),
+])
+@pytest.mark.parametrize("second_status", ["PASS", "FAIL"])
+def test_548_reports_rederive_retained_bytes_without_changing_task_or_pair_facts(
+    tmp_path: Path, versions: list[object], expected: str, second_status: str,
+) -> None:
+    import hashlib
+
+    from skillc import agent_trial as at
+    from skillc import matched_pilot as mp
+
+    spec = _plan_spec()
+    trials = spec["trials"]
+    assert isinstance(trials, list)
+    trials = trials[:2]
+    trials[0]["client"] = {"name": "codex", "version": "declared-one"}
+    trials[1]["client"] = {"name": "claude", "version": "declared-two"}
+    experiment = t.plan({**spec, "trials": trials}, t.open_store(tmp_path / "store", []))
+    schedule = mp.schedule_from_ledger(experiment)
+    records: list[dict[str, object]] = [{"disposition": "captured", "observation": {"transcript_client_version": "legacy",
+                "run_metadata": {"cli_version": "legacy", "model": "model"}}, "graded": {"status": "PASS"}},
+               {"disposition": "captured", "observation": {"run_metadata": {"model": "model"}},
+                "graded": {"status": second_status}}]
+    outcomes = [mp.AttemptOutcome(s, r, 1.0) for s, r in zip(schedule, records, strict=True)]
+    # Equal old first/last scalars cannot certify even matching-wrong-matching.
+    assert mp.build_report(experiment, outcomes)["attempts"][0]["cli_version_observed"] == "UNKNOWN"  # type: ignore[index]
+    for s, name in zip(schedule, ("codex", "claude"), strict=True):
+        rows = [{"type": "session_meta", "payload": {"cli_version": v}} if name == "codex"
+                else {"type": "system", "version": v} for v in versions]
+        t.retain_transcript(experiment, s.attempt_id, t.TranscriptEvidence(("\n".join(map(json.dumps, rows)) + "\n").encode()))
+        t.begin_prompt_inputs(experiment, s.attempt_id, 0)
+        t.retain_prompt_input(experiment, s.attempt_id, 1, "exact private instruction", at.transcript_leak_findings)
+        t.finish_prompt_inputs(experiment, s.attempt_id, [1], "declared-complete")
+        experiment.record(s.attempt_id, "started")
+        experiment.record(s.attempt_id, "stopped")
+    before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in experiment.root.rglob("*") if p.is_file()}
+    report = mp.build_report(experiment, outcomes, declared_model="model")
+    entries = report["attempts"]
+    assert isinstance(entries, list)
+    assert [e["cli_version_observed"] for e in entries] == [expected, expected]
+    assert [e["client_declared"] for e in entries] == [t["client"] for t in trials]
+    assert [e["graded_status"] for e in entries] == ["PASS", second_status]
+    assert all(e["model_eligible"] is True for e in entries)
+    assert all(t.read_prompt_inputs(experiment, s.attempt_id).inputs[0].data == b"exact private instruction" for s in schedule)
+    assert {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in experiment.root.rglob("*") if p.is_file()} == before
+    assert mp.summarize(report)["arms"][mp.TREATMENT]["passed"] == 1  # type: ignore[index]
+    assert len(mp.summarize(report)["matched_successful_pairs"]) == (1 if second_status == "PASS" else 0)  # type: ignore[arg-type]
+
+
+def _548_manifest(experiment: t.Experiment, aid: str, entry: dict[str, object]) -> dict[str, object]:
+    """A complete valid captured-manifest baseline, without a retention journal."""
+    from skillc import checks, records
+
+    artifact = b"synthetic captured output"
+    manifest = {
+        "version": 2, "kind": records.ARTIFACT_MANIFEST, "producer": "controller",
+        "attempt_id": aid, "trial_id": experiment.trial_of(aid)["trial_id"], "captured": "2026-10-27T00:00:00Z",
+        "artifacts": [{"path": "result.txt", "type": "file", "size": len(artifact),
+                       "digest": t.put_object(experiment, artifact), "mode": "-"}],
+        "exclusions": [], "capture_failures": [],
+        "observations": [{"stream": stream, "origin": "observed", "coverage": "unsupported", "attempt_id": aid,
+                          "reason": "not supplied by the synthetic fixture"} for stream in records.REQUIRED_OBSERVATIONS]
+                        + [entry],
+    }
+    assert not list(checks.run_record(records.Record(Path("manifest.json"), manifest)))
+    return manifest
+
+
+@pytest.mark.parametrize(("scope", "key", "value"), [
+    ("manifest", "attempt_id", "other-attempt"), ("manifest", "attempt_id", None),
+    ("manifest", "trial_id", "other-trial"), ("manifest", "trial_id", None),
+    ("manifest", "version", 1), ("manifest", "kind", "agent-observation"),
+    ("manifest", "producer", "assembler"), ("entry", "attempt_id", "other-attempt"),
+    ("entry", "attempt_id", None), ("entry", "origin", "observed"), ("entry", "origin", None),
+    ("entry", "ref", "objects/other"), ("entry", "ref", None), ("entry", "size", None),
+    ("entry", "size", True), ("entry", "size", -1), ("entry", "size", 1.5), ("entry", "size", 1),
+    ("entry", "size", "same-length-float"),
+])
+def test_548_legacy_manifest_version_requires_this_attempts_valid_binding(
+    tmp_path: Path, scope: str, key: str, value: object,
+) -> None:
+    from skillc import agent_trial as at
+    from skillc import matched_pilot as mp
+
+    experiment = t.plan(_plan_spec(), t.open_store(tmp_path / "store", []))
+    aid = mp.schedule_from_ledger(experiment)[0].attempt_id
+    raw = b'{"type":"session_meta","payload":{"cli_version":"A"}}\n'
+    digest = t.put_object(experiment, raw)
+    entry: dict[str, object] = {"stream": "client-transcript", "origin": "client-reported", "coverage": "complete",
+                                "attempt_id": aid, "digest": digest, "ref": "objects/" + digest[7:], "size": len(raw)}
+    manifest = _548_manifest(experiment, aid, entry)
+    path = experiment.root / f"manifest-{aid}.json"
+    path.write_text(json.dumps(manifest))
+    assert t.read_retained_transcript(experiment, aid) is None
+    assert at.retained_client_version(experiment, aid) == "A", "the full valid legacy baseline must be healthy"
+    target = entry if scope == "entry" else manifest
+    if value is None:
+        target.pop(key)
+    else:
+        target[key] = float(len(raw)) if value == "same-length-float" else value
+    path.write_text(json.dumps(manifest))
+    assert at.retained_client_version(experiment, aid) is None
+
+
+@pytest.mark.parametrize("source", ["legacy", "journal", "both"])
+def test_548_valid_legacy_and_failure_retention_remain_readable(tmp_path: Path, source: str) -> None:
+    from skillc import agent_trial as at
+    from skillc import matched_pilot as mp
+
+    experiment = t.plan(_plan_spec(), t.open_store(tmp_path / "store", []))
+    aid = mp.schedule_from_ledger(experiment)[0].attempt_id
+    raw = b'{"type":"session_meta","payload":{"cli_version":"A"}}\n'
+    digest = t.put_object(experiment, raw)
+    if source in ("journal", "both"):
+        t.retain_transcript(experiment, aid, t.TranscriptEvidence(raw))
+    if source in ("legacy", "both"):
+        entry = {"stream": "client-transcript", "origin": "client-reported", "coverage": "complete",
+                 "attempt_id": aid, "digest": digest, "ref": "objects/" + digest[7:], "size": len(raw)}
+        manifest = _548_manifest(experiment, aid, entry)
+        (experiment.root / f"manifest-{aid}.json").write_text(json.dumps(manifest))
+    assert at.retained_client_version(experiment, aid) == "A"
+
+
+@pytest.mark.parametrize("damage", ["partial", "tampered", "nonutf8", "unknown-client", "ambiguous", "conflicting", "malformed"])
+def test_548_report_retention_damage_is_unknown_not_a_task_failure(tmp_path: Path, damage: str) -> None:
+    from skillc import agent_trial as at
+    from skillc import matched_pilot as mp
+
+    spec = _plan_spec()
+    if damage == "unknown-client":
+        spec["trials"][0]["client"] = {"name": "scripted", "version": "A"}  # type: ignore[index]
+    experiment = t.plan(spec, t.open_store(tmp_path / "store", []))
+    aid = mp.schedule_from_ledger(experiment)[0].attempt_id
+    raw = b'{"type":"session_meta","payload":{"cli_version":"A"}}\n'
+    entry = t.retain_transcript(experiment, aid, t.TranscriptEvidence(b"\xff" if damage == "nonutf8" else raw),
+                                limits=t.Limits(max_stream_bytes=3) if damage == "partial" else None)
+    if damage == "tampered":
+        path = experiment.object_path(str(entry["digest"]))
+        path.chmod(0o600)
+        path.write_bytes(b"altered")
+    if damage in ("ambiguous", "conflicting"):
+        manifest = _548_manifest(experiment, aid, entry)
+        entries = manifest["observations"]
+        assert isinstance(entries, list)
+        if damage == "ambiguous":
+            entries.append(dict(entry))
+        else:
+            digest = t.put_object(experiment, raw.replace(b'"A"', b'"B"'))
+            entries[-1] = {**entry, "digest": digest, "ref": "objects/" + digest[7:]}
+        (experiment.root / f"manifest-{aid}.json").write_text(json.dumps(manifest))
+    if damage == "malformed":
+        manifest = _548_manifest(experiment, aid, entry)
+        manifest["observations"] = entry
+        (experiment.root / f"manifest-{aid}.json").write_text(json.dumps(manifest))
+    assert at.retained_client_version(experiment, aid) is None

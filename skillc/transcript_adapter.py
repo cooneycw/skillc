@@ -520,6 +520,21 @@ def parse_codex_transcript(raw_jsonl: str) -> list[NormalizedEvent]:
 _CODEX_TOKEN_KEYS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens")
 
 
+@dataclass
+class VersionObservation:
+    """One exact version or unknown; contradictions never heal. Bounded state."""
+
+    value: str | None = None
+    invalid: bool = False
+
+    def add(self, value: object) -> None:
+        if (self.invalid or not isinstance(value, str) or not value.strip()
+                or (self.value is not None and self.value != value)):
+            self.value, self.invalid = None, True
+        else:
+            self.value = value
+
+
 def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
     """What a real Codex rollout says about the run itself, rather than the
     conversation (issue #12: the pilot's model identity is OBSERVED, not the
@@ -527,7 +542,8 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
 
       - `model` / `reasoning_effort`: the LAST `turn_context` event's own
         `model` and `effort`;
-      - `cli_version`: the `session_meta` event's own `cli_version`;
+      - `cli_version`: the unique valid version across ALL `session_meta`
+        events, or None when absent, malformed or conflicting;
       - `token_usage`: the LAST `token_count` event's cumulative
         `info.total_token_usage`, restricted to `_CODEX_TOKEN_KEYS`;
       - `final_agent_message`: the text of the last `assistant` message - the
@@ -541,6 +557,7 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
         "model": None, "reasoning_effort": None, "cli_version": None,
         "token_usage": None, "final_agent_message": None,
     }
+    version = VersionObservation()
     for line in raw_jsonl.splitlines():
         line = line.strip()
         if not line:
@@ -548,18 +565,18 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
+            version.add(None)
             continue
         if not isinstance(obj, dict):
+            version.add(None)
             continue
         payload = obj.get("payload")
+        if obj.get("type") == "session_meta":
+            version.add(payload.get("cli_version") if isinstance(payload, Mapping) else None)
         if not isinstance(payload, Mapping):
             continue
         kind = obj.get("type")
-        if kind == "session_meta":
-            version = payload.get("cli_version")
-            if isinstance(version, str):
-                meta["cli_version"] = version
-        elif kind == "turn_context":
+        if kind == "turn_context":
             model = payload.get("model")
             if isinstance(model, str):
                 meta["model"] = model
@@ -578,4 +595,5 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
             text = _codex_message_text(payload.get("content"))
             if text:
                 meta["final_agent_message"] = text
+    meta["cli_version"] = version.value
     return meta
