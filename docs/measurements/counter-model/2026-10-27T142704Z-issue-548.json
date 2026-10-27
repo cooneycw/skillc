@@ -1,0 +1,31 @@
+{
+  "branch": "issue-548-frozen-identity-checks-verify-the-declaration-not",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "bd6ba0f15717326b27c1ace46c1cb2152670755a",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-34-27-01a17cec-fab5-7860-b0e9-aeef446e1806.jsonl",
+    "thread_id": "01a17cec-fab5-7860-b0e9-aeef446e1806"
+  },
+  "issue": "548",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-27T14:27:04Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T10-21-30-01a17dbc-d9c6-7b02-b213-73d3e23cbb6f.jsonl",
+    "thread_id": "01a17dbc-d9c6-7b02-b213-73d3e23cbb6f"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

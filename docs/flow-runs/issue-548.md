@@ -66,3 +66,16 @@ bytes/pins, accidental frozen-artifact rewrite, and cap exhaustion. Small pure
 focused checks/selftest/types/lint only while other worker owns heavy full slot.
 Review/full finish/push/PR/merge/physical/version/client/model/host-install/deploy
 remain separate held gates. No owner reconfirmation or approval bypass was used.
+
+### Current-run receipt and integration grant
+Root gate-548a-receipt-integrate.md approved the exact following row after the
+independent CLEAN one-pass review of bd6ba0f versus actual5d04. Original A approval
+and source remain historical; this current-run addition precedes receipt copying.
+
+4. `docs/measurements/counter-model/2026-10-27T142704Z-issue-548.json` - Copy the unchanged genuine31-line native gpt-6-astra receipt from the outside-source writer, actual implementer gpt-6.1-sol; scoped validation only.
+
+Net product123+receipt31=154AD; conservative charged125+31=156AD, cap260.
+Ordinary checkpoint and merge actualmain1c7c4c73b22c666131d0bb38a3a7ccc79999b756
+are authorized. Preserve all three reviewed A files, exact receipt and frozen
+375/271/profile evidence. Full quality still awaits post-integration clearance;
+no second review, B, push, PR, physical/client/model study or deployment grant.
