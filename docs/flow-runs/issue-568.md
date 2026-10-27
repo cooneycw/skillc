@@ -136,3 +136,1645 @@ events remain caller evidence. Subsequent begin/approve supply actual session.
 CC run1 remains immutable history; this approval authorizes only run2/B1.
 Workflow-only checkpoint and read-only original-rollout attribution preflight
 were specifically authorized before substantive work. No synthetic review receipt.
+
+<!-- flow-run n=3 id=045c0d23a4514e5ea5a8ca4b9fe5551d -->
+## Run 3
+
+- Run-id:            045c0d23a4514e5ea5a8ca4b9fe5551d
+- Run-start:         357095af692b72565e4273a14d0aab6a3c8fae04
+
+- Issue: #568
+- Base SHA: 357095af692b72565e4273a14d0aab6a3c8fae04
+- Necessity verdict: Partially addressed
+- Approval: granted
+- Approver: skillc-proof orchestrator, gate-568B3a-BB.md, durable revision15
+
+### Section B - approved plan evidence
+
+The following is the exact own BB Step3 plan approved by root, SHA256
+eb34171688bab0357492b83f28be84c2557a257cf8ec8cb02d9372ee058dcac7.
+Its pending-approval wording is retained as historical pre-gate text; the actual
+attributable approval above and gate15 now authorize only its bounded scope.
+
+# ELI5 Gate: BB fresh #568 B3a - pending root approval
+
+## A. Intent
+
+A future comparison can be misleading if the workflow cannot start in a clean environment. A file list does not show that supporting commands are installed where the workflow expects them or can actually run. This slice supplies a pinned profile, meaning an audited list of skills and supporting files, and proves its limited commands inside a new disposable container. Missing real agent/reviewer evidence remains an explicit stopping point; this does not prove the complete workflow or authorize a live study.
+
+## B. Necessity and source evidence
+
+Verdict: Partially addressed. Issue created2026-10-25T07:32:17Z. Actual fresh base357095af692b72565e4273a14d0aab6a3c8fae04. Post-filing commits inspected:6b78522/PR570 explicit product comparisons, b246435/PR572 B1 artifact task,357095a/PR573 closed scripted coordination. These do not provide current CPP87ecb097 profile installation or cold proof. Scoped profile/materialize/new-profile history has no post-filing solution. Both actual profile/materialize blobs match B1main (43838ba09e731db0fb7d25fbd20dce6273867f80/a25b66c66ae319b07e6eedbf0a7ab4875ec4aafc). Main357 push1111 is FAILED; CC owns actual #574 repair, which must be normally integrated before final full verification. No current-main readiness claim.
+
+Today's merged PRs inspected573,572,570,567,565,564,562; only573/572/570 follow filing. Search considered568,258,247,245,542,554,20,315. Historical266/529/525/334/505 and current553/546/547 were considered from existing public plan; none supplies this specific pin/profile/cold delivery. The #567 fixture-only flow-check resume surface and older86641e8 flow-auto profiles are different scopes.18local sibling worktrees read successfully; none has unpublished relevant profile/materialize/new-cold path commits (BB-568B3a-sibling-evidence.json). Protected archives remain unchanged.
+
+Independently compared every declared388 source file to actual immutable CPP87ecb0970f70aace9e0323feee00c9ca57dda133 Git bytes AND modes, total8,168,295bytes. Complete source manifest SHA256a12dce75f62cd1784ff0d426ec1ecdeb9d790cc98f60b22e9c670986a7a44f1c;397path lane SHA256b0b865c2ec530573cb7d489740c6ee81cc62925fd5f613e47ea1f8e547802dc4. BB-568B3a-source-inventory-verified.json records this independent check. No source exported, image built, profile installed or product test run. Existing normal validator copies all source skill files before selection; hence387read sources plus LICENSE388 differs from planned121installed files. Existing closure result cc176f64b98e0f4bb15d1ab53e10247c083b865d28df7694a87c73648ff04cde and missing-gate-lib refusal are AA's prior source-only facts, not BB cold evidence; BB must independently rerun applicable controls after approval.
+
+Fresh actual flow run045c0d23a4514e5ea5a8ca4b9fe5551d, native session01a16fc2-3e17-7590-b1a5-40fb3710d1d6. Creation/verify/reconcile/read helpers used ONLY canonical CLAUDE_PID1102501/CLAUDE_CODE_SESSION_ID actualnativeID. Separate literal unprefixed git status --short was EMPTY before reconcile. Verify selfclaim uses actual identity. Readissue digest3313c2da0cec25a6e59eb7dc16e2263780d74f69e36c87b13b56ec8e8aaa93f7. Registry actually updated and read back to issue568/newcwd/complete2workflowpaths;571P registry lane dropped intentionally while its worktree claim/tree42ad remains cleanownedinactive. The committed older568 flow records are history, not this run's approval. AA's reviewed plan/design and inventory are reusable facts only; old gate grants no authority to BB. Refused574 and AA568 archives remain protected.
+
+## C. Exact proposed file lane - pending root approval
+
+397product paths (388unchanged pinned exports plus9authored) and2workflow paths. Each path has its own numbered description below. Pinned sources exported ONLY from the declared CPP commit, never hand edited. No arbitrary glob lane. README includes the full path/mode/digest manifest and licence/provenance.8,500,000pinned-byte ceiling and1500authored added+deleted lines INCLUDING JSON/table/provenance. Stop before expansion; no compressed unreadable JSON to evade the bound. No old profile/cold recipe/test, shared core, CLI, root Makefile or globalCI edits. Actual review receipt path separately granted only after actual independent review.
+
+1. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/.claude/commands/flow/auto.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+2. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/.claude/commands/flow/eli5.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+3. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/CLAUDE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+4. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/LICENSE` - Copy the exact upstream87ecb097 licence notice; avoids repeating existing#553 snapshot notice gap.
+5. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/README.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+6. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+7. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+8. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+9. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+10. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+11. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/scripts/playwright-desk.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+12. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-check/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+13. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-check/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+14. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-container/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+15. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-health/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+16. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-health/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+17. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+18. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+19. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-discover/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+20. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-init/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+21. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-pipeline/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+22. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-init/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+23. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-init/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+24. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-pipeline/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+25. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-smoke/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+26. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-smoke/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+27. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-verify/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+28. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-verify/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+29. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-woodpecker/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+30. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-woodpecker/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+31. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+32. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-lint/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+33. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-lint/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+34. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-dockers/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+35. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-dockers/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+36. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-happy-check/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+37. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+38. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+39. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-load-best-practices/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+40. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-load-mcp-docs/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+41. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+42. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+43. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+44. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+45. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/scripts/c4-mermaid.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+46. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+47. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+48. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+49. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/scripts/c4-mermaid.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+50. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+51. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+52. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+53. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+54. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/scripts/c4-mermaid.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+55. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+56. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+57. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+58. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+59. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+60. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+61. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+62. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+63. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+64. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+65. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+66. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+67. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+68. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+69. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+70. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+71. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+72. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/flow-plan-record.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+73. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+74. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+75. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+76. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+77. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+78. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/lib/vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+79. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+80. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+81. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+82. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/codex-skill-resync.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+83. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/codex-skill-sync.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+84. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+85. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+86. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/eli5-vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+87. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-ci-status.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+88. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+89. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+90. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+91. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-plan-record.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+92. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-stale-check.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+93. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+94. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+95. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+96. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+97. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+98. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/gh-pr-merge.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+99. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/hook-permission-census.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+100. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/nit-store-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+101. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+102. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+103. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+104. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+105. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+106. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+107. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/evidence.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+108. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/state.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+109. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+110. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+111. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+112. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+113. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/execution-evidence-verify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+114. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+115. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+116. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+117. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+118. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/docs/decisions/0006-worktree-teardown-ownership.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+119. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+120. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+121. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+122. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/flow-worktree-sweep.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+123. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+124. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-deploy/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+125. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-deploy/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+126. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+127. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+128. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+129. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+130. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/flow-helpers-install.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+131. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+132. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/hook-mask-output.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+133. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+134. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+135. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+136. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+137. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+138. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/lib/vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+139. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+140. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+141. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/eli5-core-drift.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+142. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/eli5-vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+143. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+144. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+145. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+146. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+147. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+148. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+149. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/lib/vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+150. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+151. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+152. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+153. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/codex-skill-resync.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+154. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/codex-skill-sync.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+155. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+156. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/eli5-vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+157. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+158. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/flow-stale-check.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+159. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+160. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/knowledge-graduation-check.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+161. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/nit-store-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+162. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+163. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+164. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+165. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+166. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+167. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+168. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+169. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+170. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+171. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+172. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+173. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+174. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-ci-status.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+175. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+176. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+177. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+178. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+179. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/gh-pr-merge.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+180. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+181. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+182. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+183. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+184. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+185. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+186. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-vantage.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+187. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-lexicon.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+188. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-mailbox.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+189. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-registry.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+190. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/toolchain-provenance.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+191. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+192. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+193. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+194. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+195. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-helpers-install.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+196. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+197. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+198. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+199. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+200. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+201. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+202. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+203. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+204. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+205. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+206. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+207. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+208. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+209. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+210. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-status/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+211. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-sync/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+212. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+213. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+214. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+215. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+216. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+217. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+218. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-pr-watch.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+219. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-vantage.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+220. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-lexicon.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+221. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-mailbox.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+222. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-plan.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+223. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-registry.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+224. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-residuals.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+225. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+226. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-worktree-sweep.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+227. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+228. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+229. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/toolchain-provenance.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+230. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+231. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+232. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-close/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+233. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-close/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+234. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+235. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+236. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+237. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+238. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+239. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-list/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+240. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-update/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+241. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-update/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+242. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-view/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+243. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+244. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+245. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+246. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+247. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+248. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+249. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/project-init.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+250. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+251. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+252. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-lite/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+253. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-lite/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+254. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+255. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+256. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+257. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/classify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+258. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/collect.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+259. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/config.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+260. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/models.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+261. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/ownership.json` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+262. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/rank.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+263. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/render.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+264. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+265. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+266. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/scripts/project-next.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+267. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+268. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+269. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+270. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+271. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/scripts/qa-regression-export.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+272. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+273. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+274. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+275. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+276. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/scripts/qa-regression-export.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+277. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+278. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-models/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+279. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-models/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+280. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-start/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+281. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-start/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+282. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-delete/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+283. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-get/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+284. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+285. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-list/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+286. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-rotate/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+287. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-run/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+288. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-set/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+289. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-ui/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+290. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-validate/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+291. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-deep/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+292. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-explain/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+293. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+294. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+295. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+296. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+297. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/scripts/classify-tool-risk.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+298. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+299. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+300. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+301. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/classify-tool-risk.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+302. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+303. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/hook-permission-census.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+304. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/tool-risk-drift.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+305. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-quick/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+306. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-scan/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+307. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-deployment/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+308. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-deployment/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+309. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+310. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+311. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+312. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+313. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+314. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+315. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/hook-permission-census.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+316. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/measurement-shape-scan.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+317. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+318. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/__main__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+319. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/bootstrap.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+320. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/cli.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+321. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/config.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+322. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/container.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+323. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/coverage.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+324. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+325. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/docker_compose.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+326. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/guardrails.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+327. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/strategy.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+328. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/detector.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+329. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/evidence.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+330. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/failure_patterns.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+331. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/health.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+332. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/infrastructure.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+333. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/makefile.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+334. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/makefile_declaration.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+335. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/manifest.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+336. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/manifest_path.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+337. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/models.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+338. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/mypy_scope.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+339. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/outcomes.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+340. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/pipeline.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+341. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/pyproject.toml` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+342. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/runner.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+343. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/smoke.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+344. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/state.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+345. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/steps.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+346. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/verify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+347. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/README.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+348. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+349. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/__main__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+350. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/cli.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+351. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/config.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+352. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/explain.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+353. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/models.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+354. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+355. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/debug_flags.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+356. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/env_files.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+357. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/gitignore.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+358. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/gitleaks.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+359. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/npm_audit.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+360. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/permissions.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+361. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/pip_audit.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+362. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/secrets.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+363. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/orchestrator.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+364. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+365. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/json_output.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+366. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/novice.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+367. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/pyproject.toml` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+368. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/pyproject.toml` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+369. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+370. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+371. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/execution-evidence-verify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+372. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-ci-status.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+373. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+374. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+375. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+376. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-plan-record.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+377. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-stale-check.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+378. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+379. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+380. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+381. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+382. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+383. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/gh-pr-merge.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+384. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/nit-store-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+385. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+386. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+387. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+388. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/uv.lock` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+389. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/README.md` - Record upstream pin, licence, exact source path/mode/digest manifest and source-versus-installed proof boundary.
+390. `evals/subjects/cpp-codex-flow-auto-87ecb097/subject.json` - Declare the actual87ecb097 Codex surface selection; client version remains a declared target, not runtime availability proof.
+391. `evals/subjects/cpp-codex-flow-auto-87ecb097/profile.json` - Readable audited flow-auto/flow-eli5 closure, preferred and bundled stash siblings, tool probes, modes/checksums and explicit unsupported services/review boundary.
+392. `evals/subjects/cpp-codex-flow-auto-87ecb097/README.md` - Document source validation, actual cold results and honest missing reviewer/session/full-workflow capability.
+393. `docker/profile-flow-auto-568/Dockerfile` - Dedicated immutable-base cached/uncached cold images with Python, uv and explicit git/make/bash; public controller source inputs only, never an installed home.
+394. `tests/test_profile_flow_auto_87ecb097.py` - Verify exact snapshot/source manifest, normal profile closure and committed missing/deformed declaration/source controls; no host installation.
+395. `tests/test_profile_flow_auto_87ecb097_cold.py` - Opt-in serial physical Docker proof, actual in-container profile installation, ten-case accounting and bounded command/container cleanup; no live agent.
+396. `evals/flow-auto-calibration-568/task-interface.md` - Record precisely what B3a proves and leaves unproven, preserving B2/546 and later runtime/prompt/selection obligations.
+397. `changelog.d/568-b3a.md` - Describe the bounded current-profile/cold capability preparation, Refs#568 only.
+398. `docs/flow-runs/issue-568.md` - Append this genuine BB run approval and validation history; preserve all earlier runs.
+399. `docs/flow-runs/issue-568.as-read.md` - Normal helper snapshot of this BB run's actual issue read; preserve older snapshots.
+
+### Implementation and exact proof boundary
+
+Use normal subject/profile/DirTree validate against the exact snapshot; source-only checks may run on host, but EVERY actual profile.install call is inside the fresh container. Never install skills/tools/native home on host. Profile selects flow-auto and flow-eli5 with actual transitive helpers/references, preferred plus bundled stash sibling and literal tool probes. Record source count, selected surface,121installed files/modes separately from installed execution. Services and actual agent/reviewer execution remain unsupported.
+
+Dedicated Dockerfile linux/amd64 immutable Python base python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a and uv0.9.7 source ghcr.io/astral-sh/uv@sha256:68d029b921923c7234ef0178e669d6d253c8356153f1b54316df8cc3e15f5c01, subject to actual build identity confirmation. Explicit cached AND uncached build targets, common git/make/bash. Record actual package versions/image IDs, never call recipe a frozen study runtime. Public bounded context only: exact snapshot/profile and actual committed branch HEAD skillc controller bytes through Git export/byte checks; no installed home/private config/credentials/sessions. No bind mounts in positive runs. Cached alone warms uv sync --locked --no-install-project using exact CPP lock; record actual lock SHA in THAT layer. Uncached empty. CPP pyproject SHA256fe4b57ddb90f92793e0a1e45092d51bc28a7cfc048ae73ec00905cfed9ab00ed and lock0d7606bfd0efa1f58d5fa38386bde45cd63d75812c03cd0324bcd6f422ba6c32 independently bound by source export. Do not infer cache validity from tag. Build failures infrastructureUNKNOWN.
+
+Request/receive serialized Docker slot before build/container execution. Actual in-container source validation/install/verify from immutable inputs, fresh tiny repo/worktrees for both preferred/bundled flow-start --verify. Observe each real sibling's STASH_GUARD; one route cannot conceal the other's missing guard. In writable cache tmpfs copy only that image's warmed cache; offline uv sync verifies actual installed/baked lock identities. Tiny active-test project invokes real lib.cicd check/check-plan, including failing-test twin. This is not full flow:auto finish.
+
+### Ten committed cases and discrimination
+
+1. source-valid-closure: exact388source path/mode/digests/licence and planned121installed files; mutated/missing/extra/empty source-manifest twins refuse the SAME classifier as positive.
+2. source-missing-dependency: literal gate-lib dependency omitted => normal validate refuses; correct declaration passes. Independently execute, do not merely copy AA result.
+3. cold-install-clean: actual container-only fresh install/files/modes, no host binds/inheritedoperatorhome/skills/MCP/secrets, only declared tmpfs. Actual install receipt is not model review evidence.
+4. cold-sibling-route: BOTH installed preferred and bundled verify paths require installed/current stash protection. Missing-sibling twin at either route observes unknown despite other intact route. Preserve actual consuming-call red on committed120file pre-fix declaration before adding preferred guard for121file green; do not use only manifest count or APIabsence.
+5. cold-content-drift: mutate installed helper byte, actual verify_installed violated; unchanged bytes positive. Pinned source unchanged.
+6. cold-mode-drift: remove installed executable bit, actual verify_installed violated; original mode positive.
+7. cold-offline-runner: actual lock agreement/offline imports/real nonempty check-plan green; deliberately failing tiny test red. Report command/tool evidence, not whole flow completion.
+8. cold-cache-unavailable: uncached image yields specific absent offline distribution diagnostic; stale-lock marker refuses before resolution. Generic Docker failure cannot satisfy intended negative.
+9. cold-forbidden-mount: bind ONLY owned synthetic sentinel; SAME actual inspect classifier rejects, no-bind positive. Omitted required resource/mount settings also challenge classifier. Never mount real operator data.
+10. cold-review-evidence-absent: intentionally enrolled tiny repo without actual review receipt fails real finish gate. Actual receipt writer lacking implementer rollout refuses and writes no receipt; no fake ID/rollout/model/receipt, copied unrelatedreceipt or enrollment bypass. This is truthful fullflowUNPROVEN boundary.
+
+All10top-level expected/executed identities and per-case/substep counts must match exactly; empty/missing/extra/duplicate/skipped physical population cannot certify. Knownbad/healthy inputs committed with loadbearing classifier. Infrastructure/capture/cleanup uncertainty UNKNOWN; intended observed bad condition distinguishes negative from unavailable. Default opt-in physical skips name precise reason, never count as cold proof. Actual delivery must run physical selection in granted slot.
+
+### Budget, containment and evidence
+
+ONE1800s monotonic endpoint begins BEFORE source/build staging, includes both builds, all cases, final evidence AND cleanup. Build cap300s each, case60s each, othercommand30s, clipped at every actual launch to SAME remaining; no launch after expiry, no success after late publication.1MiB per stdout/stderr file-backed stream,64MiB parent-owned staging/retention; exact bytes/count. Actual timeout/outputoverflow/expired-publication planted substeps with healthy twins must fail same wrapper, within ten cases rather than fabricated extra population. Per-case controller operations and subprocesses must share the case bound, not reset it. Teardown grace cannot earn completionPASS.
+
+Serial actual runtime containers: networknone/read-onlyroot; memory512MiB AND memory+swap512MiB hard combined cap, CPU1,pids128. Exact tmpfs home256MiB, work/cache256MiB, tinyproject32MiB,tmp64MiB; sum608MiB mount maxima is NOT physical memory beyond512MiB. Inspect real settings including memoryswap/tmpfs; allocation failure honestUNKNOWN. No operator binds. Each image/container owned nonce+purpose labels, record actual IDs immediately, use measured immutable IDs, cleanup ONLY confirmed owned IDs/tags, confirm containers stopped/absent. No globalprune/daemonrestart/unrelatedimages/sharedcheckoutinstall. Build daemon/cache has no OSdiskquota/universalinterrupt claim; timed-outbuild without confirmed stop/ownedleftovers accounting =>UNKNOWN and return. Retain all early/failure cleanup outcomes.
+
+Source/export/build/control/publication rows and report actual counts/digests/imageIDs/toolversions/limits privately, no host paths in committed reports. Final authoritative success only after identity joins/case accounting and cleanup inside originalbudget. Unknown or missing observations never replaced with expected values. At most2actual different-model review passes on authored diff +complete pinnedmanifest/exportequalityproof, full local source available; no claim to rereview all upstream semantics. Root must accept this review boundary for BB. Full verification serialized slot; normally integrate CC574 actual main repair before finalfullchecks, review conflicts with root. Exact-head CI/merge clearance separate.
+
+### Workflow order, risks and residual
+
+STOP at this ownStep3 until root reviews concrete plan. On approval: genuine begin-run, append approved fields/completeexactfileplan, helper approve/asread, workflow-only commit, supported ordinary+freshscope IDpreflight against COMPLETE ORIGINAL native rollout before ANY product export/build/install/tests. Ordinarymixed historicalmodel refusal may coexist with supported genuinefreshscope; stop on scopedrefusal, no aliases/remint/window/assertedmodel/historyrepair. No reviewreceipt fabricated. Early preflight is not countermodel review. Actual future receipt filename needs exactgrant.
+
+Risks: 8MBsource includes every skill source read during discovery, not every installedfile; preserve source/install distinction. Readable manifest adds authoredlines;1500includes it. Coldcache/tag/skip can conceal unexecutedproof; actual immutable/offline and exactpopulation controls address it. Missing preferredsiblings require actual route, not bundledfallback green. Daemoncleanup/hostI/O not hardinterruptible; uncertainty remainsUNKNOWN. Existing snapshot notice/defaultstage rough edges already recorded under553/NitStore; do not widen this slice to oldfixtures. No material need for sharedcore expansion found.
+
+B1artifact preparation shipped but main1111repair remainsCC574. B2services wait selected546 and real paired isolatedremotegrading. Fullflow actual model/client/reviewer/runtime, prompt/selection/equaltools/reviewcosts, sample sizing/rehearsal, heldoutcustodian and exactunapproveddeclaration/liveapproval remain. #568 and parents203/245 remainOPEN; Refs568 only. No task-success/latency/efficacy/readiness/live-study/consumerinstall/deploy claim or authorization. Keep571P42ad cleanownedinactive.
+
+Approval REQUIRED from root on this BB run. No product work before exact gate.
+
+### Source checkpoint evidence (cold operation not yet run)
+
+Supported fresh-run attribution passed against the complete original rollout,
+deriving codex/gpt-6.1-sol and measured-clean. Ordinary mixed historical model
+refusal remains retained. This is not a model review receipt. Exact399-path
+registry lane was actually registered and read back before product export.
+All388 pinned Git bytes/modes matched before export (8,168,295bytes).
+
+Focused source/wrapper selection:19passed,1explicit physical skip;20collected
+identities matched JUnit. Source guards include healthy input before each actual
+mutation. Lint and two-module types pass. Initial development canonical-manifest
+metadata/index-order failures and a local type-name collision were corrected;
+these are development failures, not product regression claims.
+
+No image build, physical Docker, profile installation, full repository check,
+independent review, receipt, CI or live study has run at this checkpoint. Actual
+cold controls, consuming missing-sibling red, resource/cleanup evidence and later
+review remain owed. Full flow capability remains UNPROVEN.
+
+### Read-only audit corrections before Docker slot
+
+AA supplied source support on6dad3f9, not a different-model review or physical
+execution. Accepted cleanup/absence, active-test-cause, root-readonly control and
+identity-retention gaps were corrected within the existing lane. Normal work now
+reserves120s of the same1800s endpoint for cleanup; no fresh cleanup timer extends
+completion credit. Every resource is accounted despite an earlier cleanup error;
+uncertain absence needs owned rescue. Owned names are journaled before allocation,
+cleanup outcomes after each resource, and a bounded UNKNOWN diagnostic retains
+identities/partial cases/events outside completion time without claiming success.
+
+The expired-cleanup regression ran against the exact unmodified6dad3f9 Budget
+implementation: it launched after expiry and the new assertion failed with
+DID NOT RAISE RuntimeError. Corrected implementation passes. New population,
+root-readonly and cleanup controls discriminate known-bad/healthy inputs; these
+are instrument controls, not API-absence regression claims. The committed120-file
+input removes only the preferred sibling declaration and exercises the same
+actual consumer/oracle before the121-file positive. Its physical outcome and all
+ten cold cases remain unexecuted pending Docker slot. Expected substeps are
+explicit; a mere nonzero runner exit cannot satisfy the failing-test control.
+
+Root's cleanup-retention follow-up also discriminated on actual pre-fix code:
+a controlled cleanup.json write failure raised OSError and skipped later owned
+resources. The preimage and red log are retained. The corrected same-path input
+continues all three resources, marks the first retention failure unconfirmed,
+and cannot yield all-absent success. Final focused selection32passed/1explicit
+physical skip,33collection/JUnit identities matched; lint and two-module types
+pass. Authored added+deleted1454/1500; pinned-source bytes/modes unchanged.
+Physical Docker/120-declaration consuming result remain pending actual slot.
+
+### Approved staging correction, root gate16
+
+Actual da559e4 selected Git archive failed at1MiB with exit128/File too large:
+RLIMIT_FSIZE bounds artifact files as well as streams. Root approved staging-only
+replacement with existing bounded Git ls-tree/cat-file commands and actual spool
+bytes. No stream/deadline/retention limit changed. A committed binary/CRLF aggregate
+larger than1MiB distinguishes old archive failure from exact blob/mode staging;
+five blobs require exactly six staging Git calls. Pinned source files remain
+unchanged. Actual selected HEAD export and exact launch footprint are checked
+separately before Docker. Authored added+deleted1487/1500; further expansion must
+return to root. No physical Docker or complete workflow success claimed.
+
+Actual selected HEAD14a9489 staged467regular files through468bounded Git calls,
+10,961,340source bytes,21,989,925parent-retained bytes in22.01s. All exported bytes
+and modes matched. Largest selected blob256,041bytes; largest controller blob
+skillc/docker_backend.py181,776bytes. Private report retains all467object IDs.
+New-function empty selection and oversized single-blob inputs also refuse through
+stage_context itself; aggregate binary/CRLF healthy preserves bytes/modes. Changed
+control1passed, lint/types passed. Authored1494before receipt.
+
+Root cap amendment17 permits1600authored added+deleted lines, same399paths and
+8.5MB pinned-source cap; a genuine receipt path still needs a separate grant.
+Docker remains queued behind CC574 complete verification. Formal source review is
+explicitly deferred until physical results; no repeat full export is owed solely
+for this test-only negative-input addition. Actual cold run stages its own HEAD.
+
+### First physical result and narrow cleanup classifier correction
+
+Root Docker slot18 ran committed9cc3cc4 once. Terminal1FAIL228.94s; the retained
+result is UNKNOWN, not retroactively green. Both builds completed; all ten cases
+reached expected observed substeps1,1,7,13,7,7,11,7,1,9, including actual120-file
+preferred-consumer red and121-file routes. Cleanup removed all eight containers
+with exit0, but the classifier failed to recognize Docker's lowercase exact
+`error: no such object` diagnostic; both image-tag absence checks passed.
+Private owned/diagnostic/command files remain original. A separate fresh read-only
+check confirmed absence of the exact8containers/2tags; no rescue removal needed.
+
+Root approved the minimal classifier correction before any rerun. Actual lowercase
+input failed before the fix (absentFalse versus expectedTrue); corrected cleanup
+requires exit1, parsed empty-list stdout, the known normalized diagnostic prefix
+and EXACT case-sensitive owned name. Live output, wrong name/case, empty output,
+daemon and permission errors remain non-absence.13cleanup controls pass; lint and
+types pass. Authored1525/1600 before genuine receipt. Docker remains diagnosis-only
+until root authorizes a second physical invocation; no cap weakened or fake receipt.
+
+### Corrected physical result and actual main integration
+
+Root grant19 ran committed1799ebb once with unchanged caps/cases. Physical2 passed
+in231.82s (JUnit case231.778s), population1/1 matched. All10case/substep counts
+matched;533parent commands;22,766,184parent bytes; max command stream256,041bytes.
+Actual cached image120719aa157ab95aecaa6ce31297fd106f57083613054f00d933774fe7b11ef9
+and uncached965f0baa7f499f1d230b83cacf19d7dad630fbd8a626d2c50d79cbd1a6d25965
+were recorded before use. All8containers/2tags absence confirmed, Docker slot
+released. Full flow/native reviewer/live outcome remains UNPROVEN.
+
+Normal merge29d702d8 integrated actual574 into this same run; no conflict or remint.
+At mergeae7162f4 all467physical source blobs/modes/sizes matched1799ebb exactly.
+The following subject README edit only records these observed results; executable
+and profile inputs stay identical. Postmerge main CI1114 was pending at handoff,
+not claimed green. Formal independent review starts after physical results;
+actual receipt and final full slot remain separate root grants.
+
+### Section C - extraction mirror of gate15 approved exact lane
+
+Append-only parser compatibility mirror of the original approved399numbered
+lines, unchanged in membership/order/description. Initial complianceUNKNOWN is
+retained; original approved prefix/baseline/run/approval are not changed.
+
+1. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/.claude/commands/flow/auto.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+2. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/.claude/commands/flow/eli5.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+3. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/CLAUDE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+4. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/LICENSE` - Copy the exact upstream87ecb097 licence notice; avoids repeating existing#553 snapshot notice gap.
+5. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/README.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+6. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+7. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+8. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+9. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+10. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+11. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/scripts/playwright-desk.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+12. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-check/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+13. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-check/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+14. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-container/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+15. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-health/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+16. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-health/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+17. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+18. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+19. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-discover/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+20. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-init/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+21. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-pipeline/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+22. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-init/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+23. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-init/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+24. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-pipeline/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+25. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-smoke/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+26. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-smoke/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+27. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-verify/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+28. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-verify/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+29. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-woodpecker/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+30. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-woodpecker/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+31. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+32. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-lint/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+33. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-lint/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+34. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-dockers/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+35. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-dockers/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+36. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-happy-check/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+37. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+38. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+39. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-load-best-practices/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+40. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-load-mcp-docs/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+41. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+42. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+43. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+44. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+45. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/scripts/c4-mermaid.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+46. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+47. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+48. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+49. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/scripts/c4-mermaid.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+50. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+51. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+52. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+53. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+54. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/scripts/c4-mermaid.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+55. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+56. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+57. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+58. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+59. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+60. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+61. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+62. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+63. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+64. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+65. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+66. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+67. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+68. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+69. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+70. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+71. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+72. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/flow-plan-record.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+73. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+74. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+75. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+76. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+77. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+78. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/lib/vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+79. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+80. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+81. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+82. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/codex-skill-resync.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+83. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/codex-skill-sync.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+84. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+85. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+86. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/eli5-vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+87. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-ci-status.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+88. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+89. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+90. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+91. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-plan-record.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+92. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-stale-check.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+93. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+94. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+95. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+96. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+97. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+98. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/gh-pr-merge.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+99. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/hook-permission-census.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+100. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/nit-store-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+101. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+102. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+103. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+104. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+105. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+106. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+107. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/evidence.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+108. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/state.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+109. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+110. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+111. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+112. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+113. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/execution-evidence-verify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+114. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+115. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+116. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+117. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+118. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/docs/decisions/0006-worktree-teardown-ownership.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+119. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+120. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+121. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+122. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/flow-worktree-sweep.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+123. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+124. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-deploy/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+125. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-deploy/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+126. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+127. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+128. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+129. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+130. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/flow-helpers-install.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+131. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+132. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/hook-mask-output.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+133. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+134. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+135. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+136. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+137. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+138. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/lib/vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+139. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+140. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+141. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/eli5-core-drift.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+142. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/eli5-vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+143. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+144. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+145. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+146. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+147. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+148. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+149. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/lib/vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+150. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+151. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+152. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+153. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/codex-skill-resync.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+154. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/codex-skill-sync.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+155. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+156. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/eli5-vendor.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+157. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+158. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/flow-stale-check.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+159. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+160. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/knowledge-graduation-check.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+161. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/nit-store-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+162. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+163. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+164. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+165. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+166. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+167. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/closing-report-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+168. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/detector-contracts.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+169. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+170. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+171. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+172. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+173. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+174. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-ci-status.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+175. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+176. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+177. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+178. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+179. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/gh-pr-merge.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+180. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+181. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+182. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+183. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+184. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+185. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+186. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-vantage.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+187. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-lexicon.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+188. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-mailbox.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+189. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-registry.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+190. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/toolchain-provenance.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+191. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+192. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+193. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+194. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+195. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-helpers-install.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+196. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+197. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+198. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+199. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+200. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+201. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+202. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+203. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+204. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+205. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+206. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+207. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+208. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+209. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+210. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-status/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+211. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-sync/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+212. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+213. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+214. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+215. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+216. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+217. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+218. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-pr-watch.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+219. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-vantage.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+220. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-lexicon.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+221. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-mailbox.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+222. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-plan.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+223. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-registry.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+224. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-residuals.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+225. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+226. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-worktree-sweep.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+227. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+228. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+229. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/toolchain-provenance.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+230. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+231. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+232. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-close/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+233. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-close/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+234. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+235. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+236. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/docs/agents/issue-contract.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+237. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+238. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+239. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-list/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+240. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-update/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+241. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-update/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+242. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-view/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+243. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+244. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+245. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+246. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/docs/agents/knowledge-lifecycle.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+247. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+248. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+249. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/project-init.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+250. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+251. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/speckit-tasks-to-issues.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+252. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-lite/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+253. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-lite/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+254. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+255. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+256. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+257. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/classify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+258. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/collect.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+259. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/config.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+260. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/models.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+261. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/ownership.json` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+262. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/rank.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+263. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/render.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+264. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+265. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+266. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/scripts/project-next.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+267. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+268. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+269. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+270. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+271. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/scripts/qa-regression-export.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+272. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+273. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+274. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+275. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+276. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/scripts/qa-regression-export.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+277. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+278. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-models/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+279. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-models/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+280. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-start/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+281. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-start/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+282. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-delete/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+283. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-get/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+284. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+285. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-list/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+286. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-rotate/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+287. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-run/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+288. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-set/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+289. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-ui/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+290. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-validate/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+291. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-deep/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+292. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-explain/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+293. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+294. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+295. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+296. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+297. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/scripts/classify-tool-risk.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+298. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+299. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+300. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+301. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/classify-tool-risk.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+302. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+303. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/hook-permission-census.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+304. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/tool-risk-drift.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+305. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-quick/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+306. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-scan/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+307. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-deployment/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+308. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-deployment/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+309. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-help/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+310. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/PROVENANCE.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+311. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/SKILL.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+312. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/reference.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+313. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/SHA256SUMS` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+314. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+315. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/hook-permission-census.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+316. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/measurement-shape-scan.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+317. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+318. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/__main__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+319. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/bootstrap.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+320. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/cli.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+321. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/config.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+322. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/container.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+323. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/coverage.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+324. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+325. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/docker_compose.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+326. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/guardrails.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+327. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/strategy.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+328. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/detector.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+329. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/evidence.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+330. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/failure_patterns.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+331. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/health.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+332. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/infrastructure.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+333. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/makefile.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+334. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/makefile_declaration.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+335. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/manifest.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+336. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/manifest_path.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+337. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/models.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+338. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/mypy_scope.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+339. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/outcomes.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+340. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/pipeline.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+341. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/pyproject.toml` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+342. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/runner.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+343. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/smoke.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+344. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/state.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+345. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/steps.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+346. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/verify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+347. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/README.md` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+348. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+349. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/__main__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+350. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/cli.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+351. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/config.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+352. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/explain.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+353. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/models.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+354. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+355. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/debug_flags.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+356. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/env_files.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+357. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/gitignore.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+358. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/gitleaks.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+359. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/npm_audit.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+360. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/permissions.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+361. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/pip_audit.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+362. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/secrets.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+363. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/orchestrator.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+364. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/__init__.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+365. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/json_output.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+366. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/novice.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+367. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/pyproject.toml` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+368. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/pyproject.toml` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+369. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/check-ignored-additions.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+370. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/counter-model-receipt.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+371. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/execution-evidence-verify.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+372. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-ci-status.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+373. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-driver-capability.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+374. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-finish-gate.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+375. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-live-driver-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+376. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-plan-record.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+377. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-stale-check.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+378. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-start-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+379. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-worktree-claim.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+380. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+381. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/friction-log.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+382. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/gate-lib.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+383. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/gh-pr-merge.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+384. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/nit-store-resolve.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+385. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/speckit-context.py` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+386. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/stash-worktree-guard.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+387. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/worktree-remove.sh` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+388. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/uv.lock` - Copy exact pinned CPP source bytes and mode for the normal-validator snapshot; not a claim this file is installed.
+389. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/README.md` - Record upstream pin, licence, exact source path/mode/digest manifest and source-versus-installed proof boundary.
+390. `evals/subjects/cpp-codex-flow-auto-87ecb097/subject.json` - Declare the actual87ecb097 Codex surface selection; client version remains a declared target, not runtime availability proof.
+391. `evals/subjects/cpp-codex-flow-auto-87ecb097/profile.json` - Readable audited flow-auto/flow-eli5 closure, preferred and bundled stash siblings, tool probes, modes/checksums and explicit unsupported services/review boundary.
+392. `evals/subjects/cpp-codex-flow-auto-87ecb097/README.md` - Document source validation, actual cold results and honest missing reviewer/session/full-workflow capability.
+393. `docker/profile-flow-auto-568/Dockerfile` - Dedicated immutable-base cached/uncached cold images with Python, uv and explicit git/make/bash; public controller source inputs only, never an installed home.
+394. `tests/test_profile_flow_auto_87ecb097.py` - Verify exact snapshot/source manifest, normal profile closure and committed missing/deformed declaration/source controls; no host installation.
+395. `tests/test_profile_flow_auto_87ecb097_cold.py` - Opt-in serial physical Docker proof, actual in-container profile installation, ten-case accounting and bounded command/container cleanup; no live agent.
+396. `evals/flow-auto-calibration-568/task-interface.md` - Record precisely what B3a proves and leaves unproven, preserving B2/546 and later runtime/prompt/selection obligations.
+397. `changelog.d/568-b3a.md` - Describe the bounded current-profile/cold capability preparation, Refs#568 only.
+398. `docs/flow-runs/issue-568.md` - Append this genuine BB run approval and validation history; preserve all earlier runs.
+399. `docs/flow-runs/issue-568.as-read.md` - Normal helper snapshot of this BB run's actual issue read; preserve older snapshots.
+Scope: EXACT399 already-approved paths; no new authority, no restamp.
+
+### Plan-record parser compatibility correction
+
+Initial complianceUNKNOWNexit4 is retained: the approved own Step3 used heading
+C. rather than the helper's literal Section C. Root independently authorized only
+the append-only extraction mirror above, exactly399original numbered lines with
+Scope terminator. Original c5117f4 approved-file prefix is byte-unchanged; baseline
+e4bc7064 remains unchanged and was not restamped. File-set compliance now reports
+399planned/399touched agreement, exit3 for explicit append stability. This fixes
+record format; it is not a CPP parser defect or new approval authority.
+
+Actual first independent review completed on6ad80a4, reviewer derived from its own
+stream/rollout as codex/gpt-6-astra. Scope preflightunverified/networkblocked/local
+credentialsabsent retained; successful source/evidence reads recorded. Two MEDIUM
+findings accepted: malformed ownership response aborts later cleanup; actor failure
+loses command diagnostics at tmpfs removal. Their controls/fixes and one remaining
+actual re-review are owed; no receipt or final full gate is claimed yet.
+
+### Two accepted first-review corrections, root gate20
+
+Current pre-fix controls demonstrated TypeError for null labels and IndexError
+for an empty successful inspect; actual old actor call body emitted no parent
+observation for distinctive healthy/nonzero/owned-child-timeout inputs. All five
+red executions are retained; none depends on absence of a new helper/API. The
+actual nested call is compiled only for host-side controlled command tests,
+without invoking profile installation on host.
+
+Ownership now validates exact one-object Config/Labels shape and nonce before
+remove; malformed ownership stays per-resourceUNKNOWN and later cleanup proceeds.
+The same Budget.command observer finally flushes structured stderr evidence on
+return/nonzero/error/owned-child-timeout. Actual available stream counts/SHA256,
+explicit clipped256head+256tail byte excerpts, and not-started attribution remain
+separate from complete raw-output retention. Encoded16KiB/event and256KiB/actor
+caps refuse overflow inside unchanged1MiB parentstderr. Earlier command output is
+never borrowed for prelaunch refusal. Original final stdout JSON and successful
+case observations/counts remain. Existing55s actor budget now starts before prep.
+An outer kill may retain only flushed prefix and remainsUNKNOWN, not universal
+cancellation/output proof. All source/parent/resource caps are unchanged.
+
+Focused49passed/1physical skip,50collection/JUnit identities matched; lint and
+two-module types pass. Authored1635/1700 before actual receipt. Physical2PASS is
+still bound to1799ebb, not recredited to these changed executable inputs. Actual
+fault/container revalidation needs separate slot ruling. Final second actual
+independent review follows this checkpoint; no third review is authorized.
+
+### Final second-review correction and owner migration stop
+
+Actual final reviewer derived codex/gpt-6-astra and found one LOW: command-number
+allocation preceded Popen. Root gate23 approved only a separate started_calls set
+updated immediately after successful Popen return, with observer membership check.
+Missing cwd and expiry after stream allocation both exposed false startedTrue on
+pre-fix behavior by assertion, then passed after repair. Popen proves managed
+launcher creation, not successful exec of the requested target. Two independent
+review passes are complete; no third is authorized. No review receipt is written.
+
+Current focused51passed/1explicitphysical skip,52collected/JUnit identities matched;
+lint and two-module types pass. Authored1658/1750 before a genuine receipt. Final
+source has not had full repository verification or physical revalidation; the
+prior physical2PASS remains tied to1799ebb. Root prohibits new Docker allocations
+or builds pending owned-space assessment. No live study or efficacy claim.
+
+Owner migration stop supersedes further work: preserve source/workflow WIP on its
+branch, no new tests/reviews/builds/PR/merge, keep raw runtime/review transcripts
+out of the public repository. Runtime evidence and exact resumption instructions
+are handed privately to the orchestrator for verified private archive transfer.
+Current worktrees/retained evidence/protected archives are not deleted. Owned
+worktree claims and wave role are released after remote-confirmed source push.
+The corrected cleanup hypothesis is comparative CPP-vs-baseline cleanup measured
+before harness teardown; AA owns its read-only endpoint proposal. It is not a new
+harness cleanup implementation prerequisite for this source checkpoint.
+
+<!-- flow-run n=4 id=9056cde511ae46edb0de307475036820 -->
+## Run 4
+
+- Run-id:            9056cde511ae46edb0de307475036820
+- Run-start:         d1f5bad35681b0892ccf87bc3ced79d7182dfca2
+
+- Issue: #568
+- Base SHA: 028dde512f2f43f1c47cb77abff6740b4cf86ca6
+- Preserved source: e9be116165265cfcba5ff62e8ba03cc660e235b6
+- Integrated source: d1f5bad35681b0892ccf87bc3ced79d7182dfca2
+- Necessity verdict: Partially addressed
+- Approval: granted
+- Approver: skillc-update orchestrator, native thread 01a17ce7-0301-7621-8b1f-bf330eed8b5d; outbox-worker-02 rev 23, GO-WITH-CONDITIONS
+- Implementer identity: current integration only, native Codex thread 01a17cec-fab5-7860-b0e9-aeef446e1806
+- Recorded at: 2026-10-27T11:49:08.819612+00:00
+
+### Section B evidence
+
+Current main028dde5 incorporates #570/6b78522, #572/b246435,
+#573/357095a, #575/29d702d, #578/1e7ae69 and #579/028dde5 since
+issue creation2026-10-25T07:32:17Z. None delivers the current B3a profile
+or its exact snapshot exemptions. Related #203/#245/#547/#546/#580/#571/
+#576/#542 were inspected; no duplicate or superseding B3a delivery was found.
+No unpushed sibling commits touched the proposed authored paths. The preserved
+e9be116 source and original private freeze/review/physical evidence remain
+unchanged; inaccessible newer be603 source is not claimed or reconstructed.
+
+Historical debt1658 remains charged. The 388 CPP87ecb097 source exports,
+8,168,295-byte source identity and 121-file closure stay fixed. Two historical
+B3a reviews stay tied to 6ad80a47 (two accepted MEDIUM) and efd9bdff (one accepted
+LOW then corrected), with their original scope/network/credential limits.
+Historical physical1 UNKNOWN and physical2 PASS stay on their actual source;
+physical2 at1799ebb is not final-source proof. Earlier c881 receipt is not B3a
+provenance. Historical51pass/1physicalskip/52identities is not a new-run result.
+
+This fresh sibling was created from e9 and merged current main normally.
+The original worktree/history/archives are untouched. New native metadata uses
+only the actual current thread. No soft reset/index transplant, Claude alias,
+manual original-run edit or model-history window is used. The approved supported
+compliance scope is explicitly --base origin/main plus the complete main-to-final
+diff/lane check; an empty run-only diff cannot certify inherited work.
+
+### Section C - the approved plan
+
+1. `changelog.d/568-b3a.md` - Remove the existing heading/blank prefix, retaining its ordinary single bullet; prove original/fixed fragment verdicts.
+2. `docker/profile-flow-auto-568/Dockerfile` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+3. `evals/flow-auto-calibration-568/task-interface.md` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+4. `evals/subjects/cpp-codex-flow-auto-87ecb097/README.md` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+5. `evals/subjects/cpp-codex-flow-auto-87ecb097/profile.json` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+6. `evals/subjects/cpp-codex-flow-auto-87ecb097/subject.json` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+7. `pyproject.toml` - Add only the anchored exact 87ecb097 immutable-snapshot mypy exclusion; keep authored scope.
+8. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/.claude/commands/flow/auto.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+9. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/.claude/commands/flow/eli5.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+10. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/CLAUDE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+11. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/LICENSE` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+12. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/README.md` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+13. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/README.md` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+14. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+15. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+16. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+17. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+18. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+19. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/browser-session/scripts/playwright-desk.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+20. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-check/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+21. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-check/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+22. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-container/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+23. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-health/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+24. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-health/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+25. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+26. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-help/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+27. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-discover/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+28. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-init/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+29. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-infra-pipeline/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+30. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-init/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+31. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-init/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+32. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-pipeline/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+33. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-smoke/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+34. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-smoke/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+35. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-verify/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+36. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-verify/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+37. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-woodpecker/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+38. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cicd-woodpecker/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+39. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+40. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-lint/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+41. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/claude-md-lint/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+42. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-dockers/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+43. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-dockers/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+44. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-happy-check/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+45. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+46. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-help/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+47. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-load-best-practices/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+48. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/cpp-load-mcp-docs/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+49. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+50. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+51. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+52. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+53. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-c4/scripts/c4-mermaid.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+54. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+55. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+56. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+57. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-help/scripts/c4-mermaid.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+58. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+59. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+60. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+61. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+62. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/documentation-pptx/scripts/c4-mermaid.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+63. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+64. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+65. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+66. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+67. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-help/scripts/speckit-tasks-to-issues.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+68. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+69. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+70. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/docs/agents/issue-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+71. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/docs/agents/knowledge-lifecycle.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+72. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+73. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+74. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+75. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/evaluate-issue/scripts/speckit-tasks-to-issues.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+76. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+77. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+78. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/closing-report-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+79. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/detector-contracts.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+80. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/flow-plan-record.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+81. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/issue-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+82. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+83. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+84. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+85. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+86. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/lib/vendor.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+87. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+88. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+89. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/check-ignored-additions.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+90. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/codex-skill-resync.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+91. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/codex-skill-sync.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+92. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/counter-model-receipt.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+93. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+94. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/eli5-vendor.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+95. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-ci-status.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+96. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-driver-capability.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+97. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-finish-gate.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+98. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-live-driver-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+99. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-plan-record.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+100. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-stale-check.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+101. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-start-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+102. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+103. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/flow-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+104. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/friction-log.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+105. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/gate-lib.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+106. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/gh-pr-merge.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+107. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/hook-permission-census.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+108. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/nit-store-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+109. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+110. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/stash-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+111. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-auto/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+112. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+113. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+114. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+115. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/evidence.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+116. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/lib/cicd/state.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+117. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+118. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+119. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/check-ignored-additions.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+120. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/counter-model-receipt.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+121. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/execution-evidence-verify.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+122. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/flow-finish-gate.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+123. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-check/scripts/gate-lib.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+124. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+125. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+126. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/docs/decisions/0006-worktree-teardown-ownership.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+127. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+128. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+129. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+130. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/flow-worktree-sweep.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+131. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-cleanup/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+132. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-deploy/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+133. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-deploy/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+134. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+135. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+136. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+137. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+138. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/flow-helpers-install.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+139. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+140. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/hook-mask-output.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+141. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-doctor/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+142. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+143. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+144. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/docs/agents/closing-report-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+145. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/docs/agents/detector-contracts.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+146. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/lib/vendor.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+147. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+148. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+149. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/eli5-core-drift.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+150. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-eli5/scripts/eli5-vendor.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+151. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+152. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+153. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/closing-report-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+154. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/detector-contracts.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+155. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/issue-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+156. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/docs/agents/knowledge-lifecycle.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+157. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/lib/vendor.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+158. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+159. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+160. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/check-ignored-additions.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+161. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/codex-skill-resync.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+162. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/codex-skill-sync.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+163. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/counter-model-receipt.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+164. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/eli5-vendor.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+165. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/flow-finish-gate.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+166. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/flow-stale-check.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+167. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/gate-lib.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+168. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/knowledge-graduation-check.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+169. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/nit-store-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+170. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-finish/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+171. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+172. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-help/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+173. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+174. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+175. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/closing-report-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+176. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/detector-contracts.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+177. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/issue-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+178. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/docs/agents/knowledge-lifecycle.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+179. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+180. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+181. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/counter-model-receipt.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+182. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-ci-status.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+183. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-finish-gate.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+184. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+185. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/friction-log.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+186. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/gate-lib.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+187. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/gh-pr-merge.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+188. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-merge/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+189. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+190. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+191. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+192. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+193. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-driver-capability.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+194. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-vantage.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+195. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-lexicon.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+196. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-mailbox.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+197. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/flow-wave-registry.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+198. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-register/scripts/toolchain-provenance.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+199. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+200. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+201. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+202. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+203. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-helpers-install.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+204. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-live-driver-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+205. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/flow-start-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+206. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-repair/scripts/stash-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+207. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+208. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+209. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+210. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+211. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-live-driver-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+212. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-start-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+213. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+214. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/flow-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+215. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/gate-lib.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+216. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/stash-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+217. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-start/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+218. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-status/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+219. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-sync/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+220. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+221. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+222. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+223. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+224. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+225. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-driver-capability.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+226. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-pr-watch.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+227. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-vantage.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+228. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-lexicon.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+229. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-mailbox.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+230. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-plan.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+231. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-registry.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+232. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-wave-residuals.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+233. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+234. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/flow-worktree-sweep.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+235. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+236. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+237. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/toolchain-provenance.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+238. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/flow-wave/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+239. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+240. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-close/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+241. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-close/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+242. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+243. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+244. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/docs/agents/issue-contract.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+245. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/docs/agents/knowledge-lifecycle.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+246. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-create/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+247. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-list/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+248. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-update/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+249. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-update/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+250. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/github-issue-view/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+251. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+252. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+253. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+254. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/docs/agents/knowledge-lifecycle.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+255. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+256. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+257. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/project-init.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+258. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+259. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-init/scripts/speckit-tasks-to-issues.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+260. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-lite/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+261. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-lite/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+262. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+263. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+264. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+265. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/classify.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+266. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/collect.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+267. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/config.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+268. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/models.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+269. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/ownership.json` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+270. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/rank.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+271. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/lib/project_next/render.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+272. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+273. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+274. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/project-next/scripts/project-next.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+275. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+276. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+277. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+278. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+279. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-help/scripts/qa-regression-export.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+280. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+281. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+282. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+283. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+284. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/qa-test/scripts/qa-regression-export.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+285. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+286. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-models/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+287. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-models/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+288. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-start/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+289. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/second-opinion-start/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+290. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-delete/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+291. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-get/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+292. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+293. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-list/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+294. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-rotate/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+295. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-run/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+296. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-set/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+297. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-ui/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+298. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/secrets-validate/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+299. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-deep/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+300. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-explain/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+301. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+302. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+303. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+304. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+305. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-help/scripts/classify-tool-risk.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+306. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+307. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+308. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+309. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/classify-tool-risk.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+310. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/friction-log.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+311. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/hook-permission-census.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+312. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-permissions/scripts/tool-risk-drift.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+313. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-quick/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+314. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/security-scan/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+315. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-deployment/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+316. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-deployment/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+317. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-help/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+318. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/PROVENANCE.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+319. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/SKILL.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+320. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/reference.md` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+321. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/SHA256SUMS` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+322. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/friction-log.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+323. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/hook-permission-census.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+324. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/codex/skills/self-improvement-retro/scripts/measurement-shape-scan.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+325. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+326. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/__main__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+327. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/bootstrap.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+328. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/cli.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+329. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/config.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+330. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/container.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+331. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/coverage.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+332. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+333. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/docker_compose.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+334. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/guardrails.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+335. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/deploy/strategy.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+336. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/detector.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+337. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/evidence.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+338. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/failure_patterns.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+339. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/health.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+340. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/infrastructure.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+341. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/makefile.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+342. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/makefile_declaration.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+343. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/manifest.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+344. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/manifest_path.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+345. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/models.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+346. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/mypy_scope.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+347. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/outcomes.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+348. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/pipeline.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+349. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/pyproject.toml` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+350. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/runner.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+351. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/smoke.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+352. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/state.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+353. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/steps.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+354. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/cicd/verify.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+355. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/README.md` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+356. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+357. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/__main__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+358. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/cli.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+359. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/config.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+360. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/explain.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+361. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/models.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+362. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+363. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/debug_flags.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+364. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/env_files.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+365. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/gitignore.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+366. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/gitleaks.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+367. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/npm_audit.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+368. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/permissions.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+369. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/pip_audit.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+370. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/modules/secrets.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+371. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/orchestrator.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+372. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/__init__.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+373. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/json_output.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+374. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/output/novice.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+375. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/lib/security/pyproject.toml` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+376. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/pyproject.toml` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+377. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/check-ignored-additions.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+378. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/counter-model-receipt.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+379. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/execution-evidence-verify.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+380. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-ci-status.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+381. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-driver-capability.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+382. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-finish-gate.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+383. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-live-driver-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+384. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-plan-record.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+385. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-stale-check.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+386. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-start-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+387. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-worktree-claim.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+388. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/flow-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+389. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/friction-log.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+390. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/gate-lib.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+391. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/gh-pr-merge.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+392. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/nit-store-resolve.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+393. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/speckit-context.py` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+394. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/stash-worktree-guard.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+395. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/worktree-remove.sh` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+396. `tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/uv.lock` - Preserve exact inherited pinned upstream bytes and mode; custody does not authorize edits.
+397. `tests/test_private_citations.py` - Add only the exact snapshot exemption and exact/sibling/both-authored-module boundary assertions.
+398. `tests/test_profile_flow_auto_87ecb097.py` - Add one real-mypy scratch-input boundary control from actual config; retain existing source/closure controls.
+399. `tests/test_profile_flow_auto_87ecb097_cold.py` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
+
+400. `skillc/leak.py` - Extend existing account-conditional exact homes only for synthetic u/proof; retain independent live-host detection and document foreign-host limit.
+401. `tests/test_leak.py` - Actual absent/present-account, longer sibling, unsafe same-line neighbor, live-home/cwd and cache-reset behavioral controls; red before policy fix.
+402. `changelog.d/581.md` - Document strict conditional synthetic-home policy repair.
+
+403. `docs/measurements/counter-model/2026-10-27T123222Z-issue-568.json` - Copy exact generated receipt bytes under root grant30; measured models/access and two fresh limited passes, one accepted MEDIUM fixed.
+
+Scope: 401 known custody paths plus one later exact generated receipt, final402.
+The integration across pyproject/citation/profile test is at most25 added-plus-
+deleted lines TOTAL, estimated24-25; changelog heading/blank removal2 lines.
+No compressed implementation to fit: return exact delta before exceeding a cap.
+Keep1658 historical debt, correction ceiling350 including restricted25 integration,
+receipt<=42 and aggregate<=2050; expected initial total<=1727, no reset. Workflow
+record/snapshot/receipt are excluded from the Section C file list by the helper.
+No other source/path expansion is granted.
+
+Add real boundary controls before exclusions and retain behavioral failures on
+unchanged config, then repair. Exact snapshot exempt; 87ecb097x sibling and both
+authored profile/cold modules stay checked. Existing hash/mode/dependency/empty/
+start/cleanup/budget controls remain. Actual fragment_problem must reject original
+and accept fixed fragment bytes; no formatter feature or extra suite. Recorded
+finding: https://github.com/cooneycw/skillc/issues/20#issuecomment-6440871036 .
+
+Focused collected/JUnit identities must match; derive current population rather
+than borrow52. Run lint/types/selftest and relevant leak/docs checks. Request
+serialized full finish when stable; exact-head required CI and guarded merge
+remain required, Refs568 only. Parent568 stays open.
+
+One actual new distinct-model review is LIMITED to the four fresh integration/
+format files against e9 plus current main, with inherited source readable as
+context. Preserve original two B3a reviews; no third historical re-review, unrelated
+c881 receipt reuse or history/count reset. A needed follow-up pass or inherited
+required defect returns for exact scope judgment. One genuine new receipt needs
+a later exact path grant; no broad receipt-directory lane.
+
+Risks: over-exclusion, inherited module baseline, actual provenance availability,
+and current-main integration. No material concern with exact exemptions/real
+opposite controls; broad fixture exclusions would undermine the outcome.
+
+OFFLINE ONLY: no physical opt-in/build/allocation, host profile install, live model
+study or deployment. Final-source cold proof is separately held for frozenSHA,
+runner pin/history staging/headroom/serialized slot/exact trigger, retaining
+existing ten cases and1800s endpoint/build300/case60/other30/cleanupreserve120,
+stream/retention/resources/owned-cleanup bounds. A physical skip proves no cold
+installation. Whole568 B2/common witness/remote grading/frozen unapproved declaration
+remain after delivered546/580 shared APIs; no blanket571D family dependency.
+Actual bootstrap/resume prompts remain547/568 acceptance, never public-digest
+substitution. Historical results/debt/review limits remain visible.
+
+
+### Authorized #581 scope expansion - root gate27, 2026-10-27
+
+Required blocker #581 goes first and ships with offline B3a (Fixes #581,
+Refs #568). This explicitly expands the current Run4 Section C by three rows;
+the earlier approved Section C is not claimed unchanged. Root confirmed insertion
+before its first Scope boundary because canonical compliance reads the first
+Section C only. Original Run1-3 byte prefix and original row order/bytes remain.
+Pre-amendment plan/snapshot and SHA256 fingerprints are retained outside source.
+
+The new gate supersedes the aggregate2050 cap with2250 nonworkflow added+deleted
+lines INCLUDING the genuine receipt; historical1658 debt and current25 charge
+remain. Exact custody now404 known paths plus one later exact receipt (405).
+All388 exports/pin/actor remain immutable. No unconditional home exemption or
+broad file/line exclusion. Extend conditional_exemptions only for u/proof absent
+matching local accounts. Preserve user/uid/gid, longer sibling and same-line real
+leaks; prove independent live home/cwd findings and deterministic cache resets.
+Document that local account absence cannot infer foreign-host identities.
+
+Add behavioral tests first against existing scan API and retain actual red XML/log,
+then minimal policy and green. Run exact ordinary CLI against unchanged pinned
+source and unsafe-input nonzero, focused leak/citation/profile and types/lint.
+One already authorized current distinct-model review now covers exactly seven
+fresh product files (the previous four plus these three), with inherited source
+readable as context; original two B3a review scopes remain unchanged. New receipt
+needs an exact path grant. Full finish, physical proof, push/PR remain held.
+
+
+### Authorized #581 live-path review repair - root gate28
+
+Fresh limited review pass1 on1fab5b58bf found one accepted MEDIUM: conditional
+homes suppress the old fallback finding while live-path matching misses closing
+punctuation. Root independently expanded reproduction across ordinary delimiter
+family; the proposed two-character fix was insufficient. Repair in the SAME
+leak.py/test_leak.py paths using established complete delimiter vocabulary,
+retaining exact-prefix rejection for letters/hyphen/underscore/dot continuations.
+Target<=70 added+deleted lines including controls/docs, combinedcap2250 unchanged.
+
+Add committed existingAPI red controls on1fab for bare home/cwd for user/u/proof
+and all documented delimiters; retain longer-name/adjacent-text controls and the
+original15 account/cache/live-descendant cases. Then fix and retain actualgreen,
+ordinary/unsafeCLI distinction and focusedidentitymatch, lint/types. Exactly ONE
+followup independent review is authorized after source freeze (freshpass2 with
+prioroneMEDIUM), separate from the TWO historical B3a reviews. Further findings
+return for disposition; no third fresh pass. Exactreceiptpath/full/physical/push
+remain held. Previous runs/as-read are retained byte-identically.
+
+
+### Authorized #581 explicit bare-mount contract closure - root gate29
+
+Actual focused323 population reconciled321PASS/1FAIL/1physicalSKIP: existing bare
+mount control exposed explicit host_paths accepting /workspace before a comma.
+Retain this failing result; do not weaken existingtest. Root authorized applying
+existing _is_specific_enough at compiled host candidate boundary and documenting
+that existing API requirement, preserving default/HOME/other classes. Commit
+bare /workspace,/root,/opt,/srv,/tmp versus /checkout twins across recognized
+closing delimiters, actualred on unfiltered_END then green. Retain original147
+controls. Combined entire delimiter/filter repair<=70AD, totalcap2250 unchanged.
+The pending ONE freshfollowup remainspass2, now covers completed boundary/filter
+repair and context; previousoneMEDIUM and oldtwohistoricalB3areviews preserved.
+No extra round or newpaths. Full/physical/push/exactreceiptgrant remainheld.
+
+
+### Exact fresh receipt grant - root gate30 and accounting correction
+
+Known custody405 includes only the exact generated receipt above, unchanged from
+/tmp/skillc-568-581-receipt/2026-10-27T123222Z-issue-568.json. Stage immediately.
+Measured implementer codex/gpt-6.1-sol, reviewer codex/gpt-6-astra, two freshpasses,
+one accepted MEDIUM fixed; nine proposed/eight already-covered behavioral pairs.
+Freshpass1 reviewed seven integration/policy files; cleanfreshpass2 reviewed only
+the50AD boundary/specificity repair plus relevantcontext. Originaltwohistorical
+B3areviews remain separate. Receipt scopefull is repositoryREADaccess, not full
+semantic branch review; actual DNS failure/withdrawn env/localcredential-key
+absence do not establish absence of credentials elsewhere. Do not describe the
+reviewer's48in-memory corroborating combinations as committed cases.
+
+Actual sourcecharge1804+actual31receiptlines=1835 within2250;42 was the receipt
+ceiling, not actual count (root explicitly corrected). No debtreset/reformatting.
+NEXT heavyfullslot only after worker01terminalrelease AND explicitrootclearance.
+No fullrun now; physical remainsseparatelyheld. Push/PR requiresnextdeliverygate.
+Whole568 remainsopen; finalPR Fixes581/Refs568 with truthful remainingboundaries.
