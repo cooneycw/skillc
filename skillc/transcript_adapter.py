@@ -520,6 +520,63 @@ def parse_codex_transcript(raw_jsonl: str) -> list[NormalizedEvent]:
 _CODEX_TOKEN_KEYS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens")
 
 
+@dataclass
+class VersionObservation:
+    """One exact version or unknown; contradictions never heal. Bounded state."""
+
+    value: str | None = None
+    invalid: bool = False
+
+    def add(self, value: object) -> None:
+        if (self.invalid or not isinstance(value, str) or not value.strip()
+                or (self.value is not None and self.value != value)):
+            self.value, self.invalid = None, True
+        else:
+            self.value = value
+
+
+class _JsonMembers(dict[str, object]):
+    def __init__(self, pairs: list[tuple[str, object]]) -> None:
+        super().__init__()
+        self.duplicates: set[str] = set()
+        for key, value in pairs:
+            if key in self:
+                self.duplicates.add(key)
+            self[key] = value
+
+
+def diagnostic_json(raw: str | bytes) -> object:
+    return json.loads(raw, object_pairs_hook=_JsonMembers)
+
+
+def duplicate_members(value: object, keys: tuple[str, ...]) -> bool:
+    return isinstance(value, _JsonMembers) and bool(value.duplicates.intersection(keys))
+
+
+def observed_client_version(client: str, raw: str) -> str | None:
+    version = VersionObservation()
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        try:
+            obj = diagnostic_json(line)
+        except ValueError:
+            version.add(None)
+            continue
+        if not isinstance(obj, dict):
+            version.add(None)
+        elif client == "codex":
+            if duplicate_members(obj, ("type",)):
+                version.add(None)
+            elif obj.get("type") == "session_meta":
+                payload = obj.get("payload")
+                ambiguous = duplicate_members(obj, ("payload",)) or duplicate_members(payload, ("cli_version",))
+                version.add(payload.get("cli_version") if isinstance(payload, dict) and not ambiguous else None)
+        elif "version" in obj:
+            version.add(None if duplicate_members(obj, ("version",)) else obj["version"])
+    return version.value
+
+
 def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
     """What a real Codex rollout says about the run itself, rather than the
     conversation (issue #12: the pilot's model identity is OBSERVED, not the
@@ -527,7 +584,8 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
 
       - `model` / `reasoning_effort`: the LAST `turn_context` event's own
         `model` and `effort`;
-      - `cli_version`: the `session_meta` event's own `cli_version`;
+      - `cli_version`: the unique valid version across ALL `session_meta`
+        events, or None when absent, malformed or conflicting;
       - `token_usage`: the LAST `token_count` event's cumulative
         `info.total_token_usage`, restricted to `_CODEX_TOKEN_KEYS`;
       - `final_agent_message`: the text of the last `assistant` message - the
@@ -555,11 +613,7 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
         if not isinstance(payload, Mapping):
             continue
         kind = obj.get("type")
-        if kind == "session_meta":
-            version = payload.get("cli_version")
-            if isinstance(version, str):
-                meta["cli_version"] = version
-        elif kind == "turn_context":
+        if kind == "turn_context":
             model = payload.get("model")
             if isinstance(model, str):
                 meta["model"] = model
@@ -578,4 +632,5 @@ def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
             text = _codex_message_text(payload.get("content"))
             if text:
                 meta["final_agent_message"] = text
+    meta["cli_version"] = observed_client_version("codex", raw_jsonl)
     return meta

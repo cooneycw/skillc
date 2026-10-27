@@ -291,6 +291,31 @@ def test_codex_run_metadata_reports_absent_as_none_never_a_default() -> None:
     assert meta["model"] is None
     assert meta["cli_version"] is None
     assert meta["token_usage"] is None
+
+
+@pytest.mark.parametrize("versions", [("A", "B"), ("B", "A"), ("A", "B", "A")])
+def test_548_metadata_never_selects_a_version_from_a_conflicting_population(versions: tuple[str, ...]) -> None:
+    raw = "\n".join(json.dumps({"type": "session_meta", "payload": {"cli_version": v}}) for v in versions)
+    assert ta.codex_run_metadata(raw)["cli_version"] is None
+
+
+def test_548_metadata_accepts_repeated_identical_versions_without_changing_other_facts() -> None:
+    raw = _read("codex", "run-metadata")
+    before = ta.codex_run_metadata(raw)
+    header = json.dumps({"type": "session_meta", "payload": {"cli_version": "9.9.9"}})
+    assert before["cli_version"] == "9.9.9"
+    assert ta.codex_run_metadata(header + "\n" + raw + "\n" + header) == before
+
+
+def test_548_metadata_duplicate_members_do_not_change_other_run_facts() -> None:
+    raw = '{"type":"session_meta","payload":{"cli_version":"A","cli_version":"B","cli_version":"A"}}\n'
+    rest = "\n".join(line for line in _read("codex", "run-metadata").splitlines()
+                     if json.loads(line).get("type") != "session_meta")
+    meta = ta.codex_run_metadata(raw + rest)
+    assert meta.pop("cli_version") is None
+    expected = ta.codex_run_metadata(rest)
+    expected.pop("cli_version")
+    assert meta == expected
 # ------------------------------------------- Claude Code skill listing (#124)
 
 
