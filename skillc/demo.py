@@ -612,7 +612,7 @@ def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
             f"subject {result.subject_name!r}: in-container digests match the installation receipt",
             f"subject {result.subject_name!r}: every selected skill is discovered by the client",
             f"subject {result.subject_name!r}: declared host paths unchanged",
-            f"subject {result.subject_name!r}: cleanup sweep confirms no owned container left running",
+            f"subject {result.subject_name!r}: cleanup sweep confirms no selected resources remain",
         )
         return [AcceptanceItem(name, False, result.not_exercised_reason, exercised=False) for name in names]
 
@@ -622,7 +622,7 @@ def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
     digest_ok = result.digest_status == "matched"
     discovery_ok = result.discovery_reason is None and all(v == "discovered" for v in result.discovery.values())
     host_ok = not result.host_diff.changed and not result.host_diff.unresolved
-    reap_ok = result.reap_report.daemon_reachable and not result.reap_report.left_running and not result.reap_report.unknown
+    reap_ok = result.reap_report.clean
     return [
         AcceptanceItem(
             f"subject {result.subject_name!r}: installed skills match its declared selection", install_ok,
@@ -643,7 +643,7 @@ def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
             f"changed={list(result.host_diff.changed)}, unresolved={list(result.host_diff.unresolved)}",
         ),
         AcceptanceItem(
-            f"subject {result.subject_name!r}: cleanup sweep confirms no owned container left running", reap_ok,
+            f"subject {result.subject_name!r}: cleanup sweep confirms no selected resources remain", reap_ok,
             f"reap outcomes={[o.outcome for o in result.reap_report.outcomes]}",
         ),
     ]
@@ -697,7 +697,7 @@ def _acceptance_items(
 ) -> list[AcceptanceItem]:
     lifecycle_ok = lifecycle_record.get("disposition") == "captured"
     grading_ok = graded.status == "PASS"
-    reap_ok = reap_report.daemon_reachable and not reap_report.left_running and not reap_report.unknown
+    reap_ok = reap_report.clean
     host_ok = not host_diff.changed and not host_diff.unresolved
     digest_ok = image_digest is not None
     # Issue #118's own "vacuous MET": when the lifecycle leg's own prepare()
@@ -713,7 +713,7 @@ def _acceptance_items(
         AcceptanceItem("grades through the verifier's backend seam (#76)", grading_ok,
                         f"grading status={graded.status}, detail={graded.detail}"),
         AcceptanceItem(
-            "cleanup sweep confirms no owned container left running",
+            "cleanup sweep confirms no selected resources remain",
             reap_ok and not prepare_never_succeeded,
             f"reap outcomes={[o.outcome for o in reap_report.outcomes]}",
             exercised=not prepare_never_succeeded,
@@ -846,7 +846,7 @@ def build_paste_back(
         label = "NOT EXERCISED" if not item.exercised else ("MET" if item.met else "NOT MET")
         lines.append(f"  [{label}] {item.name} - {item.evidence}")
     lines.append("")
-    lines.append("cleanup (reap outcomes, four possible values: reaped/already-absent/left-running/unknown):")
+    lines.append("cleanup (reap outcomes, five possible values: reaped/already-absent/left-running/left-present/unknown):")
     for outcome in reap_report.outcomes:
         lines.append(f"  {outcome.attempt_id}: {outcome.outcome}")
     lines.append(f"  daemon_reachable={reap_report.daemon_reachable}")
