@@ -25,13 +25,14 @@ import subprocess
 import sys
 import tarfile
 import types
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from skillc import calibration_run as cr
-from skillc import cli, credential, lifecycle, trial_bootstrap
+from skillc import cli, credential, lifecycle, profile, trial_bootstrap
 from skillc import collection_conformance as cc
 from skillc import level3_campaign as lc
 
@@ -90,6 +91,47 @@ def test_expectations_differ_from_qualification_only_where_a_delta_is_declared()
 
 def test_frozen_identities_hold_on_this_tree() -> None:
     assert lc.check_frozen(lc.load_manifest(MANIFEST), ROOT) == []
+
+
+@pytest.mark.parametrize("entry", ["load", "direct"])
+@pytest.mark.parametrize("change", ["empty", "extra", "not-object", *_committed()["frozen"]["runtime"]])
+def test_runtime_identity_cannot_omit_its_comparison(
+    tmp_path: Path, entry: str, change: str,
+) -> None:
+    data = _committed()
+    if change == "empty":
+        data["frozen"]["runtime"] = {}
+    elif change == "extra":
+        data["frozen"]["runtime"]["unknown_runtime_key"] = None
+    elif change == "not-object":
+        data["frozen"]["runtime"] = None
+    else:
+        del data["frozen"]["runtime"][change]
+    if entry == "load":
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps(data))
+        with pytest.raises(lc.CampaignRefused, match="frozen.runtime"):
+            lc.load_manifest(path)
+    else:
+        manifest = lc.Manifest(data, lc.load_manifest(MANIFEST).rows)
+        assert lc.check_frozen(manifest, ROOT), "direct Manifest construction bypassed runtime validation"
+
+
+@pytest.mark.parametrize("entry", ["load", "direct"])
+@pytest.mark.parametrize("key", list(_committed()["frozen"]["runtime"]))
+@pytest.mark.parametrize("value", ["", " \t", None, False, 7, [], {}])
+def test_runtime_identity_values_are_nonblank_text(
+    tmp_path: Path, entry: str, key: str, value: Any,
+) -> None:
+    data = _committed()
+    data["frozen"]["runtime"][key] = value
+    if entry == "load":
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps(data))
+        with pytest.raises(lc.CampaignRefused, match="frozen.runtime"):
+            lc.load_manifest(path)
+    else:
+        assert lc.check_frozen(lc.Manifest(data, lc.load_manifest(MANIFEST).rows), ROOT)
 
 
 @pytest.mark.parametrize("mutate, named", [
@@ -314,12 +356,56 @@ def test_the_campaign_backends_give_the_agent_no_network(tmp_path: Path) -> None
 # --------------------------------------------------------------- wiring
 
 
+def _pinned_treatment() -> cr.Treatment:
+    path = ".codex/skills/check/SKILL.md"
+    body = b"---\nname: check\ndescription: Check a project.\n---\nRun the check.\n"
+    description_digest, body_digest = profile.skill_md_digests(body)
+    return cr.Treatment(
+        home_files={"a": b"1", path: body}, digest="sha256:tt", gate_entrypoint=".claude/scripts/gate",
+        receipt_context=None, verify_home_files={"a": "sha256:aa"}, preflight_tools=({"id": "tool-x"},),
+        skill_digests=({"path": path, "body_digest": body_digest, "description_digest": description_digest},),
+    )
+
+
+@pytest.mark.parametrize("actor", ["fresh", "noop"])
+@pytest.mark.parametrize("pinned", [True, False])
+def test_treated_rows_require_and_record_actual_skill_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, actor: str, pinned: bool,
+) -> None:
+    manifest = lc.load_manifest(MANIFEST)
+    row = next(row for row in manifest.rows if row.actor == actor)
+    treatment = _pinned_treatment()
+    if not pinned:
+        treatment = replace(treatment, skill_digests=())
+    observed = []
+
+    def attempt(**kwargs: Any) -> dict[str, Any]:
+        planned = kwargs["experiment"].trial_of(kwargs["attempt_id"])
+        assert planned.get("skill_digests") == list(treatment.skill_digests)
+        observed.append(planned)
+        return {"disposition": "captured", "graded": _graded()}
+
+    def backends() -> tuple[Any, Any]:
+        assert pinned, "an unpinned treatment allocated a backend"
+        return object(), object()
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", attempt)
+    def run() -> None:
+        lc.run_rows(manifest, root=ROOT, run_dir=tmp_path, treatment=treatment, backends=backends,
+                    image_digest="sha256:img", rows=[row])
+
+    if pinned:
+        run()
+        assert len(observed) == 1
+    else:
+        with pytest.raises(lc.CampaignRefused, match="skill_digests"):
+            run()
+
+
 def test_run_rows_hands_the_production_treatment_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = lc.load_manifest(MANIFEST)
     rows = [r for r in manifest.rows if r.id in ("gse.reference", "vse.wrong.unconditional-green")]
-    treatment = cr.Treatment(home_files={"a": b"1"}, digest="sha256:tt", gate_entrypoint=".claude/scripts/gate",
-                             receipt_context=None, verify_home_files={"a": "sha256:aa"},
-                             preflight_tools=({"id": "tool-x"},))
+    treatment = _pinned_treatment()
     calls: list[dict[str, Any]] = []
 
     def fake_attempt(**kwargs: Any) -> dict[str, Any]:
