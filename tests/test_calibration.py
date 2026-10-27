@@ -833,3 +833,28 @@ def test_explicit_product_binding_cannot_be_smuggled_into_legacy_lane() -> None:
     data["explicit_product"] = _EXPLICIT_CASES["valid"]["explicit_product"]
     with pytest.raises(calibration.DeclarationRefused, match="explicit_product"):
         calibration.parse_declaration(data)
+
+
+def test_both_primary_endpoint_branches_combine_after_raw_criteria() -> None:
+    from skillc import completion
+    clock = [0.0]
+    deadline = completion.CompletionDeadline.after(10, lambda: clock[0])
+    marker = deadline.marker("a")
+    raw: dict[str, object] = {"attempt_id": "a", "graded": {"status": "PASS", "criteria": [
+        {"id": "task", "mandatory": True, "outcome": "SATISFIED", "evidence": ["r1"]}]}}
+    for endpoint in (None, calibration.OutcomeEndpoint(("task",))):
+        assert calibration.primary_endpoint(raw, endpoint=endpoint)["status"] == "PASS"
+        opted = {**raw, "completion_required": True, "completion_marker": marker}
+        assert calibration.primary_endpoint(opted, endpoint=endpoint)["status"] == "UNKNOWN"
+        qualified = {**opted, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
+        assert calibration.primary_endpoint(qualified, endpoint=endpoint)["status"] == "PASS"
+        clock[0] = deadline.end + 1
+        late = {**opted, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
+        assert calibration.primary_endpoint(late, endpoint=endpoint)["status"] == "UNKNOWN"
+        assert calibration.raw_primary_endpoint(late, endpoint=endpoint)["status"] == "PASS"
+        failed = {**late, "graded": {"criteria": [
+            {"id": "task", "mandatory": True, "outcome": "VIOLATED", "evidence": ["r1"]}]}}
+        assert calibration.primary_endpoint(failed, endpoint=endpoint)["status"] == "FAIL"
+        # A fresh, separate endpoint for the next branch avoids backwards fake time.
+        deadline = completion.CompletionDeadline.after(10, lambda: clock[0])
+        marker = deadline.marker("a")

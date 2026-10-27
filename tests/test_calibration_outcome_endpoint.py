@@ -421,7 +421,11 @@ def test_runner_dispatches_bound_bytes_and_isolates_baseline(
         if scheduled.arm == "baseline":
             assert call["receipt_context"] is call["gate_entrypoint"] is call["verify_home_files"] is None
     report = _report(experiment, outcomes)
-    assert all(row["primary_endpoint"]["status"] == "PASS" for row in report["attempts"])
+    # This fake returns raw criteria without cleanup/publication qualification.
+    # The selected runner must not turn those task facts into completion credit.
+    endpoint = calibration.outcome_endpoint(calibration.parse_declaration(data))
+    assert all(calibration.raw_primary_endpoint(o.record, endpoint=endpoint)["status"] == "PASS" for o in outcomes)
+    assert all(row["primary_endpoint"]["status"] == "UNKNOWN" for row in report["attempts"])
     assert all(row["model_eligible"] is True for row in report["attempts"])
 
 

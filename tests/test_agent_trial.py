@@ -1773,3 +1773,141 @@ def test_production_gate_output_sink_retains_diagnostics_when_grading_is_blocked
             assert gate["coverage"] == "channel-unavailable"
     if fault == "drain":
         assert result["graded"] is None and result["grading_blocked_reason"]
+
+
+def test_wrong_parent_collector_refuses_before_any_grading_prepare(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, aid, _ = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    other, other_aid = _planned(store)
+    wrong = t.OwnedAttemptIds(other, other_aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+
+    def prepare(self: object, aid: str) -> object:
+        prepared.append(aid)
+        raise AssertionError("wrong-parent collector reached actual prepare")
+
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    with pytest.raises(t.Refused, match="collector belongs to another parent"):
+        verify._grade_and_store(experiment, aid, verify.GraderDef.load(GRADER_ROOT), base,
+                                backend=backend, recorded_attempt_ids=wrong)
+    assert not prepared and wrong == []
+    assert not any(e.get("event") == "owned-attempt" for e in other.events(other_aid))
+
+
+def test_registration_persistence_failure_prevents_probe_preparation(
+    store: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, aid = _planned(store)
+    ids = t.OwnedAttemptIds(experiment, aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+    original_record = t.Experiment.record
+
+    def record(self: t.Experiment, attempt: str, event: str, **detail: object) -> None:
+        if event == "owned-attempt":
+            raise OSError("controlled durable ownership write failure")
+        original_record(self, attempt, event, **detail)
+
+    def prepare(self: object, probe: str) -> object:
+        prepared.append(probe)
+        raise AssertionError("preparation preceded durable registration")
+
+    monkeypatch.setattr(t.Experiment, "record", record)
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    with pytest.raises(OSError, match="durable ownership"):
+        verify.grade_files(verify.GraderDef.load(GRADER_ROOT), [("candidate", b"x", False)], base,
+                           backend=backend, recorded_attempt_ids=ids)
+    assert ids == [] and not prepared
+
+
+def test_receipt_discovery_and_ordinary_grading_share_caller_collector_and_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import test_calibration_run as helpers
+
+    from skillc import calibration_run
+    original_agent, original_run = at.run_one_attempt, calibration_run.run_calibration
+    observed: list[t.OwnedAttemptIds] = []
+    deadlines: list[object] = []
+    executed: set[str] = set()
+    original_execute = d.DockerBackend.execute
+
+    def execute(self: object, *args: object, **kwargs: object) -> object:
+        assert getattr(args[2], "completion_deadline", None) is deadlines[-1]
+        executed.add(str(getattr(args[0], "attempt_id", None)))
+        return original_execute(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    def run(*args: object, **kwargs: object) -> object:
+        kwargs["clock"] = lambda: 0.0
+        return original_run(*args, **kwargs)  # type: ignore[arg-type]
+
+    def agent(**kwargs: object) -> dict[str, object]:
+        ids = kwargs["recorded_attempt_ids"]
+        assert isinstance(ids, t.OwnedAttemptIds)
+        observed.append(ids)
+        deadlines.append(kwargs["completion_deadline"])
+        return original_agent(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(calibration_run, "run_calibration", run)
+    monkeypatch.setattr(at, "run_one_attempt", agent)
+    monkeypatch.setattr(d.DockerBackend, "execute", execute)
+    _, outcomes, _, _ = helpers._run(tmp_path, monkeypatch, total_seconds=100)
+    assert len(observed) == len(outcomes) == 6
+    assert sorted(map(len, observed)) == [1, 1, 1, 1, 1, 3]
+    assert all(ids.all_absent() for ids in observed)
+    assert executed == {aid for ids in observed for aid in [ids.parent_attempt, *ids]}
+    assert Limits(timeout=1).completion_deadline is None
+    for ids in observed:
+        registered = [e["owned_id"] for e in ids.experiment.events(ids.parent_attempt)
+                      if e.get("event") == "owned-attempt"]
+        assert registered == ids
+    assert all(isinstance(o.record.get("completion"), dict) for o in outcomes)
+
+
+def test_duplicate_owned_registration_refuses_across_collector_instances(store: Path) -> None:
+    experiment, aid = _planned(store)
+    first = t.OwnedAttemptIds(experiment, aid)
+    second = t.OwnedAttemptIds(experiment, aid)
+    first.append("probe-controlled-identity")
+    with pytest.raises(t.Refused, match="duplicate"):
+        first.append("probe-controlled-identity")
+    with pytest.raises(t.Refused, match="already registered"):
+        second.append("probe-controlled-identity")
+    assert first == ["probe-controlled-identity"] and second == []
+    assert first.all_absent() is False
+    assert len([e for e in experiment.events(aid) if e.get("event") == "owned-attempt"]) == 1
+
+
+@pytest.mark.parametrize("wrong_parent", [True, False])
+def test_supplied_collector_is_checked_before_legacy_agent_preparation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, wrong_parent: bool,
+) -> None:
+    experiment, aid = _planned(store)
+    other, other_aid = _planned(store)
+    ids = t.OwnedAttemptIds(other, other_aid) if wrong_parent else t.OwnedAttemptIds(experiment, aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+
+    def prepare(self: object, attempt: str) -> object:
+        prepared.append(attempt)
+        raise RuntimeError("controlled preparation reached")
+
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    kwargs = {"backend": backend, "experiment": experiment, "attempt_id": aid, "client": "codex",
+                  "base_argv": _fake_argv(fmt="codex-fake", home=_mapped_home(docker_state, aid),
+                                      transcript_relpath=".codex/sessions/test.jsonl"),
+                  "prompt": "Fix the helper.", "skill_name": None, "surface": {}, "limits": Limits(timeout=5),
+                  "base": base, "credential_explicit_path": _fresh_credential(tmp_path, "codex"),
+                  "recorded_attempt_ids": ids, "completion_deadline": None}
+    if wrong_parent:
+        with pytest.raises(t.Refused, match="owned IDs belong to a different experiment or parent"):
+            at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
+        assert prepared == []
+    else:
+        with pytest.raises(RuntimeError, match="controlled preparation reached"):
+            at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
+        assert prepared == [aid]
+    assert ids == []

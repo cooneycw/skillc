@@ -81,7 +81,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
-from . import checks, provenance, records, trial, witness_capture
+from . import checks, completion, provenance, records, trial, witness_capture
 from . import judge as judge_seam
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 from .gate_witness import GateWitnessRecord
@@ -553,7 +553,8 @@ def _kill_inside(work: Path, home: Path) -> int:
     return killed
 
 
-def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path) -> tuple[dict[str, object], dict[str, object]]:
+def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path,
+           completion_deadline: completion.CompletionDeadline | None = None) -> tuple[dict[str, object], dict[str, object]]:
     """Stage 1: run candidate code under the supervisor. Returns the envelope the
     judge will read and the containment observation."""
     harness, home = work / "harness", work / "home"
@@ -569,10 +570,14 @@ def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path) -> tuple[dic
         sys.executable, "-I", "-S", "-B", str(probe), str(work / "candidate"),
     ]
     with open(errors, "xb") as err:
+        probe_cap = grader.probe_timeout
+        if completion_deadline is not None:
+            probe_cap = completion_deadline.remaining(probe_cap)
+            argv[6] = str(probe_cap)
         proc = subprocess.Popen(argv, cwd=work / "candidate", env=_env(home), stdin=subprocess.PIPE,
                                 stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
         try:
-            proc.communicate(inputs, timeout=grader.probe_timeout + SWEEP_SECONDS + SUPERVISOR_SLACK)
+            proc.communicate(inputs, timeout=probe_cap + SWEEP_SECONDS + SUPERVISOR_SLACK)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
@@ -649,6 +654,7 @@ def _probe_surface(grader: GraderDef, loaded: dict[str, bytes],
 def _probe_via_backend(
     grader: GraderDef, loaded: dict[str, bytes], files: list[tuple[str, bytes, bool]],
     work: Path, backend: ExecutionBackend, recorded_attempt_ids: list[str] | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Stage 1, through an `ExecutionBackend` instead of a bare host subprocess
     (#10 PR2, interfaces.md step 8: "a SEPARATE backend instance, through this
@@ -720,8 +726,10 @@ def _probe_via_backend(
                 PROBE_INTERPRETER, "-I", "-S", "-B",
                 f"{PROBE_WORKDIR}/{grader.probe.name}", f"{PROBE_WORKDIR}/candidate",
             ]
+            probe_cap = (grader.probe_timeout if completion_deadline is None
+                         else completion_deadline.remaining(grader.probe_timeout))
             result = backend.execute(
-                handle, argv, Limits(timeout=grader.probe_timeout), stdin=loaded["inputs"],
+                handle, argv, Limits(timeout=probe_cap, completion_deadline=completion_deadline), stdin=loaded["inputs"],
             )
             stop_confirmation = backend.confirm_stopped(handle)
             confirmed = stop_confirmation is Confirmation.CONFIRMED
@@ -786,6 +794,8 @@ def _probe_via_backend(
                 raise
         else:
             containment["teardown"] = teardown_confirmation.value
+            if isinstance(recorded_attempt_ids, trial.OwnedAttemptIds):
+                recorded_attempt_ids.confirm(probe_attempt_id, teardown_confirmation is Confirmation.CONFIRMED)
             if teardown_confirmation is not Confirmation.CONFIRMED:
                 _set_quarantine(
                     f"backend teardown was not confirmed absent ({teardown_confirmation.value})"
@@ -799,18 +809,22 @@ def _probe_via_backend(
 
 
 def _judge(grader: GraderDef, loaded: dict[str, bytes], work: Path,
-           envelope: dict[str, object]) -> tuple[str, str, object]:
+           envelope: dict[str, object],
+           completion_deadline: completion.CompletionDeadline | None = None) -> tuple[str, str, object]:
     """Stage 2: the trusted judge, in a directory created after the sweep."""
     home = work / "home"
     home.mkdir(mode=0o700, parents=True)
     judge = work / grader.judge.name
     _write_tree(work, [(grader.judge.name, loaded["judge"], False)])
+    payload = json.dumps(envelope).encode()
+    judge_cap = (grader.judge_timeout if completion_deadline is None
+                 else completion_deadline.remaining(grader.judge_timeout))
     proc = subprocess.Popen(
         [sys.executable, "-I", "-S", "-B", str(judge), "--judge"], cwd=work, env=_env(home),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     )
     try:
-        out, err = proc.communicate(json.dumps(envelope).encode(), timeout=grader.judge_timeout)
+        out, err = proc.communicate(payload, timeout=judge_cap)
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
         proc.communicate()
@@ -880,7 +894,8 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
                 forbidden: list[Path] | None = None, loaded: dict[str, bytes] | None = None,
                 backend: ExecutionBackend | None = None,
                 recorded_attempt_ids: list[str] | None = None,
-                trusted_observation: bytes | None = None) -> Graded:
+                trusted_observation: bytes | None = None,
+                completion_deadline: completion.CompletionDeadline | None = None) -> Graded:
     """Grade candidate files through the three stages, in a disposable owned root.
 
     `files` are (relative path, bytes, executable). The root is removed afterwards,
@@ -921,20 +936,21 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
         root, nonce = create_root(base, [*(forbidden or []), grader.root])
     except NotOwned as exc:
         raise Refused(str(exc)) from None
+    containment: dict[str, object] = {"confirmed": True}
     try:
         probe_dir = root / "probe"
         probe_dir.mkdir(mode=0o700)
         if backend is None:
             (probe_dir / "candidate").mkdir(mode=0o700)
             _write_tree(probe_dir / "candidate", files)
-            envelope, containment = _probe(grader, loaded, probe_dir)
+            envelope, containment = _probe(grader, loaded, probe_dir, completion_deadline)
         else:
             # Candidate/probe/inputs bytes go THROUGH the backend's install(),
             # never staged on this host first - install()'s own contract
             # ("the skill starts inside the isolation - never staged on the
             # host and merely copied in afterward") applies here too.
             envelope, containment = _probe_via_backend(
-                grader, loaded, files, probe_dir, backend, recorded_attempt_ids,
+                grader, loaded, files, probe_dir, backend, recorded_attempt_ids, completion_deadline,
             )
         if trusted_observation is not None:
             # Set after the probe returns and BEFORE the judge runs, never
@@ -956,14 +972,24 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
             category, detail = "capture", "the observations write-back failed; the measurement did not complete"
             criteria = _unknown(grader, detail)
         else:
-            category, detail, report = _judge(grader, loaded, root / "judge", envelope)
+            category, detail, report = _judge(grader, loaded, root / "judge", envelope, completion_deadline)
             assembled = None
             if category == "verdict":
                 category, detail, assembled = _assemble(grader, report, digests)
             criteria = assembled if assembled is not None else _unknown(grader, detail)
+    except completion.CompletionUnavailable as exc:
+        category, detail = "completion-unavailable", str(exc)
+        criteria = _unknown(grader, detail)
     finally:
         cleanup = remove_owned(root, nonce)
     containment["cleanup"] = cleanup["status"]
+    if completion_deadline is not None:
+        try:
+            completion_deadline.remaining(grader.judge_timeout)
+        except completion.CompletionUnavailable:
+            containment["completion_on_time"] = False
+        else:
+            containment["completion_on_time"] = True
     status = _status(criteria)
     if category == "verdict":
         unmet = [str(c["id"]) for c in criteria if c.get("outcome") != "SATISFIED"]
@@ -1138,7 +1164,9 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
                         forbidden: list[Path] | None = None,
                         trusted_observation: bytes | None = None,
                      gate_witness: GateWitnessRecord | None = None,
-                        trusted_extras: Mapping[str, object] | None = None) -> tuple[dict[str, object], Graded]:
+                        trusted_extras: Mapping[str, object] | None = None,
+                        recorded_attempt_ids: list[str] | None = None,
+                        completion_deadline: completion.CompletionDeadline | None = None) -> tuple[dict[str, object], Graded]:
     """Grade one captured agent-trial attempt and store its `verified-result`
     (#139), exactly as `grade` does - the same pin, capture, snapshot, ledger
     and frozen-digest checks - except that the controller's transcript
@@ -1174,7 +1202,8 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
     return _grade_and_store(experiment, attempt_id, grader, base, forbidden, backend=backend,
                             readiness_source=AGENT_OBSERVATION_READINESS,
                             trusted_observation=trusted_observation, gate_witness=gate_witness,
-                            trusted_extras=trusted_extras)
+                            trusted_extras=trusted_extras, recorded_attempt_ids=recorded_attempt_ids,
+                            completion_deadline=completion_deadline)
 
 
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1246,7 +1275,9 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
                      readiness_source: str = records.INSTALLATION_RECEIPT,
                      trusted_observation: bytes | None = None,
                      gate_witness: GateWitnessRecord | None = None,
-                     trusted_extras: Mapping[str, object] | None = None) -> tuple[dict[str, object], Graded]:
+                     trusted_extras: Mapping[str, object] | None = None,
+                        recorded_attempt_ids: list[str] | None = None,
+                        completion_deadline: completion.CompletionDeadline | None = None) -> tuple[dict[str, object], Graded]:
     """Holds the experiment lock (#12) from the first read to the stored
     result, so a sibling attempt's capture, finalize or stored result waits
     for this grade instead of reading to its snapshot as tampering.
@@ -1260,7 +1291,7 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
         current = trial.Experiment.open(experiment.root)
         return _grade_and_store_held(current, attempt_id, grader, base, forbidden, regrade_of,
                                      backend, judges, goal_text, readiness_source, trusted_observation, gate_witness,
-                                     trusted_extras)
+                                     trusted_extras, recorded_attempt_ids, completion_deadline)
 
 
 def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1270,7 +1301,11 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
                           readiness_source: str,
                           trusted_observation: bytes | None = None,
                           gate_witness: GateWitnessRecord | None = None,
-                          trusted_extras: Mapping[str, object] | None = None) -> tuple[dict[str, object], Graded]:
+                          trusted_extras: Mapping[str, object] | None = None,
+                        recorded_attempt_ids: list[str] | None = None,
+                        completion_deadline: completion.CompletionDeadline | None = None) -> tuple[dict[str, object], Graded]:
+    if isinstance(recorded_attempt_ids, trial.OwnedAttemptIds) and not recorded_attempt_ids.bound_to(experiment, attempt_id):
+        raise Refused("grading collector belongs to another parent")
     if gate_witness is not None:
         if trusted_observation is not None:
             raise Refused("cannot supply both trusted_observation and gate_witness")
@@ -1328,14 +1363,29 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
 
     in_flight = _in_flight_scratch(experiment, attempt_id)
     before = _snapshot(experiment.root, in_flight)
+    owned = recorded_attempt_ids if isinstance(recorded_attempt_ids, trial.OwnedAttemptIds) else None
+    journal_before = _read_regular(experiment.journal(attempt_id)) if owned is not None else b""
+    append_count = len(owned._journal_appends) if owned is not None else 0
     graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()],
-                          loaded, backend=backend, trusted_observation=trusted_observation)
+                          loaded, backend=backend, trusted_observation=trusted_observation,
+                          recorded_attempt_ids=recorded_attempt_ids, completion_deadline=completion_deadline)
 
     # Everything candidate code could have reached is checked again. A change here
     # is not a verdict on the candidate: the measurement itself is compromised.
     if grader.digest() != pin["digest"]:
         raise Refused("the grader definition changed while it was grading; no result is written")
-    changed = _changed(before, _snapshot(experiment.root, in_flight))
+    after = _snapshot(experiment.root, in_flight)
+    if owned is not None:
+        # Permit ONLY exact bytes synchronously written by this bound collector.
+        # Preserve the original prefix and every other evidence-store check.
+        if not owned.bound_to(experiment, attempt_id):
+            raise Refused("grading collector belongs to another parent")
+        expected = journal_before + b"".join(owned._journal_appends[append_count:])
+        if _read_regular(experiment.journal(attempt_id)) != expected:
+            raise Refused("parent journal changed outside registered ownership writes")
+        journal_rel = f"{trial.JOURNAL}/{attempt_id}.jsonl"
+        after[journal_rel] = before[journal_rel]
+    changed = _changed(before, after)
     if changed:
         raise Refused(f"the evidence store changed while candidate code ran ({changed}); no result is written")
     if trial.Experiment.open(experiment.root).ledger != experiment.ledger:

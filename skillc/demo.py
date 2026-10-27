@@ -65,12 +65,12 @@ import tempfile
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import IO
 
+from . import completion, leak, lifecycle, materialize, provenance, reap, trial, verify
 from . import docker_backend as dbe
-from . import leak, lifecycle, materialize, provenance, reap, trial, verify
 from .backend import Confirmation, Limits
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -369,6 +369,7 @@ def recheck_subject_digests(
 def run_subject_discovery(
     backend: dbe.DockerBackend, handle: object, client_argv: list[str], selected: set[str],
     limits: Limits, export_root: Path,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[dict[str, str], frozenset[str], str | None]:
     """Runs the client's own listing (`codex debug prompt-input`, the same
     argv convention `skillc.exposure`'s `render_codex` already uses) INSIDE
@@ -414,6 +415,12 @@ def run_subject_discovery(
 
     codex_home = f"{dbe.CONTAINER_HOME}/{_SUBJECT_CODEX_HOME_RELPATH}"
     argv = ["env", f"CODEX_HOME={codex_home}", *client_argv, *materialize.CANARY_ARGV, materialize.CANARY_PROMPT]
+    if completion_deadline is not None:
+        try:
+            limits = replace(limits, timeout=completion_deadline.remaining(limits.timeout),
+                             completion_deadline=completion_deadline)
+        except completion.CompletionUnavailable as exc:
+            return unmeasured(str(exc))
     result = backend.execute(handle, argv, limits)
     backend.confirm_stopped(handle)
     if result.reason != "exited" or result.exit_code != 0:

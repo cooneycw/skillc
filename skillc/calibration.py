@@ -58,7 +58,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import degrade, profile, records, trial, verify
+from . import completion, degrade, profile, records, trial, verify
 from . import materialize as m
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -296,7 +296,12 @@ def require_outcome_approval(declaration: CalibrationDeclaration) -> None:
         raise _refuse("approval.declaration_digest does not bind this exact outcome declaration")
 
 
-def primary_endpoint(
+def primary_endpoint(record: Mapping[str, object], *, endpoint: OutcomeEndpoint | None = None) -> dict[str, object]:
+    raw = raw_primary_endpoint(record, endpoint=endpoint)
+    return {**raw, "status": completion.combine(str(raw["status"]), record)}
+
+
+def raw_primary_endpoint(
     record: Mapping[str, object], *, endpoint: OutcomeEndpoint | None = None,
 ) -> dict[str, object]:
     """The primary endpoint for one attempt: the task grader's own criteria

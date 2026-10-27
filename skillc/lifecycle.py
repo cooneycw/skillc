@@ -110,7 +110,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from . import trial
+from . import completion, trial
 from .backend import (
     BackendUnavailable,
     Confirmation,
@@ -250,6 +250,7 @@ def _run_turns(
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None],
     order: Order | None = None,
     before_stop: Callable[[ExecutionBackend, object], None] | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> ExecuteResult:
     """#279: one attempt as controller-delivered turns, each in the SAME
     still-running container (`TurnCapableBackend.execute_turn`). A further turn
@@ -261,7 +262,11 @@ def _run_turns(
     `confirm_stopped()` then verifies it as for any attempt. Each turn is a
     pair of `controller-turn` detail events (dispatched, then ended with
     `delivered` = it actually launched); the returned result is the last
-    turn's, which the stop record describes. With `order` (#279 PR-2a) every
+    turn's, which the stop record describes. With a selected completion deadline,
+    a continuation that never starts retains the last actually executed turn's
+    result for parent stop/capture; its refusal is separately journaled with
+    delivered=False. Legacy None keeps the prior last-requested-turn result.
+    With `order` (#279 PR-2a) every
     controller-turn record carries the attempt's ordering counter, so a grader
     can place a service event or a gate run before or after a turn.
     `before_stop` (#518) runs in the same `finally`, BEFORE `end_attempt`,
@@ -272,7 +277,20 @@ def _run_turns(
         return {"order": order.next()} if order is not None else {}
 
     started_at = time.monotonic()
+    local_end = started_at + limits.timeout
+
+    def remaining_time() -> float:
+        left = local_end - time.monotonic()
+        if completion_deadline is not None:
+            if left <= 0:
+                raise completion.CompletionUnavailable("local execution deadline exhausted")
+            return min(left, completion_deadline.remaining(limits.timeout))
+        return left
+
     try:
+        if completion_deadline is not None:
+            limits = dataclasses.replace(limits, timeout=remaining_time(), completion_deadline=completion_deadline,
+                                         execution_deadline=local_end)
         result = backend.execute_turn(handle, argv, limits, cancel)
         assert isinstance(result, ExecuteResult)
         turn = 1
@@ -288,13 +306,28 @@ def _run_turns(
             nxt = next_turn(backend, handle, turn, result)
             if nxt is None:
                 break
-            remaining = limits.timeout - (time.monotonic() - started_at)
+            try:
+                remaining = remaining_time()
+            except completion.CompletionUnavailable:
+                experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
+                                  reason="completion unavailable before next turn", **stamp())
+                result = dataclasses.replace(result, reason="timeout")
+                break
             if remaining <= 0:
                 experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
                                   reason="the attempt's wall budget was spent before this turn", **stamp())
                 break
             turn += 1
             experiment.record(attempt_id, "controller-turn", index=turn, dispatched=True, **stamp())
+            if completion_deadline is not None:
+                try:
+                    remaining = remaining_time()
+                except completion.CompletionUnavailable:
+                    experiment.record(attempt_id, "controller-turn", index=turn, delivered=False,
+                                      reason="completion unavailable after dispatch journal", **stamp())
+                    result = dataclasses.replace(result, reason="timeout")
+                    break
+            previous = result
             result = backend.execute_turn(handle, list(nxt), dataclasses.replace(limits, timeout=remaining), cancel)
             assert isinstance(result, ExecuteResult)
             # Delivered only if the resume actually launched (#279 counter-
@@ -302,6 +335,10 @@ def _run_turns(
             # an approval the agent received, nor a launch the guard expects.
             experiment.record(attempt_id, "controller-turn", index=turn, ended=result.reason,
                               exit_code=result.exit_code, delivered=result.reason not in _NEVER_STARTED, **stamp())
+            if completion_deadline is not None and result.reason in _NEVER_STARTED:
+                # Parent stop/capture describe the last actual execution; the
+                # refused continuation remains separately recorded above.
+                return dataclasses.replace(previous, error=f"turn {turn} was not started: {result.reason}")
         return result
     finally:
         if before_stop is not None:
@@ -330,6 +367,7 @@ def run_through_backend(
     next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None] | None = None,
     order: Order | None = None,
     before_stop: Callable[[ExecutionBackend, object], None] | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -491,7 +529,12 @@ def run_through_backend(
                     before = {}
 
                 experiment.record(attempt_id, "dispatched")
-                experiment.record(attempt_id, "started")
+                started_at = trial._now()
+                if completion_deadline is None:
+                    experiment.record(attempt_id, "started")
+                else:
+                    limits = dataclasses.replace(limits, timeout=completion_deadline.remaining(limits.timeout),
+                                                 completion_deadline=completion_deadline)
                 if next_turn is None and (before_stop is None or not isinstance(backend, TurnCapableBackend)):
                     # A backend that cannot keep the container up gets its
                     # `before_stop` after the stop: the hook then fails to
@@ -507,8 +550,11 @@ def run_through_backend(
                     # the subject exits, which only the turn path keeps - a
                     # single turn is the turn path with no next turn.
                     result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel,
-                                        next_turn or (lambda *_: None), order=order, before_stop=before_stop)
+                                        next_turn or (lambda *_: None), order=order, before_stop=before_stop,
+                                        completion_deadline=completion_deadline)
                 assert isinstance(result, ExecuteResult)
+                if completion_deadline is not None and result.reason not in _NEVER_STARTED:
+                    experiment.record(attempt_id, "started", at=started_at)
                 if result.reason != "exited":
                     experiment.record(attempt_id, "stop-requested", reason=result.reason)
 
@@ -586,6 +632,12 @@ def run_through_backend(
                                 )
                             except trial.Refused:
                                 pass  # capture() already recorded capture-failed; nothing more here
+    except completion.CompletionUnavailable as exc:
+        unavailable_reason = str(exc)
+        experiment.record(attempt_id, "launch-suppressed", reason=str(exc))
+        if any(e.get("event") == "dispatched" for e in experiment.events(attempt_id)):
+            experiment.record(attempt_id, "stopped", reason="launch-failed", confirmed=True, exit_code=None)
+            experiment.record(attempt_id, "stop-confirmed")
     finally:
         # TEARDOWN FAILURE IS ITS OWN FAILURE PATH (#79), never a reason to
         # skip accounting. Before this fix, an exception from `destroy()` or

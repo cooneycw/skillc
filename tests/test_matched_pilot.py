@@ -379,3 +379,38 @@ def test_a_do_nothing_attempt_lowers_the_pass_rate_never_leaves_the_denominator(
     passing = [{"arm": mp.TREATMENT, "repeat": i, "graded_status": "PASS", "disposition": "captured"} for i in range(3)]
     do_nothing = {"arm": mp.TREATMENT, "repeat": 9, "graded_status": "INCONCLUSIVE", "disposition": "captured"}
     assert rate([*passing, do_nothing]) < rate(passing)
+
+
+def test_completion_readback_joins_supplied_recovered_and_direct_reports(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from skillc import completion
+    from skillc import matched_pilot as mp
+    experiment, schedule = mp.plan_pilot(mp.load_declaration(), t.open_store(tmp_path / "store", []),
+                                       treatment_digest="sha256:" + "ab" * 32, image_digest=None)
+    first = schedule[0]
+    deadline = completion.CompletionDeadline.after(10, lambda: 0.0)
+    marker = completion.mark(experiment, first.attempt_id, deadline)
+    raw = {**t.finalize(experiment, first.attempt_id), "graded": {"status": "PASS"}}
+    supplied = mp.AttemptOutcome(first, raw, 0.0)
+    normalized = mp.reconcile(experiment, [supplied])
+    assert mp.graded_status(normalized[0].record) == "UNKNOWN"
+    assert mp.graded_status(mp.reconcile(experiment, [])[0].record) == "UNKNOWN"
+    entries = mp.build_report(experiment, [supplied])["attempts"]
+    assert isinstance(entries, list) and entries[0]["graded_status"] == "UNKNOWN"
+    run = tmp_path / "run"
+    run.mkdir()
+    mp.write_outcomes(run, experiment, [supplied])
+    _, read = mp.read_outcomes(run)
+    assert mp.graded_status(read[0].record) == "UNKNOWN"
+    final = {**deadline.qualify(marker, True), "publication_confirmed": True}
+    experiment.record(first.attempt_id, "completion-qualified", qualification=final)
+    qualified = replace(supplied, record={**raw, "completion": final})
+    assert mp.graded_status(mp.reconcile(experiment, [qualified])[0].record) == "PASS"
+    # Durable evidence alone cannot reconstruct missing private publication as PASS.
+    assert mp.graded_status(mp.reconcile(experiment, [supplied])[0].record) == "UNKNOWN"
+    copied = replace(qualified, record={**qualified.record, "attempt_id": "another-attempt"})
+    assert mp.graded_status(mp.reconcile(experiment, [copied])[0].record) == "UNKNOWN"
+    failed = replace(supplied, record={**raw, "graded": {"status": "FAIL"}})
+    assert mp.graded_status(mp.reconcile(experiment, [failed])[0].record) == "FAIL"
+    assert mp.graded_status(raw) == "PASS"  # Unopted primitive legacy interpretation.

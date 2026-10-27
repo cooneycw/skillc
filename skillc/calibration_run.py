@@ -66,7 +66,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from . import agent_trial, calibration, demo, gate_state, profile, trial, verify
+from . import agent_trial, calibration, completion, demo, gate_state, profile, trial, verify
 from . import attempt_guard as ag
 from . import collection_conformance as cc
 from . import matched_pilot as mp
@@ -673,6 +673,7 @@ def run_calibration(
     clock: Callable[[], float] = time.monotonic,
     total_seconds: float | None = None,
     rehearse: bool = False,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, plan and run the whole declared schedule. `backends()`
     returns a fresh `(agent backend, grading backend)` pair per attempt;
@@ -682,6 +683,9 @@ def run_calibration(
     declared total cap - for tests only; the CLI never sets it."""
     if treatment is not None and treatment.gate_state_protocol is not None:
         raise CalibrationRefused("gate-state treatment is fixture-only")
+    declared_total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
+    completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
+                           else completion_deadline.child(declared_total))
     # ADR 0005: nothing - no store, no plan, no container - before this.
     declaration = _launch_declaration(declaration)
     calibration.require_approved(declaration, root)
@@ -729,7 +733,9 @@ def run_calibration(
     guarded = guard_kwargs(client_name, model)
     stop = GuardStop()
 
-    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
+    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float,
+                    deadline: completion.CompletionDeadline) -> dict[str, object]:
+        owned = trial.OwnedAttemptIds(experiment, scheduled.attempt_id)
         if rehearse:  # #287 P2: only the attempt is swapped; everything around it is the real path
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
         if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
@@ -739,6 +745,7 @@ def run_calibration(
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
+            completion_deadline=deadline, recorded_attempt_ids=owned,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=treatment.home_files if treated else {},
@@ -768,8 +775,9 @@ def run_calibration(
 
     try:
         mp.run_schedule(
-            experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
+            experiment, schedule, None, total_seconds=total, per_attempt_seconds=per_attempt,
             clock=clock, on_outcome=on_outcome,
+                        run_attempt_with_deadline=run_attempt, completion_deadline=completion_deadline,
         )
     except KeyboardInterrupt:
         # An operator's interrupt still accounts for every planned attempt
@@ -1276,6 +1284,7 @@ def run_discrimination(
     total_seconds: float | None = None,
     rehearse: bool = False,
     precondition_report: Path | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, derive the degraded arm, plan and run a discrimination
     declaration (#287 P2). Nothing - no store, no plan - before the approval
@@ -1286,6 +1295,9 @@ def run_discrimination(
     live run would. `total_seconds` overrides the declared cap (tests only)."""
     if intact is not None and intact.gate_state_protocol is not None:
         raise CalibrationRefused("gate-state treatment is fixture-only")
+    declared_total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
+    completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
+                           else completion_deadline.child(declared_total))
     calibration.require_approved_discrimination(declaration, root)
     require_precondition(declaration, precondition_report, root, rehearse=rehearse)  # #287 option 1, ruling (A)
     if image_digest != _shared_str(declaration, "image", "digest"):
@@ -1318,7 +1330,9 @@ def run_discrimination(
     guarded = guard_kwargs(client_name, model)
     stop = GuardStop()
 
-    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
+    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float,
+                    deadline: completion.CompletionDeadline) -> dict[str, object]:
+        owned = trial.OwnedAttemptIds(experiment, scheduled.attempt_id)
         if rehearse:
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
         if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
@@ -1327,6 +1341,7 @@ def run_discrimination(
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
+            completion_deadline=deadline, recorded_attempt_ids=owned,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=chosen.home_files, client=client_name, cli_version=client_version,
@@ -1345,8 +1360,9 @@ def run_discrimination(
         write_outcomes(run_dir, experiment, outcomes, declaration)
 
     try:
-        mp.run_schedule(experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
-                        clock=clock, on_outcome=on_outcome)
+        mp.run_schedule(experiment, schedule, None, total_seconds=total, per_attempt_seconds=per_attempt,
+                        clock=clock, on_outcome=on_outcome,
+                        run_attempt_with_deadline=run_attempt, completion_deadline=completion_deadline)
     except KeyboardInterrupt:
         write_outcomes(run_dir, experiment, reconcile(experiment, outcomes), declaration)
         raise
@@ -1455,7 +1471,7 @@ def build_discrimination_report(
             # #287 option 1: the launch-bound declaration's obligation endpoint
             # is what the attempt is scored, and its evaluability counted, on.
             # The composite stays beside it, never dropped.
-            entry["task_grader_beside"] = entry["primary_endpoint"]
+            entry["task_grader_beside"] = calibration.raw_primary_endpoint(outcome.record)
             entry["primary_endpoint"] = calibration.primary_endpoint(outcome.record, endpoint=endpoint)
     if endpoint is not None:
         report["arms"] = summarize_arms(report["attempts"])  # type: ignore[arg-type]
