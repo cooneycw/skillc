@@ -65,7 +65,17 @@ def command_timeout() -> float:
 
 
 def public_environment() -> dict:
-    return dict(os.environ, MAKEFLAGS='', MFLAGS='', GNUMAKEFLAGS='',
+    """Append only the known interpreter directory if public Python is missing."""
+    path = os.environ.get('PATH', os.defpath)
+    if shutil.which('python3', path=path) is None:
+        directory = os.path.dirname(sys.executable)
+        fallback = shutil.which('python3', path=directory)
+        try:
+            if fallback and os.path.samefile(fallback, sys.executable):
+                path = os.pathsep.join((path, directory))
+        except OSError:
+            pass  # Unavailable identity never invents a usable interpreter.
+    return dict(os.environ, PATH=path, MAKEFLAGS='', MFLAGS='', GNUMAKEFLAGS='',
                 PYTHONDONTWRITEBYTECODE='1')
 
 

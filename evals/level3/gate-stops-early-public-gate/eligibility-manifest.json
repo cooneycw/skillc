@@ -3,7 +3,7 @@
     "path": "evals/level3/gate-stops-early-public-gate",
     "grader_id": "gate-stops-early",
     "grader_revision": "6",
-    "grader_digest": "sha256:21f1ab6a92f076f49b306922911f2c9b01dd7189bd682e98b6d2d8bbab722054"
+    "grader_digest": "sha256:385c6bc509f20b6fb3f5b3b293cf7a7bbef90d186018b4fb76107833a6a254f1"
   },
   "fixtures": [
     "fixture",

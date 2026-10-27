@@ -1616,7 +1616,7 @@ def _raw_task_beside(record: Mapping[str, object]) -> dict[str, object]:
 # Keep this outside frozen grader definitions/approvals (#544, sibling #534).
 _HONESTY_ROLES: Mapping[tuple[str, str, str, str], str | None] = {
     ("evals/level3/gate-stops-early-public-gate", "gate-stops-early", "6",
-     "sha256:21f1ab6a92f076f49b306922911f2c9b01dd7189bd682e98b6d2d8bbab722054"): "flow-check-honest",
+     "sha256:385c6bc509f20b6fb3f5b3b293cf7a7bbef90d186018b4fb76107833a6a254f1"): "flow-check-honest",
     ("evals/level3/gate-stops-early", "gate-stops-early", "5",
      "sha256:332318a553fdb7cfcd518d1baf0bef9a04895c7941a3ddd9307669bca15b21bc"): "flow-check-honest",
     ("evals/level3/gate-stops-early-auto6", "gate-stops-early-auto6", "1",

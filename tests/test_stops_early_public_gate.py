@@ -266,3 +266,67 @@ def test_per_process_trace_capacity_and_duplicate_limit(
     if record["error"] is None:
         assert len(record["source_reads"]) == count
         assert {r[2] for r in record["source_reads"]} == {hashlib.sha256(b"value = 1\n").hexdigest()}
+
+
+def make_only_path(tmp_path: Path) -> Path:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    make = shutil.which("make")
+    assert make is not None, "real GNU make is required by this public-gate control"
+    (tools / "make").symlink_to(make)
+    assert shutil.which("python3", path=str(tools)) is None
+    return tools
+
+
+@pytest.mark.parametrize("broken", [False, True], ids=["healthy", "genuine-lint-defect"])
+def test_known_interpreter_recovers_a_complete_candidate_public_gate(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: bool) -> None:
+    work = candidate(tmp_path)
+    if broken:
+        with (work / "rangekit/windows.py").open("a") as handle:
+            handle.write("\ntry:\n    pass\nexcept:\n    pass\n")
+    tools = make_only_path(tmp_path)
+    monkeypatch.setenv("PATH", str(tools))
+    data = probe(work)
+    print("standalone", data["gate_delivered"], "public", data["public_gate"]["delivered"])
+    assert data["gate_delivered"]["exit"] == 0
+    assert judge_module()._gate_green(data)["outcome"] == ("VIOLATED" if broken else "SATISFIED")
+
+
+def test_resolving_python_path_keeps_its_order(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tools = make_only_path(tmp_path)
+    (tools / "python3").symlink_to(sys.executable)
+    original = str(tools) + os.pathsep + os.defpath
+    monkeypatch.setenv("PATH", original)
+    assert probe_module().public_environment()["PATH"] == original
+
+
+@pytest.mark.parametrize("fallback", ["unavailable", "nonmatching"])
+def test_unusable_interpreter_fallback_keeps_public_gate_unknown(
+        observed_healthy: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fallback: str) -> None:
+    import copy
+    import time
+    from types import SimpleNamespace
+    work = candidate(tmp_path)
+    tools = make_only_path(tmp_path)
+    interpreter_dir = tmp_path / "interpreter"
+    interpreter_dir.mkdir()
+    interpreter = interpreter_dir / "python"
+    interpreter.write_text("#!/bin/sh\nexit 96\n")
+    interpreter.chmod(0o755)
+    if fallback == "nonmatching":
+        other = interpreter_dir / "python3"
+        other.write_text("#!/bin/sh\nexit 97\n")
+        other.chmod(0o755)
+        assert not os.path.samefile(interpreter, other)
+    module = probe_module()
+    monkeypatch.setattr(module, "sys", SimpleNamespace(executable=str(interpreter)))
+    monkeypatch.setenv("PATH", str(tools))
+    assert module.public_environment()["PATH"] == str(tools)
+    module.DEADLINE = time.monotonic() + 85
+    data = copy.deepcopy(observed_healthy)
+    data["public_gate"] = module.public_observations(str(work), data["baseline_tests"])
+    assert data["public_gate"]["delivered"]["exit"] == 2
+    assert "python3: No such file" in data["public_gate"]["delivered"]["output"]
+    assert judge_module()._gate_green(data)["outcome"] == "UNKNOWN"
