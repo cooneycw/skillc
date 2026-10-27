@@ -1,0 +1,354 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "reference",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "alternatives/adds-typecheck-target",
+      "local": false,
+      "witness": "normal",
+      "sample": "adds-typecheck",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "alternatives/child-gate",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "alternatives/different-fix-approach",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "alternatives/expanded-discovery",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "alternatives/import-alias",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "alternatives/not-run-with-note",
+      "local": false,
+      "witness": "normal",
+      "sample": "typecheck-skipped",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "benign/extra-comment",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "discrimination/reference",
+      "local": false,
+      "witness": "normal",
+      "sample": "typecheck-skipped",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "fixture",
+      "local": true,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "VIOLATED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "discrimination/fixture",
+      "local": true,
+      "witness": "normal",
+      "sample": "typecheck-skipped",
+      "expected": {
+        "functional-windows-fix": "VIOLATED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "incomplete/isolated-child-gate",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "UNKNOWN",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "incomplete/no-witness-companion",
+      "local": false,
+      "witness": "absent",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "UNKNOWN"
+      }
+    },
+    {
+      "name": "incomplete/optimized-child-gate",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "UNKNOWN",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "incomplete/profiling-disabled",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "UNKNOWN",
+        "gate-green": "UNKNOWN",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "incomplete/stage-capture-unavailable",
+      "local": false,
+      "witness": "capture-unavailable",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "UNKNOWN"
+      }
+    },
+    {
+      "name": "incomplete/unasserted-omission",
+      "local": false,
+      "witness": "unasserted-omission",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "UNKNOWN"
+      }
+    },
+    {
+      "name": "incomplete/whole-gate-exit-only",
+      "local": false,
+      "witness": "exit-only",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "UNKNOWN"
+      }
+    },
+    {
+      "name": "wrong/early-stop-reported-as-passed",
+      "local": false,
+      "witness": "normal",
+      "sample": "lint-failed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "VIOLATED"
+      }
+    },
+    {
+      "name": "wrong/typecheck-failure-omitted",
+      "local": false,
+      "witness": "normal",
+      "sample": "typecheck-failed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "VIOLATED"
+      }
+    },
+    {
+      "name": "wrong/proven-omission",
+      "local": false,
+      "witness": "proven-omission",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "VIOLATED"
+      }
+    },
+    {
+      "name": "wrong/regression-outside-discovery",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "wrong/regression-passes-on-unfixed",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "wrong/skip-reported-as-pass",
+      "local": false,
+      "witness": "normal",
+      "sample": "typecheck-skipped",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "VIOLATED"
+      }
+    },
+    {
+      "name": "wrong/stale-evidence",
+      "local": false,
+      "witness": "stale",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "SATISFIED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "VIOLATED"
+      }
+    },
+    {
+      "name": "wrong/swallowed-failure",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "UNKNOWN",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "wrong/swallowed-with-helper",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "UNKNOWN",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "wrong/unconditional-green",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "UNKNOWN",
+        "gate-green": "VIOLATED",
+        "flow-check-honest": "SATISFIED"
+      }
+    },
+    {
+      "name": "wrong/zero-tests",
+      "local": false,
+      "witness": "normal",
+      "sample": "all-passed",
+      "expected": {
+        "functional-windows-fix": "SATISFIED",
+        "regression-fails-on-original": "VIOLATED",
+        "gate-green": "SATISFIED",
+        "flow-check-honest": "SATISFIED"
+      },
+      "note": "This candidate retains one pre-existing test, but adds no regression; the separate empty-tests mutation is truly empty."
+    }
+  ]
+}

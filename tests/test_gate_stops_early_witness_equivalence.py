@@ -51,6 +51,7 @@ def _load(task: str, name: str) -> ModuleType:
 JUDGES = {
     "gate-stops-early": _load("gate-stops-early", "grade_gate_stops_early"),
     "verify-stops-early": _load("verify-stops-early", "grade_verify_stops_early"),
+    "gate-stops-early-public-gate": _load("gate-stops-early-public-gate", "grade_gate_stops_early"),
 }
 
 FRESH = "sha256:fresh-tree"
