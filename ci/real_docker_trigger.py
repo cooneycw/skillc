@@ -49,6 +49,7 @@ from dataclasses import dataclass
 #: command embedded mid-sentence does not count, so an ordinary comment
 #: that happens to mention the phrase cannot trigger anything by accident.
 _COMMAND_RE = re.compile(r"^/run-real-docker\s+([0-9a-fA-F]{40})\s*$")
+_OPTIN_RE = re.compile(r"^/run-real-docker\s+([0-9a-fA-F]{40})\s+--opt-in\s+([a-z0-9-]{1,40})\s*$")
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class TriggerSelection:
     #: the caller persists these into its processed-ids state so none of
     #: them is ever re-read, including after an edit.
     newly_seen_ids: tuple[int, ...]
+    optin_requests: tuple[tuple[int, str, str], ...] = ()
 
 
 def select_requested_shas(
@@ -70,11 +72,14 @@ def select_requested_shas(
 ) -> TriggerSelection:
     requests: list[tuple[int, str]] = []
     newly_seen: list[int] = []
+    optins: list[tuple[int, str, str]] = []
+    seen = set(processed_ids)
 
     for comment in comments:
         raw_id = comment.get("id")
-        if not isinstance(raw_id, int) or raw_id in processed_ids:
+        if type(raw_id) is not int or raw_id in seen:
             continue  # already processed (or malformed) - an edit never re-enters here
+        seen.add(raw_id)
         newly_seen.append(raw_id)
 
         user = comment.get("user")
@@ -87,7 +92,11 @@ def select_requested_shas(
             continue
         match = _COMMAND_RE.match(body.strip())
         if match is None:
+            optin = _OPTIN_RE.fullmatch(body.strip())
+            if optin:
+                optins.append((raw_id, optin.group(1), optin.group(2)))
             continue
         requests.append((raw_id, match.group(1)))
 
-    return TriggerSelection(requests=tuple(requests), newly_seen_ids=tuple(newly_seen))
+    return TriggerSelection(requests=tuple(requests), newly_seen_ids=tuple(newly_seen),
+                            optin_requests=tuple(optins))

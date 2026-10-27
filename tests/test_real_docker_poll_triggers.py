@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "example/project"
 OWNER = "the-owner"
@@ -87,6 +89,8 @@ def _tick(
     runner_exit: int = 0,
     raw_pages: dict[int, str] | None = None,
     python3: Path | None = None,
+    hostile_cwd: bool = False,
+    relative_paths: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]], dict[str, Any]]:
     installed = tmp_path / "installed"
     shutil.copytree(ROOT / "ci", installed / "ci")
@@ -121,15 +125,32 @@ def _tick(
 
     events = tmp_path / "events.jsonl"
     events.touch()
+    work = tmp_path
+    if hostile_cwd:
+        work = tmp_path / "hostile"
+        (work / "ci").mkdir(parents=True)
+        (work / "ci/__init__.py").write_text("")
+        (work / "ci/real_docker_trigger.py").write_text(
+            "from types import SimpleNamespace\nfrom pathlib import Path\n"
+            f"Path({str(tmp_path / 'imported-target')!r}).write_text('bad')\n"
+            "def select_requested_shas(*a, **kw):\n"
+            f" return SimpleNamespace(requests=((999,{REQUESTED_SHA!r}),), newly_seen_ids=(999,), optin_requests=())\n")
+        (work / "json.py").write_text(
+            f"from pathlib import Path\nPath({str(tmp_path / 'imported-json')!r}).write_text('bad')\n"
+            "raise SystemExit('WORK json was imported')\n")
+    if relative_paths:
+        for key in ('INSTALLED_ROOT', 'STATE_FILE', 'GITHUB_TOKEN_FILE'):
+            values[key] = os.path.relpath(values[key], work)
+        config.write_text(''.join(f'{key}={shlex.quote(value)}\n' for key, value in values.items()))
     env = {
         "PATH": f"{binaries}{os.pathsep}{os.defpath}",
-        "SKILLC_REAL_DOCKER_CONFIG": str(config),
+        "SKILLC_REAL_DOCKER_CONFIG": os.path.relpath(config, work) if relative_paths else str(config),
         "POLL_TEST_EVENTS": str(events), "POLL_TEST_FIXTURES": str(fixtures),
         "POLL_TEST_MAIN_SHA": main_sha, "POLL_TEST_REPO": REPO, "POLL_TEST_OWNER": OWNER,
         "POLL_TEST_RUNNER_EXIT": str(runner_exit),
     }
     result = subprocess.run(
-        ["bash", str(installed / "ci" / "real-docker" / "poll-triggers")], cwd=tmp_path, env=env, text=True,
+        ["bash", str(installed / "ci" / "real-docker" / "poll-triggers")], cwd=work, env=env, text=True,
         capture_output=True, timeout=60, check=False,
     )
     logged = [json.loads(line) for line in events.read_text().splitlines()]
@@ -294,3 +315,48 @@ def test_an_unparseable_comment_page_stops_the_tick_before_any_decision(tmp_path
     assert "JSONDecodeError" in result.stderr
     assert _runs(events) == []
     assert new_state == state
+
+
+@pytest.mark.parametrize("name", ["flow-auto-cold", "unknown-control"])
+def test_optin_owner_command_is_forwarded_once(tmp_path: Path, name: str) -> None:
+    """#576: unknown names must reach installed refusal, not vanish in parsing."""
+    command = f"/run-real-docker {REQUESTED_SHA} --opt-in {name}"
+    result, events, state = _tick(tmp_path, {1: [_comment(901, command, OWNER),
+                                               _comment(900, command)]},
+                                  state={"last_main_sha": MAIN_SHA, "processed_comment_ids": []})
+    assert result.returncode == 0, result.stderr
+    assert _runs(events) == [[REQUESTED_SHA, "--opt-in", name]]
+    assert state["processed_comment_ids"] == [900, 901]
+
+
+def test_work_cwd_cannot_replace_installed_trigger_policy(tmp_path: Path) -> None:
+    result, events, _ = _tick(tmp_path, {1: [_comment(1, 'ordinary text')]},
+                              state={'last_main_sha': MAIN_SHA, 'processed_comment_ids': []}, hostile_cwd=True)
+    assert result.returncode == 0, result.stderr
+    assert _runs(events) == []
+    assert not (tmp_path / 'imported-target').exists()
+    assert not (tmp_path / 'imported-json').exists()
+
+
+def test_lock_retry_preserves_original_optin_tuple_after_edit(tmp_path: Path) -> None:
+    first_path, second_path = tmp_path / 'first', tmp_path / 'second'
+    first_path.mkdir(); second_path.mkdir()
+    original = f'/run-real-docker {REQUESTED_SHA} --opt-in flow-auto-cold'
+    _, first_events, state = _tick(first_path, {1: [_comment(901, original, OWNER)]},
+                                   state={'last_main_sha': MAIN_SHA, 'processed_comment_ids': []}, runner_exit=3)
+    assert _runs(first_events) == [[REQUESTED_SHA, '--opt-in', 'flow-auto-cold']]
+    edited = f'/run-real-docker {"e"*40} --opt-in unknown-control'
+    result, events, final = _tick(second_path, {1: [_comment(901, edited, OWNER)]}, state=state)
+    assert result.returncode == 0, result.stderr
+    assert _runs(events) == [[REQUESTED_SHA, '--opt-in', 'flow-auto-cold']]
+    assert final['processed_comment_ids'] == [901]
+
+
+def test_trusted_cwd_preserves_relative_private_config_paths(tmp_path: Path) -> None:
+    command = f'/run-real-docker {REQUESTED_SHA} --opt-in flow-auto-cold'
+    result, events, _ = _tick(tmp_path, {1: [_comment(1, command, OWNER)]},
+                              state={'last_main_sha': MAIN_SHA, 'processed_comment_ids': []},
+                              hostile_cwd=True, relative_paths=True)
+    assert result.returncode == 0, result.stderr
+    assert _runs(events) == [[REQUESTED_SHA, '--opt-in', 'flow-auto-cold']]
+    assert not (tmp_path / 'imported-json').exists() and not (tmp_path / 'imported-target').exists()

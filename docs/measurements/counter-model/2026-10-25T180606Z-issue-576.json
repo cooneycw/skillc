@@ -1,0 +1,31 @@
+{
+  "branch": "issue-576-owner-triggered-opt-in-runs",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "10b1eb6121b0d0e7aad94eb72834fef53588dde4",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/25/rollout-2026-10-25T13-03-28-01a17328-aedf-7440-abed-76f80d592c1c.jsonl",
+    "thread_id": "01a17328-aedf-7440-abed-76f80d592c1c"
+  },
+  "issue": "576",
+  "local_credentials": "unknown",
+  "network": "unverified",
+  "passes": 1,
+  "recorded_at": "2026-10-25T18:06:06Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 8
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/25/rollout-2026-10-25T17-43-48-01a17429-558e-7f13-9235-eb9ab965ad79.jsonl",
+    "thread_id": "01a17429-558e-7f13-9235-eb9ab965ad79"
+  },
+  "schema": 1,
+  "scope": "diff-only",
+  "status": "ran"
+}
