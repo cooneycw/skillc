@@ -186,6 +186,22 @@ pinned CLI - neither failure would have surfaced as anything other than a
 correctly-formed JSON file passing a schema check that proved less than it
 claimed to.
 
+## Transcript-version observations and runtime identity
+
+Build pins, the per-attempt ledger declaration and the transcript's version
+observation are separate facts. Transcript adapters retain a version only for
+a valid, consistent population; missing or contradictory evidence is unknown,
+for scripted and native clients alike. Reports re-derive the observation from
+retained bytes, rather than upgrading historical first/last scalars. These
+diagnostics do not change task grading, model eligibility or comparison rules.
+
+They do not measure the executable that ran. Actual runtime qualification still
+requires a declared consumer contract binding executable resolution, version
+and image on the same attempt handle after its final PATH overlays, within its
+shared completion deadline. A bare client measured elsewhere cannot certify a
+wrapper, scripted actor or separate discovery client. No such measurement or
+qualification is supplied by the transcript-version diagnostics.
+
 ## Controls (committed)
 
 All in `tests/test_trial_bootstrap.py`:
