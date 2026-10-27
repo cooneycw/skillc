@@ -46,6 +46,7 @@ Built under a DISTINCT tag, never `:latest`, same convention as
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -131,8 +132,9 @@ def test_uv_is_present_at_the_pinned_version(built_image: str) -> None:
         capture_output=True, text=True, timeout=30, check=False,
     )
     _require_uv(uv_version.returncode == 0, f"uv --version failed (exit {uv_version.returncode}): {uv_version.stderr!r}")
+    version = re.fullmatch(r"uv (\S+)(?: \([^\r\n()]+\))?", uv_version.stdout.strip())
     _require_uv(
-        _PINNED_UV_VERSION in uv_version.stdout,
+        version is not None and version.group(1) == _PINNED_UV_VERSION,
         f"uv --version reported {uv_version.stdout!r}, expected the pinned {_PINNED_UV_VERSION}",
     )
 
