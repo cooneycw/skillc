@@ -1,0 +1,31 @@
+{
+  "branch": "issue-585-keep-ruff-caches-out-of-immutable-vendored-fixture",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "e7c08821521f1288d9474da5b877c4a9d7fe1bae",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-34-27-01a17cec-fab5-7860-b0e9-aeef446e1806.jsonl",
+    "thread_id": "01a17cec-fab5-7860-b0e9-aeef446e1806"
+  },
+  "issue": "585",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-27T16:42:34Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T12-37-37-01a17e39-7473-7612-b8bd-cd206ea1435a.jsonl",
+    "thread_id": "01a17e39-7473-7612-b8bd-cd206ea1435a"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

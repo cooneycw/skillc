@@ -573,3 +573,65 @@ def test_red_case_without_turns_the_attempt_runs_through_plain_execute_once(
     monkeypatch.setattr(d.DockerBackend, "end_attempt", lambda *_: calls.append(("end_attempt", None)))
     _attempt(store, base, docker_state, tmp_path, turns=None)
     assert calls == [("execute", False)]
+
+
+@pytest.mark.parametrize("mode", ["healthy", "spent", "header", "never-started", "retention-fails"])
+def test_547_prepared_resume_and_launch_are_separate_without_native_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    from collections.abc import Sequence
+
+    from test_lifecycle import FakeBackend, _Handle
+
+    from skillc import completion
+    from skillc.backend import Confirmation, ExecuteResult
+
+    ticks = [0.0]
+    class Memory(FakeBackend):
+        def __init__(self) -> None:
+            super().__init__(tmp_path / "backend", force_confirm_stopped=Confirmation.CONFIRMED)
+            self.argv: list[list[str]] = []
+            self.ended = False
+
+        def execute_turn(self, handle: object, argv: Sequence[str], limits: Limits,
+                         cancel: object = None) -> ExecuteResult:
+            assert isinstance(handle, _Handle)
+            self.argv.append(list(argv))
+            (handle.root / "output.txt").write_text("synthetic result")
+            if mode == "never-started" and len(self.argv) > 1:
+                return ExecuteResult("launch-failed", None)
+            return ExecuteResult("exited", 0, stderr=b"" if mode == "header" else _HEADER.encode())
+
+        def end_attempt(self, handle: object) -> None:
+            self.ended = True
+
+    monkeypatch.setattr(at, "_make_before_execute", lambda **_: lambda *_: None)
+    keep = t.retain_prompt_input
+    def retain(*args: object) -> None:
+        if mode == "retention-fails":
+            raise OSError("synthetic diagnostic publication failure")
+        keep(*args)  # type: ignore[arg-type]
+        if mode == "spent" and args[2] == 2:
+            ticks[0] = 11.0
+    monkeypatch.setattr(t, "retain_prompt_input", retain)
+    e, aid = _planned(t.open_store(tmp_path / "store", []))
+    backend = Memory()
+    text = "Approved: retain exact \u03bb\nresume."
+    result = at.run_one_attempt(
+        backend=backend, experiment=e, attempt_id=aid, client="codex",  # type: ignore[arg-type]
+        base_argv=("synthetic-client", *CODEX_BASE[1:]), prompt="Synthetic task", skill_name=None, surface={},
+        limits=Limits(timeout=60), base=tmp_path / "scratch", turns=ct.Turns((text,)),
+        completion_deadline=completion.CompletionDeadline.after(10, lambda: ticks[0]) if mode == "spent" else None,
+    )
+    assert backend.ended and aid in backend.destroyed and result["backend_teardown"] == "confirmed"
+    assert result["disposition"] == ("unavailable" if mode == "never-started" else "captured")
+    trace = t.read_prompt_inputs(e, aid)
+    assert trace.coverage == ("unknown" if mode == "retention-fails" else "complete")
+    if mode != "retention-fails":
+        assert trace.inputs[0].data == backend.argv[0][-1].encode()
+        assert trace.inputs[0].launched is True
+        assert len(trace.inputs) == (1 if mode == "header" else 2)
+        if mode != "header":
+            assert trace.inputs[1].data == text.encode()
+            assert trace.inputs[1].launched is (mode == "healthy")
+        assert len(backend.argv) == (1 if mode in {"header", "spent"} else 2)

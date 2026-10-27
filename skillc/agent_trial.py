@@ -2760,6 +2760,20 @@ def run_one_attempt(
         attempt_id, base_argv, supports_name=spec.supports_name_flag,
     )
     argv = (*invocation.argv, full_prompt)
+    prepared_inputs = [1]
+    prompt_stop = "lifecycle-ended"
+
+    def keep_input(index: int, text: str) -> None:
+        try:
+            trial.retain_prompt_input(experiment, attempt_id, index, text, transcript_leak_findings)
+        except Exception:  # noqa: BLE001, S110 - diagnostic loss cannot block raw task facts
+            pass  # terminal population exposes the missing entry to the reader
+
+    try:
+        trial.begin_prompt_inputs(experiment, attempt_id, len(declared_turns))
+    except Exception:  # noqa: BLE001, S110 - no usable marker means UNKNOWN, never complete
+        pass
+    keep_input(1, argv[-1])
     for text in declared_turns:
         # Every resume argv is checked before any container exists: the same
         # #442 preflight as turn 1, on the exact shape that will run.
@@ -2774,6 +2788,7 @@ def run_one_attempt(
         _backend: ExecutionBackend, _handle: object, done: int, previous: ExecuteResult,
     ) -> Sequence[str] | None:
         """#279: the argv of the turn after `done` turns, or `None`."""
+        nonlocal prompt_stop
         if done == 1:
             turn_state["session_id"] = ct.session_id_from_header(previous.stderr)
             turn_state["session_id_found"] = turn_state["session_id"] is not None
@@ -2781,10 +2796,12 @@ def run_one_attempt(
             # on an exit-0 attempt, so this is the only trace of a refusal.
             turn_state["header_refusal"] = ct.header_refusal(previous.stderr)
         if done > len(declared_turns):
+            prompt_stop = "declared-complete"
             turn_state["stopped"] = "every declared turn was delivered"
             return None
         session_id = turn_state.get("session_id")
         if not isinstance(session_id, str):
+            prompt_stop = "header-unavailable"
             turn_state["stopped"] = "no session id in turn 1's client header: no further turn"
             return None
         # #518: the resumed client needs the credential back - for its startup
@@ -2795,9 +2812,13 @@ def run_one_attempt(
             try:
                 driver.restore_for_turn(_backend, _handle)  # type: ignore[arg-type]
             except cs.StewardFailed as exc:
+                prompt_stop = "resume-precondition"
                 turn_state["stopped"] = f"the credential steward could not cover the resume: {exc}"
                 return None
-        return ct.resume_argv(client, invocation.argv, session_id, declared_turns[done - 1])
+        resumed = ct.resume_argv(client, invocation.argv, session_id, declared_turns[done - 1])
+        prepared_inputs.append(done + 1)
+        keep_input(done + 1, resumed[-1])
+        return resumed
 
     ctx = _AttemptContext(workdir=resolved_workdir, mcp_servers=resolved_mcp_servers, cli_version=resolved_cli_version)
     delivered_credential_bytes: dict[str, bytes] = {}
@@ -2966,6 +2987,10 @@ def run_one_attempt(
         next_turn=next_turn if declared_turns else None,
         order=attempt_order, completion_deadline=completion_deadline,
     )
+    try:
+        trial.finish_prompt_inputs(experiment, attempt_id, prepared_inputs, prompt_stop)
+    except Exception:  # noqa: BLE001, S110 - absent terminal denies complete coverage, preserves facts
+        pass
     delivered = sum(1 for e in experiment.events(attempt_id)
                     if e.get("event") == "controller-turn" and e.get("delivered") is True)
     if attempt_guard is not None:

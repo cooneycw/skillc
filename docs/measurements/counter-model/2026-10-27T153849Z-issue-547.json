@@ -1,0 +1,31 @@
+{
+  "branch": "issue-547-records-keep-less-than-the-claims-need-transcript",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "28a2684bd47e2b89d83c250d42fb3ee957f12001",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-27-09-01a17ce6-4b92-7802-b7c7-35181ac56d6a.jsonl",
+    "thread_id": "01a17ce6-4b92-7802-b7c7-35181ac56d6a"
+  },
+  "issue": "547",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-27T15:38:49Z",
+  "red_cases": {
+    "already_covered": 9,
+    "proposed": 16
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T11-32-46-01a17dfe-164b-7881-aff8-f2ef908715dc.jsonl",
+    "thread_id": "01a17dfe-164b-7881-aff8-f2ef908715dc"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}

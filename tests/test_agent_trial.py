@@ -1911,3 +1911,50 @@ def test_supplied_collector_is_checked_before_legacy_agent_preparation(
             at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
         assert prepared == [aid]
     assert ids == []
+
+
+def test_547_exact_issued_prompt_survives_without_a_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing entrypoint/ledger/CAS APIs: text must survive real teardown."""
+    from collections.abc import Sequence
+
+    from test_lifecycle import FakeBackend, _Handle
+
+    from skillc.backend import Confirmation, ExecuteResult
+
+    class Memory(FakeBackend):
+        def __init__(self, base: Path) -> None:
+            super().__init__(base, force_confirm_stopped=Confirmation.CONFIRMED)
+            self.issued: list[str] = []
+
+        def execute(self, handle: object, argv: Sequence[str], limits: Limits,
+                    cancel: object = None, stdin: bytes | None = None) -> ExecuteResult:
+            assert isinstance(handle, _Handle)
+            self.issued.append(argv[-1])
+            (handle.root / "result.txt").write_text("synthetic task output")
+            return ExecuteResult("exited", 0)
+
+        def read_home_tree(self, *args: object, **kwargs: object) -> dict[str, bytes]:
+            return {}
+
+    monkeypatch.setattr(at, "_make_before_execute", lambda **_: lambda *_: None)
+    monkeypatch.setattr(at.trial_bootstrap, "new_canary_nonce", lambda: "synthetic547nonce")
+    experiment, aid = _planned(t.open_store(tmp_path / "store", []))
+    backend = Memory(tmp_path / "backend")
+    result = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=aid, client="claude",  # type: ignore[arg-type]
+        base_argv=["synthetic-client"], prompt="Preserve these exact lines.\n\u03bb", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=tmp_path / "scratch",
+    )
+    assert aid in backend.destroyed and result["backend_teardown"] == "confirmed"
+    assert _observation(result)["status"] == "unknown"  # unsupported transcript observation
+    assert len(backend.issued) == 1 and "synthetic547nonce" in backend.issued[0]
+    control = b"known-present scan control"
+    t.put_object(experiment, control)
+    objects = [f.read_bytes() for f in (experiment.root / t.OBJECTS).iterdir()]
+    assert control in objects, "the same-store byte scan must see its planted control"
+    expected = backend.issued[0].encode("utf-8")
+    assert expected in objects, "actual post-nonce client input disappeared after teardown"
+    assert any(expected_digest in json.dumps(e) and aid in json.dumps(e)
+               for e in experiment.events(aid) for expected_digest in [t.sha256_bytes(expected)])
