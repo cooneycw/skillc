@@ -1649,6 +1649,10 @@ diff/lane check; an empty run-only diff cannot certify inherited work.
 398. `tests/test_profile_flow_auto_87ecb097.py` - Add one real-mypy scratch-input boundary control from actual config; retain existing source/closure controls.
 399. `tests/test_profile_flow_auto_87ecb097_cold.py` - Preserve inherited B3a preparation and evidence boundaries unchanged; no fresh edit granted.
 
+400. `skillc/leak.py` - Extend existing account-conditional exact homes only for synthetic u/proof; retain independent live-host detection and document foreign-host limit.
+401. `tests/test_leak.py` - Actual absent/present-account, longer sibling, unsafe same-line neighbor, live-home/cwd and cache-reset behavioral controls; red before policy fix.
+402. `changelog.d/581.md` - Document strict conditional synthetic-home policy repair.
+
 Scope: 401 known custody paths plus one later exact generated receipt, final402.
 The integration across pyproject/citation/profile test is at most25 added-plus-
 deleted lines TOTAL, estimated24-25; changelog heading/blank removal2 lines.
@@ -1690,3 +1694,30 @@ installation. Whole568 B2/common witness/remote grading/frozen unapproved declar
 remain after delivered546/580 shared APIs; no blanket571D family dependency.
 Actual bootstrap/resume prompts remain547/568 acceptance, never public-digest
 substitution. Historical results/debt/review limits remain visible.
+
+
+### Authorized #581 scope expansion - root gate27, 2026-10-27
+
+Required blocker #581 goes first and ships with offline B3a (Fixes #581,
+Refs #568). This explicitly expands the current Run4 Section C by three rows;
+the earlier approved Section C is not claimed unchanged. Root confirmed insertion
+before its first Scope boundary because canonical compliance reads the first
+Section C only. Original Run1-3 byte prefix and original row order/bytes remain.
+Pre-amendment plan/snapshot and SHA256 fingerprints are retained outside source.
+
+The new gate supersedes the aggregate2050 cap with2250 nonworkflow added+deleted
+lines INCLUDING the genuine receipt; historical1658 debt and current25 charge
+remain. Exact custody now404 known paths plus one later exact receipt (405).
+All388 exports/pin/actor remain immutable. No unconditional home exemption or
+broad file/line exclusion. Extend conditional_exemptions only for u/proof absent
+matching local accounts. Preserve user/uid/gid, longer sibling and same-line real
+leaks; prove independent live home/cwd findings and deterministic cache resets.
+Document that local account absence cannot infer foreign-host identities.
+
+Add behavioral tests first against existing scan API and retain actual red XML/log,
+then minimal policy and green. Run exact ordinary CLI against unchanged pinned
+source and unsafe-input nonzero, focused leak/citation/profile and types/lint.
+One already authorized current distinct-model review now covers exactly seven
+fresh product files (the previous four plus these three), with inherited source
+readable as context; original two B3a review scopes remain unchanged. New receipt
+needs an exact path grant. Full finish, physical proof, push/PR remain held.

@@ -639,6 +639,65 @@ def test_with_no_such_host_account_the_container_identity_is_exempt(monkeypatch:
 
 
 
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+@pytest.mark.parametrize("present", [False, True])
+def test_synthetic_home_depends_on_its_own_host_account(
+    monkeypatch: pytest.MonkeyPatch, name: str, present: bool,
+) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda candidate: candidate == name and present)
+    findings = list(leak.scan_text(f"/home/{name}/project", frozenset()))
+    assert [kind for _, kind, _ in findings] == (["home-path"] if present else [])
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+def test_synthetic_home_does_not_hide_longer_names_or_same_line_leaks(
+    monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda candidate: False)
+    text = f"/home/{name}/project /home/{name}-operator/private /home/exampleuser/private"
+    findings = list(leak.scan_text(text, frozenset()))
+    assert [(line, kind) for line, kind, _ in findings] == [(1, "home-path"), (1, "home-path")]
+    assert f"/home/{name}-operator" in findings[0][2]
+    assert "/home/exampleuser" in findings[1][2]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+def test_synthetic_home_cannot_hide_the_live_home_or_cwd(
+    monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda candidate: False)
+    home, cwd = f"/home/{name}", f"/home/{name}/checkout"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path(home)))
+    monkeypatch.setattr(os, "getcwd", lambda: cwd)
+    host_paths = leak.default_host_paths()
+    assert host_paths == frozenset({home, cwd})
+    findings = list(leak.scan_text(f"{cwd}/report.txt", frozenset(), host_paths))
+    assert {detail for _, kind, detail in findings if kind == "host-path"} == {
+        f"this host's own path: {home}", f"this host's own path: {cwd}",
+    }
+    assert len(findings) == 2
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+def test_synthetic_account_cache_is_recomputed_after_reset(
+    monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    present = False
+    monkeypatch.setattr(leak, "_host_has_account", lambda candidate: candidate == name and present)
+    text = f"/home/{name}/project"
+    assert list(leak.scan_text(text, frozenset())) == []
+    present = True
+    leak.conditional_exemptions.cache_clear()
+    assert [kind for _, kind, _ in leak.scan_text(text, frozenset())] == ["home-path"]
+    present = False
+    leak.conditional_exemptions.cache_clear()
+    assert list(leak.scan_text(text, frozenset())) == []
+
+
 # --- #470: the encoded home form, Claude scratchpads and session-id segments
 
 def _kinds(text: str) -> set[str]:

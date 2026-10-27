@@ -225,17 +225,22 @@ def conditional_exemptions() -> frozenset[str]:
         transcripts of the #203 calibration.
       - `/home/user`: the generic example path in third-party skill text an
         agent reads (cpp-codex's flow-auto `reference.md`).
+      - `/home/u`: CPP's fixed developer example; `/home/proof`: the disposable
+        flow-auto cold-profile identity (#581). Neither is a blanket prefix.
 
     Exact match only: the operator's own uid, a longer number that starts
     with 10001, and a longer home directory name all still fire. A scan run on a host that HAS such an
-    account keeps the strict behaviour."""
+    account keeps the strict behaviour. Local account absence says nothing about
+    identities on foreign hosts. Callers must still supply live home/cwd paths,
+    which are checked independently even when an exact home is exempt."""
     exempt = set()
     if not _host_has_uid(CANDIDATE_UID):
         exempt.add(f"uid={CANDIDATE_UID}")
     if not _host_has_gid(CANDIDATE_GID):
         exempt.add(f"gid={CANDIDATE_GID}")
-    if not _host_has_account("user"):
-        exempt.add("/home/user")
+    for name in ("user", "u", "proof"):
+        if not _host_has_account(name):
+            exempt.add(f"/home/{name}")
     return frozenset(exempt)
 
 #: `--denylist`, then this environment variable, then nothing (#63). Real host
