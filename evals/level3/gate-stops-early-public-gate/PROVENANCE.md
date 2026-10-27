@@ -1,7 +1,7 @@
 # Public-gate successor (#543)
 
 Independent task path: evals/level3/gate-stops-early-public-gate.
-Grader: gate-stops-early revision 6. Offline controls cover 29 candidates, 29 task mutations and 14 source-integrity
+Grader: gate-stops-early revision 6. Offline controls cover 29 candidates, 33 task mutations and 14 source-integrity
 corruptions; no study approval is granted.
 
 The runtime starts from revision-5 probe/judge code and two runnable seeds at

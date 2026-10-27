@@ -39,3 +39,8 @@ space-indented definitions. Unsupported includes, conditionals, computed/escaped
 or generated definitions yield UNKNOWN rather than proving typecheck absent.
 Discovery does not evaluate Make; actual check/stage runs share an 85-second
 cumulative launch budget (15 seconds per command) inside the 90-second probe.
+
+Alternate default GNUmakefile or makefile entrypoints are unsupported (UNKNOWN),
+even when their aggregate includes typecheck. The public command remains make check.
+Trace limits: 128KiB of JSON bytes and 512 distinct source-read rows per process.
+After 512 rows, any further qualifying read (even a duplicate) yields UNKNOWN.

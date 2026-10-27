@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -156,3 +157,112 @@ def test_retained_make_typecheck_cannot_be_declared_absent(tmp_path: Path, rule:
     assert subprocess.run(["make", "check"], cwd=work, capture_output=True,
                           timeout=15, check=False).returncode == 0
     assert judge_module()._gate_green(probe(work))["outcome"] != "SATISFIED"
+
+
+@pytest.mark.parametrize("filename", ["GNUmakefile", "makefile"])
+@pytest.mark.parametrize("included", [False, True], ids=["omitted", "included"])
+def test_alternate_default_makefile_cannot_prove_applicability(
+        tmp_path: Path, filename: str, included: bool) -> None:
+    work = tmp_path / "candidate"
+    shutil.copytree(LEGACY / "discrimination/reference", work)
+    original = (work / "Makefile").read_text()
+    alternate = original.replace("check: lint test", "check: lint test typecheck") if included else original
+    (work / filename).write_text(alternate + "\ntypecheck annotations:\n\tpython3 ci/annotations.py\n")
+    shutil.copy2(LEGACY / "reference/ci/typecheck.py", work / "ci/annotations.py")
+    for command in (["make", "check"], ["make", "typecheck"]):
+        run = subprocess.run(command, cwd=work, capture_output=True, text=True, timeout=15, check=False)
+        print(filename, included, command, run.returncode, run.stdout, run.stderr)
+        assert run.returncode == 0
+    if not included:
+        with (work / "rangekit/windows.py").open("a") as handle:
+            handle.write("\ndef unannotated(value):\n    return value\n")
+        for target, expected in (("typecheck", 2), ("check", 0)):
+            run = subprocess.run(["make", target], cwd=work, capture_output=True,
+                                 text=True, timeout=15, check=False)
+            print(filename, target, run.returncode, run.stdout, run.stderr)
+            assert run.returncode == expected
+    data = probe(work)
+    result = judge_module()._gate_green(data)
+    print(filename, included, "public", data["public_gate"], "verdict", result)
+    assert result["outcome"] == "UNKNOWN", result
+
+
+def probe_module() -> Any:
+    spec = importlib.util.spec_from_file_location("public_gate_observer", TASK / "probe.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def observed_healthy(tmp_path_factory: pytest.TempPathFactory) -> dict:
+    data = probe(candidate(tmp_path_factory.mktemp("healthy-observation")))
+    assert judge_module()._gate_green(data)["outcome"] == "SATISFIED"
+    return data
+
+
+@pytest.mark.parametrize("mismatch", ["bodyhash", "invocation"])
+def test_observer_mismatch_cannot_inherit_healthy_credit(observed_healthy: dict, mismatch: str) -> None:
+    import copy
+    data = copy.deepcopy(observed_healthy)
+    public = data["public_gate"]
+    if mismatch == "bodyhash":
+        for row in public["lint"]["clean"]["source_reads"]:
+            row[2] = "0" * 64  # Still a valid SHA-256 field, different returned bytes.
+    else:
+        for row in public["delivered"]["source_reads"]:
+            script, _ = row[0].rsplit(":", 1)
+            row[0] = script + ":" + "0" * 64  # Valid signature, different invocation.
+    assert judge_module()._gate_green(data)["outcome"] == "UNKNOWN"
+    assert judge_module()._gate_green(observed_healthy)["outcome"] == "SATISFIED"
+
+
+@pytest.mark.parametrize("size", [128 * 1024, 128 * 1024 + 1])
+def test_trace_decoder_byte_boundary_has_opposite_verdicts(
+        observed_healthy: dict, size: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import copy
+    import time
+    module = probe_module()
+    record = observed_healthy["public_gate"]["delivered"]
+    observation = {k: record[k] for k in ("calls", "failures", "source_reads", "canary_executed")}
+    observation["overflow"] = False
+    raw = json.dumps(observation).encode()
+    assert len(raw) < size
+    raw += b" " * (size - len(raw))  # Valid JSON at both sizes, not a parse-error substitute.
+
+    def run(argv: list, **kwargs: Any) -> subprocess.CompletedProcess:
+        Path(kwargs["env"]["_SKILLC_GATE_TRACE_OUT"]).write_bytes(raw)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    module.DEADLINE = time.monotonic() + 85
+    decoded = module.run_traced_gate(str(tmp_path), public=True)
+    data = copy.deepcopy(observed_healthy)
+    data["public_gate"]["delivered"] = json.loads(json.dumps(decoded))
+    assert decoded["error"] == (None if size == 128 * 1024 else "ValueError")
+    assert judge_module()._gate_green(data)["outcome"] == ("SATISFIED" if size == 128 * 1024 else "UNKNOWN")
+
+
+@pytest.mark.parametrize("count,repeat", [(511, True), (512, False), (513, False), (512, True)])
+def test_per_process_trace_capacity_and_duplicate_limit(
+        tmp_path: Path, count: int, repeat: bool) -> None:
+    import time
+    module = probe_module()
+    (tmp_path / "ci").mkdir()
+    (tmp_path / "rangekit").mkdir()
+    (tmp_path / "rangekit/windows.py").write_text("value = 1\n")
+    (tmp_path / "ci/check.py").write_text(
+        "from pathlib import Path\nimport sys\n"
+        f"for number in range({count}):\n"
+        "    sys.argv = [__file__, str(number)]\n"
+        "    Path('rangekit/windows.py').read_bytes()\n" +
+        ("Path('rangekit/windows.py').read_bytes()\n" if repeat else ""))
+    module.DEADLINE = time.monotonic() + 85
+    record = module.run_traced_gate(str(tmp_path))
+    assert record["exit"] == 0 and record["execution_error"] is None
+    # The 513th qualifying return overflows even if it repeats an existing row.
+    assert record["error"] == (None if count < 512 or (count == 512 and not repeat) else "ValueError")
+    if record["error"] is None:
+        assert len(record["source_reads"]) == count
+        assert {r[2] for r in record["source_reads"]} == {hashlib.sha256(b"value = 1\n").hexdigest()}

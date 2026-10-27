@@ -95,6 +95,8 @@ def run_public_gate(tree: str, expected: str = '') -> dict:
 
 def typecheck_applicable(tree: str, text: str) -> bool | None:
     """Literal declarations only. Unsupported syntax never proves absence."""
+    if any(Path(tree, name).exists() for name in ('GNUmakefile', 'makefile')):
+        return None
     if Path(tree, 'ci/typecheck.py').is_file():
         return True
     present = False

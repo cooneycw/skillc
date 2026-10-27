@@ -234,7 +234,7 @@ def certify(root: Path, control: str | None = None) -> bool:
 def mutation_cases() -> list[dict]:
     data = json.loads((HERE / 'public-gate-controls.json').read_text())
     cases = data['cases']
-    if data.get('schema') != 1 or len(cases) != 29 or len({c['name'] for c in cases}) != 29:
+    if data.get('schema') != 1 or len(cases) != 33 or len({c['name'] for c in cases}) != 33:
         raise ValueError('mutation population changed')
     return cases
 
