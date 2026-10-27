@@ -409,7 +409,9 @@ says `observation_record: refused-leak`.
 The census's `client_version` is a transcript observation, not an executable
 measurement. Current readers return the exact unique nonblank version across
 the version-bearing records, or null for missing, malformed or conflicting
-evidence. Identical duplicates are allowed; matching-wrong-matching is unknown.
+evidence. Repeated records with an identical version are allowed. Duplicate
+version, population or binding members within one JSON object are ambiguous,
+even when their values match; matching-wrong-matching across records is unknown.
 Ordinary Claude messages without a version field do not invalidate a header.
 This uses the existing text/null field; version uncertainty adds no census
 error and changes no task grade or eligibility decision.

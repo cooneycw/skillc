@@ -301,7 +301,6 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
     rule has been grounded for it yet (#124 is the Claude Code arm) - `None`
     means "not assessed", never "no drift"."""
     line_types: dict[str, int] = {}
-    client_version = ta.VersionObservation()
     model: str | None = None
     unrecognized: set[str] = set()
     response_items = 0
@@ -312,11 +311,9 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
-            client_version.add(None)
             line_types["<unparseable>"] = line_types.get("<unparseable>", 0) + 1
             continue
         if not isinstance(obj, dict):
-            client_version.add(None)
             line_types["<non-object>"] = line_types.get("<non-object>", 0) + 1
             continue
         top = str(obj.get("type"))
@@ -325,8 +322,6 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
         key = f"{top}/{payload_type}" if payload_type is not None else top
         line_types[key] = line_types.get(key, 0) + 1
         if client == "codex":
-            if top == "session_meta":
-                client_version.add(payload.get("cli_version") if isinstance(payload, dict) else None)
             if top == "turn_context" and isinstance(payload, dict) and isinstance(payload.get("model"), str):
                 model = model or payload["model"]
             if top == "response_item":
@@ -339,13 +334,11 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
                 elif payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
                     unrecognized.add(payload_type)
         else:
-            if "version" in obj:
-                client_version.add(obj["version"])
             message = obj.get("message")
             if top == "assistant" and isinstance(message, dict) and isinstance(message.get("model"), str):
                 model = model or message["model"]
     return {
-        "transcript_client_version": client_version.value,
+        "transcript_client_version": ta.observed_client_version(client, raw),
         "transcript_model": model,
         "transcript_line_types": dict(sorted(line_types.items())),
         "transcript_response_items_inspected": response_items if client == "codex" else None,
@@ -1691,7 +1684,19 @@ def retained_client_version(experiment: trial.Experiment, attempt_id: str) -> st
     client = planned["client"]
     if not isinstance(client, dict) or client.get("name") not in CLIENT_SPECS:
         return None
+    binding_keys = ("attempt_id", "stream", "origin", "coverage", "ref", "digest", "size")
     try:
+        journal = experiment.journal(attempt_id)
+        for line in journal.read_text().splitlines() if journal.exists() else ():
+            if not line.strip():
+                continue
+            event = ta.diagnostic_json(line)
+            if ta.duplicate_members(event, ("event",)):
+                return None
+            if (isinstance(event, dict) and event.get("event") == "transcript-retained"
+                    and (ta.duplicate_members(event, ("observation",))
+                         or ta.duplicate_members(event.get("observation"), binding_keys))):
+                return None
         independent = trial.read_retained_transcript(experiment, attempt_id)
         entry = independent
         manifest = experiment.root / f"manifest-{attempt_id}.json"
@@ -1700,13 +1705,17 @@ def retained_client_version(experiment: trial.Experiment, attempt_id: str) -> st
         if manifest.exists():
             if not manifest.is_file():
                 return None
-            metadata = json.loads(manifest.read_bytes())
-            if (not isinstance(metadata, dict) or metadata.get("version") != 2
+            metadata = ta.diagnostic_json(manifest.read_bytes())
+            if (not isinstance(metadata, dict)
+                    or ta.duplicate_members(metadata, ("version", "kind", "producer", "attempt_id", "trial_id", "observations"))
+                    or metadata.get("version") != 2
                     or metadata.get("kind") != records.ARTIFACT_MANIFEST or metadata.get("producer") != "controller"
                     or metadata.get("attempt_id") != attempt_id or metadata.get("trial_id") != planned["trial_id"]):
                 return None
             entries = metadata.get("observations", [])
             if not isinstance(entries, list):
+                return None
+            if any(ta.duplicate_members(e, ("stream",)) for e in entries):
                 return None
             transcripts = [e for e in entries if isinstance(e, dict) and e.get("stream") == records.CLIENT_TRANSCRIPT]
             if len(transcripts) > 1:
@@ -1718,7 +1727,8 @@ def retained_client_version(experiment: trial.Experiment, attempt_id: str) -> st
         if independent is not None and any(independent.get(k) != entry.get(k) for k in ("digest", "coverage")):
             return None
         digest, size = entry.get("digest"), entry.get("size")
-        if (entry.get("attempt_id") != attempt_id or entry.get("origin") != "client-reported"
+        if (ta.duplicate_members(entry, binding_keys)
+                or entry.get("attempt_id") != attempt_id or entry.get("origin") != "client-reported"
                 or not isinstance(digest, str) or type(size) is not int or size <= 0
                 or entry.get("ref") != f"{trial.OBJECTS}/{digest.removeprefix('sha256:')}"):
             return None

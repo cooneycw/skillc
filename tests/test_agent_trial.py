@@ -1210,6 +1210,31 @@ def test_548_malformed_population_cannot_observe_a_version(client: str, bad: str
         assert read_metadata is not None and read_metadata(raw)["cli_version"] is None
 
 
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize("member", ["version", "identical", "payload", "type"])
+def test_548_serialized_duplicate_members_cannot_hide_version_population(client: str, member: str) -> None:
+    if client == "codex":
+        bad = {
+            "version": '{"type":"session_meta","payload":{"cli_version":"A","cli_version":"B","cli_version":"A"}}',
+            "identical": '{"type":"session_meta","payload":{"cli_version":"A","cli_version":"A"}}',
+            "payload": '{"type":"session_meta","payload":{"cli_version":"B"},"payload":{"cli_version":"A"}}',
+            "type": '{"type":"session_meta","type":"event_msg","payload":{"cli_version":"B"}}',
+        }[member]
+        good = '{"type":"session_meta","payload":{"cli_version":"A"}}'
+    else:
+        bad = {"version": '{"version":"A","version":"B","version":"A"}',
+               "identical": '{"version":"A","version":"A"}',
+               "payload": '{"type":"user","payload":{},"payload":{}}',
+               "type": '{"type":"assistant","type":"user"}'}[member]
+        good = '{"type":"system","version":"A"}'
+    raw = bad + "\n" + good
+    canonical = "\n".join(json.dumps(json.loads(line)) for line in raw.splitlines())
+    observed, last_wins = at.transcript_census(client, raw), at.transcript_census(client, canonical)
+    assert observed.pop("transcript_client_version") == ("A" if client == "claude" and member in ("payload", "type") else None)
+    last_wins.pop("transcript_client_version")
+    assert observed == last_wins  # Classification/counts/errors retain their existing semantics.
+
+
 @pytest.mark.parametrize("raw", ["", "not json\n", '{"type": "session_meta", "payload": {"cli_version": "0.157.1"}}\n'])
 def test_census_with_no_response_items_is_not_assessed(raw: str) -> None:
     """Codex review, red on the first census: an empty, malformed or

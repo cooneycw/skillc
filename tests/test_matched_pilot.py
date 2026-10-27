@@ -543,6 +543,64 @@ def test_548_valid_legacy_and_failure_retention_remain_readable(tmp_path: Path, 
     assert at.retained_client_version(experiment, aid) == "A"
 
 
+@pytest.mark.parametrize("member", ["observations", "attempt_id", "trial_id", "hidden-stream", "journal:observation", "journal:event", "journal:entry",
+                                   *["entry:" + key for key in ("attempt_id", "stream", "origin", "coverage", "ref", "digest", "size")]])
+def test_548_serialized_binding_members_cannot_hide_a_population(tmp_path: Path, member: str) -> None:
+    from skillc import agent_trial as at
+    from skillc import matched_pilot as mp
+
+    def encoded(value: object) -> str:
+        return json.dumps(value, separators=(",", ":"))
+
+    def duplicate(raw: str, key: str, value: object) -> str:
+        field = encoded(key) + ":" + encoded(value)
+        assert field in raw
+        return raw.replace(field, field + "," + field, 1)
+
+    experiment = t.plan(_plan_spec(), t.open_store(tmp_path / "store", []))
+    aid = mp.schedule_from_ledger(experiment)[0].attempt_id
+    raw = b'{"type":"session_meta","payload":{"cli_version":"A"}}\n'
+    digest = t.put_object(experiment, raw)
+    entry: dict[str, object] = {"stream": "client-transcript", "origin": "client-reported", "coverage": "complete",
+                                "attempt_id": aid, "digest": digest, "ref": "objects/" + digest[7:], "size": len(raw)}
+    prefix = ""
+    if member.startswith("journal:"):
+        t.retain_transcript(experiment, aid, t.TranscriptEvidence(raw))
+        path = experiment.journal(aid)
+        lines = path.read_text().splitlines()
+        prefix = "\n".join(lines[:-1]) + "\n"
+        data = json.loads(lines[-1])
+    else:
+        path = experiment.root / f"manifest-{aid}.json"
+        data = _548_manifest(experiment, aid, entry)
+        if member == "hidden-stream":
+            t.retain_transcript(experiment, aid, t.TranscriptEvidence(raw))
+    serialized = encoded(data)
+    path.write_text(prefix + serialized + "\n")
+    assert at.retained_client_version(experiment, aid) == "A"
+    if member == "hidden-stream":
+        serialized = serialized.replace('"stream":"client-transcript"', '"stream":"client-transcript","stream":"other"')
+    elif member.startswith("entry:"):
+        key = member.split(":")[1]
+        serialized = serialized.replace(encoded(entry), duplicate(encoded(entry), key, entry[key]))
+    elif member.startswith("journal:"):
+        key = member.split(":")[1]
+        if key == "entry":
+            observed = data["observation"]
+            serialized = serialized.replace(encoded(observed), duplicate(encoded(observed), "attempt_id", aid))
+        else:
+            serialized = duplicate(serialized, key, data[key])
+    elif member == "observations":
+        other = {**entry, "digest": t.put_object(experiment, raw.replace(b'"A"', b'"B"'))}
+        other["ref"] = "objects/" + str(other["digest"])[7:]
+        alternative = _548_manifest(experiment, aid, other)
+        serialized = serialized.replace('"observations":', '"observations":' + encoded(alternative["observations"]) + ',"observations":', 1)
+    else:
+        serialized = duplicate(serialized, member, data[member])
+    path.write_text(prefix + serialized + "\n")
+    assert at.retained_client_version(experiment, aid) is None
+
+
 @pytest.mark.parametrize("damage", ["partial", "tampered", "nonutf8", "unknown-client", "ambiguous", "conflicting", "malformed"])
 def test_548_report_retention_damage_is_unknown_not_a_task_failure(tmp_path: Path, damage: str) -> None:
     from skillc import agent_trial as at
