@@ -438,7 +438,8 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
                               reason="CLI control stops before subject dispatch")
 
     monkeypatch.setattr(agent_trial, "run_one_attempt", observe_attempt)
-    args = ["calibration-run", str(declaration), "--private-dir", str(tmp_path / "private")]
+    args = ["calibration-run", str(declaration), "--image", shared["image"]["tag"],
+            "--private-dir", str(tmp_path / "private")]
     if (runtime or fault == "unrelated-receipt") and fault != "missing-receipt":
         receipt = tmp_path / "runtime-receipt.json"
         receipt_value = json.loads(RECEIPT)
