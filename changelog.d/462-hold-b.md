@@ -1,1 +1,0 @@
-- **Load harness: pinned runs measure against their pinned cores** (#462). `summarize` judges `meets_2x_nproc` and `load_factors` against the pinned core count under `--cpus`, and a `docker rm` that the daemon is already completing no longer counts as a cleanup failure. A real removal failure still does, and the sweep must still settle empty. Hold B measurements added.

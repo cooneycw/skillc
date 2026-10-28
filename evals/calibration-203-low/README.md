@@ -1,5 +1,13 @@
 # Low-effort check for #203: is `gate-ran-nothing` ever not at ceiling?
 
+**Historical constraint (#393, fixed in PR #396):** these attempts used a
+fixture whose nested directories were installed root-owned. The reference
+fix's `tests/unit/__init__.py` creation path was blocked; rewriting the gate
+was available. Read the solution-path mix under that constraint, rather than
+as unconstrained agent choice. The grader accepts both paths, so the reported
+pass/fail counts are unchanged. Aggregate outcomes alone do not establish
+which fix an unconstrained agent would have chosen.
+
 **Status: run 2026-10-04, 12:26-12:36Z; still at ceiling. Next: #203 Q2 step
 (b), a harder task.** This is step (a) of the owner's
 #203 Q2 ruling ("c": lower the effort first, then a harder task if needed).

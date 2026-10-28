@@ -1,1 +1,0 @@
-- Native calibration schedules stop before launching another attempt after observed server-side tool use or successful egress outside the provider allowlist. Checkpoints preserve the stop decision and evidence; recovered reports distinguish an actual stop from a historical violation and exclude violating attempts from comparison eligibility.

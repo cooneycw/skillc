@@ -55,32 +55,29 @@ milestone"](#second-milestone-a-matched-pilot-a-second-client-arm-and-real-daemo
 below for exactly what those runs establish and what they do not. `skillc`
 now also ships Level 2 and Level 3 task fixtures
 ([#13](https://github.com/cooneycw/skillc/issues/13)) that self-certify
-locally; neither level has run through a live agent yet. The full behavioral
-comparisons described later in this README remain a documentation-only
-proposal. See the
+locally; Level 3 has also run through live calibration attempts. Those
+calibrations reached ceiling or floor and do not demonstrate general benefit
+(see the [0.5.0 release notes](docs/release-notes/0.5.0.md)). See the
 [specification](docs/specs/evaluation-facility/spec.md),
 [architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
 [PLAN.md](PLAN.md) for the design and delivery sequence.
 
-**0.4.0 closes no new capability milestone.** It closes four issues found
-and fixed along the way: two load-sensitive tests made deterministic
-([#174](https://github.com/cooneycw/skillc/issues/174)), a silent
-partial-capture bug in the Docker backend's own output draining
-([#189](https://github.com/cooneycw/skillc/issues/189)), a silent
-failed-write-back bug in the same backend that could let a subject suppress
-its own capture ([#186](https://github.com/cooneycw/skillc/issues/186)),
-and a CPP scan suppression fix
-([#159](https://github.com/cooneycw/skillc/issues/159)). Substantial code
-also landed this cycle for the Level 4/5 evaluation work
-([#14](https://github.com/cooneycw/skillc/issues/14): an authority-boundary
-interceptor, an advisory Level 5 request-count observer, and a
-trusted-observation channel) and declared outcome dimensions plus a
-matched-configuration comparison
-([#13](https://github.com/cooneycw/skillc/issues/13)) - neither issue
-closes yet, since both still owe a real live-agent run. Full detail,
-including everything else that shipped and exactly what each open issue
-still owes:
-[`docs/release-notes/0.4.0.md`](docs/release-notes/0.4.0.md).
+**0.5.0 delivers controlled evaluation workflows and retained evidence.**
+Declared dependency inventories, qualified graders, calibration and uptake
+reports, fixture services, controller-held witnesses and retained export now
+exist. The bounded selection probe (#26) is closed with its detection/control
+and retained evidence; broader effectiveness and reliability claims remain open.
+Today's delivery also fixes zero-score optimizer ranking (#599), preserves
+license notices beside frozen snapshots, gates clean wheel installation, and
+corrects uptake accounting and minimum schedule overhead (#546, now closed
+with its seven-item disposition; real-daemon follow-up remains open in #613).
+`skillc calibration-report <run_dir>` recovers interrupted calibration reports
+from retained checkpoints and verified ledgers without starting an agent.
+Most failure-path coverage still uses fake Docker; container verification skips
+real-daemon tests. The eighteen sweep closures include coordination transfers
+whose implementation work is unfinished. See the
+[0.5.0 release notes](docs/release-notes/0.5.0.md) for each delivered scope,
+remaining obligation and evidence limit.
 
 <!-- milestones:start (checked against docs/milestones.json, #73) -->
 | Milestone | State |
@@ -89,9 +86,10 @@ still owes:
 | 0.2.0 - real Docker trial end to end (#10) and a second independent collection (#11) | closed |
 | 0.3.0 - the first predeclared matched pilot (#12), the Claude Code agent arm (#124), and real-daemon timeout/cancellation seeds (#122) | closed |
 | 0.4.0 - determinism and capture-correctness hardening: load-sensitive tests fixed (#174), two silent partial/failed-capture bugs fixed (#189, #186), and CPP scan suppressions (#159) - no new capability milestone closes this cycle | closed |
+| 0.5.0 - controlled evaluation workflows and retained evidence; broader live studies remain open | closed |
 <!-- milestones:end -->
 
-**Version:** `0.4.0` (checked in CI against the package version, #73)
+**Version:** `0.5.0` (checked in CI against the package version, #73)
 
 <!-- commands:start (checked against the real argparse parser, #73) -->
 ```bash
@@ -173,7 +171,7 @@ ok       frontmatter           red on bad (3), green on good (2)
 ok       record-envelope       red on bad (7), green on good (2)
 ...
 
-skillc selftest: 23/23 rule(s) discriminate
+skillc selftest: 31/31 rule(s) discriminate
 ```
 
 Six verdicts fail the run:
@@ -528,13 +526,14 @@ installed, on the same Level 1 task, 3 repeats across 2 arms). **That pilot
 has since run, under the operator's own subscription login (never metered
 spend, ADR 0005 rule 6) - see ["Second milestone"](#second-milestone-a-matched-pilot-a-second-client-arm-and-real-daemon-seeds)
 below.** Level 2 and Level 3 task fixtures now exist too (#13), self-certified
-locally; no agent has attempted either yet, and no paid model trial or real
-judge call has been made against any subject.
+locally; Level 3 live calibration attempts are retained under
+`evals/calibration-204/` and `evals/calibration-203*/`. A completed attempt
+is distinct from a calibrated task or demonstrated benefit.
 
-The [implementation plan](PLAN.md) sequences delivery against the specification;
-the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
-runtime, paid model trial, CPP change or upstream CI integration is introduced
-by this planning update.
+The [implementation plan](PLAN.md) retains the original delivery sequence;
+the [review agenda](docs/specs/evaluation-facility/review.md) tracks issue-specific
+choices. Current implementation and retained evidence are summarized above.
+A new live attempt needs its own approved declaration and caps.
 
 See the [project assessment and research](docs/README.md) for the proposed role
 of skillc in a focused CPP harness, verified implementation gaps, and a suggested
@@ -580,23 +579,12 @@ both run live on native Docker Engine, both `CAUGHT` (evidence:
 The rest of the conformance table and failure-path matrix stay proven only
 against the fake CLI, unchanged from 0.2.0's own scope ruling.
 
-Also in this cycle, still open: Level 2, Level 3, Level 4 and Level 5 task
-fixtures ([#13](https://github.com/cooneycw/skillc/issues/13),
-[#14](https://github.com/cooneycw/skillc/issues/14), self-certified locally,
-no live agent run yet), four Nit Store fixes against the exposure check's
-own acceptance criteria ([#55](https://github.com/cooneycw/skillc/issues/55),
-whose own live-evidence acceptance items are untouched by this cycle), an
-optional managed-container backend with a published protocol but no
-implementing platform yet ([#64](https://github.com/cooneycw/skillc/issues/64)),
-operator-expressible degraded CPP subjects and a behavioral-eval export path
-([#150](https://github.com/cooneycw/skillc/issues/150) - everything it
-needs to run now exists, including the agent-path installation receipt;
-the operator's own live discriminating run and the export into
-claude-power-pack are what's still owed), and a live selection-probe run with its
-detection control ([#26](https://github.com/cooneycw/skillc/issues/26)).
-None of these claims to be finished; see
-[`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)
-for exactly what each one still owes.
+The [0.3.0 release notes](docs/release-notes/0.3.0.md) preserve that milestone's
+historical status. Since then, the exposure check (#55), degraded-run slice
+(#150) and bounded selection probe (#26) have closed with their recorded
+limits. Level 3 calibration attempts now exist; the broader #13/#14 task-family
+outcomes and #203 effectiveness study remain open. Current scope and carry-forward
+work are documented in the [0.5.0 notes](docs/release-notes/0.5.0.md).
 
 ## Prior art
 

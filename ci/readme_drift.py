@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""README drift checks (#73): commands, version, and status vs. milestones.
+"""README drift checks (#73, #554): commands, version, status and selftest count.
 
 Each check compares README.md against something ELSE that can go stale
 independently of it - the real argparse parser, the package's own version,
@@ -156,6 +156,16 @@ def status_drift(readme_text: str, milestones_data: dict[str, object]) -> list[s
     return problems
 
 
+def selftest_drift(readme_text: str, rule_count: int) -> list[str]:
+    """Check the documented sample against the registered rule population."""
+    match = re.search(r"skillc selftest: (\d+)/(\d+) rule\(s\) discriminate", readme_text)
+    if rule_count <= 0 or match is None:
+        return ["README selftest sample or registered rule population is absent"]
+    if tuple(map(int, match.groups())) != (rule_count, rule_count):
+        return [f"README selftest sample differs from {rule_count}/{rule_count} registered rules"]
+    return []
+
+
 # --------------------------------------------------------------------- CLI
 
 
@@ -164,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args[0]) if args else ROOT
 
     from skillc import __version__
+    from skillc.checks import ALL_RULES
     from skillc.cli import build_parser
 
     readme_text = (root / "README.md").read_text(encoding="utf-8")
@@ -174,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
 
     problems = [
         *command_drift(readme_text, real_commands(build_parser())),
+        *selftest_drift(readme_text, len(ALL_RULES)),
         *version_drift(readme_text, __version__),
         *status_drift(readme_text, milestones_data),
     ]
