@@ -7,7 +7,7 @@ This module runs it with the MODEL: the agent gets CPP's real flow:auto (the
 path the scripted campaign certified.
 
 That path is the fixture service, the gh shim, the nested-codex guard, the
-controller gate witness and the post-stop snapshot, graded by grader revision 2.
+controller gate witness and the post-stop snapshot, graded by the declared grader revision, derived from the current grader definition.
 The live attempt adds the real codex client, the real credential and #442's
 provider-only egress.
 
