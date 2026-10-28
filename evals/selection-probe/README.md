@@ -1,5 +1,21 @@
 # Selection probe: three predeclared cases (#26)
 
+Current result storage (#545 B2): future runs through the concrete
+`AgentTrialRunner` finish attempt collection and establish complete attendance
+before grading eligible captures. Each eligible capture is graded once through the locked verifier
+assembler using its attempt/trial-bound stored observation and frozen artifacts,
+not copied transcript candidate bytes. Reports link `result_id` and
+`result_status`; task success remains separate from mandatory installation-ready
+UNKNOWN, so a task PASS may have stored status INCONCLUSIVE. No receipt or trusted
+origin/freshness is inferred from an observation, hash, or Python adapter type.
+The adapter requires its own experiment and a separate network-none grading
+backend, even with `allow_host_grading=True`. Missing/invalid capture evidence
+refuses; already captured attempts and admitted results remain, with no global
+rollback or idempotent replay guarantee. Ineligible captures may still owe grading.
+Custom synthetic callbacks retain explicit trusted-fixture grading policy and no
+authoritative result IDs. Historical stores/studies, trusted regrade and the
+legacy baseline identity are unchanged; whole #545 remains open.
+
 Current installation (#538): new CLI runs preserve each acquired skill file's
 source executable classification, using the same population and digest policy as
 collection runs. Executable helpers arrive owner-only at 0700; other files at 0600,

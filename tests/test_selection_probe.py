@@ -513,6 +513,7 @@ def test_an_inconclusive_grade_is_unknown_never_a_task_failure(
     report = _run({}, tmp_path)
     treatment = _case(report, INTENDED_USE).treatment
     assert treatment.task_success is None
+    assert treatment.result_id is None and treatment.result_status is None
     assert "INCONCLUSIVE" in treatment.detail and "not contained" in treatment.detail
 
 
@@ -1709,3 +1710,239 @@ def test_cli_resolves_one_grader_for_plan_and_execution(
     monkeypatch.setattr(verify.GraderDef, "load", load)
     assert cli.main(["selection-probe", "--task", str(FINISH_CLOSE_REF_ROOT), "--base", str(tmp_path)]) == 0
     assert len(loaded) == 1 and seen[0]["grader"] is loaded[0]
+
+
+def test_real_selection_stores_one_result_per_eligible_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Actual controller captures must cease owing grading, not just print a grade."""
+    calls: list[object] = []
+    grade_files = verify.grade_files
+
+    def counted(*args: object, **kwargs: object) -> verify.Graded:
+        calls.append(kwargs.get("backend"))
+        return grade_files(*args, **kwargs)  # type: ignore[arg-type]
+
+    observed: list[str] = []
+    read_observation = verify._stored_observation
+
+    def bound(current: t.Experiment, aid: str, issued: object) -> dict[str, object]:
+        assert t._holds_lock(current.root)
+        assert len(list(current.root.glob("lifecycle-*.json"))) == 6
+        assert aid not in observed, "duplicate grading of a captured attempt"
+        observed.append(aid)
+        return read_observation(current, aid, issued)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "_stored_observation", bound)
+    monkeypatch.setattr(verify, "grade_files", counted)
+    report, experiment, backend = _run_real(tmp_path, {
+        (INTENDED_USE, "treatment"): _script(plant=("qa-test",)),
+        (OVERLAPPING, "treatment"): _script(plant=("security-deep",), candidate=BAD_CANDIDATE),
+    })
+    aids = [str(a["attempt_id"]) for _, a in experiment.attempts()]
+    assert len(aids) == len(backend.delivered) == 6 and len(report.cases) == 3
+    assert _case(report, INTENDED_USE).treatment.task_success is True
+    assert _case(report, OVERLAPPING).treatment.task_success is False
+    for aid in aids:
+        assert json.loads((experiment.root / f"lifecycle-{aid}.json").read_text())["disposition"] == "captured"
+        obs = json.loads((experiment.root / verify.observation_record_name(aid)).read_text())
+        assert obs["status"] == "observed" and obs["transcript"]["grading_eligible"] is True
+    results = [json.loads(p.read_text()) for p in experiment.root.glob("result-*.json")]
+    assert len(results) == len(aids) == 6, "eligible captured attempts still have no stored results"
+    from skillc import checks, records
+
+    assert set(observed) == set(aids) and len(observed) == 6
+    assert len(calls) == 6 and all(b is not None and b is not backend for b in calls)
+    assert len({v["result_id"] for v in results}) == 6
+    assert {v["attempt_id"] for v in results} == set(aids)
+    for result in results:
+        aid = result["attempt_id"]
+        assert result["trial_id"] == experiment.trial_of(aid)["trial_id"]
+        assert result["grader"] == GRADER.identity()
+        assert result["graded_digests"] == sorted({str(a["digest"]) for a in t.frozen_artifacts(experiment, aid)})
+        assert not checks.run_record(records.Record(experiment.root / f"result-{result['result_id']}.json", result))
+        readiness = [c for c in result["criteria"] if c["id"] == verify.READINESS_CRITERION]
+        assert len(readiness) == 1 and readiness[0]["mandatory"] is True and readiness[0]["outcome"] == "UNKNOWN"
+        assert result["verification"]["readiness_source"] == "agent-observation"
+    linked = [arm for case in report.cases for arm in (case.treatment, case.baseline)]
+    assert {arm.result_id for arm in linked} == {v["result_id"] for v in results}
+    assert all(arm.result_status == "INCONCLUSIVE" for arm in linked if arm.task_success is True)
+    copied = tmp_path / "accounting-copy"
+    shutil.copytree(experiment.root, copied)
+
+    def accounting() -> list[str]:
+        bundle = records.bundle_at(copied)
+        assert bundle is not None and len(bundle.of_kind(records.TRIAL_LEDGER)) == 1
+        return [f.detail for f in checks.run_bundle(bundle, only="attempt-accounting")]
+
+    assert accounting() == []
+    removed = copied / f"result-{results[0]['result_id']}.json"
+    original = removed.read_bytes()
+    removed.unlink()
+    assert any(results[0]["attempt_id"] in f and "grading is still owed" in f for f in accounting())
+    removed.write_bytes(original)
+    assert accounting() == [] and removed.read_bytes() == original
+
+
+def test_cli_real_selection_stores_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only acquisition/transport factories are substituted; CLI/driver/grader run."""
+    from skillc import cli, demo
+    from skillc import collection_conformance as cc
+
+    state = tmp_path / "docker-state"
+    docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(state)]
+    credential_path = _codex_credential(tmp_path)
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: SimpleNamespace(
+        subject=SimpleNamespace(client="codex", client_version="0.157.1", revision="v1"),
+        source=SimpleNamespace(digest=_TREATMENT_SUBJECT_DIGEST), files=[],
+    ))
+    monkeypatch.setattr(cc, "_collection_home_files", lambda *a: _COLLECTION)
+    monkeypatch.setattr(cc, "_collection_home_modes", lambda *a: {})
+    monkeypatch.setattr(cc, "discard_acquisition", lambda *a: None)
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: _PLACEHOLDER_IMAGE_DIGEST)
+    def backends(*, image: str, base: Path, **_kwargs: object) -> tuple[d.DockerBackend, d.DockerBackend]:
+        options = {"image": image, "base_dir": base, "docker_bin": docker_bin,
+                   "daemon_timeout": FAKE_DOCKER_DAEMON_TIMEOUT}
+        return _HomeRecordingBackend(**options), d.DockerBackend(**options)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cc, "agent_backends", backends)
+    actual_factory = sp.agent_trial_runner
+    experiments: list[t.Experiment] = []
+
+    def factory(**kwargs: object) -> sp.AgentTrialRunner:
+        experiment = kwargs["experiment"]
+        assert isinstance(experiment, t.Experiment)
+        experiments.append(experiment)
+        kwargs["argv_for"] = _argv_for(experiment, state, {})
+        return actual_factory(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sp, "agent_trial_runner", factory)
+    assert cli.main([
+        "selection-probe", "--base", str(tmp_path), "--image", "fake-image:1",
+        "--docker-bin", " ".join(docker_bin), "--credential", str(credential_path), "--agent-timeout", "5",
+    ]) == 0
+    [experiment] = experiments
+    aids = {str(a["attempt_id"]) for _, a in experiment.attempts()}
+    assert len(aids) == 6
+    for aid in aids:
+        obs = json.loads((experiment.root / verify.observation_record_name(aid)).read_text())
+        assert obs["status"] == "observed" and obs["transcript"]["grading_eligible"] is True
+    results = [json.loads(p.read_text()) for p in experiment.root.glob("result-*.json")]
+    assert len(results) == 6, "CLI captures still owe stored verified results"
+    assert {v["attempt_id"] for v in results} == aids
+    document = json.loads((experiment.root.parent / "selection-probe-report.json").read_text())
+    links = [c[arm] for c in document["cases"] for arm in ("treatment", "baseline")]
+    assert {v["result_id"] for v in links} == {v["result_id"] for v in results}
+    assert all(v["result_status"] == "INCONCLUSIVE" and v["task_success"] is True for v in links)
+
+
+@pytest.mark.parametrize("fault", [
+    "healthy", "missing", "symlink", "schema", "attempt", "trial", "ineligible", "frozen-changed", "frozen-missing",
+])
+def test_real_selection_requires_bound_capture_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    actual = sp.AgentTrialRunner.__call__
+    seen: list[tuple[sp.AgentTrialRunner, str]] = []
+
+    def changed(self: sp.AgentTrialRunner, issued: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript | None:
+        transcript = actual(self, issued, attempt)
+        seen.append((self, str(attempt["attempt_id"])))
+        if len(seen) != 6:
+            return transcript
+        _, aid = seen[0]
+        path = self.experiment.root / verify.observation_record_name(aid)
+        if fault == "missing":
+            path.unlink()
+        elif fault == "symlink":
+            target = path.with_suffix(".saved")
+            path.rename(target)
+            path.symlink_to(target)
+        elif fault.startswith("frozen-"):
+            blob = self.experiment.object_path(str(t.frozen_artifacts(self.experiment, aid)[0]["digest"]))
+            if fault == "frozen-changed":
+                blob.chmod(0o600)  # deliberately corrupt this test-owned object
+                blob.write_bytes(b"modified frozen capture")
+            else:
+                blob.unlink()
+        elif fault != "healthy":
+            data = json.loads(path.read_text())
+            if fault == "schema":
+                data["version"] = 999
+            elif fault == "attempt":
+                data["attempt_id"] = "foreign-attempt"
+            elif fault == "trial":
+                data["trial_id"] = "foreign-trial"
+            else:
+                data["transcript"]["grading_eligible"] = False
+                data["transcript"]["canary_satisfied"] = False
+            path.write_text(json.dumps(data))
+        return transcript
+
+    monkeypatch.setattr(sp.AgentTrialRunner, "__call__", changed)
+    if fault == "healthy":
+        report, experiment, _ = _run_real(tmp_path, {})
+        assert len(list(experiment.root.glob("result-*.json"))) == 6
+        assert all(c.treatment.task_success is True for c in report.cases)
+    else:
+        with pytest.raises(sp.SelectionProbeRefused, match="stored grading refused"):
+            _run_real(tmp_path, {})
+        assert len(seen) == 6
+        runner, _ = seen[0]
+        assert len(list(runner.experiment.root.glob("lifecycle-*.json"))) == 6
+        assert not list(runner.experiment.root.glob("result-*.json"))
+
+
+def test_real_selection_ignores_copied_transcript_candidate_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual = sp.AgentTrialRunner.__call__
+
+    def poisoned(self: sp.AgentTrialRunner, issued: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript | None:
+        transcript = actual(self, issued, attempt)
+        assert transcript is not None
+        return dataclasses.replace(transcript, candidate_files=tuple(_candidate_files(BAD_CANDIDATE)))
+
+    monkeypatch.setattr(sp.AgentTrialRunner, "__call__", poisoned)
+    report, experiment, _ = _run_real(tmp_path, {})
+    assert all(c.treatment.task_success is True and c.baseline.task_success is True for c in report.cases)
+    assert len(list(experiment.root.glob("result-*.json"))) == 6
+
+
+@pytest.mark.parametrize("fault", ["foreign", "no-backend-host-optin"])
+def test_real_selection_policy_refuses_before_dispatch(tmp_path: Path, fault: str) -> None:
+    experiment, runner, _ = _real_runner_parts(tmp_path)
+    if fault == "foreign":
+        runner = dataclasses.replace(runner, experiment=_plan(tmp_path / "other"))
+    with pytest.raises(sp.SelectionProbeRefused, match="another experiment" if fault == "foreign" else "no grading_backend"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, allow_host_grading=True,
+        )
+    assert runner.backend.delivered == {}  # type: ignore[attr-defined]
+
+
+def test_synthetic_lookalike_keeps_fixture_policy_and_no_result_ids(tmp_path: Path) -> None:
+    experiment = _plan(tmp_path)
+    runner = _fake_runner({})
+    runner.experiment = experiment  # type: ignore[attr-defined]
+    runner.backend = object()  # type: ignore[attr-defined]
+    with pytest.raises(sp.SelectionProbeRefused, match="no grading_backend"):
+        sp.run_planned_selection_probe(experiment, CASES, runner, base=tmp_path / "work", grader=GRADER)
+    report = sp.run_planned_selection_probe(
+        experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, allow_host_grading=True,
+    )
+    assert all(c.treatment.task_success is True for c in report.cases)
+    assert all(a.result_id is None and a.result_status is None for c in report.cases for a in (c.treatment, c.baseline))
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+def test_incomplete_attendance_precedes_any_grade(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(verify, "grade_files", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(verify, "grade_agent_attempt", lambda *a, **kw: calls.append(a))
+    experiment = _plan(tmp_path)
+    with pytest.raises(sp.SelectionProbeRefused, match="missing 6 planned"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, lambda *a: None, base=tmp_path / "work", grader=GRADER, allow_host_grading=True,
+        )
+    assert calls == [] and not list(experiment.root.glob("result-*.json"))
