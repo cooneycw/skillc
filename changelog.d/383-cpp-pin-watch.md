@@ -1,0 +1,1 @@
+- Add an explicit CPP pin-watch reading with verified closure drift classes, evidence paths, committed controls and opt-in change-only notices to the evergreen watch issue.
