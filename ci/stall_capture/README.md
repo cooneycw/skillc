@@ -74,6 +74,8 @@ the guest, `throttle` when no container was seen in two consecutive samples,
 and any rate on the very first sample. So a guest-only `discard` verdict names
 the alternatives nobody checked. Host rates are joined to a window by interval
 overlap, and `host_intervals.partial` counts those reaching outside it.
+An `error` record splits a stall window, and no rate is computed across it, so
+a gap is never read as a continuous stall. Non-finite thresholds are refused.
 
 The **CPU-burn control** (C1) is the `cpuburn` fixture: cpu pressure with io
 quiet must book to `contention` and never to an io cause. Here it is replayed
