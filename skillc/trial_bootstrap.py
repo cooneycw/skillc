@@ -109,8 +109,14 @@ CLIENT_BINARIES: Mapping[str, str] = {"codex": "codex", "claude": "claude", "cla
 
 #: One container start of the trial image measured ~1s; this bounds a wedge.
 CLIENT_PROBE_TIMEOUT = 60.0
+#: After a timeout, how long the killed-at-bound create is given to settle
+#: before its cleanup (#540: an `rm -f` sent before the daemon answers can
+#: find "No such container" and the create lands afterwards).
+CLIENT_PROBE_SETTLE = 10.0
 
-_VERSION_TOKEN = re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?![\w.])")
+# A complete version token, prerelease and build metadata included, so
+# "0.157.1+custom" is the version "0.157.1+custom" - never "0.157.1".
+_VERSION_TOKEN = re.compile(r"(?<![\w.+-])\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?![\w.+-])")
 
 
 @dataclass(frozen=True)
@@ -124,23 +130,36 @@ class ClientProbe:
 def parse_cli_version_output(output: str) -> ClientProbe:
     """The version in one `<client> --version` answer: exactly one non-blank
     line carrying exactly one version token ("codex-cli 0.157.1",
-    "2.1.283 (Claude Code)"). Empty, multi-line or multi-version output is
-    UNKNOWN, never a best guess."""
+    "2.1.283 (Claude Code)"). Empty, multi-line or multi-version output - a
+    repeated identical token included - is UNKNOWN, never a best guess."""
     lines = [line for line in output.splitlines() if line.strip()]
     if not lines:
         return ClientProbe(None, "the client printed no version")
     if len(lines) != 1:
         return ClientProbe(None, f"the client printed {len(lines)} lines, not one version line")
-    tokens = set(_VERSION_TOKEN.findall(lines[0]))
+    tokens = _VERSION_TOKEN.findall(lines[0])
     if len(tokens) != 1:
         return ClientProbe(None, f"{len(tokens)} version strings in {lines[0][:120]!r}, not exactly one")
-    return ClientProbe(tokens.pop(), "measured")
+    return ClientProbe(tokens[0], "measured")
+
+
+def _remove_probe_container(docker_bin: Sequence[str], name: str, timeout: float) -> str:
+    """"" when `name` is confirmed gone, else a clause saying cleanup is unconfirmed."""
+    try:
+        removed = subprocess.run([*docker_bin, "rm", "-f", name], capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"; cleanup 'docker rm -f {name}' failed: {exc}"
+    if removed.returncode != 0 and b"No such container" not in removed.stderr:
+        return f"; cleanup 'docker rm -f {name}' exited {removed.returncode}"
+    return ""
 
 
 def probe_image_cli_version(docker_bin: Sequence[str], image_id: str, client: str, *,
-                            timeout: float = CLIENT_PROBE_TIMEOUT) -> ClientProbe:
+                            timeout: float = CLIENT_PROBE_TIMEOUT,
+                            settle: float = CLIENT_PROBE_SETTLE) -> ClientProbe:
     """Run `<binary> --version` in a throwaway, network-less container of
-    `image_id` (never a tag, never pulled) and parse the answer."""
+    `image_id` (never a tag, never pulled) and parse the answer. Never
+    raises for an unmeasurable answer: every failure is UNKNOWN."""
     binary = CLIENT_BINARIES.get(client)
     if binary is None:
         return ClientProbe(None, f"no known binary for client {client!r}")
@@ -148,18 +167,37 @@ def probe_image_cli_version(docker_bin: Sequence[str], image_id: str, client: st
     argv = [*docker_bin, "run", "--rm", "--name", name, "--network", "none", "--pull", "never",
             "--entrypoint", binary, image_id, "--version"]
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired:
-        # `--rm` does not fire for a container whose client was killed.
-        subprocess.run([*docker_bin, "rm", "-f", name], capture_output=True, timeout=timeout, check=False)
-        return ClientProbe(None, f"`{binary} --version` did not answer within {timeout:g}s")
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as exc:
         return ClientProbe(None, f"could not start the probe: {exc}")
+    try:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # #540: give the create one bounded window to settle, so the
+            # removal below cannot run ahead of a container still landing.
+            settled = True
+            try:
+                proc.communicate(timeout=settle)
+            except subprocess.TimeoutExpired:
+                settled = False
+            cleanup = _remove_probe_container(docker_bin, name, settle)
+            if not settled:
+                cleanup = cleanup or f"; the create had not settled after {settle:g}s, so removal is unconfirmed"
+            return ClientProbe(None, f"`{binary} --version` did not answer within {timeout:g}s{cleanup}")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    try:
+        out, err = stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
+    except UnicodeDecodeError as exc:
+        return ClientProbe(None, f"`{binary} --version` printed bytes that are not UTF-8: {exc}")
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        detail = (err or out).strip().splitlines()
         return ClientProbe(None, f"`{binary} --version` exited {proc.returncode}"
                                  + (f": {detail[-1][:200]}" if detail else ""))
-    return parse_cli_version_output(proc.stdout)
+    return parse_cli_version_output(out)
 
 
 # --------------------------------------------------------------------------

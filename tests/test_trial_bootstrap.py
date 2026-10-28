@@ -86,14 +86,23 @@ log, mode, argv = sys.argv[1], sys.argv[2], sys.argv[3:]
 with open(log, "a") as fh:
     fh.write(json.dumps(argv) + "\\n")
 if argv[0] == "rm":
+    if mode == "sleep-rmhang":
+        time.sleep(30)
+    sys.exit(1 if mode == "sleep-rmfail" else 0)
+if mode == "badbytes":
+    sys.stdout.buffer.write(b"codex-cli \\xff\\xfe\\n")
     sys.exit(0)
-outputs = {"codex": "codex-cli 0.157.1\\n", "claude": "2.1.283 (Claude Code)\\n", "other": "codex-cli 0.150.0\\n",
+if mode == "late":
+    time.sleep(1)
+    sys.exit(0)
+outputs = {"repeated": "codex-cli 0.157.1 (fallback 0.157.1)\\n", "build": "codex-cli 0.157.1+custom\\n",
+           "codex": "codex-cli 0.157.1\\n", "claude": "2.1.283 (Claude Code)\\n", "other": "codex-cli 0.150.0\\n",
            "empty": "", "two-lines": "codex-cli 0.157.1\\nupdate available: 0.160.0\\n",
            "two-versions": "codex-cli 0.157.1 (node 22.1.0)\\n"}
 if mode == "nonzero":
     sys.stderr.write("Unable to find image locally\\n")
     sys.exit(125)
-if mode == "sleep":
+if mode.startswith("sleep"):
     time.sleep(30)
 sys.stdout.write(outputs[mode])
 '''
@@ -129,7 +138,8 @@ def test_548_probe_measures_the_binary_inside_the_image_by_id(tmp_path, client, 
 
 @pytest.mark.parametrize(("mode", "reason"), [
     ("empty", "printed no version"), ("two-lines", "2 lines"), ("two-versions", "2 version strings"),
-    ("nonzero", "exited 125: Unable to find image locally"),
+    ("nonzero", "exited 125: Unable to find image locally"), ("repeated", "2 version strings"),
+    ("badbytes", "not UTF-8"),
 ])
 def test_548_probe_reports_unknown_rather_than_a_guess(tmp_path, mode, reason):
     docker_bin, _log = _probe_docker(tmp_path, mode)
@@ -137,12 +147,35 @@ def test_548_probe_reports_unknown_rather_than_a_guess(tmp_path, mode, reason):
     assert probe.version is None and reason in probe.reason
 
 
+def test_548_probe_keeps_build_metadata_so_a_custom_build_is_not_the_declared_one(tmp_path):
+    docker_bin, _log = _probe_docker(tmp_path, "build")
+    assert tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex").version == "0.157.1+custom"
+
+
 def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path):
     docker_bin, log = _probe_docker(tmp_path, "sleep")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.5)
-    assert probe.version is None and "did not answer within 0.5s" in probe.reason
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.3)
+    assert probe.version is None and "did not answer within 0.3s" in probe.reason
+    assert "removal is unconfirmed" in probe.reason  # the create never settled
     run, rm = _calls(log)
     assert rm == ["rm", "-f", run[run.index("--name") + 1]]
+
+
+def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path):
+    """#540's race: the CLI answers after the bound. Removal waits for it, so
+    the cleanup is confirmed rather than racing a create still landing."""
+    docker_bin, log = _probe_docker(tmp_path, "late")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=5)
+    assert probe.version is None and probe.reason == "`codex --version` did not answer within 0.3s"
+    assert [call[0] for call in _calls(log)] == ["run", "rm"]
+
+
+@pytest.mark.parametrize(("mode", "reason"), [("sleep-rmfail", "exited 1"), ("sleep-rmhang", "failed")])
+def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, mode, reason):
+    docker_bin, _log = _probe_docker(tmp_path, mode)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.5)
+    assert probe.version is None and f"cleanup 'docker rm -f skillc-client-probe-" in probe.reason
+    assert reason in probe.reason
 
 
 def test_548_probe_refuses_an_unknown_client_without_running_anything(tmp_path):

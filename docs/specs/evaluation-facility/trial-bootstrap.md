@@ -210,11 +210,15 @@ the image's build recipe, not the image. Once the image ID binds, each now
 also asks the client binary itself:
 `trial_bootstrap.probe_image_cli_version` runs `<client> --version` in a
 throwaway container of that image by its ID (`--rm`, `--network none`,
-`--pull never`, a 60 s bound, a timed-out container removed by name). The
+`--pull never`, a 60 s bound; a timed-out create is given a further bounded
+window to settle before it is removed by name, and a removal that cannot be
+confirmed is said so, #540). The
 run is refused before any private run directory exists unless the answer is
 exactly one line carrying exactly one version, equal to the declared one.
 Anything else is UNKNOWN, and UNKNOWN refuses: empty, multi-line or
-multi-version output, a nonzero exit, a timeout, no docker. Rehearsals that
+multi-version output (a repeated token included; build metadata such as
+`+custom` is part of the version), non-UTF-8 output, a nonzero exit, a
+timeout, no docker. Rehearsals that
 start no container (`calibration-run --rehearse`, `level3-live --rehearse
 dry`) skip the probe as they already skip the image check, and say so.
 
