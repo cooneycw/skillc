@@ -1115,10 +1115,11 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             else list(cc.DEFAULT_CLIENT_ARGVS[acquired.subject.client])
         )
         image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        grader = verify.GraderDef.load(task_root)
         experiment = sp.plan_selection_probe(
             planned_cases, manifest, treatment_subject_digest=acquired.source.digest,
             baseline_subject_digest=sp.BASELINE_SUBJECT_DIGEST, image_digest=image_digest or "UNKNOWN",
-            store=trial.open_store(store_path, forbidden=[]), experiment_name=experiment_name,
+            store=trial.open_store(store_path, forbidden=[]), experiment_name=experiment_name, grader=grader,
         )
         backend, grading_backend = cc.agent_backends(
             image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
@@ -1138,7 +1139,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
         try:
             report = sp.run_planned_selection_probe(
                 experiment, planned_cases, runner, base=run_root,
-                grader=verify.GraderDef.load(task_root), grading_backend=grading_backend,
+                grader=grader, grading_backend=grading_backend,
                 detection_control=control is not None,
             )
         except sp.SelectionProbeRefused as exc:
