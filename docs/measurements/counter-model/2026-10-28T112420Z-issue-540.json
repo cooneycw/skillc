@@ -1,0 +1,27 @@
+{
+  "branch": "issue-540-find-the-path-that-abandons-never-started-skillc-m",
+  "counts": {
+    "accepted": 2,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "912879d8ca54d5c00de4915a612f4e6891ef8194",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "540",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-28T11:24:20Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "rollout": "2026/10/28/rollout-2026-10-28T07-21-14-01a1823e-299d-70f1-89a4-6432a2ad8e22.jsonl",
+    "thread_id": "01a1823e-299d-70f1-89a4-6432a2ad8e22"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
