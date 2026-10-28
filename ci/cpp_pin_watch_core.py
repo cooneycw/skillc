@@ -7,7 +7,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import leak, profile
+from skillc import leak, profile
 
 CPP_LOCATOR = "github.com/cooneycw/claude-power-pack"
 MARKER = "<!-- skillc-cpp-pin-watch-v1\n"

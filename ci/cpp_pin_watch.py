@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from skillc import cpp_pin_watch as watch
+from ci import cpp_pin_watch_core as watch
 from skillc import profile
 
 ROOT = Path(__file__).resolve().parent.parent

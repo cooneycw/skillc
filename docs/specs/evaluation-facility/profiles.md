@@ -531,7 +531,7 @@ helper dependencies.
 The report retains separate flags, with primary severity `contract`, `structural`,
 `library-only`, then `none`. Contract includes selected SKILL.md/reference.md,
 all declared gate entrypoint sources, and the explicitly versioned gate-verdict
-and receipt paths in `skillc/cpp-pin-watch-policy.json`. The latter deliberately
+and receipt paths in `ci/cpp-pin-watch-policy.json`. The latter deliberately
 covers the runner/step/manifest silent-success contract (CPP #1576) and receipt
 schema/adapters (CPP #1584); an unrelated library edit remains library-only.
 This is conservative content drift, not semantic equivalence analysis. Removed
