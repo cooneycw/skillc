@@ -78,6 +78,7 @@ def test_a_calibration_declaration_cannot_carry_a_discrimination_endpoint() -> N
 
 def test_an_endpoint_criterion_the_grader_lacks_is_refused() -> None:
     data = json.loads(APPROVED_DISCRIMINATION.read_text())
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["discrimination_endpoint"] = {**ENDPOINT, "criteria": ["gate-report-honest"]}  # auto6's, not this grader's
     declaration = calibration.parse_discrimination_declaration(data)
     with pytest.raises(calibration.DeclarationRefused, match=r"criteria the grader does not have: \['gate-report-honest'\]"):

@@ -75,7 +75,7 @@ def _declaration(*, attempts_per_arm: int = 10, seed: int = 20261006, approval: 
             "public_requirements": "evals/level3/slugkit-pipeline/goal.md, delivered verbatim to both arms",
             "image": {"tag": "skillc-trial:latest", "digest": "sha256:" + "d" * 64},
             "per_attempt_seconds": 1200,
-            "total_seconds": 1200 * attempts_per_arm * 2,
+            "total_seconds": (1200 + 16) * attempts_per_arm * 2,
         },
         "attempts_per_arm": attempts_per_arm,
         "arm_order": {"seed": seed, "sequence": sequence},
@@ -212,7 +212,7 @@ def test_red_case_approval_at_the_wrong_attempts_per_arm_is_refused() -> None:
         "seed": 20261006,
         "sequence": calibration.derive_arm_order(20261006, list(calibration.DISCRIMINATION_ARMS), 15),
     }
-    data["shared"]["total_seconds"] = 1200 * 15 * 2
+    data["shared"]["total_seconds"] = (1200 + 16) * 15 * 2
     declaration = calibration.parse_discrimination_declaration(data)
     with pytest.raises(calibration.DeclarationRefused, match="approved for attempts_per_arm"):
         calibration.require_approved_discrimination(declaration, ROOT)
