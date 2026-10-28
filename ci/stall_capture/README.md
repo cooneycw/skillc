@@ -15,6 +15,16 @@ are pre-migration evidence only. Nothing measured before the migration says
 anything about the host as it is now, and the first live run here re-measures
 it from zero.
 
+**After the migration (checked 2026-10-28):** about 70 skillc pipelines ran,
+and almost all were green. One failure looked like a stall: pipeline 1111
+(2026-10-25), where five tests hit the 120 s timeout during setup while
+psi_io10 stayed between 30 and 45 for over a minute, on a 16-CPU agent. That
+is milder than the original 61-90, but above the issue's target of 20. So the
+stalls are rarer, not shown to be gone.
+
+There are now two CI agents. A live run samples one VM, so it has to say which
+agent it ran on, and a full window means one run per agent.
+
 ## The three parts
 
 | Script | Runs on | Reads | Writes |
