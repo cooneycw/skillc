@@ -31,6 +31,7 @@ CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "leak-check": ("leak-check",),
     "changelog-check": ("changelog-check",),
     "readme-drift": ("readme-drift",),
+    "clean-install": ("clean-install",),
     "git-tests-control": ("git-tests-control",),
     "pytest-population-control": ("pytest-population-control",),
 }
@@ -296,3 +297,42 @@ def test_parallel_contract_rejects_dropping_durations_from_either_side() -> None
 def test_generated_collection_is_excluded_from_both_leak_scans() -> None:
     assert "pytest-collected.txt" in _ci_leak_exclude_paths(CI_YML.read_text())
     assert "pytest-collected.txt" in _makefile_leak_exclude_paths(MAKEFILE.read_text())
+
+
+def _clean_install_commands_present(ci_text: str, make_text: str) -> bool:
+    config = yaml.safe_load(ci_text)
+    step = next((s for s in config["steps"] if s["name"] == "clean-install"), None)
+    if step is None:
+        return False
+    required = (
+        "bash ci/clean-install-check.sh",
+        "CLEAN_INSTALL_CONTROL=neuter-installed-rule bash ci/clean-install-check.sh",
+        "CLEAN_INSTALL_CONTROL=delete-scratch-controls bash ci/clean-install-check.sh",
+        "bash ci/clean-install-comparison-control.sh",
+    )
+    target = re.search(r"^clean-install:.*\n((?:\t.*\n)+)", make_text, re.MULTILINE)
+    verify = re.search(r"^verify:((?:.*\\\n)*.*)", make_text, re.MULTILINE)
+    return (
+        target is not None and verify is not None
+        and "clean-install" in verify.group(1).split()
+        and all(command in step["commands"] for command in required)
+        and all(f"\t{command}\n" in target.group(1) for command in required)
+    )
+
+
+def test_clean_install_and_both_controls_run_in_both_gates() -> None:
+    assert _clean_install_commands_present(CI_YML.read_text(), MAKEFILE.read_text())
+
+
+def test_clean_install_wiring_controls() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    assert _clean_install_commands_present(ci_text, make_text)
+    for command in (
+        "bash ci/clean-install-check.sh",
+        "CLEAN_INSTALL_CONTROL=neuter-installed-rule bash ci/clean-install-check.sh",
+        "CLEAN_INSTALL_CONTROL=delete-scratch-controls bash ci/clean-install-check.sh",
+        "bash ci/clean-install-comparison-control.sh",
+    ):
+        assert not _clean_install_commands_present(ci_text.replace(f"      - {command}\n", ""), make_text)
+        assert not _clean_install_commands_present(ci_text, make_text.replace(f"\t{command}\n", ""))
+    assert not _clean_install_commands_present(ci_text, make_text.replace("pytest-population-control clean-install\n", "pytest-population-control\n"))

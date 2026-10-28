@@ -180,6 +180,13 @@ EVERY invocation of that subcommand sleep before doing anything else, `.down`
 included - a slow daemon by construction rather than by host load (issue
 #385). A loaded host is what pushed one fake `run -d` past production's 5s
 `DAEMON_TIMEOUT`, and load alone does not reproduce that on demand.
+
+A `.late-create-run` sentinel (its content is the delay in seconds) makes
+`run -d` model a daemon whose create OUTLIVES its client (issue #540): a
+detached child records NAME as `created` after the delay, then touches
+`.late-created-NAME`, and the CLI waits for it before starting NAME. Unlike
+`.delay-run`, which sleeps before anything exists, killing this CLI does not
+stop the create.
 """
 
 from __future__ import annotations
@@ -1008,6 +1015,28 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     container_id = uuid.uuid4().hex + uuid.uuid4().hex
 
     if detached:
+        late_create = state_dir / ".late-create-run"
+        if late_create.is_file():
+            # #540: the daemon's create outlives its client. A detached child
+            # (its own session, so killing this CLI does not reach it) records
+            # NAME as `created` after the delay; this CLI waits for that answer
+            # and then starts it as usual. A caller that kills this CLI at its
+            # bound and removes NAME at once finds nothing, and the record
+            # lands afterwards: the never-started residue #540 found on kyle19.
+            delay = float(late_create.read_text(encoding="utf-8").strip())
+            child = os.fork()
+            if child == 0:
+                os.setsid()
+                # A daemon does not hold its client's pipes open.
+                devnull = os.open(os.devnull, os.O_RDWR)
+                for fd in (0, 1, 2):
+                    os.dup2(devnull, fd)
+                time.sleep(delay)
+                with _state_lock(state_dir, name):
+                    _write_state(state_dir, name, "created", image, env, labels, container_id)
+                (state_dir / f".late-created-{name}").write_text("done", encoding="utf-8")
+                os._exit(0)
+            os.waitpid(child, 0)
         hang = state_dir / ".hang-run"
         if hang.exists():
             duration_text = hang.read_text(encoding="utf-8").strip()

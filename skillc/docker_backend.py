@@ -882,6 +882,16 @@ class _Handle:
     egress_proxy: str | None = None
 
 
+def _unconfirmed_cleanup_note(reason: str, attempt_id: str) -> str:
+    """#540: the clause a raising prepare() adds when its cleanup ran without
+    the daemon's answer to `run -d`, so a create still in flight may land
+    after it. Names the label a sweep can find that container by."""
+    return (
+        f"; {reason}, so a container it creates after this cleanup is not removed - "
+        f"find it by label {ATTEMPT_LABEL_KEY}={attempt_id}"
+    )
+
+
 @dataclass(frozen=True)
 class DockerBackend:
     """One `ExecutionBackend` per attempt lifecycle. `image` should be pinned
@@ -1064,7 +1074,9 @@ class DockerBackend:
         daemon overload, not a pull - is read exactly like a nonzero exit: the
         best-effort `rm -f` cleanup below runs either way, itself bounded, and
         `prepare()` raises rather than returning a handle for a container this
-        call cannot confirm the state of."""
+        call cannot confirm the state of. After a timeout, that cleanup waits
+        for the daemon's answer first (`_run_awaiting_answer`, issue #540), so
+        a create still in flight cannot land behind it."""
         env = _docker_env()
         if probe_daemon(self.docker_bin, self.daemon_timeout, env) is None:
             raise BackendUnavailable(f"docker daemon unreachable via {' '.join(self.docker_bin)!r}")
@@ -1094,10 +1106,8 @@ class DockerBackend:
             self._stop_egress(egress_proxy, egress_network, env)
             raise
         try:
-            started = subprocess.run(
-                argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            started, timed_out, answered = self._run_awaiting_answer(argv, env)
+        except OSError as exc:
             # Best-effort: whether or not a container was actually created,
             # this makes sure none is left behind under this name. Also
             # bounded - a cleanup call that itself hangs must not turn a
@@ -1118,10 +1128,32 @@ class DockerBackend:
             self._best_effort_rm(name, env)
             self._stop_egress(egress_proxy, egress_network, env)
             raise
+        if timed_out is not None:
+            # #540: the cleanup runs only once the daemon has answered, so a
+            # create still in flight cannot land after it. A daemon that never
+            # answered leaves that unconfirmable, and the message says so.
+            if channel is not None:
+                channel.close()
+            cleanup_note = self._best_effort_rm(name, env)
+            if not answered:
+                cleanup_note += _unconfirmed_cleanup_note(
+                    f"the daemon did not answer 'docker run -d' within a further {self.daemon_timeout}s", attempt_id,
+                )
+            cleanup_note += self._stop_egress(egress_proxy, egress_network, env)
+            raise BackendUnavailable(
+                f"docker run failed to start a container for {attempt_id!r}: {timed_out}{cleanup_note}"
+            ) from timed_out
+        assert started is not None
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
-            cleanup_note = self._best_effort_rm(name, env) + self._stop_egress(egress_proxy, egress_network, env)
+            cleanup_note = self._best_effort_rm(name, env)
+            if not answered:
+                cleanup_note += _unconfirmed_cleanup_note(
+                    f"the 'docker run -d' CLI was ended by signal {-started.returncode} before the daemon answered",
+                    attempt_id,
+                )
+            cleanup_note += self._stop_egress(egress_proxy, egress_network, env)
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}{cleanup_note}"
             )
@@ -1244,6 +1276,49 @@ class DockerBackend:
         except (OSError, subprocess.TimeoutExpired):
             return None
         return done.stdout if done.returncode == 0 else None
+
+    def _run_awaiting_answer(
+        self, argv: list[str], env: Mapping[str, str],
+    ) -> tuple[subprocess.CompletedProcess[str] | None, subprocess.TimeoutExpired | None, bool]:
+        """prepare()'s `run -d`, bounded by `daemon_timeout`. Returns
+        `(completed, None, True)` within the bound, else `(None, timeout,
+        answered)`.
+
+        Issue #540: `run -d` is create-then-start in one CLI call, and killing
+        the CLI at its bound does not stop a create the daemon is still
+        working on. The cleanup that followed found "No such container", and
+        the create landed after it: kyle19's never-started
+        `skillc-a-live-conformance-fbba8d601e10`. So a timed-out call is given
+        one further `daemon_timeout` to return. Once it has, the daemon has
+        settled whether NAME exists, and the caller's `rm -f` is reliable.
+        `answered` is False when it did not return then either (the CLI is
+        killed), or when something else ended it by a signal in either window;
+        either way the caller cannot confirm its cleanup."""
+        proc = subprocess.Popen(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        )
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=self.daemon_timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = subprocess.TimeoutExpired(argv, self.daemon_timeout)
+                try:
+                    proc.communicate(timeout=self.daemon_timeout)
+                except subprocess.TimeoutExpired:
+                    return None, timed_out, False
+                # A CLI ended by a signal never heard the daemon's answer, so
+                # its exit says nothing about whether the create has settled.
+                return None, timed_out, proc.returncode >= 0
+            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr), None, proc.returncode >= 0
+        finally:
+            if proc.poll() is None:
+                # Reap without draining: a pipe held open by anything the CLI
+                # left behind must not turn this bounded call into a hang.
+                proc.kill()
+                proc.wait()
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
 
     def _best_effort_rm(self, name: str, env: Mapping[str, str]) -> str:
         """prepare()'s failure-path cleanup: make sure no container is left
