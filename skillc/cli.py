@@ -1690,6 +1690,38 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
     return code or _print_pilot_summary(report)
 
 
+def cmd_calibration_report(args: argparse.Namespace) -> int:
+    """Recover a private checkpoint's report; no backend or model is started."""
+    from . import calibration, demo, trial
+    from . import calibration_run as cr
+
+    run_dir = Path(args.run_dir).expanduser()
+    try:
+        declaration: cr.AnyDeclaration | None = None
+        if args.declaration:
+            path = Path(args.declaration).expanduser()
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise cr.CalibrationRefused("declaration must be a JSON object")
+            declaration = (calibration.parse_discrimination_declaration(data)
+                           if data.get("kind") == calibration.DISCRIMINATION_KIND
+                           else calibration.parse_declaration(data))
+        report = cr.recover_report(run_dir, declaration, rehearse=args.rehearse)
+        path = run_dir / cr.REPORT_FILENAME
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+        temporary.replace(path)
+        demo.print_paste_back(demo.redact_known_host_paths(cr.paste_back(report), base=run_dir))
+    except (OSError, ValueError, KeyError, TypeError, trial.Refused, demo.PasteBackRefused) as exc:
+        print(f"skillc: cannot report calibration: {exc}", file=sys.stderr)
+        return 2
+    if args.rehearse:
+        accounting = report["rehearsal_accounting"]
+        assert isinstance(accounting, dict)
+        return 0 if accounting["every_slot_accounted"] else 1
+    return _refuse_ineligible(report)
+
+
 def cmd_calibration_run(args: argparse.Namespace) -> int:
     """Issue #207: run an APPROVED two- or three-arm (#231) calibration declaration (#204's
     `evals/calibration-204/run-manifest.json`) end to end. Refuses (exit 2),
@@ -3062,6 +3094,19 @@ def build_parser() -> argparse.ArgumentParser:
              "prints the slot accounting",
     )
     p_calibration_run.set_defaults(func=cmd_calibration_run)
+
+    p_calibration_report = sub.add_parser(
+        "calibration-report",
+        help="rebuild a calibration report from its private checkpoint after interruption; no agent is started",
+    )
+    p_calibration_report.add_argument("run_dir", help="the private run directory calibration-run printed")
+    p_calibration_report.add_argument(
+        "--declaration", help="the original declaration; required for legacy runs without a stored snapshot",
+    )
+    p_calibration_report.add_argument(
+        "--rehearse", action="store_true", help="recover rehearsal accounting instead of a live-run verdict",
+    )
+    p_calibration_report.set_defaults(func=cmd_calibration_report)
 
     p_level3_campaign = sub.add_parser(
         "level3-campaign",
