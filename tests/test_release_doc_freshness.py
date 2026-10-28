@@ -1,4 +1,6 @@
 """Committed stale-document cases from #554; current pages must retire them."""
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -58,3 +60,11 @@ def test_frozen_profile_has_an_adjacent_current_network_policy_correction() -> N
     text = (ROOT / "evals/subjects/cpp-codex-flow-check-ea6dbfa/PROFILE.md").read_text()
     assert AGENT_NETWORK_POLICY in text
     assert "profile_digest" in text and "network:none" in text
+
+
+def test_historical_profile_preserves_its_canonical_identity() -> None:
+    raw = json.loads((ROOT / "evals/subjects/cpp-codex-flow-check-ea6dbfa/profile.json").read_text())
+    canonical = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    assert hashlib.sha256(canonical).hexdigest() == (
+        "f2636695c92e1aa59bf28cd1596b292fb2e60788c8bee3dc51561db0387117f6"
+    )
