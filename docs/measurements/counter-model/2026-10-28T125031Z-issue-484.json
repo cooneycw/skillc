@@ -1,0 +1,27 @@
+{
+  "branch": "issue-484-stall-capture-monitor",
+  "counts": {
+    "accepted": 9,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "5a76971e41d1a9ef1ade110a5d34d13eb7dcb76d",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "484",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-28T12:50:31Z",
+  "red_cases": {
+    "already_covered": 10,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "rollout": "2026/10/28/rollout-2026-10-28T08-47-23-01a1828d-0b28-72b3-af7d-ad9e9cf931d6.jsonl",
+    "thread_id": "01a1828d-0b28-72b3-af7d-ad9e9cf931d6"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
