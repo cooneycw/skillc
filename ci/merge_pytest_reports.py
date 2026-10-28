@@ -8,12 +8,12 @@ from pathlib import Path
 
 from ci.check_pytest_population import check, collected, outcomes
 
-SERIAL_CLASS = "tests.test_load_harness"
-SERIAL_FILE = "tests/test_load_harness.py"
+SERIAL_FILES = ("tests/test_load_harness.py", "tests/test_change_with_regression_568.py")
+SERIAL_CLASSES = tuple(path.removesuffix(".py").replace("/", ".") for path in SERIAL_FILES)
 
 
 def serial_identity(classname: str) -> bool:
-    return classname == SERIAL_CLASS or classname.startswith(SERIAL_CLASS + ".")
+    return any(classname == module or classname.startswith(module + ".") for module in SERIAL_CLASSES)
 
 
 def merge(collection: Path, ordinary: Path, serial: Path, output: Path) -> str:
