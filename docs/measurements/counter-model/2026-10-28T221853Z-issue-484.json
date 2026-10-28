@@ -1,0 +1,27 @@
+{
+  "branch": "issue-484-kyleci-disk-i-o-stalls-time-out-unrelated-tests-ps",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "c6216888e889fe6ec8d142d1f40d89fed72f5cc9",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "484",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-28T22:18:53Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "rollout": "2026/10/28/rollout-2026-10-28T18-18-09-01a18497-9791-7881-aa67-b5c488478acb.jsonl",
+    "thread_id": "01a18497-9791-7881-aa67-b5c488478acb"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
