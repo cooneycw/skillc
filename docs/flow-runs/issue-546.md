@@ -192,3 +192,31 @@ NOT independently re-reviewed. Three actual passes/ten accepted findings stay
 counted. This same-run row/reapproval grants receipt custody and a local WIP
 preservation commit only. Full retry/push/PR/CI/merge remain separately gated;
 no fullgreen or final delivery claim. Preserve all prior contributions/history.
+
+<!-- flow-run n=3 id=7bdf309f5ea846c69b5e445e70109edf -->
+## Run 3
+
+- Run-id:            7bdf309f5ea846c69b5e445e70109edf
+- Run-start:         16c6b4b65b5e0d35d72ae811163625d7cd8347a7
+- Issue:             #546
+- Base SHA:          16c6b4b65b5e0d35d72ae811163625d7cd8347a7
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          skillc-update root, clearance-546-uptake-report-accounting-implementation.md
+- Recorded at:       2026-10-28T07:03:49Z
+
+### Section B evidence
+
+PR583/1c7c4c7 and closed580 delivered shared deadlines; parent546 remains OPEN for other residuals. Current16c6 still classifies all uptake rows and sums all false decided booleans as undecided. Scoped post-filing1fcf690/PR567 did not repair this. Duplicates238/20, nested-guard500/PR502 and already-addressed552 stdout/PR578 were considered; no repeat. All21 readable registered worktrees had no relevant unpublished committed overlap. Old546WIP8eb87 and its5741 tracked bytes/modes/status/registration/claim were preserved. New native run7bdf309f5ea846c69b5e445e70109edf does not inherit old approval.
+
+### Section C - the approved plan
+
+1. `skillc/uptake_study.py` - Add disposition-based decision applicability and separate not_run/unavailable/unknown_disposition counts in both report branches; preserve raw classifier booleans and all existing selection/model/cell/statistical calculations. Correct accountable undecided and render valid new counters, omit absent legacy counters, refuse partial/malformed sets.
+2. `tests/test_uptake_study.py` - Existing public build_report/paste_back mixed-value old assertion red and all-captured healthy twin, full disposition/probe/screen compatibility and nonempty committed opposites; actual consumer partition-disabled and force-all-decided blind controls.
+3. `changelog.d/546-uptake-not-run-accounting.md` - New direct bullet for this bounded reporting correction, preserving shipped546 fragment.
+
+Scope: THREE current product paths, product HARD300 added+deleted including a future genuine receipt reserve at most60 (NO leaf allocated now); TWO canonical workflow paths docs/flow-runs/issue-546.md and docs/flow-runs/issue-546.as-read.md append this run, HARD250 workflow A+D. No other paths, frozen records, judge/endpoint/declaration/report regeneration, CLI option or lifecycle policy. Root approved actual Step3 SHA2d72b697522d6cfb669f58e978bd7fb4a1672e45c3b14ad6127318ae4ded44e2.
+
+Contract: additive version1, raw decided stays boolean and _decided unchanged. decision_applicable true for captured/inconclusive, false for not-run/unavailable, null for missing/unknown/malformed disposition including unhashable values. Undecided counts only applicable false-classifier rows. Applicability is cohort membership, NOT proof of launch/contact/spend/observation. All raw rows/dispositions retained; no contradictory input repair or observed-population expansion. Cells/scores/Fisher/model confirmation unchanged. Screen/tested/nonprobe consistent; no unsupported cutoff-cause claim. Complete valid new counters displayed; legacy absent counters omitted; partial/malformed refused, never invented clean zeros.
+
+Validation: before production edit actual unchanged public APIs mixed captured-zero-call/selected/not-run fixture must ASSERT undecided1 versus old2; sameAPI all-captured twin healthy. Retain raw/JUnit/source hashes. Same IDs green after minimal repair. Committed opposite rows and actual builder/text controls disable ONLY partition and separately force all classifier results decided. Focused uptake plus real descriptionoptimizer consumer tests, Ruff/scoped mypy/diff; strict physical389 frozen membership/bytes/modes, offlane/source/history and native guards. No qualification/full/Docker/model/install. Risks: additive JSON compatibility, unknown dispositions/evidence, boolean/applicability distinction, full canonical snapshot/workflow cap. Stop on unexpected product/instrument failure, scope/cap/contract or blocking guard; no expansion/retry. Return TESTED UNCOMMITTED; no commit/review/receipt/full/publication under this gate.
