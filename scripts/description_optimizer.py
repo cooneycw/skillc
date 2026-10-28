@@ -148,7 +148,8 @@ def optimize(entry: dict[str, object], cpp: Path, work: Path, base: dict[str, ob
     (sdir / "screen.json").write_text(json.dumps(screen_decl, indent=1) + "\n", encoding="utf-8")
     screen = run_study(sdir / "screen.json", snapshots, sdir / "screen-private")
     scores = screen["report"]["scores"]
-    ranked = sorted(variants, key=lambda a: (scores[a]["score"] is not None, scores[a]["score"] or -9), reverse=True)
+    ranked = sorted(variants, key=lambda a: (scores[a]["score"] is not None,
+                                           scores[a]["score"] if scores[a]["score"] is not None else -9), reverse=True)
     best = ranked[0]
     pub = scores["published"]["score"]
     complete = screen_complete(screen["report"])
