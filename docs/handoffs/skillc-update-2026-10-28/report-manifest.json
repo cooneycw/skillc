@@ -95,5 +95,12 @@
     "published_sha256": "3276c58fec07039a4d5f3c461a45615f4477b58021ec0e7ad3204089866bc74b",
     "archive_manifest_sha256": "02ef3a5003fff8e673ce7ad50404401097036eb9534f8c897e38942b8ce51c2f",
     "note": "Final owner-park acknowledgement; local home paths redacted; original29-member local archive retained."
+  },
+  {
+    "document": "546-worker02-final-parking-handoff.md",
+    "original_sha256": "1006c5eaeb9b58421d08a21ce55348fdede0ac612f41a482d685fd095d6498dc",
+    "published_sha256": "60c5346305618782b230fc116becda1c4ac4ad06f49d740f5e677c087111696d",
+    "archive_manifest_sha256": "cc1a0a244c22a758c7a3a7909c4fcef36dab87ec3d5a47d79ea4654a14088781",
+    "note": "Final owner-park acknowledgement; local home paths redacted; original147-entry local archive retained."
   }
 ]
