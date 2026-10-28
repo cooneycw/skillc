@@ -179,3 +179,33 @@ LEDGER
 delivered:Actualfresh548Step3judged; safeFACTdiagnosticscontractselectedafterinvalidglobalgradegatepremisecorrected.
 in-scope:Exact11product+2workflow600productADinclfuturegenuinereceipt/350workflowcap, genuineprefixedbehavioralreds thenfocusedimplementation.
 residual:B1review/receipt/full/publicationlater;B2actualruntimebinding+legacylabel/discoveryitemsremain548OPEN;543publictaskrevisionand549queued.
+
+<!-- flow-run n=3 id=a9cb7bf1270d47c3bc967208e3d1a4cc -->
+## Run 3
+
+- Run-id:            a9cb7bf1270d47c3bc967208e3d1a4cc
+- Run-start:         f0cea733298ebd5730907999f075e5256c12130d
+- Issue: #548
+- Base SHA: f0cea733298ebd5730907999f075e5256c12130d
+- Necessity verdict: Still needed - bounded legacy literal image-tag contract
+- Approval: granted
+- Approver: skillc-update root orchestrator, clearance-548-legacy-tag-implementation.md
+- Recorded at: 2026-10-27T20:52:50.806580+00:00
+
+## Section B
+
+Actual Step3 report SHA25648d141f0bd6c8fc4db164a641f1a6677db9fd46a36d67cffe86b66ddebd1e06e. Fresh native runa9cb7bf1270d47c3bc967208e3d1a4cc. Current cli.main on the real approved204 declaration accepts an alternate tag with the same resolved ID, reaching a sentinel before private_root creates anything. Matching tag+ID and omitted-default healthies reach that sentinel; both wrong-ID twins exit2. One true assertion red, no Docker/client/model calls; initial import setup failure is separately preserved, not a regression. PR454/68a7e10 intentionally left legacy ID-only; present548 authorizes this narrow extension. Three named historical approvals all declare skillc-trial:latest, the existing default. Prior548PR584 and589 delivered other slices, not this guard. B1 source and original Run1/2 records remain history. GH legacy+tag search returned548/279/20/287; bounded history found no shipped tag fix.
+
+## Section C
+
+1. `skillc/cli.py` - Require nonempty string declared shared.image.tag and literal effective args.image-or-existing-default agreement ONLY for nonrehearsal no-receipt legacy calibration. Keep existing resolved-ID refusal independently before private_root/acquisition/artifacts; preserve receipt binding and rehearsal skip. Public help/docstring states the exact tag contract, no alias normalization/default adoption or binary attestation.
+2. `tests/test_calibration_run.py` - Existing-CLI alternate-tag/same-ID regression on immutable f0cea before production edits, paired matching/default/wrong-ID controls and no private artifacts. Missing/malformed tag controls must reach this guard or disclose prior refusal. Normal synthetic approval stamps only. Realign only synthetic fake tag before stamp_approval and existing committed-declaration wrong-ID test's image argument so it still isolates ID refusal. Preserve receipt/rehearsal controls and frozen originals.
+3. `changelog.d/548-legacy-image-tag.md` - New one-bullet fragment describing bounded literal legacy image tag binding; leave older548fragments untouched.
+
+Scope: exact three product paths plus the two canonical workflow records. Product cap220 added+deleted lines INCLUDES a genuine future receipt; workflow cap350. Estimate25CLI+110tests+2fragment+31receipt=168. Actual later receipt path needs separate exact grant after genuine review, no invented timestamp. No calibration_run/schema/frozen/pin/Docker/probe/shared-conftest edit. Return facts before widening.
+
+## Validation and stop conditions
+
+Commit bad alternate-tag/same-ID and healthy declared-tag/same-ID controls; run the regression on immutable pre-fix f0cea and retain real behavioral failure. Fake-only focused calibration_run/p3_bindings/approval_binding/discrimination_run plus relevant receipt-swap checks, real collected/JUnit IDs, Ruff/mypy/selftest. Keep all three historical default tags and wrong-ID dispositions; receipt-backed behavior unchanged; rehearsal starts no container and discloses skipped identity checks. Empty or malformed tag cannot silently pass. Two synthetic arrangements change only to preserve the layers their assertions test. No physical Docker/client/model/paid study, private campaign inspection or host installation.
+
+Root owns later checkpoint/review/receipt/full/publication gates;549 owns the exclusive full now. Return focused proof/counts/hashes before checkpoint or review. Parent548 stays OPEN, same-handle actual executable/image qualification B2 remains separately owed. Existing invocation-reader Nit6450901506 stays outside this slice. No new approval/history restamp or previous-run edits.

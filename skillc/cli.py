@@ -1691,8 +1691,8 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     `evals/calibration-204/run-manifest.json`) end to end. Refuses (exit 2),
     before any run directory or container exists, a declaration that is not
     approved or still carries an unrecorded identity, a client argv that
-    chooses its own model, a trial image whose pinned client or resolved
-    digest is not the declared one, and a subject whose locator or revision
+    chooses its own model, a trial image whose tag, pinned client or resolved
+    digest differs from the declaration, and a subject whose locator or revision
     is not the declared one. Requires `SKILLC_ALLOW_REAL_AGENT=1` and the
     operator's own subscription login (ADR 0005 rule 6). Everything stays in
     a private run directory; only a leak-checked summary is printed. Exits 1
@@ -1783,10 +1783,15 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             except cr.CalibrationRefused as exc:
                 print(f"skillc: {exc}", file=sys.stderr)
                 return 2
-        elif image_digest != declared_digest:
-            print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
-                  f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
-            return 2
+        else:
+            tag = declared_image.get("tag") if isinstance(declared_image, dict) else None
+            if not isinstance(tag, str) or not tag.strip() or image != tag:
+                print(f"skillc: image tag {image!r} is not the declared shared.image.tag {tag!r}", file=sys.stderr)
+                return 2
+            if image_digest != declared_digest:
+                print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
+                      f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
+                return 2
 
     try:
         private_root = cr.private_root(declaration, args.private_dir)  # #287 P3 (C5): the declared run store
@@ -3024,7 +3029,7 @@ def build_parser() -> argparse.ArgumentParser:
              "printed (a real agent run, behind SKILLC_ALLOW_REAL_AGENT=1)",
     )
     p_calibration_run.add_argument("declaration", help="the calibration-declaration JSON to run")
-    p_calibration_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_calibration_run.add_argument("--image", help="exact declared shared.image.tag (default: skillc.demo.DEFAULT_IMAGE)")
     p_calibration_run.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
     p_calibration_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_calibration_run.add_argument("--credential", help="explicit path to the client credential file")
