@@ -19,9 +19,12 @@ Causes, each a rule over the window plus one lead-in tick:
                    work than CPUs.
 
 The VERDICT is the one cause that held, `ambiguous` when several did, and
-`UNATTRIBUTED` when none did. It is never forced to a label. Host-side rules
-with no host tick inside the window are listed as `unassessed`, so a guest-only
-`discard` verdict says which alternatives nobody looked at.
+`UNATTRIBUTED` when none did. It is never forced to a label. A rule with no
+observation behind it is listed as `unassessed` rather than counted as quiet:
+host rules with no host interval overlapping the window, `neighbour` when the
+host stream names no VM but the guest, `throttle` when no container was seen
+in two consecutive samples, and any rate on the first sample (which has no
+predecessor). So a verdict says which alternatives nobody looked at.
 
 An empty guest stream, a stream of error records, or a host stream that does
 not overlap the guest one is REFUSED (exit 2): nothing to look at is not the
@@ -100,20 +103,34 @@ def _mbps(a: dict[str, Any], b: dict[str, Any], key: str, dt: float) -> float:
     return (b[key] - a[key]) * SECTOR_BYTES / 1e6 / dt if dt > 0 else 0.0
 
 
-def _guest_tick(prev: dict[str, Any], cur: dict[str, Any]) -> dict[str, float]:
+def _guest_tick(prev: dict[str, Any] | None, cur: dict[str, Any]) -> dict[str, Any]:
+    """One guest tick. Pressure is a reading of `cur` alone, so every sample,
+    the first included, can open a stall window. Rates need `prev`: without
+    it they are None (unassessed), never 0."""
+    tick: dict[str, Any] = {"t": float(cur["t"]), "io_psi": cur["psi"]["io"]["some_avg10"],
+                            "cpu_psi": cur["psi"]["cpu"]["some_avg10"], "discard_mbps": None,
+                            "write_mbps": None, "steal_share": None, "throttle_share": None}
+    if prev is None:
+        return tick
     disk_p, disk_c = prev["disk"], cur["disk"]
     dt = float(cur["t"]) - float(prev["t"])
     total = cur["cpu"]["total"] - prev["cpu"]["total"]
-    throttled = max((c["throttled_usec"] - prev["cgroups"].get(name, c)["throttled_usec"]
-                     for name, c in cur["cgroups"].items()), default=0)
-    return {
-        "t": float(cur["t"]),
-        "io_psi": cur["psi"]["io"]["some_avg10"], "cpu_psi": cur["psi"]["cpu"]["some_avg10"],
-        "discard_mbps": _mbps(disk_p, disk_c, "discard_sectors", dt),
-        "write_mbps": _mbps(disk_p, disk_c, "write_sectors", dt),
-        "steal_share": (cur["cpu"]["steal"] - prev["cpu"]["steal"]) / total if total > 0 else 0.0,
-        "throttle_share": throttled / (dt * 1e6) if dt > 0 else 0.0,
-    }
+    tick["discard_mbps"] = _mbps(disk_p, disk_c, "discard_sectors", dt)
+    tick["write_mbps"] = _mbps(disk_p, disk_c, "write_sectors", dt)
+    tick["steal_share"] = (cur["cpu"]["steal"] - prev["cpu"]["steal"]) / total if total > 0 else 0.0
+    # Only containers seen in BOTH samples have a throttling delta. None of them
+    # is "no container was observed", which is not "no container was throttled".
+    both = [name for name in cur["cgroups"] if name in prev["cgroups"]]
+    if both and dt > 0:
+        throttled = max(cur["cgroups"][n]["throttled_usec"] - prev["cgroups"][n]["throttled_usec"] for n in both)
+        tick["throttle_share"] = throttled / (dt * 1e6)
+    return tick
+
+
+def _peak(span: list[dict[str, Any]], key: str) -> float | None:
+    """The largest observed value of `key`, or None when no tick observed it."""
+    seen = [t[key] for t in span if t[key] is not None]
+    return max(seen) if seen else None
 
 
 def _host_tick(prev: dict[str, Any], cur: dict[str, Any], self_vm: str | None) -> dict[str, Any]:
@@ -131,7 +148,9 @@ def _host_tick(prev: dict[str, Any], cur: dict[str, Any], self_vm: str | None) -
         dt = float(cur["t"]) - float(prev["t"])
         mbps = (c["rbytes"] + c["wbytes"] - p["rbytes"] - p["wbytes"]) / dt / 1e6 if dt > 0 else 0.0
         neighbours[vm] = {"io_psi": c["io_some_avg10"], "mbps": mbps}
-    return {"t": float(cur["t"]), "await_ms": awaits, "neighbours": neighbours}
+    # A host rate covers the interval (prev, cur], so it keeps both ends: the
+    # time join is an interval overlap, not a test on the end timestamp.
+    return {"t0": float(prev["t"]), "t": float(cur["t"]), "await_ms": awaits, "neighbours": neighbours}
 
 
 @dataclass
@@ -148,9 +167,9 @@ class Stall:
     unassessed: list[str]
 
 
-def _windows(ticks: list[dict[str, float]], th: Thresholds) -> list[list[dict[str, float]]]:
-    windows: list[list[dict[str, float]]] = []
-    run: list[dict[str, float]] = []
+def _windows(ticks: list[dict[str, Any]], th: Thresholds) -> list[list[dict[str, Any]]]:
+    windows: list[list[dict[str, Any]]] = []
+    run: list[dict[str, Any]] = []
     for tick in ticks:
         if tick["io_psi"] >= th.io_psi or tick["cpu_psi"] >= th.cpu_psi:
             run.append(tick)
@@ -162,7 +181,7 @@ def _windows(ticks: list[dict[str, float]], th: Thresholds) -> list[list[dict[st
     return windows
 
 
-def _judge(window: list[dict[str, float]], lead: dict[str, float] | None, host: list[dict[str, Any]] | None,
+def _judge(window: list[dict[str, Any]], lead: dict[str, Any] | None, host: list[dict[str, Any]] | None,
            th: Thresholds, interval: float) -> Stall:
     span = ([lead] if lead else []) + window
     kind = [k for k, hit in (("io", any(t["io_psi"] >= th.io_psi for t in window)),
@@ -171,32 +190,52 @@ def _judge(window: list[dict[str, float]], lead: dict[str, float] | None, host: 
     causes: list[str] = []
     unassessed: list[str] = []
     if "io" in kind:
-        discard = max(t["discard_mbps"] for t in span)
-        writes = max(t["write_mbps"] for t in span)
-        evidence["discard_mbps_max"], evidence["write_mbps_max"] = round(discard, 1), round(writes, 1)
-        if discard >= th.discard_mbps and discard > writes:
-            causes.append("discard")
+        discard, writes = _peak(span, "discard_mbps"), _peak(span, "write_mbps")
+        if discard is None or writes is None:
+            unassessed.append("discard")
+        else:
+            evidence["discard_mbps_max"], evidence["write_mbps_max"] = round(discard, 1), round(writes, 1)
+            if discard >= th.discard_mbps and discard > writes:
+                causes.append("discard")
         lo, hi = span[0]["t"] - interval, window[-1]["t"]
-        inside = [h for h in host if lo <= h["t"] <= hi] if host is not None else []
+        inside = [h for h in host if h["t0"] <= hi and h["t"] >= lo] if host is not None else []
         if not inside:
             unassessed.extend(HOST_RULES)
         else:
-            worst = max(((d, a) for h in inside for d, a in h["await_ms"].items()), key=lambda x: x[1],
-                        default=("-", 0.0))
-            evidence["device_await_ms_max"] = {"device": worst[0], "ms": round(worst[1], 1)}
-            if worst[1] >= th.device_await_ms:
-                causes.append("device")
-            busy = sorted({vm for h in inside for vm, n in h["neighbours"].items()
-                           if n["io_psi"] >= th.neighbour_io_psi or n["mbps"] >= th.neighbour_mbps})
-            evidence["busy_neighbours"] = busy
-            if busy:
-                causes.append("neighbour")
+            # Host intervals reaching past the guest window are still joined;
+            # say how many, so evidence from outside it is not read as inside.
+            evidence["host_intervals"] = {"joined": len(inside),
+                                          "partial": sum(1 for h in inside if h["t0"] < lo or h["t"] > hi)}
+            awaits = [(d, a) for h in inside for d, a in h["await_ms"].items()]
+            if not awaits:
+                unassessed.append("device")
+            else:
+                worst = max(awaits, key=lambda x: x[1])
+                evidence["device_await_ms_max"] = {"device": worst[0], "ms": round(worst[1], 1)}
+                if worst[1] >= th.device_await_ms:
+                    causes.append("device")
+            # A host stream naming no VM but the guest has looked at no neighbour:
+            # that is unassessed, never "the neighbours were quiet".
+            monitored = sorted({vm for h in inside for vm in h["neighbours"]})
+            if not monitored:
+                unassessed.append("neighbour")
+            else:
+                busy = sorted({vm for h in inside for vm, n in h["neighbours"].items()
+                               if n["io_psi"] >= th.neighbour_io_psi or n["mbps"] >= th.neighbour_mbps})
+                evidence["monitored_neighbours"], evidence["busy_neighbours"] = monitored, busy
+                if busy:
+                    causes.append("neighbour")
     if "cpu" in kind:
-        steal = max(t["steal_share"] for t in span)
-        throttle = max(t["throttle_share"] for t in span)
-        evidence["steal_share_max"], evidence["throttle_share_max"] = round(steal, 3), round(throttle, 3)
-        cpu_causes = [c for c, hit in (("steal", steal >= th.steal_share),
-                                       ("throttle", throttle >= th.throttle_share)) if hit]
+        cpu_causes = []
+        for cause, key, limit in (("steal", "steal_share", th.steal_share),
+                                  ("throttle", "throttle_share", th.throttle_share)):
+            value = _peak(span, key)
+            if value is None:
+                unassessed.append(cause)
+                continue
+            evidence[key + "_max"] = round(value, 3)
+            if value >= limit:
+                cpu_causes.append(cause)
         causes.extend(cpu_causes or ["contention"])
     verdict = causes[0] if len(causes) == 1 else ("ambiguous" if causes else "UNATTRIBUTED")
     return Stall(start=window[0]["t"], end=window[-1]["t"], ticks=len(window), kind=kind,
@@ -208,8 +247,8 @@ def attribute(guest: list[dict[str, Any]], host: list[dict[str, Any]] | None = N
               self_vm: str | None = None, th: Thresholds | None = None) -> dict[str, Any]:
     th = th or Thresholds()
     good, guest_errors = _usable(guest, "guest")
-    ticks = [_guest_tick(a, b) for a, b in itertools.pairwise(good)]
-    interval = (ticks[-1]["t"] - float(good[0]["t"])) / len(ticks)
+    ticks = [_guest_tick(None, good[0])] + [_guest_tick(a, b) for a, b in itertools.pairwise(good)]
+    interval = (ticks[-1]["t"] - ticks[0]["t"]) / (len(ticks) - 1)
     host_ticks = None
     host_errors = 0
     if host is not None:

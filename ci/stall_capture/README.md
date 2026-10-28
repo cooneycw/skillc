@@ -67,9 +67,13 @@ decides which causes may explain it:
 | cpu | `contention` | cpu pressure with neither of the above |
 
 The verdict is the one cause that held, `ambiguous` if several held, and
-`UNATTRIBUTED` if none did. When no host tick falls inside a window, `device`
-and `neighbour` are listed as **unassessed** rather than dropped, so a
-guest-only `discard` verdict names the alternatives nobody checked.
+`UNATTRIBUTED` if none did. A rule with nothing observed behind it is listed
+as **unassessed**, never counted as quiet: `device` and `neighbour` when no host
+interval overlaps the window, `neighbour` when the host stream names no VM but
+the guest, `throttle` when no container was seen in two consecutive samples,
+and any rate on the very first sample. So a guest-only `discard` verdict names
+the alternatives nobody checked. Host rates are joined to a window by interval
+overlap, and `host_intervals.partial` counts those reaching outside it.
 
 The **CPU-burn control** (C1) is the `cpuburn` fixture: cpu pressure with io
 quiet must book to `contention` and never to an io cause. Here it is replayed

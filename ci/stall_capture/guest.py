@@ -38,6 +38,10 @@ def sample(root: Path, device: str, cgroup_root: str, cgroup_glob: str = "*") ->
     disk = pf.parse_diskstats(pf.read(root, "/proc/diskstats"), [device])[device]
     cgroups: dict[str, dict[str, Any]] = {}
     base = root / cgroup_root.lstrip("/")
+    if not base.is_dir():
+        # A mistyped root would otherwise sample zero containers forever, which
+        # reads as "nothing was throttled".
+        raise pf.Unreadable(f"--cgroup-root {cgroup_root}: not a directory")
     for path in sorted(p for p in base.glob(cgroup_glob) if p.is_dir()):
         rel = "/" + str(path.relative_to(root))
         cpu = pf.parse_keyed(pf.read(root, f"{rel}/cpu.stat"))

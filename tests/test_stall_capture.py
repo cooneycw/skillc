@@ -273,13 +273,29 @@ def test_the_loop_records_a_gap_as_an_error_and_goes_on(tmp_path: Path) -> None:
     def sleep(seconds: float) -> None:
         now[0] += seconds
     out = tmp_path / "s.jsonl"
-    ticks = loop.run(sample, source="guest", interval=10, duration=25, out=out, clock=lambda: now[0], sleep=sleep)
+    ticks = loop.run(sample, source="guest", interval=10, duration=25, out=out, clock=lambda: now[0],
+                     monotonic=lambda: now[0], sleep=sleep)
     records = [json.loads(line) for line in out.read_text().splitlines()]
     assert ticks == 3 and [r.get("x", r.get("error")) for r in records] == [1, "gone", 3]
     assert [r["t"] for r in records] == [0.0, 10.0, 20.0]
 
 
-@pytest.mark.parametrize(("interval", "duration"), [(0.5, 10), (10, 0), (10, loop.MAX_DURATION_SECONDS + 1)])
+def test_red_no_sleep_reaches_past_the_deadline(tmp_path: Path) -> None:
+    """An interval longer than the duration must not hold the loop open past it,
+    and wall-clock jumps must not stretch the run: scheduling is monotonic."""
+    mono, slept = [0.0], []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        mono[0] += seconds
+    wall = iter(range(0, 10**9, 10**6))  # a wall clock leaping forward by days per read
+    ticks = loop.run(dict, source="guest", interval=3600, duration=1, out=tmp_path / "s.jsonl",
+                     clock=lambda: float(next(wall)), monotonic=lambda: mono[0], sleep=sleep)
+    assert ticks == 1 and slept == [1.0] and mono[0] == 1.0
+
+
+@pytest.mark.parametrize(("interval", "duration"), [(0.5, 10), (10, 0), (10, loop.MAX_DURATION_SECONDS + 1),
+                                                    (float("inf"), 10), (float("nan"), 10)])
 def test_red_an_unbounded_loop_is_refused(interval: float, duration: float) -> None:
     with pytest.raises(ValueError, match="must"):
         loop.check_bounds(interval, duration)
@@ -331,3 +347,49 @@ def test_red_discard_that_does_not_dominate_writes_is_not_the_cause() -> None:
     g, h = _streams("device")
     (stall,) = at.attribute(g, h, self_vm="vm-ci", th=at.Thresholds(discard_mbps=0.1))["stalls"]
     assert "discard" not in stall["causes"] and stall["verdict"] == "device"
+
+
+# --- coverage is stated, never assumed (counter-model review) --------------
+
+def test_red_a_stall_on_the_first_sample_is_detected() -> None:
+    g, h = _streams("quiet")
+    g[0]["psi"]["io"]["some_avg10"] = 90.0
+    (stall,) = at.attribute(g, h, self_vm="vm-ci")["stalls"]
+    assert stall["start"] == mf.T0 and stall["kind"] == ["io"]
+    assert "discard" in stall["unassessed"]  # the first sample has no rate behind it
+
+
+def test_red_no_container_observed_leaves_throttle_unassessed() -> None:
+    g, _ = _streams("throttle")
+    for record in g:
+        record["cgroups"] = {}
+    (stall,) = at.attribute(g)["stalls"]
+    assert stall["verdict"] == "contention" and "throttle" in stall["unassessed"]
+    assert "throttle_share_max" not in stall["evidence"]
+
+
+def test_red_a_host_stream_with_no_other_vm_leaves_neighbour_unassessed() -> None:
+    g, h = _streams("discard")
+    for record in h:
+        del record["vms"]["vm-a"]
+    (stall,) = at.attribute(g, h, self_vm="vm-ci")["stalls"]
+    assert stall["verdict"] == "discard" and stall["unassessed"] == ["neighbour"]
+    assert "busy_neighbours" not in stall["evidence"]
+
+
+def test_red_a_host_interval_overlapping_a_one_tick_stall_is_joined() -> None:
+    """Guest stall on the tick ending at +50 (interval 40-50); the host interval
+    43-53 overlaps it although it ends after the window."""
+    g, h = _streams("quiet")
+    g[5]["psi"]["io"]["some_avg10"] = 80.0
+    dev = [r["devices"]["dev-a"] for r in h]
+    for i in range(5, len(dev)):  # the host interval ending at +53 carries a 300 ms await
+        dev[i]["write_ms"] += 300 * 1100
+    (stall,) = at.attribute(g, h, self_vm="vm-ci")["stalls"]
+    assert (stall["start"], stall["ticks"]) == (mf.T0 + 50, 1)
+    assert stall["verdict"] == "device" and stall["evidence"]["host_intervals"]["partial"] >= 1
+
+
+def test_red_a_missing_cgroup_root_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(pf.Unreadable, match="not a directory"):
+        guest.sample(_tree(tmp_path), "dev-g", "/no/such/cgroup/root")
