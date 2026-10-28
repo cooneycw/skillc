@@ -197,3 +197,32 @@ no automatic commit/stash or CPP lifecycle edit. Frozen pre439/CPP389/task/
 grader/declarations/receipts/history and old record/snapshot prefixes preserved.
 No CI/pyproject/assembler/evals/helper path. No review/receipt/checkpoint/full/
 push/PR/merge/issueedit/cleanup yet.538 retains next exclusive full.
+
+<!-- flow-run n=4 id=a7a19d2097f1484cb522cf39a213bb3a -->
+## Run 4
+
+- Run-id:            a7a19d2097f1484cb522cf39a213bb3a
+- Run-start:         000753d82c4c5e102fefb90d25eef9e9f0b226a1
+- Issue: #542
+- Base SHA: 000753d82c4c5e102fefb90d25eef9e9f0b226a1
+- Necessity verdict: Partially addressed
+- Approval: granted
+- Approver: root orchestrator, clearance-542-cold-cache-oracle-implementation.md
+- Recorded at: 2026-10-28T04:27:38Z
+
+### Section B evidence
+
+Issue created 2026-10-24T11:56:18Z. PR579/028dde512f2f43f1c47cb77abff6740b4cf86ca6 delivered authored-test targeting/exact uv; PR595/000753d82c4c5e102fefb90d25eef9e9f0b226a1 delivered changelog sequencing. Parent remains OPEN with typing/cold/acceptance residuals. Post-filing scoped commit79fbaaffe5c22606d5356d268d0b42b74201f885/PR564 labels child controls, not cold predicate. Historical b6e238b/PR378 normalized closure diagnostic;558fe767/PR386 repinned profile;9bda3c59/PR363 targeted evidence;5cf15861/PR340 introduced cold install. Related issues542/568/266/360/20 do not supersede this slice. All21 host worktrees readable; unpublished380c0b885ee3391b4a5495f3f063dd7103aa9e30 in sibling348 touches closure controls in shared test file, not cold predicate, preserved/not adopted.
+
+Current cold consumer raw substring can produce FALSE HARD FAILURE under a phrase-internal wrap, not false green; no live Docker failure established. Closure already folds whitespace and requires both authentic uv clauses. Current complete cold consumer control uses incomplete synthetic cache-only wording; replace within scoped test. Captured fixture, profiles/frozen CPP, Dockerfile/uv pin/public protocol remain unchanged. Actual old complete-consumer wrapped acceptance red must precede production repair; tests use controlled observations, no physical Docker proof.
+
+### Section C - the approved plan
+
+1. `tests/test_profile_install_cold_container_live.py` - small local _offline_cache_miss folds whitespace and requires BOTH literal clauses; use only existing cold-cache/nonzero diagnostic assertion. Preserve unconditional success check, strict _OfflineSyncPropertyHeld marker, cleanup/isolation/env/defaults.
+2. `tests/test_offline_cache_miss_oracle.py` - run authentic captured/wrapped/spaces-tabs and missing-clause/unrelated matrices against actual closure AND cold predicates with daemon discovery disabled; closure and fixture unchanged.
+3. `tests/test_property_held_xfail_pattern.py` - complete actual cold consumer wrapped regression and contiguous contrast; preserve successful-sync XPASS hardFAIL/unrelated127/permission/setup hardFAIL/cross-property controls. Commit actual consumer acceptance opposite with ONLY cold normalization disabled; named wrapped assertion must fail, contiguous stays narrow XFAIL.
+4. `changelog.d/542-cold-cache-oracle.md` - new direct bullet fragment describing bounded robustness, no fresh physical proof or whole542 closure.
+
+Scope: exact4 product paths; approximately110-175 product A+D before separately granted genuine receipt<=60, HARD250 total including future receipt. Exact2 workflow paths issue-542.md and issue-542.as-read.md; HARD250 workflow A+D, preserve old history prefixes. No receipt filename enrolled. Same native a7a19d2097f1484cb522cf39a213bb3a/base000753, no reset.
+Risks: exact two-clause grammar intentionally rejects old synthetic cache-only input; no fuzz/casefold/generic xfail or weakening marker. Future uv wording may need fresh evidence; controlled subprocess tests prove discrimination, not container behavior. Small duplicate predicate avoids widening helper/closure ownership; defer remains possible for lower impact. No material frozen protocol concern.545 retains sole heavy priority.
+Validation: BEFORE repair genuine outer per-node wrapped acceptance FAIL on unchanged complete consumer, healthy contiguous XFAIL and success/unrelated contrasts. AFTER repair same acceptance PASS; actual-consumer normalization-disabled opposite FAILS acceptance while intact/contiguous controls discriminate. Focused two-file population/IDs/child labels, Ruff/scoped mypy/diff/strict389/frozen/all off-lane hashes/history/native/normal guards and leak bad+healthy controls. Return TESTED UNCOMMITTED; no checkpoint/review/receipt/full/push/issue edit.
