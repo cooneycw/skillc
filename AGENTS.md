@@ -118,7 +118,7 @@ target here, so this list cannot silently fall behind the workflow file the
 way it did once (#156: PR #155 went red on `changelog-check`, which no local
 gate ran):
 
-- `skillc selftest`, `ci/run_pytest_lanes.py` (ordinary pytest workers, then isolated serial load-harness self-tests), `ruff check --cache-dir .ruff_cache .`, `mypy` (the `gate` step)
+- `skillc selftest`, `ci/run_pytest_lanes.py` (ordinary pytest workers, then isolated serial load-harness and artifact-qualification self-tests), `ruff check --cache-dir .ruff_cache .`, `mypy` (the `gate` step)
 - Independent `pytest --collect-only -q` population matched by identity and count to
   the JUnit report, then `ci/pytest-population-control.sh` rejects its committed
   short report; `ci/pytest-lanes-control.sh` refuses missing, dropped, duplicated
@@ -139,12 +139,16 @@ gate ran):
   catches it before anything reaches GitHub.
 
 `make test` uses up to eight workers for ordinary tests, then runs all selected
-`tests/test_load_harness.py` items in a separate `-n 0` pytest invocation after
+`tests/test_load_harness.py` and `tests/test_change_with_regression_568.py` items
+in a separate `-n 0` pytest invocation after
 those workers exit and are reaped (#462). The attribution self-tests require
 uncontended container CPUs; their INVALID verdicts are unchanged, and none are
 skipped under load. `reports/pytest-lanes.json` records phase PIDs, exit codes
 and monotonic start/end times. External competing work can still make a harness
-phase INVALID; serializing this suite removes only its own competition.
+phase INVALID; serializing this suite removes only its own competition. The
+artifact qualifier keeps its frozen five-second process cap, 450-second whole
+budget and explicit 0.3-second slow control. Its qualification alone measured
+43-95 seconds idle/under four competitors, work now assigned to the serial lane.
 
 One independent full collection is the population authority. Both lane XML
 reports are mandatory, even for an empty lane under a selection. Their exact,
@@ -159,7 +163,7 @@ they reuse Docker images; their JUnit group property preserves canonical IDs.
 `PYTEST_ARGS` (including paths and `-k`) selects the same population in the
 independent collection and both phases. `PYTEST_REPORT_DIR` isolates nested
 runs (default: `reports`). To reproduce the forced-contention and phased-work
-proofs, see `ci/reproduce_load_lanes.py`.
+proofs, see `ci/reproduce_load_lanes.py` and `ci/reproduce_oracle_lane.py`.
 
 Local `changelog-check` refuses (exit 2) staged, unstaged or untracked nonignored
 changes under `skillc/` or eligible `changelog.d/<issue>[-slug].md` fragments,
