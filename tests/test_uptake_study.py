@@ -57,7 +57,7 @@ def _data(*, n_primary: int = 3, n_secondary: int = 3, approved: bool = True) ->
                    "reasoning_effort": "high", "tools": "defaults", "permissions": "the same for every attempt",
                    "public_requirements": "goal.md plus each case's addendum",
                    "image": {"tag": "skillc-trial:latest", "digest": _IMAGE_DIGEST},
-                   "per_attempt_seconds": 600, "total_seconds": 600 * 2 * (n_primary + n_secondary)},
+                   "per_attempt_seconds": 600, "total_seconds": (600 + 16) * 2 * (n_primary + n_secondary)},
         "cases": cases,
         "test": {"kind": "fisher-exact-one-sided", "direction": "rewritten > published", "alpha": 0.05},
         "arm_order": {"seed": 7, "sequence": [list(x) for x in us.derive_order(7, parsed)]},
@@ -319,6 +319,7 @@ def test_the_committed_declaration_is_authorized() -> None:
 
 def test_red_the_committed_declaration_without_its_approval_is_refused() -> None:
     data = json.loads((ROOT / "evals" / "uptake-study" / "run-manifest.json").read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = None
     with pytest.raises(us.StudyRefused, match="not approved"):
         us.require_approved(us.parse_declaration(data), ROOT)
@@ -405,6 +406,7 @@ def test_the_committed_selective_declaration_is_authorized_and_its_file_matches(
     lines, at = us._description_of((root / "flow-check-SKILL.md").read_bytes())
     assert us._unquote(lines[at].split(":", 1)[1]) == declaration.rewritten_description
     data = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = None
     with pytest.raises(us.StudyRefused, match="not approved"):
         us.require_approved(us.parse_declaration(data), ROOT)
@@ -541,7 +543,7 @@ def _screen_data(variants: Sequence[str] = ("variant-a", "variant-b"), **case_ex
         "task": {"path": "evals/level1/slug-small-fix", "grader_id": grader.id, "grader_revision": grader.revision},
         "arms": arms, "cases": cases, "probe": {"cutoff_seconds": 45},
         "shared": {**_data()["shared"], "per_attempt_seconds": 45,  # type: ignore[dict-item]
-                   "total_seconds": 45 * len(names) * 6},
+                   "total_seconds": (45 + 16) * len(names) * 6},
         "arm_order": {"seed": 3, "sequence": [list(x) for x in us.derive_order(3, parsed, names)]},
     }
 
@@ -685,3 +687,124 @@ def test_uptake_refuses_any_reused_protocol_arm_before_approval_or_store(tmp_pat
         us.run_study(None, run_dir=tmp_path / "run", treatments={"second-arm": t},  # type: ignore[arg-type]
                      image_digest=None, backends=lambda: pytest.fail("backend"), argv_for=lambda _: [], root=tmp_path)
     assert not (tmp_path / "run").exists()
+
+
+# #546: public report/text accounting, including slots that never started.
+def _accounting_twin() -> list[mp.AttemptOutcome]:
+    return [_probe_outcome("rewritten", selected=False, calls=0),
+            _probe_outcome("published", selected=True, calls=2)]
+
+
+def test_not_run_is_excluded_from_public_probe_undecided() -> None:
+    outcomes = _accounting_twin()
+    outcomes.append(mp.AttemptOutcome(mp.ScheduledAttempt("a-not-run", "t", "intended-use__rewritten", 2),
+                                      {"disposition": "not-run"}, None))
+    report = us.build_report(_Experiment(), outcomes, us.parse_declaration(_probe_data()))  # type: ignore[arg-type]
+    assert report["undecided"] == 1
+    assert "undecided=1" in us.paste_back(report)
+
+
+def test_all_captured_public_probe_accounting_healthy_twin() -> None:
+    report = us.build_report(_Experiment(), _accounting_twin(),  # type: ignore[arg-type]
+                             us.parse_declaration(_probe_data()))
+    assert report["undecided"] == 1
+    assert "undecided=1" in us.paste_back(report)
+
+
+@pytest.mark.parametrize("screen", [False, True])
+@pytest.mark.parametrize("probe", [False, True])
+def test_disposition_partition_preserves_report_consumers(screen: bool, probe: bool) -> None:
+    data = _screen_data() if screen else _probe_data()
+    if not probe:
+        data.pop("probe")
+    declaration = us.parse_declaration(data)
+    captured = [dataclasses.replace(o, scheduled=dataclasses.replace(
+        o.scheduled, arm=f"{declaration.cases[0].id}__{declaration.arms[i]}"))
+        for i, o in enumerate(_accounting_twin())]
+    baseline = us.build_report(_Experiment(), captured, declaration)  # type: ignore[arg-type]
+    dispositions: list[object] = ["not-run", "unavailable", "inconclusive", None, "future", {}, []]
+    extra = [mp.AttemptOutcome(mp.ScheduledAttempt(f"a-extra-{i}", "t", captured[0].scheduled.arm, i + 2),
+                               {"disposition": value}, None) for i, value in enumerate(dispositions)]
+    report = us.build_report(_Experiment(), captured + extra, declaration)  # type: ignore[arg-type]
+    assert [report[k] for k in ("not_run", "unavailable", "unknown_disposition")] == [1, 1, 4]
+    assert report["undecided"] == (2 if probe else 0)
+    rows = report["attempts"]
+    assert isinstance(rows, list) and rows
+    assert [r["decision_applicable"] for r in rows] == [True, True, False, False, True, None, None, None, None]
+    assert [r["disposition"] for r in rows[2:]] == dispositions
+    assert all(isinstance(r["decided"], bool) for r in rows)
+    assert [r["decided"] for r in rows[2:]] == [not probe] * len(extra)
+    assert len(rows) == len(captured) + len(extra)
+    expected_cells = copy.deepcopy(baseline["cells"])
+    assert isinstance(expected_cells, dict) and expected_cells
+    expected_cells[declaration.cases[0].id][declaration.arms[0]]["scheduled"] += len(extra)
+    assert report["cells"] == expected_cells
+    assert report["primary_test"] == baseline["primary_test"]
+    assert report["scores"] == baseline["scores"]
+    assert report["version"] == 1
+    text = us.paste_back(report)
+    for case, arms in expected_cells.items():
+        for arm, cell in arms.items():
+            assert f"[{case} / {arm}] selected={cell['selected']}/{cell['observed']} (scheduled {cell['scheduled']})" in text
+    assert "not_run=1, unavailable=1, unknown_disposition=4" in text
+    assert ("PROBE cut-off" in text) is probe
+    assert ("undecided=2" in text) is probe
+
+
+@pytest.mark.parametrize("failure", ["wrong-model", "unconfirmed"])
+def test_accounting_does_not_expand_model_or_confirmation_eligibility(failure: str) -> None:
+    outcome = _probe_outcome("published", selected=True, calls=2)
+    obs = outcome.record["observation"]
+    assert isinstance(obs, dict) and obs
+    if failure == "wrong-model":
+        obs["run_metadata"] = {"model": "another-model"}
+    else:
+        obs["transcript_files_found"] = 0
+    report = us.build_report(_Experiment(), [outcome], us.parse_declaration(_probe_data()))  # type: ignore[arg-type]
+    cells, rows = report["cells"], report["attempts"]
+    assert isinstance(cells, dict) and isinstance(rows, list) and rows
+    assert cells["intended-use"]["published"] == {"scheduled": 1, "observed": 0, "selected": 0}
+    assert rows[0]["decision_applicable"] is True
+
+
+@pytest.mark.parametrize("value", [None, "future", {}, [], ["captured"], 1, False])
+def test_unknown_or_missing_raw_disposition_is_not_guessed(value: object) -> None:
+    record = {} if value is None else {"disposition": value}
+    outcome = mp.AttemptOutcome(mp.ScheduledAttempt("a-unknown", "t", "intended-use__rewritten", 1), record, None)
+    report = us.build_report(_Experiment(), [outcome], us.parse_declaration(_probe_data()))  # type: ignore[arg-type]
+    assert report["unknown_disposition"] == 1 and report["undecided"] == 0
+    rows = report["attempts"]
+    assert isinstance(rows, list) and len(rows) == 1
+    row = rows[0]
+    assert row["disposition"] == value and row["decision_applicable"] is None
+    assert row["decided"] is False
+    assert record == ({} if value is None else {"disposition": value})
+
+
+def test_text_preserves_legacy_json_without_inventing_zero_counters() -> None:
+    report = us.build_report(_Experiment(), _accounting_twin(),  # type: ignore[arg-type]
+                             us.parse_declaration(_probe_data()))
+    for key in ("not_run", "unavailable", "unknown_disposition"):
+        report.pop(key)
+    text = us.paste_back(report)
+    assert "PROBE cut-off 45s, undecided=1" in text
+    assert "not_run=" not in text and "unavailable=" not in text and "unknown_disposition=" not in text
+
+
+@pytest.mark.parametrize("bad", [{"not_run": 0}, {"not_run": 0, "unavailable": 0},
+    {"not_run": -1, "unavailable": 0, "unknown_disposition": 0},
+    {"not_run": False, "unavailable": 0, "unknown_disposition": 0},
+    {"not_run": 0, "unavailable": None, "unknown_disposition": 0},
+    {"not_run": 0, "unavailable": 0, "unknown_disposition": "0"},
+    {"not_run": [], "unavailable": 0, "unknown_disposition": 0}])
+def test_partial_or_malformed_text_counters_refuse(bad: dict[str, object]) -> None:
+    with pytest.raises(us.StudyRefused, match="incomplete or malformed"):
+        us.paste_back({"experiment_id": "controlled", **bad})
+
+
+def test_not_run_partition_reaches_public_text_consumer() -> None:
+    outcomes = _accounting_twin() + [mp.AttemptOutcome(
+        mp.ScheduledAttempt("a-text-not-run", "t", "intended-use__rewritten", 2), {"disposition": "not-run"}, None)]
+    report = us.build_report(_Experiment(), outcomes, us.parse_declaration(_probe_data()))  # type: ignore[arg-type]
+    assert "undecided=1" in us.paste_back(report)
+    assert "not_run=1" in us.paste_back(report)

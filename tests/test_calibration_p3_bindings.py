@@ -42,10 +42,20 @@ def _draft(path: Path) -> dict[str, Any]:
     return data
 
 
+def _budgeted(data: dict[str, Any]) -> dict[str, Any]:
+    """A prospective fixture needs overhead outside the historical exception."""
+    data = copy.deepcopy(data)
+    shared = data["shared"]
+    shared["total_seconds"] = max(shared["total_seconds"],
+                                  len(data["arms"]) * data["attempts_per_arm"] *
+                                  (shared["per_attempt_seconds"] + 16))
+    return data
+
+
 def _approve(data: dict[str, Any]) -> dict[str, Any]:
     """A TEST-ONLY approval stamped at the declaration's own digest - never
     committed; the committed drafts keep `approval: null`."""
-    data = copy.deepcopy(data)
+    data = _budgeted(data)
     data["approval"] = {"by": "TEST ONLY", "at": "2026-10-17", "attempts_per_arm": data["attempts_per_arm"],
                         "profile_inventory_digest": INVENTORY_DIGEST}
     if data["kind"] == calibration.DISCRIMINATION_KIND:
@@ -90,8 +100,8 @@ def test_the_committed_declarations_carry_the_owners_approval_at_the_approved_di
 
 @pytest.mark.parametrize("field, value", [("model", "gpt-6"), ("reasoning_effort", "medium"), ("total_seconds", 48000)])
 @pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
-def test_the_owners_approval_does_not_survive_a_changed_field(path: Path, field: str, value: object) -> None:
-    data = _draft(path)
+def test_an_approval_does_not_survive_a_changed_field(path: Path, field: str, value: object) -> None:
+    data = _approve(_draft(path))
     data["shared"][field] = value
     with pytest.raises(calibration.DeclarationRefused):
         _authorize(data)
@@ -161,7 +171,7 @@ def test_c1_the_older_exact_unknown_rule_still_covers_prose() -> None:
 # ------------------------------------------------------------------- C2
 
 def test_c2_an_endpoint_declaration_without_a_tolerance_is_refused() -> None:
-    data = _draft(IMPROVEMENT)
+    data = _budgeted(_draft(IMPROVEMENT))
     del data["tolerance"]
     with pytest.raises(calibration.DeclarationRefused, match="tolerance"):
         calibration.parse_declaration(data)
@@ -192,7 +202,7 @@ def _receipt(tmp_path: Path, body: bytes = b'{"receipt": "bytes"}') -> tuple[Pat
 
 
 def _with_receipt(data: dict[str, Any], digest: str) -> calibration.CalibrationDeclaration:
-    data = copy.deepcopy(data)
+    data = _budgeted(data)
     data["shared"]["image"]["receipt_sha256"] = digest
     return calibration.parse_declaration(data)
 
@@ -258,7 +268,7 @@ def test_c3_a_new_kind_declaration_without_a_well_formed_receipt_digest_is_refus
 @pytest.mark.parametrize("value", [None, ""])
 def test_c3_the_run_binding_refuses_a_null_declared_receipt(tmp_path: Path, value: object) -> None:
     receipt, _digest = _receipt(tmp_path)
-    data = _draft(IMPROVEMENT)
+    data = _budgeted(_draft(IMPROVEMENT))
     data["shared"]["image"]["receipt_sha256"] = value
     declaration = calibration.parse_declaration(data)
     with pytest.raises(cr.CalibrationRefused, match="receipt"):

@@ -59,7 +59,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import calibration, trial, verify
+from . import calibration, schedule_budget, trial, verify
 from . import calibration_run as cr
 from . import collection_conformance as cc
 from . import matched_pilot as mp
@@ -229,8 +229,9 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
     if not tested and {c.expect for c in cases} != set(EXPECTS):
         raise _refuse("a screen needs at least one 'select' case and one 'abstain' case to score selectivity")
     attempts = sum(len(arm_names) * c.attempts_per_arm for c in cases)
-    if total < per_attempt * attempts:
-        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts} attempts of {per_attempt:g}s")
+    budget_error = schedule_budget.refusal_reason(data, attempts=attempts, per_attempt=per_attempt, total=total)
+    if budget_error is not None:
+        raise _refuse(budget_error)
 
     test = data.get("test")
     alpha: object = 0.0
@@ -619,13 +620,18 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
         graded = record.get("graded")
         calls = tool_calls(obs)
         decided = _decided(obs, calls, invocations, declaration)
+        disposition = record.get("disposition")
+        # Cohort membership only, never proof of execution, contact or spend.
+        applicable = (True if disposition in mp.DISPATCHED else
+                      False if disposition in ("not-run", "unavailable") else None)
         entries.append({
             "position": position, "attempt_id": outcome.scheduled.attempt_id, "case": case, "arm": arm,
             "disposition": record.get("disposition"),
             "target_selected": cr._opened(invocations, (declaration.target_skill,), confirmed=confirmed and decided),
             "any_skill_selected": cr._opened(invocations, confirmed=confirmed and decided),
             "tool_calls": calls if calls is not None else UNKNOWN,
-            "decided": decided,
+            "decided": decided,  # Legacy classifier boolean stays unchanged.
+            "decision_applicable": applicable,
             "skill_invocations": invocations if isinstance(invocations, list) else UNKNOWN,
             # A probe is cut off by design, so its task grade measures nothing.
             "task_status": ("NOT_MEASURED (probe)" if declaration.probe_seconds is not None
@@ -647,11 +653,17 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
             cell["observed"] += 1
             cell["selected"] += entry["target_selected"] is True
     scores = _scores(cells, declaration)
+    accounting = {
+        "undecided": sum(e["decision_applicable"] is True and e["decided"] is False for e in entries),
+        "not_run": sum(e["disposition"] == "not-run" for e in entries),
+        "unavailable": sum(e["disposition"] == "unavailable" for e in entries),
+        "unknown_disposition": sum(e["decision_applicable"] is None for e in entries),
+    }
     if not declaration.tested:
         return {
             "version": 1, "kind": REPORT_KIND, "experiment_id": experiment.id, "screen": True,
             "probe_seconds": declaration.probe_seconds,
-            "undecided": sum(1 for e in entries if e["decided"] is False),
+            **accounting,
             "target_skill": declaration.target_skill, "variants": dict(declaration.variants or {}),
             "attempts": entries, "cells": cells, "scores": scores, "primary_test": None,
         }
@@ -663,7 +675,7 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
     return {
         "version": 1, "kind": REPORT_KIND, "experiment_id": experiment.id,
         "probe_seconds": declaration.probe_seconds,
-        "undecided": sum(1 for e in entries if e["decided"] is False),
+        **accounting,
         "target_skill": declaration.target_skill, "attempts": entries, "cells": cells,
         "primary_test": {
             "case": primary, "kind": "fisher-exact-one-sided", "direction": "rewritten > published",
@@ -681,6 +693,12 @@ def paste_back(report: Mapping[str, object]) -> str:
     probe = report.get("probe_seconds")
     lines = [f"uptake-study: experiment {report.get('experiment_id')} target={report.get('target_skill')}"
              + (f" PROBE cut-off {probe:g}s, undecided={report.get('undecided')}" if probe else "")]
+    counters = ("not_run", "unavailable", "unknown_disposition")
+    if any(key in report for key in counters):
+        if not all(isinstance(count := report.get(key), int) and not isinstance(count, bool)
+                   and count >= 0 for key in counters):
+            raise StudyRefused("incomplete or malformed report disposition counters")
+        lines[0] += ", " + ", ".join(f"{key}={report[key]}" for key in counters)
     cells = report.get("cells")
     for case, arms in (cells.items() if isinstance(cells, dict) else []):
         for arm, cell in arms.items():
