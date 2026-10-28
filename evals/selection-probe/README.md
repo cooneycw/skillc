@@ -1,8 +1,8 @@
 # Selection probe: three predeclared cases (#26)
 
 Current result storage (#545 B2): future runs through the concrete
-`AgentTrialRunner` capture every attempt and establish complete attendance
-before grading. Each eligible capture is graded once through the locked verifier
+`AgentTrialRunner` finish attempt collection and establish complete attendance
+before grading eligible captures. Each eligible capture is graded once through the locked verifier
 assembler using its attempt/trial-bound stored observation and frozen artifacts,
 not copied transcript candidate bytes. Reports link `result_id` and
 `result_status`; task success remains separate from mandatory installation-ready
