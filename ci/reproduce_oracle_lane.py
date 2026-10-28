@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from contextlib import suppress
 from pathlib import Path
 
+from ci.check_pytest_population import outcomes
 from ci.reproduce_load_lanes import validate_order
 
 MODULE = "tests/test_change_with_regression_568.py"
@@ -26,6 +27,16 @@ CONSUMERS = (
     "test_resources_have_real_refusal_and_positive_twins",
 )
 WORK = "controls/pytest-oracle-lane/workload.py"
+
+
+def validate_serial_consumers(path: Path) -> None:
+    expected = {(MODULE.removesuffix(".py").replace("/", "."), name): "passed" for name in CONSUMERS}
+    try:
+        actual = outcomes(path)
+    except (OSError, ValueError, ET.ParseError) as exc:
+        raise ValueError("serial qualifier proof is missing or incomplete") from exc
+    if actual != expected:
+        raise ValueError("serial qualifier proof must contain exactly all three passing consumers")
 
 
 def main() -> int:
@@ -65,6 +76,7 @@ def main() -> int:
         ordinary = ET.parse(args.report_dir / "pytest-ordinary.xml")
         prop = next(p for p in ordinary.iter("property") if p.get("name") == "work_reaped_ns")
         validate_order(lanes, int(prop.attrib["value"]))
+        validate_serial_consumers(args.report_dir / "pytest-serial.xml")
         print(json.dumps({"lanes": lanes, "work_reaped_ns": int(prop.attrib["value"])}, indent=2))
     print(f"oracle-lane-reproduce: {args.mode} completed in {time.monotonic() - started:.3f}s")
     return 0
