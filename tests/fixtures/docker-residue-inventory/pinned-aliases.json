@@ -1,0 +1,50 @@
+{
+  "images": [
+    {
+      "Id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "RepoTags": [
+        "skillc-trial:apparently-disposable-c",
+        "skillc-375-final:kept"
+      ],
+      "Config": {
+        "Labels": null
+      },
+      "Size": 512
+    },
+    {
+      "Id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "RepoTags": [
+        "skillc-trial:apparently-disposable-d",
+        "skillc-279-ca3030d:kept"
+      ],
+      "Config": {
+        "Labels": null
+      },
+      "Size": 512
+    },
+    {
+      "Id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "RepoTags": [
+        "skillc-trial:apparently-disposable-e",
+        "skillc-434-rev2:kept"
+      ],
+      "Config": {
+        "Labels": null
+      },
+      "Size": 512
+    },
+    {
+      "Id": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "RepoTags": [
+        "skillc-trial:apparently-disposable-f",
+        "registry.example.test/archive/skillc-529-example:kept"
+      ],
+      "Config": {
+        "Labels": null
+      },
+      "Size": 512
+    }
+  ],
+  "containers": [],
+  "networks": []
+}
