@@ -43,3 +43,41 @@ def test_qualifier_report_controls(tmp_path: Path, serial: str, expected: int) -
     )
     assert result.returncode == expected, result.stdout + result.stderr
     assert output.exists() == (expected == 0)
+
+
+def test_partial_competitor_launch_reaps_the_owned_prefix(tmp_path: Path, monkeypatch) -> None:
+    from ci import reproduce_oracle_lane as experiment
+
+    class Owned:
+        terminated = False
+        waited = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            self.waited = True
+            return -15
+
+    owned = Owned()
+    calls = []
+
+    def spawn(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            return owned
+        raise OSError("injected second competitor launch failure")
+
+    read_text = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == Path("/sys/fs/cgroup/cpu.max"):
+            return "200000 100000"
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(experiment.subprocess, "Popen", spawn)
+    monkeypatch.setattr(experiment.sys, "argv", ["experiment", "contended", "--report-dir", str(tmp_path)])
+    with pytest.raises(OSError, match="second competitor"):
+        experiment.main()
+    assert owned.terminated and owned.waited
