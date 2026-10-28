@@ -78,9 +78,9 @@ package uploads retain their own authorization requirements.
     tag-pinned links. Record merge SHA, tag, release URL and evidence limits in
     #72. Never tag the unmerged preparation branch.
 
-For 0.5.0, assembly waits for the accepted test-lane change, its qualifier
-follow-up, the residue inventory and the remaining stop/accounting delivery.
-Those pending PRs must supply their final fragments before step 6.
+For 0.5.0, the test-lane change (#608) and calibration-report recovery (#610)
+are merged. Assembly still waits for the qualifier follow-up and residue
+inventory. Those pending PRs must supply their final fragments before step 6.
 
 For 0.5.0, **no PyPI publishing is authorized** (owner ruling, 2026-10-28).
 Local wheel construction for clean-install verification is required and does

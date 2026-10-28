@@ -70,6 +70,8 @@ and retained evidence; broader effectiveness and reliability claims remain open.
 Today's delivery also fixes zero-score optimizer ranking (#599), preserves
 license notices beside frozen snapshots, gates clean wheel installation, and
 corrects uptake accounting and minimum schedule overhead (#546, still open).
+`skillc calibration-report <run_dir>` recovers interrupted calibration reports
+from retained checkpoints and verified ledgers without starting an agent.
 Most failure-path coverage still uses fake Docker; container verification skips
 real-daemon tests. The eighteen sweep closures include coordination transfers
 whose implementation work is unfinished. See the
