@@ -134,3 +134,15 @@ Currently refuses at preflight (the image has no `uv`/`make` yet,
 tracked separately as #343); the two break modes (`missing-closure`,
 `tampered-closure`) pass today regardless, since they prove the
 preflight's own refusal correctness, which does not depend on #343.
+
+
+## Current network-policy correction (#554)
+
+The historical `profile.json` retains its original `tool-pypi-runtime.supply`
+text: the canonical whole declaration contributes to `profile_digest`, so a
+prose edit would change this profile's identity. Current live-agent execution
+uses `egress:provider-only (#442)`; the separate grading container uses
+`network:none`. Provider-only egress does not include package-index access,
+so runtime dependencies still need a declared pre-supplied cache or runtime.
+This correction supplies the current policy alongside the preserved historical
+metadata. The cold-container offline-install proof remains a narrower claim.

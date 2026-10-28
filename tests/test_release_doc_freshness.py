@@ -5,6 +5,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 STALE_CASES = [
+    ("AGENTS.md", "#26 remains open"),
+    ("evals/README.md", "#26 remains open"),
+    ("evals/README.md", "No existing fixture admits it"),
+    ("README.md", "Also in this cycle, still open:"),
     ("README.md", "23/23 rule(s) discriminate"),
     ("README.md", "no agent has attempted either yet"),
     ("README.md", "neither level has run through a live agent yet"),
@@ -18,7 +22,6 @@ STALE_CASES = [
     ("docs/specs/evaluation-facility/verification.md", "No concrete backend exists"),
     ("skillc/fixture_live.py", "graded by grader revision 2"),
     ("evals/subjects/cpp-codex-flow-check-ea6dbfa/PROFILE.md", "remains #237's own path"),
-    ("evals/subjects/cpp-codex-flow-check-ea6dbfa/profile.json", "Trials have no network"),
 ]
 
 
@@ -47,3 +50,11 @@ def test_provenance_annotates_historical_not_run_claim() -> None:
     text = (ROOT / "evals/level3/gate-stops-early/PROVENANCE.md").read_text()
     original_paragraph = text.split("Two runner mechanisms", 1)[1].split("`reference.md`'s own Step 6", 1)[0]
     assert "pending" in original_paragraph and "Revision 5" in original_paragraph
+
+
+def test_frozen_profile_has_an_adjacent_current_network_policy_correction() -> None:
+    from skillc.collection_conformance import AGENT_NETWORK_POLICY
+
+    text = (ROOT / "evals/subjects/cpp-codex-flow-check-ea6dbfa/PROFILE.md").read_text()
+    assert AGENT_NETWORK_POLICY in text
+    assert "profile_digest" in text and "network:none" in text

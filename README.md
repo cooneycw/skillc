@@ -63,14 +63,18 @@ calibrations reached ceiling or floor and do not demonstrate general benefit
 [PLAN.md](PLAN.md) for the design and delivery sequence.
 
 **0.5.0 delivers controlled evaluation workflows and retained evidence.**
-Profiles close workflow dependencies, task graders qualify their own controls,
-and the facility supports calibration, uptake studies, fixture services,
-controller-held witnesses and retained evidence export. Live calibration and
-uptake reports now exist; they support bounded conclusions, not a general
-effectiveness claim. Most failure-path coverage still uses fake Docker;
-container-only verification skips real-daemon tests. See
-[0.5.0 release notes](docs/release-notes/0.5.0.md) for delivered capabilities,
-remaining live obligations and the release boundary.
+Declared dependency inventories, qualified graders, calibration and uptake
+reports, fixture services, controller-held witnesses and retained export now
+exist. The bounded selection probe (#26) is closed with its detection/control
+and retained evidence; broader effectiveness and reliability claims remain open.
+Today's delivery also fixes zero-score optimizer ranking (#599), preserves
+license notices beside frozen snapshots, gates clean wheel installation, and
+corrects uptake accounting and minimum schedule overhead (#546, still open).
+Most failure-path coverage still uses fake Docker; container verification skips
+real-daemon tests. The eighteen sweep closures include coordination transfers
+whose implementation work is unfinished. See the
+[0.5.0 release notes](docs/release-notes/0.5.0.md) for each delivered scope,
+remaining obligation and evidence limit.
 
 <!-- milestones:start (checked against docs/milestones.json, #73) -->
 | Milestone | State |
@@ -523,10 +527,10 @@ locally; Level 3 live calibration attempts are retained under
 `evals/calibration-204/` and `evals/calibration-203*/`. A completed attempt
 is distinct from a calibrated task or demonstrated benefit.
 
-The [implementation plan](PLAN.md) sequences delivery against the specification;
-the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
-runtime, paid model trial, CPP change or upstream CI integration is introduced
-by this planning update.
+The [implementation plan](PLAN.md) retains the original delivery sequence;
+the [review agenda](docs/specs/evaluation-facility/review.md) tracks issue-specific
+choices. Current implementation and retained evidence are summarized above.
+A new live attempt needs its own approved declaration and caps.
 
 See the [project assessment and research](docs/README.md) for the proposed role
 of skillc in a focused CPP harness, verified implementation gaps, and a suggested
@@ -572,23 +576,12 @@ both run live on native Docker Engine, both `CAUGHT` (evidence:
 The rest of the conformance table and failure-path matrix stay proven only
 against the fake CLI, unchanged from 0.2.0's own scope ruling.
 
-Also in this cycle, still open: Level 2, Level 3, Level 4 and Level 5 task
-fixtures ([#13](https://github.com/cooneycw/skillc/issues/13),
-[#14](https://github.com/cooneycw/skillc/issues/14), self-certified locally,
-no live agent run yet), four Nit Store fixes against the exposure check's
-own acceptance criteria ([#55](https://github.com/cooneycw/skillc/issues/55),
-whose own live-evidence acceptance items are untouched by this cycle), an
-optional managed-container backend with a published protocol but no
-implementing platform yet ([#64](https://github.com/cooneycw/skillc/issues/64)),
-operator-expressible degraded CPP subjects and a behavioral-eval export path
-([#150](https://github.com/cooneycw/skillc/issues/150) - everything it
-needs to run now exists, including the agent-path installation receipt;
-the non-discriminating live run is retained under `evals/discriminating-run/`;
-follow-up effectiveness work is tracked by #203), and a live selection-probe run with its
-detection control ([#26](https://github.com/cooneycw/skillc/issues/26)).
-None of these claims to be finished; see
-[`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)
-for exactly what each one still owes.
+The [0.3.0 release notes](docs/release-notes/0.3.0.md) preserve that milestone's
+historical status. Since then, the exposure check (#55), degraded-run slice
+(#150) and bounded selection probe (#26) have closed with their recorded
+limits. Level 3 calibration attempts now exist; the broader #13/#14 task-family
+outcomes and #203 effectiveness study remain open. Current scope and carry-forward
+work are documented in the [0.5.0 notes](docs/release-notes/0.5.0.md).
 
 ## Prior art
 

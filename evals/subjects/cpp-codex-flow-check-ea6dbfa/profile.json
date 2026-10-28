@@ -146,7 +146,7 @@
    "scope": "common",
    "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
    "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
-   "supply": "EXTERNAL: uv resolves these from a package index on first run. Live agent containers have provider-only egress (#442), not general package-index access; grading containers use network:none. #266 pre-supplies a filled cache for its offline proof or reports the gate unavailable",
+   "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
    "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
    "probes": [
     {"kind": "python-import", "modules": ["pydantic", "yaml"], "uv_project": "Projects/claude-power-pack"}

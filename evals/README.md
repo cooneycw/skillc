@@ -23,7 +23,7 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 
 | Probe | Status |
 |---|---|
-| [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller (#26); retained runs and current result-storage limits are documented in the probe README. #26 remains open; new runs require ADR 0005 approval |
+| [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller (#26); retained runs and current result-storage limits are documented in the probe README. #26 is closed for its bounded detection/control and retention scope; new runs require ADR 0005 approval |
 | [Matched pilot](matched-pilot/README.md) | Live pilot evidence is retained (#12, closed); the 2026-09-28 pinned-model rerun passed 6/6 and supersedes the first run. See the pilot README for declarations and evidence |
 | [#150 discriminating run](discriminating-run/README.md) | Live run 2026-09-29/30 on `finish-close-ref` with a codex arm: positive control PASS, NORMAL PASS, DEGRADED PASS - **non-discriminating**, nothing exported to CPP (#150) |
 | [#204 calibration](calibration-204/README.md) | Two-arm calibration run 2026-09-30 on `level3/slugkit-pipeline` (full CPP vs baseline, 4 each): both arms 4/4 primary PASS, the CPP arm never opened a skill - **REDESIGN** recommended for #203 ([report](calibration-204/report.md)) |
@@ -32,7 +32,7 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 
 | Contract | Status |
 |---|---|
-| [`flow-check` v1](workflow-contracts/flow-check/README.md) | Obligation matrix for [protocol section 10](../docs/specs/evaluation-facility/protocol.md#10-workflow-contract-lanes-246-264)'s lanes (#264): every obligation cites the pinned published procedure. No existing fixture admits it to the explicit lanes, because none has a `lint:`/`test:`/`typecheck:` target (#270). A specification only: no run is declared or authorized |
+| [`flow-check` v1](workflow-contracts/flow-check/README.md) | Obligation matrix for [protocol section 10](../docs/specs/evaluation-facility/protocol.md#10-workflow-contract-lanes-246-264)'s lanes (#264): every obligation cites the pinned published procedure. The [gate-stops-early fixture](level3/gate-stops-early/fixture/Makefile) now has real `lint`/`test`/`typecheck` targets (#270). This matrix remains a specification, not a run declaration; task qualification and study approval are separate |
 
 ### Declarations and lanes
 

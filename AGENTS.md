@@ -64,7 +64,7 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `evals/selection-probe/` - three predeclared cases probing native skill selection
   (#26): case identities and allowed choices published before any attempt runs,
   planned through the real controller, and a cost-estimate run manifest computed
-  and asserted equal to the code that produces it; retained live evidence is indexed by its README, while #26 remains open
+  and asserted equal to the code that produces it; retained live evidence is indexed by its README; #26 is closed for the bounded experiment, with further runs requiring their own approval
 - `evals/matched-pilot/` - the first bounded matched pilot's predeclared experiment
   record and cost estimate (#12), reusing `skillc/cost_estimate.py` rather than a
   second estimator, and its live evidence (`evidence/`: 6 attempts, run 2026-09-27)
