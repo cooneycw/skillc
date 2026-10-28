@@ -35,8 +35,9 @@ returning `"selected"` there is exactly this probe's own contamination
 signal - one mechanism, not two: `baseline_contaminated` is a named alias of
 that same result for the arm where it is never desired.
 
-TASK SUCCESS IS GRADED, NEVER INFERRED FROM SELECTION. `verify.grade_files`
-(#76) grades the SAME `slug-small-fix` task's public outcome for every
+TASK SUCCESS IS GRADED, NEVER INFERRED FROM SELECTION. The real adapter
+stores a result through `verify.grade_agent_attempt`; synthetic fixtures use
+`verify.grade_files`. Both grade the SAME `slug-small-fix` task's public outcome for every
 arm and every case - a correct fix without invoking any skill is a valid,
 successful result (#26's own text), and an invoked-but-wrong-fix attempt is
 still a failure. The two facts are reported side by side, never folded into
@@ -237,12 +238,28 @@ def _grade(
     if transcript.disposition != "captured":
         return None, ""
     graded = verify.grade_files(grader, list(transcript.candidate_files), base, backend=backend)
+    return _task_outcome(graded)
+
+
+def _task_outcome(graded: verify.Graded) -> tuple[bool | None, str]:
     # Only PASS and FAIL are verdicts about the candidate. Anything else (an
     # INCONCLUSIVE grade: an unconfirmed containment, a judge that did not
     # return a verdict) is a fact about the GRADING, and reporting it as
     # task failure would blame the candidate for the grader's own gap.
     success = {"PASS": True, "FAIL": False}.get(graded.status)
     return success, "" if success is not None else f"grading {graded.status}: {graded.detail}"
+
+
+def _stored_grade(
+    experiment: trial.Experiment, attempt_id: str, grader: verify.GraderDef,
+    base: Path, backend: ExecutionBackend,
+) -> tuple[dict[str, object], verify.Graded]:
+    # The observation read and assembler share the same reentrant lock. Reopen
+    # before binding it; neither a stale instance nor transcript bytes is proof.
+    with trial.experiment_lock(experiment.root):
+        current = trial.Experiment.open(experiment.root)
+        observation = verify._stored_observation(current, attempt_id, current.trial_of(attempt_id))
+        return verify.grade_agent_attempt(current, attempt_id, grader, base, observation, backend=backend)
 
 
 @dataclass(frozen=True)
@@ -259,6 +276,10 @@ class ArmResult:
     #: transcript can be re-scanned, and why not when it cannot.
     transcript_retained_digest: str | None = None
     transcript_retention_reason: str | None = None
+    #: Only the concrete real adapter admits results. Synthetic fixture grades
+    #: and noneligible captures have no authoritative result reference.
+    result_id: str | None = None
+    result_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -362,8 +383,10 @@ def run_planned_selection_probe(
         declare, including an empty one.
       - any issued trial whose grader id/revision/digest does not match the
         execution grader. The whole population is checked before dispatch.
-      - no `grading_backend` without `allow_host_grading=True`. With no
-        backend, `verify.grade_files` executes the candidate as a HOST
+      - a real adapter without a separate `grading_backend`, even with
+        `allow_host_grading=True`; a foreign runner experiment is also refused.
+        Synthetic callbacks require that flag when no backend is given:
+        `verify.grade_files` then executes the candidate as a HOST
         subprocess - acceptable only for committed, trusted fixture
         candidates (this module's own fake-runner tests), never for what a
         real agent wrote. The default is the safe one.
@@ -378,6 +401,11 @@ def run_planned_selection_probe(
         `applicable_skills`, never against `cases`, so editing the case file
         after planning cannot change a verdict; `cases` supplies only the
         case's kind for the report."""
+    real_runner = isinstance(runner, AgentTrialRunner)
+    if isinstance(runner, AgentTrialRunner) and (
+        runner.experiment.root.resolve() != experiment.root.resolve() or runner.experiment.id != experiment.id
+    ):
+        raise SelectionProbeRefused("the real runner belongs to another experiment")
     named = getattr(runner, "skill_name", None)
     if named is not None and not detection_control:
         raise SelectionProbeRefused(
@@ -388,7 +416,7 @@ def run_planned_selection_probe(
         raise SelectionProbeRefused(
             "a detection control needs a runner whose canary names the skill it must detect"
         )
-    if grading_backend is None and not allow_host_grading:
+    if grading_backend is None and (real_runner or not allow_host_grading):
         raise SelectionProbeRefused(
             "no grading_backend: the candidate would be executed on the host - pass a separate "
             "grading backend, or allow_host_grading=True for trusted fixture candidates only"
@@ -465,12 +493,12 @@ def run_planned_selection_probe(
             "every planned attempt must appear in the report, or none of it can be trusted"
         )
 
-    by_case: dict[str, dict[str, list[tuple[dict[str, object], AttemptTranscript]]]] = {}
+    by_case: dict[str, dict[str, list[tuple[dict[str, object], str, AttemptTranscript]]]] = {}
     for trial_dict, attempt in planned:
         case_id = str(trial_dict["case"]["id"])  # type: ignore[index]
         arm = str(trial_dict["config"]["arm"])  # type: ignore[index]
         by_case.setdefault(case_id, {}).setdefault(arm, []).append(
-            (trial_dict, transcripts[str(attempt["attempt_id"])])
+            (trial_dict, str(attempt["attempt_id"]), transcripts[str(attempt["attempt_id"])])
         )
 
     results = []
@@ -479,13 +507,23 @@ def run_planned_selection_probe(
         arm_results: dict[str, ArmResult] = {}
         applicable: tuple[str, ...] = ()
         for arm in ARMS:
-            [(trial_dict, transcript)] = arms[arm]  # exactly one - refused above otherwise
+            [(trial_dict, attempt_id, transcript)] = arms[arm]  # exactly one - refused above otherwise
             frozen_applicable = trial_dict["config"]["applicable_skills"]  # type: ignore[index]
             assert isinstance(frozen_applicable, list)
             arm_applicable = tuple(str(name) for name in frozen_applicable)
             if arm == "treatment":
                 applicable = arm_applicable
-            success, grading_detail = _grade(grader, transcript, base, grading_backend)
+            result_id = result_status = None
+            if real_runner and transcript.disposition == "captured":
+                assert grading_backend is not None  # real code never runs on the host
+                try:
+                    stored, graded = _stored_grade(experiment, attempt_id, grader, base, grading_backend)
+                except (verify.Refused, trial.Refused, OSError, ValueError) as exc:
+                    raise SelectionProbeRefused(f"attempt {attempt_id}: stored grading refused: {exc}") from exc
+                success, grading_detail = _task_outcome(graded)
+                result_id, result_status = str(stored["result_id"]), str(stored["status"])
+            else:
+                success, grading_detail = _grade(grader, transcript, base, grading_backend)
             arm_results[arm] = ArmResult(
                 disposition=transcript.disposition,
                 selection=selection_status(transcript, arm_applicable),
@@ -496,6 +534,7 @@ def run_planned_selection_probe(
                 observation_confirmed=transcript.observation_confirmed,
                 transcript_retained_digest=transcript.transcript_retained_digest,
                 transcript_retention_reason=transcript.transcript_retention_reason,
+                result_id=result_id, result_status=result_status,
             )
         results.append(CaseResult(
             case_id=case_id, kind=str(case["kind"]), applicable_skills=applicable,
@@ -612,8 +651,10 @@ def agent_trial_runner(
     every time; the fake-docker tests need the attempt id to map the home.
 
     No grading happens here: `run_planned_selection_probe` grades every
-    captured attempt itself, through its own `grading_backend`, so there is
-    ONE grading path whichever runner produced the transcript.
+    eligible capture after complete attendance, using the stored observation
+    and locked assembler. Synthetic callbacks retain fixture-only grade_files.
+    Recognizing this adapter is a trusted Python API boundary, not authenticated
+    producer origin. The grading backend must be separate and network-none.
 
     Launching a real `claude`/`codex` still requires
     `SKILLC_ALLOW_REAL_AGENT=1` - `lifecycle.py`'s own guard, unchanged.
