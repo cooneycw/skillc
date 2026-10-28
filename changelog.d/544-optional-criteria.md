@@ -1,0 +1,1 @@
+- Allow explicitly declared optional grader diagnostics while preserving mandatory completeness, scoring and legacy grader pins.
