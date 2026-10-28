@@ -88,5 +88,12 @@
     "original_sha256": "8fdd7e21785118d521b1bcd16019e39d0f50771d3211239eff7cee78b88849c3",
     "published_sha256": "cdca665243126095f4982bd86c44fab1c1775827a94881f9fa7d098faee2d38f",
     "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "548-worker01-final-parking-handoff.md",
+    "original_sha256": "259aaa830e4f8eaba7c47c07895c9e2a2df3b9bbe5bccb036859464e4cb3fbb8",
+    "published_sha256": "3276c58fec07039a4d5f3c461a45615f4477b58021ec0e7ad3204089866bc74b",
+    "archive_manifest_sha256": "02ef3a5003fff8e673ce7ad50404401097036eb9534f8c897e38942b8ce51c2f",
+    "note": "Final owner-park acknowledgement; local home paths redacted; original29-member local archive retained."
   }
 ]

@@ -65,3 +65,5 @@ Supplemental README tie-policy wording nit (outside #599 patch): https://github.
 - [#543 parking status](https://github.com/cooneycw/skillc/issues/543#issuecomment-6466834367)
 - [#542 parking status](https://github.com/cooneycw/skillc/issues/542#issuecomment-6466834760)
 - [#568 parking status](https://github.com/cooneycw/skillc/issues/568#issuecomment-6466835205)
+
+Worker01 explicitly acknowledged owner parking and STOPPED; its final [#548 parking handoff](548-worker01-final-parking-handoff.md) preserves clean ea2704cb, EMPTY write lane and no approved baseline. The29-member local archive manifest is recorded in report-manifest.json. No work was resumed.
