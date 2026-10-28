@@ -118,10 +118,11 @@ target here, so this list cannot silently fall behind the workflow file the
 way it did once (#156: PR #155 went red on `changelog-check`, which no local
 gate ran):
 
-- `skillc selftest`, `pytest -n auto --maxprocesses=8 --dist=loadgroup -rA`, `ruff check .`, `mypy` (the `gate` step)
+- `skillc selftest`, `ci/run_pytest_lanes.py` (ordinary pytest workers, then isolated serial load-harness self-tests), `ruff check --cache-dir .ruff_cache .`, `mypy` (the `gate` step)
 - Independent `pytest --collect-only -q` population matched by identity and count to
   the JUnit report, then `ci/pytest-population-control.sh` rejects its committed
-  short report; `ci/git-tests-control.sh` still guards git-dependent execution
+  short report; `ci/pytest-lanes-control.sh` refuses missing, dropped, duplicated
+  and incomplete lane evidence; `ci/git-tests-control.sh` still guards git-dependent execution
 - `ci/negative-control.sh` (the `negative-control` step)
 - `ci/typecheck-control.sh` (the `typecheck-control` step)
 - `skillc leak-check .` with CI's exact `--exclude` set, then
@@ -137,12 +138,28 @@ gate ran):
   scanner is not evidence of no secret, and the pre-push hook below still
   catches it before anything reaches GitHub.
 
-`make test` uses up to eight workers and keeps every test. Tests marked
-`real_docker` share one serial group because they reuse Docker images. The
-JUnit group property preserves their original identities for population checks. Use
-`make test PYTEST_WORKERS=0` for a serial diagnostic run; `PYTEST_ARGS` selects
-a subset for development, and the population check uses that same selection.
-`PYTEST_REPORT_DIR` isolates nested runs (default: `reports`).
+`make test` uses up to eight workers for ordinary tests, then runs all selected
+`tests/test_load_harness.py` items in a separate `-n 0` pytest invocation after
+those workers exit and are reaped (#462). The attribution self-tests require
+uncontended container CPUs; their INVALID verdicts are unchanged, and none are
+skipped under load. `reports/pytest-lanes.json` records phase PIDs, exit codes
+and monotonic start/end times. External competing work can still make a harness
+phase INVALID; serializing this suite removes only its own competition.
+
+One independent full collection is the population authority. Both lane XML
+reports are mandatory, even for an empty lane under a selection. Their exact,
+disjoint union becomes the usual `pytest-report.xml`, read by population and
+git-dependent execution checks. Missing serial reports, dropped IDs, duplicates,
+truncated XML and declared-count mismatches refuse before publishing that report.
+Committed controls in `controls/pytest-lanes/` demonstrate these refusals.
+
+Tests marked `real_docker` still share one ordinary-lane serial group because
+they reuse Docker images; their JUnit group property preserves canonical IDs.
+`make test PYTEST_WORKERS=0` also serializes the ordinary invocation.
+`PYTEST_ARGS` (including paths and `-k`) selects the same population in the
+independent collection and both phases. `PYTEST_REPORT_DIR` isolates nested
+runs (default: `reports`). To reproduce the forced-contention and phased-work
+proofs, see `ci/reproduce_load_lanes.py`.
 
 Local `changelog-check` refuses (exit 2) staged, unstaged or untracked nonignored
 changes under `skillc/` or eligible `changelog.d/<issue>[-slug].md` fragments,
@@ -165,8 +182,10 @@ committed proofs that they can. Equivalent without `make` (the `gate` and
 `negative-control` steps only; see the Makefile for the rest):
 
 ```bash
-uv sync --locked --extra dev && uv run skillc selftest && uv run pytest -n auto --maxprocesses=8 --dist=loadgroup -rA \
-    && uv run ruff check . && uv run mypy && uv run bash ci/negative-control.sh
+uv sync --locked --extra dev && uv run skillc selftest \
+    && uv run python3 ci/run_pytest_lanes.py --workers auto --report-dir reports \
+    && uv run ruff check --cache-dir .ruff_cache . && uv run mypy \
+    && uv run bash ci/negative-control.sh
 ```
 
 `mypy` takes its scope from `[tool.mypy] files` in `pyproject.toml` (`skillc` and
