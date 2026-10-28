@@ -1,0 +1,1 @@
+- Refuse pilot, calibration, fixture-live and uptake runs unless the client binary inside the declared image, asked by its image ID with no network, answers exactly the declared version; an unmeasurable answer refuses too. Rehearsals that start no container are unchanged.

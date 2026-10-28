@@ -77,6 +77,86 @@ def test_pinned_cli_version_refuses_a_missing_manifest(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# The client binary inside the resolved image (#548)
+# --------------------------------------------------------------------------
+
+_FAKE_PROBE_DOCKER = '''
+import json, sys, time
+log, mode, argv = sys.argv[1], sys.argv[2], sys.argv[3:]
+with open(log, "a") as fh:
+    fh.write(json.dumps(argv) + "\\n")
+if argv[0] == "rm":
+    sys.exit(0)
+outputs = {"codex": "codex-cli 0.157.1\\n", "claude": "2.1.283 (Claude Code)\\n", "other": "codex-cli 0.150.0\\n",
+           "empty": "", "two-lines": "codex-cli 0.157.1\\nupdate available: 0.160.0\\n",
+           "two-versions": "codex-cli 0.157.1 (node 22.1.0)\\n"}
+if mode == "nonzero":
+    sys.stderr.write("Unable to find image locally\\n")
+    sys.exit(125)
+if mode == "sleep":
+    time.sleep(30)
+sys.stdout.write(outputs[mode])
+'''
+
+
+def _probe_docker(tmp_path, mode):
+    script = tmp_path / "fake_docker.py"
+    script.write_text(_FAKE_PROBE_DOCKER, encoding="utf-8")
+    log = tmp_path / "calls.jsonl"
+    import sys
+    return [sys.executable, str(script), str(log), mode], log
+
+
+def _calls(log):
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+@pytest.mark.parametrize(("client", "mode", "version"), [
+    ("codex", "codex", "0.157.1"), ("claude_code", "claude", "2.1.283"), ("claude", "claude", "2.1.283"),
+    ("codex", "other", "0.150.0"),
+])
+def test_548_probe_measures_the_binary_inside_the_image_by_id(tmp_path, client, mode, version):
+    docker_bin, log = _probe_docker(tmp_path, mode)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, client)
+    assert probe == tb.ClientProbe(version, "measured")
+    (argv,) = _calls(log)
+    # Network-less, never pulled, the image by its ID, the client's own binary.
+    assert argv[0] == "run" and "--rm" in argv and argv[argv.index("--network") + 1] == "none"
+    assert argv[argv.index("--pull") + 1] == "never"
+    assert argv[argv.index("--entrypoint") + 1] == tb.CLIENT_BINARIES[client]
+    assert argv[-2:] == ["sha256:" + "a" * 64, "--version"]
+
+
+@pytest.mark.parametrize(("mode", "reason"), [
+    ("empty", "printed no version"), ("two-lines", "2 lines"), ("two-versions", "2 version strings"),
+    ("nonzero", "exited 125: Unable to find image locally"),
+])
+def test_548_probe_reports_unknown_rather_than_a_guess(tmp_path, mode, reason):
+    docker_bin, _log = _probe_docker(tmp_path, mode)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex")
+    assert probe.version is None and reason in probe.reason
+
+
+def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path):
+    docker_bin, log = _probe_docker(tmp_path, "sleep")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.5)
+    assert probe.version is None and "did not answer within 0.5s" in probe.reason
+    run, rm = _calls(log)
+    assert rm == ["rm", "-f", run[run.index("--name") + 1]]
+
+
+def test_548_probe_refuses_an_unknown_client_without_running_anything(tmp_path):
+    docker_bin, log = _probe_docker(tmp_path, "codex")
+    assert tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "gemini").version is None
+    assert not log.exists()
+
+
+def test_548_probe_without_a_docker_binary_is_unknown(tmp_path):
+    probe = tb.probe_image_cli_version([str(tmp_path / "no-docker")], "sha256:" + "a" * 64, "codex")
+    assert probe.version is None and "could not start the probe" in probe.reason
+
+
+# --------------------------------------------------------------------------
 # docker/trial/check_pins.py: the Dockerfile ARG defaults vs the manifest
 # --------------------------------------------------------------------------
 
@@ -1016,3 +1096,20 @@ def test_check_agent_canary_skill_free_still_refuses_a_failed_tool_call():
 def test_check_agent_canary_skill_free_refuses_a_no_op_transcript():
     with pytest.raises(tb.CanaryNotSatisfied):
         tb.check_agent_canary([], None)
+
+
+def test_548_shared_fake_docker_answers_the_probe_with_the_pin_or_its_sentinel(tmp_path):
+    """The shared fake daemon (tests/fixtures/docker-backend) carries the
+    pinned client by default; `.client-version` is its known-bad image."""
+    import sys
+    fake = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
+    state = tmp_path / "ds"
+    state.mkdir()
+    docker_bin = [sys.executable, str(fake), "--state", str(state)]
+    image = "sha256:" + "b" * 64
+    assert tb.probe_image_cli_version(docker_bin, image, "codex").version == tb.pinned_cli_version("codex")
+    assert tb.probe_image_cli_version(docker_bin, image, "claude").version == tb.pinned_cli_version("claude_code")
+    (state / ".client-version").write_text("0.0.1\n", encoding="utf-8")
+    assert tb.probe_image_cli_version(docker_bin, image, "codex").version == "0.0.1"
+    (state / ".client-version").write_text("", encoding="utf-8")
+    assert tb.probe_image_cli_version(docker_bin, image, "codex").version is None

@@ -209,3 +209,34 @@ Scope: exact three product paths plus the two canonical workflow records. Produc
 Commit bad alternate-tag/same-ID and healthy declared-tag/same-ID controls; run the regression on immutable pre-fix f0cea and retain real behavioral failure. Fake-only focused calibration_run/p3_bindings/approval_binding/discrimination_run plus relevant receipt-swap checks, real collected/JUnit IDs, Ruff/mypy/selftest. Keep all three historical default tags and wrong-ID dispositions; receipt-backed behavior unchanged; rehearsal starts no container and discloses skipped identity checks. Empty or malformed tag cannot silently pass. Two synthetic arrangements change only to preserve the layers their assertions test. No physical Docker/client/model/paid study, private campaign inspection or host installation.
 
 Root owns later checkpoint/review/receipt/full/publication gates;549 owns the exclusive full now. Return focused proof/counts/hashes before checkpoint or review. Parent548 stays OPEN, same-handle actual executable/image qualification B2 remains separately owed. Existing invocation-reader Nit6450901506 stays outside this slice. No new approval/history restamp or previous-run edits.
+
+<!-- flow-run n=4 id=ee0a27b0f70f4c86adab33f853e35eb7 -->
+## Run 4
+
+- Run-id:            ee0a27b0f70f4c86adab33f853e35eb7
+- Run-start:         192a7fd2a67b27b46bbf5d77045787610e29f591
+- Issue:             #548
+- Base SHA:          192a7fd2a67b27b46bbf5d77045787610e29f591
+- Necessity verdict: Needs reframing
+- Approval:          granted
+- Approver:          owner (cooneycw), in-session reply "approved" to the Step-3 report
+- Recorded at:       2026-10-28T15:40:00Z
+- Note:              recorded after the first implementation edits (ordering slip, disclosed in the PR); the plan below is the one approved before any edit
+
+### Section B evidence
+Delivered since filing: 1d129f9/#584 (items 19, 22), f0cea73/#589 (transcript version reporting, not a gate), ea2704c/#592 (item 13); item 25 checked. Inspected ea2704c..192a7fd (#593-#614): only #594, #596, #601, #610 touch cli.py/docker_backend.py/matched_pilot.py, none adds a binary probe. No open PR for #548. Related issues considered (parked analysis): #40, #247, #279, #287, #203, #375, #12, #309, #315, #554 - none supersedes. Item 16 ruled out: level3 campaigns run a scripted actor/fake client pinned by harness_digest, never the codex binary.
+
+### Section C - the approved plan
+1. `skillc/trial_bootstrap.py` - probe_image_cli_version: `docker run --rm --network none --pull never --entrypoint <bin> <image_id> --version`, bounded; strict parser; UNKNOWN with reason
+2. `skillc/cli.py` - pilot-run, calibration-run, level3-live, uptake-study refuse a mismatched or UNKNOWN measured client after the image binds; checkout-pin check unchanged; rehearsal/dry modes skip
+3. `tests/test_trial_bootstrap.py` - probe and parser cases with a fake docker, incl. timeout cleanup
+4. `tests/test_matched_pilot_run.py` - pilot-run CLI regression and fixture probe stubs
+5. `tests/test_calibration_run.py` - calibration-run CLI regression (wrong-client case)
+6. `tests/test_fixture_live_cli.py` - level3-live CLI regression
+7. `tests/test_uptake_study.py` - uptake-study CLI regression
+8. `tests/test_calibration_run_profile_closure.py` - fixture probe stub
+9. `tests/test_calibration_outcome_endpoint.py` - fixture probe stub
+10. `docs/specs/evaluation-facility/trial-bootstrap.md` - what is measured, what is not, UNKNOWN refuses
+11. `changelog.d/548-image-client-version-probe.md` - scope note
+
+Scope: ~11 files, 250-400 lines, mostly tests. Risks: fixture churn on fake-docker CLI tests; fail-closed on a daemon hiccup during the probe (deliberate, no bypass); version text is not attestation (the image-ID pin is); no Docker in skillc CI, so fakes only.

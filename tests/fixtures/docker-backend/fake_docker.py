@@ -237,8 +237,27 @@ SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
 _FLAGS_WITH_VALUE = (
     "--network", "--user", "--hostname", "--memory", "--memory-swap",
     "--pids-limit", "--cpus", "--shm-size", "-w", "--storage-opt",
-    "--signal", "--mount", "--dns",
+    "--signal", "--mount", "--dns", "--pull",
 )
+
+#: #548: `run --entrypoint <client> IMAGE --version`, the client probe, answers
+#: the version the trial image pins - the fake image carries the declared
+#: client - unless a `.client-version` sentinel in the state dir names
+#: another answer (an empty sentinel prints nothing).
+_PINNED_VERSIONS = Path(__file__).resolve().parents[3] / "docker" / "trial" / "pinned-versions.json"
+_CLIENT_VERSION_LINES = {"codex": ("codex", "codex-cli {}"), "claude": ("claude_code", "{} (Claude Code)")}
+
+
+def _client_version_probe(state_dir: Path, entrypoint: str) -> int:
+    key, line = _CLIENT_VERSION_LINES[entrypoint]
+    sentinel = state_dir / ".client-version"
+    if sentinel.is_file():
+        version = sentinel.read_text(encoding="utf-8").strip()
+    else:
+        version = json.loads(_PINNED_VERSIONS.read_text(encoding="utf-8"))[key]["version"]
+    if version:
+        print(line.format(version))
+    return 0
 
 
 def _state_file(state_dir: Path, name: str) -> Path:
@@ -969,10 +988,13 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     labels: dict[str, str] = {}
     networks: list[str] = []
     dns: list[str] = []
+    entrypoint = ""
     i = 0
     while i < len(rest):
         arg = rest[i]
-        if arg in ("--rm", "--init"):
+        if arg == "--entrypoint":
+            entrypoint, i = rest[i + 1], i + 2
+        elif arg in ("--rm", "--init"):
             i += 1
         elif arg == "-d":
             detached = True
@@ -1001,6 +1023,8 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
             break  # first non-flag token is the image
     image = rest[i] if i < len(rest) else ""
     argv = rest[i + 1:]
+    if entrypoint in _CLIENT_VERSION_LINES and argv == ["--version"]:
+        return _client_version_probe(state_dir, entrypoint)
 
     if (state_dir / ".refuse-run").exists():
         print("Error response from daemon: container creation refused (fault injection)", file=sys.stderr)
