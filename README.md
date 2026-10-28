@@ -69,7 +69,8 @@ exist. The bounded selection probe (#26) is closed with its detection/control
 and retained evidence; broader effectiveness and reliability claims remain open.
 Today's delivery also fixes zero-score optimizer ranking (#599), preserves
 license notices beside frozen snapshots, gates clean wheel installation, and
-corrects uptake accounting and minimum schedule overhead (#546, still open).
+corrects uptake accounting and minimum schedule overhead (#546, now closed
+with its seven-item disposition; real-daemon follow-up remains open in #613).
 `skillc calibration-report <run_dir>` recovers interrupted calibration reports
 from retained checkpoints and verified ledgers without starting an agent.
 Most failure-path coverage still uses fake Docker; container verification skips
