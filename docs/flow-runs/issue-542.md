@@ -143,3 +143,57 @@ No broad exclusions or edits to reserved #568/#546 source. No live study,
 deployment or physical image-conformance claim. Refs #542 only, no automatic
 issue closure. Evals typing/latent errors, cold-cache diagnostic fragility
 and committed-history changelog sequencing remain open in #542.
+
+<!-- flow-run n=3 id=c6a6873f35334f95af263e66703303ad -->
+## Run 3
+
+- Run-id:            c6a6873f35334f95af263e66703303ad
+- Run-start:         a26d8a49b5292e16e22ac54a2287b99cad87a3ce
+
+- Issue: #542
+- Base SHA: a26d8a49b5292e16e22ac54a2287b99cad87a3ce
+- Necessity verdict: Partially addressed
+- Approval: granted
+- Approver: skillc-update orchestrator, native thread 01a17ce7-0301-7621-8b1f-bf330eed8b5d; clearance-542-changelog-clean-inputs-implementation.md
+- Implementer identity: Codex thread 01a17cec-fab5-7860-b0e9-aeef446e1806
+
+### Section A - intent
+
+The local changelog gate can approve committed history while pending code
+was never inspected. Refuse relevant pending inputs locally until checkpointed,
+then apply existing committed fragment rules; do not evaluate pending content.
+
+### Section B evidence
+
+Issue created2026-10-24T11:56:18Z. Prior579/028dde5 delivered authored-test
+selection and exact uv matching, not this residual. Currenta26 checker uses
+merge-base..HEAD/git-show/HEAD trailer; local Makefile and CI call that default.
+Existing real-Git CLI controls commit their inputs. No postfiling checker/test
+change;42e367b/586 changes Makefile Ruff cache only; b2fa7f8/452 changed fragment
+format, not source selection. Related542/20/439/134/19/341/356/543/568/554/462
+were considered in accepted external triage. No superseding fix. Refreshed21
+host sibling scoped unpublished queries all succeeded with none matching.
+Current source/hash/as-read verified on freshc6a6873f, not old579 approval.
+
+### Section C - approved bounded repair
+
+1. `ci/changelog_check.py` - Add optional --require-clean-inputs; strict NUL-safe staged/unstaged/untracked nonignored relevant input guard; deletion/type/conflict and rename both ends; incomplete/error enumeration REFUSED2, before evaluation and before green with HEAD stability. Preserve pure policy/assembler API and default committed semantics.
+2. `Makefile` - Select local flag for changelog-check, preserve fetch failure and verify membership.
+3. `tests/test_changelog_check.py` - Actual unchanged Makefile behavioral red with clean/default twins before production edit; committed real-Git status/path/error and blinded-discrimination controls; assembler compatibility retained.
+4. `AGENTS.md` - Explain local refusal versus committed CI/default, explicit refs/scope and intentional checkpoint-before-full requirement.
+5. `changelog.d/542-changelog-state.md` - New single-bullet fragment; shipped542 fragments unchanged.
+
+Scope: exact5 product paths above plus this record and issue-542.as-read.md.
+Hard450 product A+D INCLUDING later genuine receipt reserve<=60; receipt path
+requires separate grant, not selected now. Workflow cap300 separate. Desired
+pre-receipt300-375; stop on cap/path/boundary expansion. Dirty good fragment also
+refuses; unrelated notes/reports/ineligible names do not. No dirty symlink read.
+HEAD trailer remains committed-only, cannot rescue pending source. Git failures
+and malformed/incomplete observations refuse; no adversarial atomicity claim.
+
+Structural challenge: generic flow quality-before-commit now refuses relevant
+dirty input intentionally. This wave uses checkpoint before canonical full;
+no automatic commit/stash or CPP lifecycle edit. Frozen pre439/CPP389/task/
+grader/declarations/receipts/history and old record/snapshot prefixes preserved.
+No CI/pyproject/assembler/evals/helper path. No review/receipt/checkpoint/full/
+push/PR/merge/issueedit/cleanup yet.538 retains next exclusive full.

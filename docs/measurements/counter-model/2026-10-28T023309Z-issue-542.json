@@ -1,0 +1,31 @@
+{
+  "branch": "issue-542-gate-and-control-instruments-that-can-go-green-bli",
+  "counts": {
+    "accepted": 2,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "719c2a5dfda3023d5758c64dd7b24b5ae43f317e",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-34-27-01a17cec-fab5-7860-b0e9-aeef446e1806.jsonl",
+    "thread_id": "01a17cec-fab5-7860-b0e9-aeef446e1806"
+  },
+  "issue": "542",
+  "local_credentials": "unknown",
+  "network": "unverified",
+  "passes": 2,
+  "recorded_at": "2026-10-28T02:33:09Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 2
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T22-25-31-01a18053-b31c-7d80-802e-f9a7fdc8ce8a.jsonl",
+    "thread_id": "01a18053-b31c-7d80-802e-f9a7fdc8ce8a"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}
