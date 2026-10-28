@@ -110,7 +110,7 @@ def test_an_unreadable_kind_keeps_positive_facts_but_clears_proposals() -> None:
     assert not any(report["proposed_removals"].values())
 
 
-@pytest.mark.parametrize("fault", ["short-id", "missing", "duplicate", "malformed", "labels", "size"])
+@pytest.mark.parametrize("fault", ["short-id", "missing", "duplicate", "malformed", "labels", "size", "digests"])
 def test_malformed_or_incomplete_inspection_cannot_propose_removal(fault: str) -> None:
     data = case()
     if fault == "short-id":
@@ -119,6 +119,8 @@ def test_malformed_or_incomplete_inspection_cannot_propose_removal(fault: str) -
         data["images"][0]["Config"]["Labels"] = {"skillc.managed": True}
     elif fault == "size":
         data["images"][0]["Size"] = None
+    elif fault == "digests":
+        data["images"][0]["RepoDigests"] = {}
     docker = Docker(data)
 
     def broken(argv: list[str]) -> str:

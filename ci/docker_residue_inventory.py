@@ -75,7 +75,9 @@ def _record(info: Any, kind: str) -> dict[str, Any]:
         if not isinstance(tags, list):
             raise Unreadable("unreadable image aliases")
         names = sorted({_text(tag) for tag in tags})
-        digests = info.get("RepoDigests") or []
+        digests = info.get("RepoDigests")
+        if digests is None:
+            digests = []
         if not isinstance(digests, list):
             raise Unreadable("unreadable image digest aliases")
         digest_names = sorted({_text(tag) for tag in digests})
