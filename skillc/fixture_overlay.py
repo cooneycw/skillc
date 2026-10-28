@@ -24,6 +24,13 @@ that directory is root-owned and empty, so the guard goes there and the real
 link is never touched. Check 4 is what makes the PATH order a verified fact
 rather than an assumption.
 
+#518: CHECK 4 HELD ONLY FOR THE INHERITED PATH. codex runs every tool command as
+`bash -lc`, and a login shell takes /etc/profile's non-root PATH, which drops
+/usr/local/sbin: there a bare `codex` was the real client (sizing-2's nested
+review ran unrefused while the guard read zero). A root-owned
+`/etc/profile.d/00-skillc-codex-guard.sh` puts /usr/local/sbin first again,
+and check 4 now runs in a login shell too.
+
 The guard's CONFIG (the realpaths of node, the real codex.js and the vendored
 native binaries) is resolved in the container now, by the controller, and
 written root-owned beside the harness. The guard trusts nothing derived at run
@@ -52,6 +59,14 @@ CODEX_GUARD_SOURCE = _FIXTURE_SERVICE_DIR / "skillc-codex-guard.py"
 
 GH_PATH = "/usr/local/bin/gh"
 CODEX_GUARD_PATH = "/usr/local/sbin/codex"
+#: #518: a LOGIN shell (codex runs every tool command as `bash -lc`) takes
+#: /etc/profile's non-root PATH, which drops /usr/local/sbin, so a bare `codex`
+#: there was the real client. This root-owned entry, sourced by /etc/profile
+#: after it sets PATH, puts the guard's directory first again.
+LOGIN_PROFILE_PATH = "/etc/profile.d/00-skillc-codex-guard.sh"
+LOGIN_PROFILE = (b"# skillc #518 (root-owned, per attempt): a login shell reaches the nested-codex guard\n"
+                 b"# before npm's real codex; /etc/profile's non-root PATH drops /usr/local/sbin.\n"
+                 b'PATH="/usr/local/sbin:$PATH"\nexport PATH\n')
 #: Must equal `skillc-codex-guard.py`'s own `CONFIG`.
 CODEX_GUARD_CONFIG = "/opt/skillc-harness/codex-guard.json"
 REAL_CODEX = "/usr/local/bin/codex"
@@ -162,6 +177,16 @@ def _resolves_to(backend: _OverlayBackend, handle: object, name: str, path: str,
                              f"{out.decode(errors='replace').strip()!r}, not the placed {path!r}")
 
 
+def _resolves_to_in_login_shell(backend: _OverlayBackend, handle: object, name: str, path: str,
+                                 env: Mapping[str, str]) -> None:
+    """Check 4 again, as a LOGIN shell runs it (#518): the agent's tool calls
+    are `bash -lc`, whose PATH comes from /etc/profile, not the inherited one."""
+    out = _output(backend, handle, ["bash", "-lc", 'command -v -- "$1"', "bash", name], env=env)
+    if out != f"{path}\n".encode():
+        raise OverlayRefused(f"in a login shell `{name}` resolves to {out.decode(errors='replace').strip()!r}, "
+                             f"not the placed {path!r}")
+
+
 def install_gh_shim(backend: _OverlayBackend, handle: object, env: Mapping[str, str],
                     source: Path = GH_SHIM_SOURCE) -> PlacedFile:
     """Place the `gh` shim at `GH_PATH`, root-owned and verified."""
@@ -192,5 +217,8 @@ def install_codex_guard(backend: _OverlayBackend, handle: object, env: Mapping[s
     config_bytes = json.dumps(config, sort_keys=True).encode("utf-8") + b"\n"
     placed_config = _place(backend, handle, CODEX_GUARD_CONFIG, config_bytes, 0o644)
     placed_guard = _place(backend, handle, CODEX_GUARD_PATH, source.read_bytes(), 0o755)
+    placed_profile = _place(backend, handle, LOGIN_PROFILE_PATH, LOGIN_PROFILE, 0o644)
     _resolves_to(backend, handle, "codex", CODEX_GUARD_PATH, env)
-    return {"guard": placed_guard.__dict__, "config": placed_config.__dict__, "resolved": config}
+    _resolves_to_in_login_shell(backend, handle, "codex", CODEX_GUARD_PATH, env)
+    return {"guard": placed_guard.__dict__, "config": placed_config.__dict__, "login_profile": placed_profile.__dict__,
+            "resolved": config}

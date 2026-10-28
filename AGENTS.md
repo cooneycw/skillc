@@ -126,10 +126,11 @@ gate ran):
 - `ci/typecheck-control.sh` (the `typecheck-control` step)
 - `skillc leak-check .` with CI's exact `--exclude` set, then
   `ci/leak-check-control.sh` (the `leak-check` step)
-- `python3 ci/changelog_check.py origin/main`, after fetching it (the
-  `changelog-check` step): a PR touching `skillc/` adds `changelog.d/<issue>.md`
+- `python3 ci/changelog_check.py origin/main --require-clean-inputs`, after fetching it
+  (the local `changelog-check` step): a PR touching `skillc/` adds `changelog.d/<issue>.md`
   rather than editing `CHANGELOG.md`'s `[Unreleased]` (#439, `changelog.d/README.md`)
 - `python3 ci/readme_drift.py` (the `readme-drift` step)
+- `make clean-install`: wheel installation and three sabotage controls (the `clean-install` step)
 - `gitleaks dir . --config .gitleaks.toml --redact --no-banner`, then
   `ci/secret-scan-control.sh` (the `secret-scan` step) - **skipped locally**,
   loudly, when gitleaks is not installed; CI always runs it, a missing local
@@ -142,6 +143,21 @@ JUnit group property preserves their original identities for population checks. 
 `make test PYTEST_WORKERS=0` for a serial diagnostic run; `PYTEST_ARGS` selects
 a subset for development, and the population check uses that same selection.
 `PYTEST_REPORT_DIR` isolates nested runs (default: `reports`).
+
+Local `changelog-check` refuses (exit 2) staged, unstaged or untracked nonignored
+changes under `skillc/` or eligible `changelog.d/<issue>[-slug].md` fragments,
+including deletions, conflicts and both ends of renames. Checkpoint these before
+`make verify`; even a good pending fragment is refused. Other notes/reports do
+not require a clean tree. Relevant dirty symlinks are never read as fragments;
+incomplete Git enumeration refuses. Ignored generated files are outside this
+Git-input precondition. No automatic commit/stash occurs.
+
+CI and the direct CLI without the flag still evaluate committed history only.
+Diagnostics name committed HEAD/base/merge-base and the requested precondition.
+A HEAD exemption belongs only to that commit and cannot rescue relevant pending
+changes in local mode. The guard rechecks before green, including HEAD stability;
+it is not an atomic snapshot against concurrent writers. This deliberately
+requires a checkpoint before the generic flow's precommit quality invocation.
 
 A green gate is only evidence while every one of these steps can still go
 red - `ci/negative-control.sh` and `ci/typecheck-control.sh` are two of the
@@ -178,9 +194,10 @@ on a known-bad/known-good pair after packaging. Retains a build/install
 identity record (wheel digest, versions, source commit - logical values only,
 issue #63) and carries its own committed negative control
 (`CLEAN_INSTALL_CONTROL=neuter-installed-rule` or `=delete-scratch-controls`).
-Not wired into Woodpecker - the build+venv round trip is slower than the four
-gates above, and #27's own scope excludes CI expansion - so run it by hand:
-`bash ci/clean-install-check.sh`. Details: [docs/findings.md](docs/findings.md).
+Runs in `make verify` and Woodpecker's `clean-install` step, followed by both
+committed sabotage modes and `ci/clean-install-comparison-control.sh`. The last
+control changes packaged findings while preserving check exit codes, and requires
+the structured comparison to fail the script. Run with `make clean-install`. Details: [docs/findings.md](docs/findings.md).
 
 `leak-check` refuses a tree or a produced bundle that carries a machine
 identity - a home-directory path, a `uid=`/`gid=` number, a private (RFC 1918)

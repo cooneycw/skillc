@@ -1,0 +1,327 @@
+{
+ "profile_schema": 1,
+ "name": "cpp-codex-flow-check-652c0118",
+ "subject": "./subject.json",
+ "select": [
+  "flow-check"
+ ],
+ "treatment_question": "product",
+ "allowed_destinations": [
+  ".codex/skills",
+  "Projects/claude-power-pack"
+ ],
+ "reference_patterns": [
+  {
+   "name": "home-path",
+   "class": "home-relative",
+   "pattern": "(?:~|\\$HOME|\\$\\{HOME\\})/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a path under the user's home; inside a trial that is the disposable home"
+  },
+  {
+   "name": "plugin-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CLAUDE_PLUGIN_ROOT(?::-)?\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "the Claude Code plugin's bundle directory, another client's surface"
+  },
+  {
+   "name": "checkout-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CPP_DIR\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a file inside the subject's own checkout, located by the procedure's probe order"
+  },
+  {
+   "name": "absolute-system-path",
+   "class": "absolute",
+   "pattern": "(?<![\\w.~}$/-])/(?:opt|usr/local|srv|home)/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "an absolute install location outside any home; never satisfiable by a disposable home"
+  }
+ ],
+ "dependencies": [
+  {
+   "id": "checkout-libraries",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "the CPP checkout's Python packages the procedure runs through `uv run --project` (reference.md:24-34, 100; flow-finish-gate.sh:343-373)",
+   "source_root": ".",
+   "paths": [
+    "pyproject.toml",
+    "uv.lock",
+    "lib/cicd",
+    "lib/security"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "traverse": false,
+   "no_traverse_reason": "Python packages: their dependencies are imports resolved by the interpreter, not path text a reference pattern can read. At this pin lib/cicd and lib/security import only themselves and PyPI packages (see tool-pypi-runtime). Whether they import cleanly in a disposable home is #266's installed-path proof.",
+   "satisfies": [
+    {
+     "reference": "~/Projects/claude-power-pack",
+     "path": null
+    },
+    {
+     "reference": "$HOME/Projects/claude-power-pack",
+     "path": null
+    },
+    {
+     "reference": "$CPP_DIR/lib/cicd/__init__.py",
+     "path": "lib/cicd/__init__.py"
+    }
+   ]
+  },
+  {
+   "id": "checkout-detection-marker",
+   "kind": "synthetic",
+   "scope": "treatment",
+   "role": "Existence-only checkout detection marker",
+   "source_root": ".",
+   "paths": [
+    "CLAUDE.md"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "content": "# Synthetic checkout marker only - not agent instructions.\n# See skillc#303.\n",
+   "unreferenced_reason": "scripts/flow-finish-gate.sh:347 tests directory and CLAUDE.md existence only.",
+   "replaces_pinned": true,
+   "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
+  },
+  {
+   "id": "checkout-scripts",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "scripts the procedure runs from the checkout ($CPP_DIR/scripts/..., reference.md:147-148, :170), and the checkout's own flow-finish-gate.sh with its sibling gate-lib.sh: the copy reference.md's exit-127 fallback names (:57-58, 'the CPP-checkout copy'), witnessed as checkout:flow-check (skillc#529)",
+   "source_root": ".",
+   "paths": [
+    "scripts/check-ignored-additions.sh",
+    "scripts/counter-model-receipt.py",
+    "scripts/execution-evidence-verify.py",
+    "scripts/flow-finish-gate.sh",
+    "scripts/gate-lib.sh"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "satisfies": [
+    {
+     "reference": "$CPP_DIR/scripts/check-ignored-additions.sh",
+     "path": "scripts/check-ignored-additions.sh"
+    },
+    {
+     "reference": "$CPP_DIR/scripts/counter-model-receipt.py",
+     "path": "scripts/counter-model-receipt.py"
+    },
+    {
+     "reference": "$CPP_DIR/scripts/execution-evidence-verify.py",
+     "path": "scripts/execution-evidence-verify.py"
+    }
+   ],
+   "unreferenced_reason": "scripts/flow-finish-gate.sh and scripts/gate-lib.sh are named only in prose (reference.md:57-58), which no reference pattern reads; they are supplied so the fallback route exists in the population, as it does in any real CPP checkout, and is witnessed rather than blind (orchestrator D1, skillc#529)"
+  },
+  {
+   "id": "tool-python",
+   "kind": "tool",
+   "scope": "common",
+   "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
+   "version": ">=3.11 (pyproject.toml requires-python at the pin)",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:100), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "python3",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=3.11"
+    }
+   ]
+  },
+  {
+   "id": "tool-uv",
+   "kind": "tool",
+   "scope": "common",
+   "role": "runs the checkout's packages (`uv run --project`)",
+   "version": "unpinned by the subject; #266 pins it in the image",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:100; flow-finish-gate.sh:355), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "uv",
+     "version_args": [
+      "--version"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tool-pypi-runtime",
+   "kind": "tool",
+   "scope": "common",
+   "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
+   "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
+   "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+   "probes": [
+    {
+     "kind": "python-import",
+     "modules": [
+      "pydantic",
+      "yaml"
+     ],
+     "uv_project": "Projects/claude-power-pack"
+    }
+   ]
+  },
+  {
+   "id": "tool-make-git-bash",
+   "kind": "tool",
+   "scope": "common",
+   "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
+   "version": "unpinned by the subject; any POSIX-conforming version the image carries",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "make"
+    },
+    {
+     "kind": "command",
+     "name": "git"
+    },
+    {
+     "kind": "command",
+     "name": "bash"
+    }
+   ]
+  }
+ ],
+ "unsupported": [
+  {
+   "reference": "/opt/claude-power-pack",
+   "reason": "absolute alternative checkout location outside any home; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first (reference.md:24)"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "reason": "third alternative checkout location; not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "$HOME/.claude-power-pack",
+   "reason": "third alternative checkout location; not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts",
+   "reason": "Claude Code plugin surface: another client's profile, declared unsupported below"
+  },
+  {
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "reason": "Claude Code plugin surface: another client's profile, declared unsupported below"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts/counter-model-receipt.py",
+   "reason": "Claude Code plugin surface: another client's profile, declared unsupported below"
+  },
+  {
+   "reference": "~/.codex/sessions",
+   "reason": "a live client's session store, read by counter-model-receipt.py to derive model identity; client state, never materialized"
+  },
+  {
+   "reference": "~/.claude/projects",
+   "reason": "a live client's transcript store, read by counter-model-receipt.py; client state, never materialized"
+  },
+  {
+   "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-finish-gate.sh",
+   "reason": "Claude Code plugin surface: another client's profile, declared unsupported below - the exit-127 fallback path named at reference.md:58, same class as the CLAUDE_PLUGIN_ROOT entries above"
+  },
+  {
+   "reference": "$HOME/.claude/scripts",
+   "reason": "flow-finish-gate.sh:186 (both copies, byte-identical at 652c0118): the gate-lib.sh fallback taken only when no gate-lib.sh sits beside the script. Each witnessed copy runs from a root-owned mirror of its own scripts/ directory, gate-lib.sh included; this profile installs no ~/.claude/scripts: at CPP f857754d flow-check's SKILL.md and reference.md name no installed helper (CPP #1408/#1542), and supplying one would offer agents the installed route they choose when it exists (7/7 at ca3030d, skillc#529), hiding #1542"
+  },
+  {
+   "reference": "~/.claude/scripts",
+   "reason": "flow-finish-gate.sh:211: the error message naming the same search as :186; not a path the gate reads"
+  },
+  {
+   "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
+   "reason": "flow-finish-gate.sh:681: the receipt-helper fallback taken only when none sits beside the script, on the finish path; flow-check's `check` plan and --check-summary never reach it, and each witnessed copy's mirror carries its own sibling"
+  },
+  {
+   "reference": "~/.qwen/projects",
+   "reason": "counter-model-receipt.py:1736 (652c0118): a home-relative read reached only when deriving a Qwen-Code-delegated implementer for a receipt; a flow-check attempt delegates to no Qwen run and writes no receipt (skillc#20 comment 6297430101, CPP #1532)"
+  }
+ ],
+ "declared_empty_kinds": [
+  "startup-context"
+ ],
+ "client_profiles": {
+  "codex": {
+   "status": "declared",
+   "reason": "the subject's own surface (codex-skills); this inventory describes it, and #266 owns the proof that it installs and runs"
+  },
+  "claude-code": {
+   "status": "unsupported",
+   "reason": "Claude Code commands, plugin and native skills are a different surface with different helpers (CLAUDE_PLUGIN_ROOT); a Codex inventory does not establish Claude parity"
+  },
+  "browser": {
+   "status": "unsupported",
+   "reason": "flow-check needs no browser; the browser/MCP capability profile is #283's to prove"
+  },
+  "security-scanner": {
+   "status": "unsupported",
+   "reason": "external scanners and live advisory feeds are #285's profile; this one carries only the checkout's lib.security"
+  },
+  "services": {
+   "status": "unsupported",
+   "reason": "GitHub, Docker, AWS, MCP servers and network are not provided to trials (spec.md section 4)"
+  }
+ },
+ "gate_entrypoint": ".codex/skills/flow-check/scripts/flow-finish-gate.sh",
+ "notes": "flow-check at claude-power-pack 652c01185bc73adf18df49f5b9d1d5ad77a038c7 (CPP PR #1548's merge, the #1547 fix, main on 2026-10-23), for CPP #1532: the post-#1497 lib/cicd closure, which ca3030d predates. Re-pinned before the build as recorded re-pin triggers fired (orchestrator): b318a14b -> f857754d (#1546, the #1542 fix: the gate call anchored to the skill directory) -> 652c0118 (#1547: no FLOW_FINISH_GATE verdict line means the gate did not run; flow-check reports DID-NOT-RUN, never SKIP); also the D3 route probe's pin. A separate profile from cpp-codex-flow-check-86641e8 (one pin per profile). The skill invokes its BUNDLED gate anchored to its own directory, \"${CPP_SKILL_DIR:-/dev/null}\"/scripts/flow-finish-gate.sh (reference.md:54, :130, re-read at this pin); SKILL.md and reference.md name no ~/.claude/scripts helper, so this profile installs none: an installed gate is the route agents choose when it exists (7/7 flow-auto attempts at ca3030d, skillc#529). gate_entrypoint is the bundled copy itself, declared bundled, witnessed from a root-owned mirror of its scripts/ (proven against the skill's SHA256SUMS) as bundled:flow-check; the checkout copy that reference.md's exit-127 fallback names is installed and witnessed as checkout:flow-check (orchestrator D1). With CPP_SKILL_DIR unset the call exits 126 and reads not-observed.",
+ "gate_witness": "flow-check",
+ "bundled_gate_entrypoints": [
+  ".codex/skills/flow-check/scripts/flow-finish-gate.sh"
+ ],
+ "checkout_gate_entrypoints": {
+  "Projects/claude-power-pack/scripts/flow-finish-gate.sh": "flow-check"
+ },
+ "mirrors": [
+  {
+   "generated": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+   "source": "scripts/flow-finish-gate.sh"
+  },
+  {
+   "generated": "codex/skills/flow-check/scripts/gate-lib.sh",
+   "source": "scripts/gate-lib.sh"
+  },
+  {
+   "generated": "codex/skills/flow-check/scripts/check-ignored-additions.sh",
+   "source": "scripts/check-ignored-additions.sh"
+  },
+  {
+   "generated": "codex/skills/flow-check/scripts/counter-model-receipt.py",
+   "source": "scripts/counter-model-receipt.py"
+  },
+  {
+   "generated": "codex/skills/flow-check/scripts/execution-evidence-verify.py",
+   "source": "scripts/execution-evidence-verify.py"
+  },
+  {
+   "generated": "codex/skills/flow-check/lib/cicd/__init__.py",
+   "source": "lib/cicd/__init__.py"
+  },
+  {
+   "generated": "codex/skills/flow-check/lib/cicd/evidence.py",
+   "source": "lib/cicd/evidence.py"
+  },
+  {
+   "generated": "codex/skills/flow-check/lib/cicd/state.py",
+   "source": "lib/cicd/state.py"
+  }
+ ],
+ "generated_from": [
+  {
+   "generated": "codex/skills/flow-check/SKILL.md",
+   "source": ".claude/commands/flow/check.md"
+  },
+  {
+   "generated": "codex/skills/flow-check/reference.md",
+   "source": ".claude/commands/flow/check.md"
+  }
+ ]
+}

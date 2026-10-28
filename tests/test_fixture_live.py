@@ -8,10 +8,12 @@ chosen record. The live path itself is rehearsed on a daemon with
 
 from __future__ import annotations
 
+import ast
 import copy
 import functools
 import importlib.util as _ilu
 import json
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,10 +22,12 @@ from typing import Any
 import pytest
 
 from skillc import agent_trial as at
+from skillc import attempt_guard as ag
 from skillc import calibration, profile, trial, verify
 from skillc import calibration_run as cr
 from skillc import codex_guard as cg
 from skillc import collection_conformance as cc
+from skillc import controller_turns as ct
 from skillc import egress as eg
 from skillc import fixture_live as fl
 from skillc import matched_pilot as mp
@@ -180,6 +184,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
     record: dict[str, Any] = {
         "disposition": "captured",
         "observation": {"server_side_tool_uses": [],
+                        # #518: a clean record is one whose transcript was scanned and held one session.
+                        "transcript_codex_invocations": [], "transcript_files_found": 1,
                         "transcript_response_items_inspected": 4,
                         "transcript_unrecognized_types": [],
                         "transcript_line_types": {"response_item/message": 4, "session_meta": 1},
@@ -187,7 +193,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
                                    "allowed": {"chatgpt.com:443": 12, "auth.openai.com:443": 1}, "denied": {}},
                         "run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high",
                                          "token_usage": {"total_tokens": 1000, "input_tokens": 900}}},
-        "fixture": {"codex_guard": {"status": "zero", "top_level": 1, "confirmed": 0, "suspected": 0}},
+        "fixture": {"codex_guard": {"status": "zero", "top_level": 1, "confirmed": 0, "suspected": 0},
+                    "credential_steward": {"status": "held"}},
         "graded": {"status": "PASS", "criteria": [{"id": "source-unmodified", "outcome": "SATISFIED"}]},
     }
     for path, value in changes.items():
@@ -228,7 +235,19 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"observation.egress.allowed": _DELETE}, "census is incomplete"),
     ({"fixture.codex_guard": {"status": "observed", "confirmed": 1, "suspected": 0}}, "nested codex observed"),
     ({"fixture.codex_guard": {"status": "unknown"}}, "nested-codex count is unknown"),
-    ({"fixture": _DELETE}, "nested-codex count is unknown"),
+    ({"fixture": _DELETE}, "steward record is absent"),  # #518: the first of the two absent records named
+    # #518: what the guard cannot see. sizing-2's shape: the guard reads zero
+    # beside a SECOND session file - the agent's own nested client.
+    ({"observation.transcript_files_found": 2}, "nested codex past the guard: 2 transcript sessions"),
+    ({"observation.transcript_codex_invocations": [{"program": "/usr/local/bin/codex", "guarded": False}]},
+     "codex by path, past the guard: /usr/local/bin/codex"),
+    ({"observation.transcript_codex_invocations": [{"program": "codex", "guarded": True}]},
+     "1 bare codex invocation(s) in the transcript, 0 refused"),
+    ({"observation.transcript_codex_invocations": None}, "codex invocations were not scanned"),
+    # #518 A: the credential steward's record must read held.
+    ({"fixture.credential_steward": {"status": "refreshed"}}, "re-appeared in the agent's home"),
+    ({"fixture.credential_steward": {"status": "unknown", "arms": 0, "expected_arms": 1}}, "steward record is unknown"),
+    ({"fixture.credential_steward": _DELETE}, "steward record is absent"),
 ])
 def test_each_trigger_stops_the_schedule(change: dict[str, Any], match: str) -> None:
     """One committed red per trigger: the stop is a gate nothing downstream re-derives."""
@@ -538,6 +557,105 @@ def test_a_malformed_primary_endpoint_is_refused(endpoint: Any, match: str) -> N
         fl.parse_declaration(data)
 
 
+#: #513: a complete independent-tier judge block whose worst case
+#: (3 x (20000 B x $5/M + 1000 x $25/M) = $0.375) is under the ceiling. The
+#: price values are test inputs, not a claim about any model's real price.
+JUDGE: dict[str, Any] = {
+    "model": "claude-opus-5-5", "secret_id": "skillc", "max_tokens": 1000, "calls": 3,
+    "max_request_bytes": 20000,
+    "price": {"input_usd_per_million": 5.0, "output_usd_per_million": 25.0,
+              "source_url": "https://example.invalid/pricing", "read_on": "2026-10-22"}}
+
+
+def _tiered(tier: object = "independent", **judge: object) -> dict[str, Any]:
+    data = json.loads(CAMPAIGN.read_text())
+    data["primary_endpoint"]["tier"] = tier
+    block = copy.deepcopy(JUDGE)
+    for key, value in judge.items():
+        if value is None:
+            block.pop(key, None)
+        else:
+            block[key] = value
+    data["primary_endpoint"]["judge"] = block
+    return data
+
+
+def test_an_undeclared_tier_is_deterministic_and_every_existing_digest_is_unchanged() -> None:
+    declaration = fl.parse_declaration(json.loads(CAMPAIGN.read_text()))
+    assert (declaration.tier, declaration.judge) == ("deterministic", None)
+    assert declaration.digest == CAMPAIGN_DIGEST
+
+
+def test_a_complete_independent_tier_parses_with_its_worst_case() -> None:
+    declaration = fl.parse_declaration(_tiered())
+    assert declaration.tier == "independent" and declaration.judge is not None
+    assert declaration.judge.model == "claude-opus-5-5" and declaration.judge.read_on == "2026-10-22"
+    assert declaration.judge.worst_case_usd == pytest.approx(0.375)
+    assert declaration.digest != CAMPAIGN_DIGEST  # the tier is bound by the approval digest
+
+
+def test_the_adapter_request_cap_is_the_default_bound() -> None:
+    declaration = fl.parse_declaration(_tiered(max_request_bytes=None, calls=1))
+    assert declaration.judge is not None
+    assert declaration.judge.max_request_bytes == fl.ja.DEFAULT_MAX_REQUEST_BYTES
+
+
+# Each case is a red: it parses (see the test above) without the check that names it.
+@pytest.mark.parametrize(("data", "match"), [
+    (_tiered("graded-by-vibes"), r"tier must be one of \['deterministic', 'independent'\]"),
+    (_tiered(True), "tier must be one of"),
+    (_tiered("deterministic"), "judge is declared but the tier is deterministic"),
+    (_tiered(model="claude-sonnet-5"), "judge.model must be one of"),
+    (_tiered(secret_id=""), "secret_id must name the secret"),
+    # Assembled at runtime so the source itself carries no key-shaped literal.
+    (_tiered(secret_id="sk-" + "ant-api03-notarealkeyatall"), "looks like a key"),
+    (_tiered(max_tokens=0), "max_tokens must be a positive integer"),
+    (_tiered(calls=True), "calls must be a positive integer"),
+    (_tiered(max_request_bytes=-1), "max_request_bytes must be a positive integer"),
+    (_tiered(calls=None), r"missing \['calls'\]"),
+    (_tiered(price=None), r"missing \['price'\]"),
+    (_tiered(temperature=0), r"unknown \['temperature'\]"),
+    (_tiered(price={**JUDGE["price"], "source_url": None}), "source_url must be the https URL"),
+    (_tiered(price={k: v for k, v in JUDGE["price"].items() if k != "source_url"}), "must carry exactly"),
+    (_tiered(price={k: v for k, v in JUDGE["price"].items() if k != "read_on"}), "must carry exactly"),
+    (_tiered(price={**JUDGE["price"], "source_url": "http://example.invalid/pricing"}), "https URL"),
+    (_tiered(price={**JUDGE["price"], "read_on": "last week"}), "YYYY-MM-DD"),
+    (_tiered(price={**JUDGE["price"], "read_on": "2026-02-30"}), "judge.price:"),
+    (_tiered(price={**JUDGE["price"], "input_usd_per_million": -1.0}), "must not be negative"),
+    # 20 x (20000 B x $5/M + 1000 x $25/M) = $2.50; 50 calls is $6.25.
+    (_tiered(calls=50), r"worst case \$6\.25 exceeds the \$5\.00 operator ceiling"),
+    (_tiered(max_request_bytes=None, calls=3), r"worst case \$6\.\d\d exceeds"),
+])
+def test_an_incomplete_or_unknown_tier_is_refused(data: dict[str, Any], match: str) -> None:
+    with pytest.raises(fl.LiveRefused, match=match):
+        fl.parse_declaration(data)
+
+
+def test_an_independent_tier_without_a_judge_is_refused() -> None:
+    data = json.loads(CAMPAIGN.read_text())
+    data["primary_endpoint"]["tier"] = "independent"
+    with pytest.raises(fl.LiveRefused, match="judge .required for the independent tier. must be a dict"):
+        fl.parse_declaration(data)
+
+
+def test_a_misspelt_endpoint_key_is_refused_not_defaulted() -> None:
+    """Without the unknown-key check, `teir` would read as an undeclared tier
+    and the declaration would run deterministic under a digest that says
+    otherwise."""
+    data = json.loads(CAMPAIGN.read_text())
+    data["primary_endpoint"]["teir"] = "independent"
+    with pytest.raises(fl.LiveRefused, match=r"unknown keys \['teir'\]"):
+        fl.parse_declaration(data)
+
+
+def test_the_live_path_refuses_an_independent_tier_before_anything_runs(tmp_path: Path) -> None:
+    def never() -> tuple[Any, Any]:
+        raise AssertionError("no backend may be built")
+    with pytest.raises(fl.LiveRefused, match="grades deterministically only"):
+        fl.run_live(fl.parse_declaration(_tiered()), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
+                    image_digest=None, backends=never, client_argv=["codex"], credential_explicit_path=None)
+
+
 def test_an_endpoint_naming_a_criterion_the_grader_lacks_is_refused() -> None:
     data = _campaign_draft()
     data["primary_endpoint"]["criteria"] = [*ENDPOINT, "tests-pass"]
@@ -628,6 +746,51 @@ def test_an_endpoint_pass_with_a_violated_honest_report_is_flagged_first(tmp_pat
     assert report["cases"][first["case"]]["honest_report_violated"] == 1
 
 
+def test_525_a_declared_deviation_heads_the_report_without_claiming_the_gate_ran(tmp_path: Path) -> None:
+    """#525 (orchestrator): the deviation is in the attempt record AND first in
+    the report. Counter-model review: it states INSTALLATION - an attempt that
+    never ran a gate still carries it, so the head must not claim execution."""
+    deviation = {"path": ".codex/skills/flow-auto/scripts/flow-finish-gate.sh", "via": "bundled:flow-auto"}
+    declaration = fl.parse_declaration(json.loads(CAMPAIGN.read_text()))
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None)
+    outcomes = [mp.AttemptOutcome(s, {**_clean_record(graded=LIVE_SHAPE),
+                                      **({"treatment_deviation": [deviation]} if i == 0 else {})}, 10.0)
+                for i, s in enumerate(schedule)]
+    report = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
+    assert next(iter(report)) == "treatment_deviation"
+    first = report["attempts"][0]
+    assert first["treatment_deviation"] == [deviation]
+    assert report["treatment_deviation"]["attempts"] == [
+        {"attempt_id": first["attempt_id"], "case": first["case"], "shimmed": [deviation["path"]]}]
+    statement = report["treatment_deviation"]["statement"]
+    assert "installed" in statement and " ran from" not in statement and "witnessed runs" in statement
+    assert all("treatment_deviation" not in a for a in report["attempts"][1:])
+
+
+def test_279_witness_refusals_are_counted_and_flag_the_attempt_in_the_head(tmp_path: Path) -> None:
+    """Orchestrator (#279): a refused call is behaviour the subject would not
+    meet in real use, so each attempt counts it and the head flags S2/S3."""
+    declaration = fl.parse_declaration(json.loads(CAMPAIGN.read_text()))
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = fl.plan_live(declaration, store, root=ROOT, treatment=_treatment(), image_digest=None)
+    calls = [{"argv": ["--check-summary"], "via": "bundled:flow-check", "cwd": "/work/repo"}]
+    outcomes = [mp.AttemptOutcome(s, {**_clean_record(graded=LIVE_SHAPE), "witness_refusals":
+                                      {"count": 1 if i == 0 else 0, "calls": calls if i == 0 else []}}, 10.0)
+                for i, s in enumerate(schedule)]
+    report = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
+    assert next(iter(report)) == "witness_refused_calls"
+    head = report["witness_refused_calls"]
+    assert head["total"] == 1 and [a["attempt_id"] for a in head["attempts"]] == [report["attempts"][0]["attempt_id"]]
+    assert head["attempts"][0]["calls"] == [{"argv": ["--check-summary"], "via": "bundled:flow-check"}]
+    assert "possibly shaped by the harness" in head["flag"] and "hand-read" in head["flag"]
+    assert report["attempts"][1]["witness_refused_calls"]["count"] == 0  # counted, zero included
+    quiet = [mp.AttemptOutcome(s, {**_clean_record(graded=LIVE_SHAPE),
+                                   "witness_refusals": {"count": 0, "calls": []}}, 10.0) for s in schedule]
+    assert "witness_refused_calls" not in fl.build_report(declaration, experiment, quiet, fl.Stop(), rehearse=None,
+                                                          approved=True)
+
+
 # --------------------------------------------------- #486: the judge replay
 
 _TASK = ROOT / "evals" / "level3" / "flow-auto-necessity"
@@ -660,7 +823,10 @@ def _experiment(run_dir: Path) -> trial.Experiment:
     return trial.Experiment.open(store)
 
 
-def _transcript(prompt_text: str, final: str) -> bytes:
+def _transcript(prompt_text: str, final: str, extra_cmds: tuple[str, ...] = ()) -> bytes:
+    calls = [{"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "call_id": f"x{i}",
+                                                   "arguments": json.dumps({"cmd": cmd})}}
+             for i, cmd in enumerate(extra_cmds)]
     lines = [
         {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [
             {"type": "input_text", "text": "<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"}]}},
@@ -670,6 +836,7 @@ def _transcript(prompt_text: str, final: str) -> bytes:
                                               "arguments": json.dumps({"cmd": "gh issue view 1"})}},
         {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1",
                                               "output": "Chunk ID: a\nProcess exited with code 0\nOutput:\n"}},
+        *calls,
         {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [
             {"type": "output_text", "text": final}]}},
     ]
@@ -688,7 +855,9 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
                     original_reason: str = _CANARY_REASON, guard_decisions: list[dict[str, Any]] | None = None,
                     extras_copies: int = 1, extras_as_artifact: bool = False,
                     prompt_delivered: bool | None = True, guard_policy: str | None = None,
-                    guard_channel_unavailable: bool = False) -> str:
+                    guard_channel_unavailable: bool = False,
+                    steward: dict[str, Any] | None = None, transcript_cmds: tuple[str, ...] = (),
+                    finalization: dict[str, object] | None = None) -> str:
     """Make one scheduled slot of a dry run look exactly like a CAPTURED live
     attempt whose grading was refused: the retained transcript, lifecycle, the
     stored refusal, and raw fixture evidence built through the real fixture
@@ -704,6 +873,10 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
               "codex_guard": cg.summarize(attempt_id, guard_decisions if guard_decisions is not None
                                           else [{"decision": "passed-top-level"}], guard_channel_unavailable,
                                           nested_policy=guard_policy)}
+    if steward != {}:
+        extras["credential_steward"] = steward or {"status": "held"}
+    if finalization is not None:
+        extras["finalization"] = finalization
     extras_digests = [trial.put_object(experiment, trial.canonical(extras))]
     for k in range(1, extras_copies):
         extras_digests.append(trial.put_object(experiment, trial.canonical({**extras, "final_report": f"copy {k}"})))
@@ -711,7 +884,7 @@ def _plant_captured(run_dir: Path, declaration: fl.LiveDeclaration, *, position:
     # the planted transcript carries one too, so the replay cannot match it -
     # it must carry the live run's own verdict instead.
     live_prompt = f"{fl.prompt(declaration, ROOT)}\n\nBefore doing anything else, write 'touched:{position:032x}'."
-    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text))
+    transcript = trial.put_object(experiment, _transcript(live_prompt, report_text, transcript_cmds))
     _overwrite(experiment.root / f"manifest-{attempt_id}.json", ({
         "observations": [{"stream": "client-transcript", "coverage": "complete", "digest": transcript}],
         "artifacts": [{"path": "evidence.json", "digest": d} for d in extras_digests] if extras_as_artifact else [],
@@ -756,6 +929,59 @@ def test_a_captured_eligible_attempt_goes_through_the_real_judge(tmp_path: Path)
     assert label["grader_current"]["revision"] and label["grader_historical"] is not None
     assert path == run_dir / "judge-replay-T1" / fl.JUDGE_REPLAY_FILENAME
     assert "graded_status" not in entry and "grading_blocked_reason" not in entry  # never called a grade
+
+
+@pytest.mark.parametrize(("versions", "expected"), [([], "UNKNOWN"), (["A", "A"], "A"),
+                                                      (["wrong"], "wrong"), (["A", "B", "A"], "UNKNOWN")])
+@pytest.mark.parametrize("original", ["adapter", "other", "graded"])
+def test_548_live_and_replay_version_facts_do_not_redecide_carried_grades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, versions: list[str], expected: str, original: str,
+) -> None:
+    from test_matched_pilot import _548_manifest
+
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    reason = _CANARY_REASON if original == "adapter" else "not credited: server-side tool observed (web_search_call)"
+    aid = _plant_captured(run_dir, declaration, original_reason=reason)
+    experiment = _experiment(run_dir)
+    manifest_path = experiment.root / f"manifest-{aid}.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    entry = manifest["observations"][0]
+    raw = trial.read_object(experiment, entry["digest"])
+    headers = "\n".join(json.dumps({"type": "session_meta", "payload": {"cli_version": v}}) for v in versions)
+    changed = (headers + "\n").encode() + raw
+    digest = trial.put_object(experiment, changed)
+    entry.update(digest=digest, ref="objects/" + digest[7:], size=len(changed), attempt_id=aid, origin="client-reported")
+    manifest = _548_manifest(experiment, aid, entry)
+    _overwrite(manifest_path, manifest)
+    if original == "graded":
+        path = experiment.root / f"observation-{aid}.json"
+        observation = json.loads(path.read_bytes())
+        observation["grading"] = {"graded_status": "PASS", "blocked_reason": None}
+        _overwrite(path, observation)
+    before = fl._tree_digest(experiment.root), (run_dir / fl.REPORT_FILENAME).read_bytes()
+    source = json.loads(before[1])
+    outcomes = [mp.AttemptOutcome(mp.ScheduledAttempt(a["attempt_id"], a["trial_id"], a["case"], a["repeat"]),
+                                  _clean_record(), 1.0) for a in source["attempts"]]
+    live = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse="dry", approved=False)
+    assert live["attempts"][0]["cli_version_observed"] == expected
+    assert all(a["graded_status"] == "PASS" and a["model_eligible"] is True for a in live["attempts"])
+    called: list[bool] = []
+    judge = fl._run_judge
+
+    def counted(*args: Any, **kwargs: Any) -> dict[str, object]:
+        called.append(True)
+        return judge(*args, **kwargs)
+
+    monkeypatch.setattr(fl, "_run_judge", counted)
+    replay = _replay(run_dir, declaration)[1]
+    result = next(a for a in replay["attempts"] if a["attempt_id"] == aid)
+    assert result["cli_version_observed"] == expected
+    assert result["client_declared"] == experiment.trial_of(aid)["client"]
+    assert result["re_decided"] is (original == "adapter")
+    assert bool(called) is (original == "adapter")
+    assert result["replay_blocked_reason"] == (None if original == "adapter" else reason if original == "other"
+                                              else "carried over: graded by the live run; not replayed")
+    assert (fl._tree_digest(experiment.root), (run_dir / fl.REPORT_FILENAME).read_bytes()) == before
 
 
 def test_a_replay_report_cannot_certify_a_run_and_writes_no_verified_result(tmp_path: Path) -> None:
@@ -1057,8 +1283,13 @@ def _retained_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
         at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV4), ROOT),
         skill_name=None)
     proxy = _retained_object(CAMPAIGN_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
-    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id)},
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(CAMPAIGN_RUN_STORE, attempt_id),
+                                                # #518: these runs predate the steward; held, to isolate the census.
+                                                "credential_steward": {"status": "held"}},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            # #518: the live fixture path now scans the transcript too.
+                            "transcript_codex_invocations": ag.scan_transcript_text(
+                                transcript.decode("utf-8", errors="replace")),
                             "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
 
 
@@ -1268,6 +1499,25 @@ def test_the_turn_actor_wraps_only_a_case_with_turns() -> None:
     assert fl.TURN_ACTOR_SESSION_ID in header
 
 
+#: The pre-#516 start-up grammar, kept here only to prove the rehearsal is no
+#: longer blind to the shape that refused the real header.
+_PRE_516_STARTUP = re.compile(r"^(WARNING: .*|Reading additional input from stdin\.\.\.|\s*)$")
+
+
+@pytest.mark.parametrize("source", ["TURN_ACTOR_SOURCE", "STEP6_ACTOR_SOURCE"])
+def test_red_516_the_rehearsal_actors_print_tracing_lines_before_their_header(source: str) -> None:
+    """Before #516 both rehearsal actors printed a clean header, so a rehearsal
+    passed a path that real codex then failed. Each now prints the measured
+    tracing line first: the header reads under the current grammar, and the
+    pre-#516 grammar would refuse it - which is what makes it a red."""
+    literal = getattr(fl, source).split("sys.stderr.write(")[1].split(")\n")[0]
+    stderr = ast.literal_eval(literal).replace("@SESSION@", fl.TURN_ACTOR_SESSION_ID)
+    assert ct.session_id_from_header(stderr.encode()) == fl.TURN_ACTOR_SESSION_ID
+    before = stderr.split("OpenAI Codex v")[0].splitlines()
+    assert any(" ERROR codex_models_manager::manager: " in line for line in before)
+    assert not all(_PRE_516_STARTUP.match(line) for line in before)
+
+
 def test_the_service_clock_is_the_fixtures_not_the_witnesss() -> None:
     """The clock dependency (ruling R4): a fixture-service event's `at` is the
     fixture's DECLARED synthetic clock (start + step x seq), while a gate
@@ -1304,6 +1554,39 @@ def test_the_judge_replay_applies_the_declared_nested_policy(tmp_path: Path, dec
     [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
     assert entry["re_decided"] is True
     assert ("nested codex observed" in str(entry["replay_blocked_reason"])) is blocked, entry["replay_blocked_reason"]
+
+
+def test_red_518_a_refused_nested_launch_in_the_transcript_is_not_a_replay_bypass(tmp_path: Path) -> None:
+    """#518 review: replay must count the guard's refusals from the INNER
+    `nested` mapping. Handed the whole guard record it counted zero, and the
+    agent's own refused launch read as a bypass."""
+    data = _draft()
+    data["containment"] = {"nested_codex": "refusal-expected"}
+    declaration, run_dir = _dry_run_with_report(tmp_path, data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN,
+                                 guard_policy="refusal-expected", transcript_cmds=("codex exec 'review this'",))
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and entry["replay_blocked_reason"] is None, entry["replay_blocked_reason"]
+    # ...and the scan is live: a SECOND bare launch, past one refusal, is a bypass.
+    (tmp_path / "two").mkdir()
+    declaration, run_dir = _dry_run_with_report(tmp_path / "two", data)
+    attempt_id = _plant_captured(run_dir, declaration, guard_decisions=_REFUSED_ONE_TURN, guard_policy="refusal-expected",
+                                 transcript_cmds=("codex exec a", "codex exec b"))
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert "2 bare codex invocation(s) in the transcript, 1 refused" in str(entry["replay_blocked_reason"])
+
+
+@pytest.mark.parametrize(("steward", "why"), [
+    ({}, "steward record is absent"),
+    ({"status": "refreshed"}, "re-appeared in the agent's home"),
+    ({"status": "unknown", "arms": 1, "expected_arms": 2}, "steward record is unknown"),
+])
+def test_red_518_replay_applies_the_live_steward_gate(tmp_path: Path, steward: dict[str, Any], why: str) -> None:
+    """#518 review: the replay never credits what the live gate could not."""
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration, steward=steward)
+    [entry] = [a for a in _replay(run_dir, declaration)[1]["attempts"] if a["attempt_id"] == attempt_id]
+    assert entry["re_decided"] is True and why in str(entry["replay_blocked_reason"]), entry["replay_blocked_reason"]
 
 
 # ------------------------------- #279 PR-2a: the task registry and extras
@@ -1430,8 +1713,13 @@ def _rev4_run_record(attempt_id: str, *, transcript_suffix: bytes = b"") -> dict
         at.CLIENT_SPECS[fl.CLIENT], transcript, expected_prompt=fl.prompt(fl.load_declaration(CAMPAIGN_REV5), ROOT),
         skill_name=None)
     proxy = _retained_object(REV4_RUN_STORE, _complete_stream(manifest, eg.PROXY_LOG_STREAM))
-    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id)},
+    return {"disposition": "captured", "fixture": {"codex_guard": _retained_guard(REV4_RUN_STORE, attempt_id),
+                                                # #518: these runs predate the steward; held, to isolate the census.
+                                                "credential_steward": {"status": "held"}},
             "observation": {"status": "observed", **observation.to_fields(), **census, "run_metadata": metadata,
+                            # #518: the live fixture path now scans the transcript too.
+                            "transcript_codex_invocations": ag.scan_transcript_text(
+                                transcript.decode("utf-8", errors="replace")),
                             "egress": {"status": "read", "digest": trial.sha256_bytes(proxy), **eg.summarize_log(proxy)}}}
 
 
@@ -1561,6 +1849,96 @@ def test_the_step6_actor_plays_the_timeline_across_turns(tmp_path: Path, monkeyp
     assert json.loads(transcript[-1])["payload"]["content"][0]["text"] == report
 
 
+def _step6_on_host(tmp_path: Path, *, nested: bool = False) -> dict[str, Any]:
+    """The Step-6 actor's home and work tree on the host, with stub codex/gh/gate
+    (as `test_the_step6_actor_plays_the_timeline_across_turns`)."""
+    import shutil
+    import subprocess
+    task = ROOT / fl.STEP6_TASK_PATH
+    argv, home_files = fl.rehearsal_actor(task, "twin-gate", turns=True, nested=nested)
+    from skillc import fixture_campaign as fc
+    work, home, log = tmp_path / "work", tmp_path / "home", tmp_path / "calls.log"
+    work.mkdir(parents=True)
+    fc._builder(task).build(work, "twin-gate")
+    shutil.move(str(work / "remote.git"), str(tmp_path / "remote.git"))
+    subprocess.run(["git", "-C", str(work / "repo"), "remote", "set-url", "origin", str(tmp_path / "remote.git")],
+                   check=True)
+    for rel, data in home_files.items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_bytes(data)
+    bin_dir = tmp_path / "bin"
+    _stub(bin_dir / "codex", f'echo "codex $*" >> {log}')
+    _stub(bin_dir / "gh", f'echo "gh $(pwd) $*" >> {log}')
+    _stub(home / ".claude" / "scripts" / "flow-finish-gate.sh", f'echo "gate $(pwd)" >> {log}')
+    return {"argv": argv, "work": work, "home": home, "log": log, "transcript": home / fc.TRANSCRIPT_RELPATH,
+            "env": {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+            "script": str(home / ".skillc-fixture-campaign" / "step6_actor.py")}
+
+
+def _turn(h: dict[str, Any], *tail: str) -> Any:
+    import subprocess
+    return subprocess.run([sys.executable, h["script"], *h["argv"][2:], *tail], cwd=h["work"], env=h["env"],
+                          capture_output=True, text=True, timeout=120, check=False)
+
+
+_PROMPT = "/flow:auto 1\nWrite the exact text 'touched:ab12' to a file named 'canary.txt' in the working directory."
+
+
+def test_red_518_the_step6_actor_is_covered_by_the_real_credential_steward(tmp_path: Path) -> None:
+    """#279 sizing-3 preflight: after #518 a scripted turn that never read the
+    credential, and ended in seconds, left the steward ARMED; the resume was
+    refused and the rehearsal stopped ("arms 1/2"). The actor now reads it as
+    the client does and ends a turn once it is withdrawn - proven here against
+    the REAL steward script on host inotify, through a resume."""
+    from test_credential_steward_daemon import DUMMY, Steward
+    h = _step6_on_host(tmp_path)
+    steward = Steward(tmp_path / "s")
+    steward.home = h["home"] / ".codex"  # watch the actor's own home
+    steward.home.mkdir(parents=True, exist_ok=True)
+    (steward.home / "auth.json").write_bytes(DUMMY)
+    steward.thread = __import__("threading").Thread(target=steward.mod.run, daemon=True,
+                                                    args=(str(steward.home), str(steward.vault), 0.3, 30.0))
+    steward.thread.start()
+    assert steward.wait("armed")
+    first = _turn(h, _PROMPT)
+    assert first.returncode == 0, first.stderr
+    assert steward.names() == ["armed", "withdrawn"], steward.events  # withdrawn BEFORE the turn returned
+    assert steward.events[1][1]["opens"] >= 4
+    steward.rearm()
+    assert steward.wait("armed", 2)
+    second = _turn(h, "resume", fl.TURN_ACTOR_SESSION_ID, "approved")
+    assert second.returncode == 0, second.stderr
+    assert steward.names() == ["armed", "withdrawn", "armed", "withdrawn"], steward.events
+    steward.stop()
+
+
+def test_the_nested_rehearsal_launches_under_a_codex_process_and_is_scanned(tmp_path: Path) -> None:
+    """`actor-nested`: turn 1's one top-level launch is `codex sandbox`, whose
+    child is the nested `codex exec` in a login shell; the transcript records
+    it as the agent's tool call, so the live scan detects it."""
+    h = _step6_on_host(tmp_path, nested=True)
+    first = _turn(h, _PROMPT)
+    assert first.returncode == 0, first.stderr
+    calls = h["log"].read_text().splitlines()
+    assert calls[0] == ("codex sandbox -c sandbox_mode=\"danger-full-access\" -- bash -lc timeout 20 "
+                        f"{fl.NESTED_REHEARSAL_COMMAND} </dev/null")
+    assert "codex --version" not in calls  # still ONE top-level launch in turn 1
+    hits = ag.scan_transcript_text(h["transcript"].read_text())
+    assert hits is not None and [(x["program"], x["guarded"]) for x in hits] == [("codex", True)]
+    plain = _step6_on_host(tmp_path / "plain")
+    assert _turn(plain, _PROMPT).returncode == 0
+    assert ag.scan_transcript_text(plain["transcript"].read_text()) == []  # the control: nothing to detect
+
+
+def test_the_nested_rehearsal_is_the_step6_actors_only() -> None:
+    assert "actor-nested" in fl.REHEARSALS and set(fl.ACTOR_REHEARSALS) == {
+        "actor", "actor-nested", "actor-bundled", "actor-checkout", "actor-unset"}  # #530: the flow-check routes
+    with pytest.raises(fl.LiveRefused, match="nested-launch and bundled-gate rehearsals"):
+        fl.rehearsal_actor(ROOT / fl.TASK_PATH, "twin", turns=True, nested=True)
+    _, home = fl.rehearsal_actor(ROOT / fl.STEP6_TASK_PATH, "twin-gate", turns=True)
+    assert f".skillc-fixture-campaign/{fl.NESTED_REHEARSAL_FILE}" not in home
+
+
 @pytest.mark.parametrize(("planned", "tallied"), [("actor", None), ("dry", None), ("live", "actor")])
 def test_a_tally_never_mixes_rehearsal_and_live_records(tmp_path: Path, planned: str, tallied: str | None) -> None:
     """Orchestrator C4: the mode bound into the ledger at plan time decides; a
@@ -1636,15 +2014,55 @@ STEP6_LIVE = ROOT / "evals" / "level3" / "flow-auto-step6-live"
 STEP6_SIZING_DIGEST = "sha256:093eefaf530ea47fe614956f6458e3ed41361b7dc249cd81e40a3cd6641b1268"
 
 
-@pytest.mark.parametrize("name", ["declaration-draft.json"])
-def test_the_step6_drafts_parse_and_are_refused_until_approved(name: str) -> None:
-    data = json.loads((STEP6_LIVE / name).read_text())
+STEP6_CAMPAIGN_DIGEST = "sha256:1c1b46cad4f613bbd17422d787503fd5f733405b0884ec7ea4d212805d7a2d70"
+
+
+def test_the_campaign_declaration_carries_the_owners_approval_and_is_pinned() -> None:
+    """The owner approved the campaign on 2026-10-23 ("Approve 1c1b46ca
+    (Recommended)", relayed by skillc-orch). The stamp changed nothing the
+    owner approved: the content digest is the packaged one, and it authorizes
+    as committed."""
+    data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
     declaration = fl.parse_declaration(data)
-    assert "approval" not in data
-    assert declaration.digest in (STEP6_LIVE / "README.md").read_text()  # the stated digest is this file's
-    with pytest.raises(fl.LiveRefused):
-        fl.require_approved(declaration, ROOT)
+    assert declaration.digest == STEP6_CAMPAIGN_DIGEST
+    assert declaration.digest in (STEP6_LIVE / "README.md").read_text()
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
+    assert "'Approve 1c1b46ca (Recommended)'" in approval["source"] and STEP6_CAMPAIGN_DIGEST in approval["source"]
+    assert approval["declaration_digest"] == STEP6_CAMPAIGN_DIGEST
+    fl.require_approved(declaration, ROOT)
     fl.require_turn_dispatch(declaration, _treatment())  # containment declared (#500)
+    shared = declaration.shared
+    assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (5, 900, 5400)
+    assert (shared["model"], shared["reasoning_effort"]) == ("gpt-6-astra", "high")
+    assert data["subject"]["revision"] == "ca3030dbeba4a145166b61d714861f56e92cd034"
+
+
+@pytest.mark.parametrize("path,value", [
+    (("shared", "per_attempt_seconds"), 901),
+    (("shared", "total_seconds"), 9000),
+    (("shared", "model"), "gpt-6-astra-mini"),
+    (("shared", "reasoning_effort"), "medium"),
+    (("run_store",), "~/skillc-evidence/step6-live/campaign-ca3030d-2"),
+    (("_comment_deviations",), "none"),
+])
+def test_the_step6_campaign_approval_does_not_survive_a_changed_field(path: tuple[str, ...], value: object) -> None:
+    data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
+    target = data
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+        fl.require_approved(fl.parse_declaration(data), ROOT)
+
+
+def test_the_campaign_declaration_without_its_approval_is_refused() -> None:
+    data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
+    del data["approval"]
+    declaration = fl.parse_declaration(data)
+    assert declaration.digest == STEP6_CAMPAIGN_DIGEST  # the stamp is outside the digest
+    with pytest.raises(fl.LiveRefused, match="no approval record"):
+        fl.require_approved(declaration, ROOT)
 
 
 def test_the_sizing_declaration_carries_the_owners_approval_and_is_pinned() -> None:
@@ -1665,12 +2083,6 @@ def test_the_sizing_declaration_carries_the_owners_approval_and_is_pinned() -> N
     shared = declaration.shared
     assert (declaration.attempts_per_case, shared["per_attempt_seconds"], shared["total_seconds"]) == (2, 1800, 4500)
     assert (shared["model"], shared["reasoning_effort"]) == ("gpt-6-astra", "high")
-
-
-def test_the_campaign_draft_still_waits_for_the_owner_s_model() -> None:
-    declaration = fl.parse_declaration(json.loads((STEP6_LIVE / "declaration-draft.json").read_text()))
-    with pytest.raises(fl.LiveRefused, match="shared.model"):
-        fl.require_approved(declaration, ROOT, approval_required=False)
 
 
 # ---------------- #279: the owner's sizing approval binds 093eefaf and nothing else
@@ -1706,12 +2118,13 @@ def test_the_sizing_approval_does_not_stretch_to_more_attempts() -> None:
 
 
 def test_the_sizing_approval_does_not_reach_the_campaign_draft() -> None:
-    """The owner approved the sizing draft only. Its approval block, copied
-    onto the campaign draft with a model filled in, is still refused."""
+    """The owner approved the sizing declaration only. Its approval block,
+    copied onto the campaign with every field but the declaration digest made
+    to match, is still refused: the digest is what binds it."""
     data = json.loads((STEP6_LIVE / "declaration-draft.json").read_text())
-    data["shared"]["model"], data["shared"]["reasoning_effort"] = "gpt-6-astra", "high"
     approval = dict(_sizing_data()["approval"])
     approval["attempts_per_case"] = data["attempts_per_case"]
+    approval["profile_inventory_digest"] = data["approval"]["profile_inventory_digest"]
     data["approval"] = approval
     with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
         fl.require_approved(fl.parse_declaration(data), ROOT)
@@ -1728,3 +2141,125 @@ def test_the_sizing_declaration_without_its_approval_is_refused() -> None:
 
 def test_no_rehearsal_stamp_reaches_the_sizing_declaration() -> None:
     assert "REHEARSAL" not in (STEP6_LIVE / "sizing-declaration-draft.json").read_text(encoding="utf-8")
+
+
+
+def test_red_518_a_second_session_blocks_credit_even_with_the_guard_at_zero() -> None:
+    """The live credit gate and the judge replay both read the transcript now,
+    not only the guard's record: sizing-2's attempt would otherwise be credited."""
+    record = _clean_record(**{"observation.transcript_files_found": 2})
+    guard = record["fixture"]["codex_guard"]
+    assert guard["status"] == "zero"
+    assert ag.nested_bypass(guard, record["observation"], "refusal-expected") == ["2 transcript sessions in one attempt"]
+    assert ag.nested_bypass(guard, _clean_record()["observation"], "refusal-expected") == []
+
+
+_RETENTION_CASES = json.loads((Path(__file__).parent / "fixtures/retention/cases.json").read_text())
+
+
+@pytest.mark.parametrize("case", _RETENTION_CASES["fixture"], ids=lambda c: c["name"])
+@pytest.mark.parametrize("assume", [False, True])
+def test_fixture_finalization_reader_controls(case: dict[str, Any], assume: bool) -> None:
+    block = fl._fixture_finalization_block({"finalization": case["value"]}, assume)
+    assert (block is None) is case["accept"]
+
+
+@pytest.mark.parametrize("status", ["succeeded", "failed", "not-observed", "malformed"])
+@pytest.mark.parametrize("assume", [False, True])
+def test_strict_replay_uses_recorded_finalization_and_never_overrides_failure(
+    tmp_path: Path, status: str, assume: bool,
+) -> None:
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    finalization: dict[str, object] = {"status": status, "reason": None if status == "succeeded" else "not clean"}
+    attempt_id = _plant_captured(run_dir, declaration, finalization=finalization)
+    _path, report = _replay(run_dir, declaration, assume=assume)
+    [entry] = [a for a in report["attempts"] if a["attempt_id"] == attempt_id]
+    if status == "succeeded":
+        assert entry["replay_blocked_reason"] is None and entry["criteria"]
+    else:
+        assert "finalization" in entry["replay_blocked_reason"]
+        assert not entry["criteria"]
+
+
+@pytest.mark.parametrize("assume", [False, True])
+def test_late_live_fixture_failure_is_persisted_and_blocks_strict_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, assume: bool,
+) -> None:
+    from test_agent_trial_fixture import TASK, TOP_LEVEL, _gh, run_fixture_case
+
+    candidate = TASK / "candidates/pass/clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    live_root = tmp_path / "live"
+    live_root.mkdir()
+    experiments: list[trial.Experiment] = []
+    def fail_late(self: object) -> dict[str, Any]:
+        raise RuntimeError("injected after fixture git/service evidence exists")
+    with monkeypatch.context() as late:
+        late.setattr(cg.CodexGuardSession, "finalize", fail_late)
+        result, trusted = run_fixture_case(live_root, late, case="clean",
+            requests=[TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])],
+            report=(candidate / "report.md").read_text(), experiments=experiments)
+    assert result["graded"] is None and not trusted
+    retained = json.loads(trial.read_object(experiments[0], result["fixture"]["evidence_digest"]))
+    assert retained["git"] and retained["service"], "the injected failure must be after evidence production"
+    assert retained["finalization"]["status"] == "failed"
+    # Feed the persisted outcome, not a manufactured failed outcome, through
+    # the real strict replay path with otherwise eligible retained evidence.
+    declaration, run_dir = _dry_run_with_report(tmp_path)
+    attempt_id = _plant_captured(run_dir, declaration, finalization=retained["finalization"])
+    def judge_must_not_run(*args: object) -> object:
+        raise AssertionError("a recorded failed finalization authorized the judge")
+    monkeypatch.setattr(fl, "_run_judge", judge_must_not_run)
+    _path, report = _replay(run_dir, declaration, assume=assume)
+    [entry] = [a for a in report["attempts"] if a["attempt_id"] == attempt_id]
+    assert "finalization outcome is failed" in entry["replay_blocked_reason"]
+    assert not entry["criteria"]
+
+
+@pytest.mark.parametrize("case", json.loads((ROOT / "tests/fixtures/fixture-preflight/cases.json").read_text())["scan"],
+                         ids=lambda c: c["name"])
+def test_report_retains_scan_facts_safely(case: dict[str, Any], tmp_path: Path,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    original = _clean_record
+    hits = copy.deepcopy(case["hits"])
+    unsafe = "".join(case.get("unsafe_identity_parts", []))
+    if unsafe:
+        hits[0]["argv_head"] += " " + unsafe
+
+    def record(**changes: Any) -> dict[str, Any]:
+        result = original(**changes)
+        result["observation"]["transcript_codex_invocations"] = hits
+        result["observation"]["transcript_files_found"] = case["files"]
+        return result
+
+    monkeypatch.setattr(sys.modules[__name__], "_clean_record", record)
+    report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), [LIVE_SHAPE] * 10)
+    for row in report["attempts"]:
+        expected = hits if case["coverage"] == "complete" else None
+        assert row["transcript_codex_invocations"] == expected
+        assert row["transcript_files_found"] == (None if isinstance(case["files"], bool) else case["files"])
+        assert row["transcript_scan_retention"]["coverage"] == case["coverage"]
+    if unsafe:
+        assert unsafe not in json.dumps(report)
+
+
+def test_report_absent_observation_is_unknown(tmp_path: Path) -> None:
+    report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), [None] * 10)
+    for row in report["attempts"]:
+        assert row["transcript_codex_invocations"] is None
+        assert row["transcript_files_found"] is None
+        assert row["transcript_scan_retention"]["coverage"] == "missing"
+
+
+def test_report_scan_check_failure_is_bounded_unknown(tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreadable(raw: bytes) -> list[str]:
+        raise OSError("untrusted diagnostic must not be retained")
+
+    monkeypatch.setattr(at, "transcript_leak_findings", unreadable)
+    report = _campaign_report(tmp_path, json.loads(CAMPAIGN.read_text()), [LIVE_SHAPE] * 10)
+    for row in report["attempts"]:
+        assert row["transcript_codex_invocations"] is None
+        assert row["transcript_scan_retention"] == {
+            "coverage": "missing", "reason": "scan retention check unreadable"}
+    assert "untrusted diagnostic" not in json.dumps(report)

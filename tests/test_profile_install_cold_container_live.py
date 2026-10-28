@@ -318,6 +318,12 @@ def _check_mounts(mounts: list[Any]) -> None:
         _require(target not in destinations, f"forbidden mount at {target}", exc_type)
 
 
+def _offline_cache_miss(text: str) -> bool:
+    """Match both authentic uv clauses despite diagnostic line wrapping."""
+    flat = " ".join(text.split())
+    return "Network connectivity is disabled" in flat and "wasn't found in the cache" in flat
+
+
 def _check_offline_sync(returncode: int, stderr: str) -> None:
     _require(returncode == 0, f"offline uv sync failed: {stderr}", _OfflineSyncPropertyHeld)
 
@@ -406,7 +412,7 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
             # assert, so a sync that fails for some unrelated reason
             # reports a hard failure naming that disagreement, rather
             # than being credited as the break working.
-            assert "wasn't found in the cache" in sync.stderr, (
+            assert _offline_cache_miss(sync.stderr), (
                 f"the offline sync must fail at uv's own resolution step, naming the specific "
                 f"cache miss - got: {sync.stderr!r}"
             )

@@ -48,7 +48,8 @@ steps:
       # --durations=0 (#412): every test's wall time survives to this log, so
       # a timing red can be placed against its own deadline from CI alone.
       - uv run --no-sync pytest -n auto --maxprocesses=8 --dist=loadgroup -rA --durations=0 --junit-xml=pytest-report.xml
-      - uv run --no-sync ruff check .
+      # Match local lint: nested project caches must stay outside frozen fixtures.
+      - uv run --no-sync ruff check --cache-dir .ruff_cache .
       - uv run --no-sync mypy
 
   # Independent collection plus a committed short-report negative control (#364).
@@ -157,5 +158,20 @@ steps:
       - pip install uv
       - uv sync --locked --extra dev
       - uv run --no-sync python3 ci/readme_drift.py
+    environment:
+      UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
+
+  # Built wheel in a fresh venv, then sabotage each committed control (#72).
+  - name: clean-install
+    image: python:3.12-slim
+    depends_on: []
+    commands:
+      - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
+      - pip install uv
+      - uv sync --locked
+      - bash ci/clean-install-check.sh
+      - CLEAN_INSTALL_CONTROL=neuter-installed-rule bash ci/clean-install-check.sh
+      - CLEAN_INSTALL_CONTROL=delete-scratch-controls bash ci/clean-install-check.sh
+      - bash ci/clean-install-comparison-control.sh
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv

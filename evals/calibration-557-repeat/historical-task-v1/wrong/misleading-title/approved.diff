@@ -1,0 +1,16 @@
+diff --git a/docs/runbook.md b/docs/runbook.md
+--- a/docs/runbook.md
++++ b/docs/runbook.md
+@@ -22,6 +22,12 @@ Wait until every replica reports the new release.
+ Run `ledgerctl check --deep`.
+ Thaw writes with `ledgerctl thaw` only after the check passes.
+ 
++## Step 5: Roll back
++
++If the health check fails, run `deployctl rollback ledgerd --to previous`.
++Restore the snapshot with `ledgerctl restore --label pre-deploy`.
++Keep writes frozen until `ledgerctl check --deep` passes on the restored ledger.
++
+ ## Contacts
+ 
+ Release owner: the ledgerd maintainers.

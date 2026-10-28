@@ -1,0 +1,44 @@
+{
+  "profile_runtimes": [
+    {
+      "gate_entrypoint": ".claude/scripts/flow-finish-gate.sh",
+      "lock_sha256": "b8edbdd3e0036bc09c849cedee3c1231c468f0f0f9425090c8f2ec914108f3cf",
+      "project": "Projects/claude-power-pack",
+      "pyproject_sha256": "bc42953d69269328dbe5041d3b7ef6423804492db20b8cf8a59a94c0ee9f3774",
+      "required_env": {
+        "HOME": "/home/candidate",
+        "UV_CACHE_DIR": "/home/candidate/.cache/uv",
+        "UV_LINK_MODE": "copy",
+        "UV_LOCKED": "1",
+        "UV_OFFLINE": "1",
+        "UV_PYTHON": "/usr/bin/python3",
+        "UV_PYTHON_DOWNLOADS": "never"
+      },
+      "runtime_id": "cpp-codex-flow-auto-ca3030d",
+      "schema_version": 1,
+      "subject_locator": "github.com/cooneycw/claude-power-pack",
+      "subject_revision": "ca3030dbeba4a145166b61d714861f56e92cd034",
+      "uv_version": "0.9.7"
+    },
+    {
+      "gate_entrypoint": ".codex/skills/flow-check/scripts/flow-finish-gate.sh",
+      "lock_sha256": "0d7606bfd0efa1f58d5fa38386bde45cd63d75812c03cd0324bcd6f422ba6c32",
+      "project": "Projects/claude-power-pack",
+      "pyproject_sha256": "fe4b57ddb90f92793e0a1e45092d51bc28a7cfc048ae73ec00905cfed9ab00ed",
+      "required_env": {
+        "HOME": "/home/candidate",
+        "UV_CACHE_DIR": "/home/candidate/.cache/uv",
+        "UV_LINK_MODE": "copy",
+        "UV_LOCKED": "1",
+        "UV_OFFLINE": "1",
+        "UV_PYTHON": "/usr/bin/python3",
+        "UV_PYTHON_DOWNLOADS": "never"
+      },
+      "runtime_id": "cpp-codex-flow-check-652c0118",
+      "schema_version": 1,
+      "subject_locator": "github.com/cooneycw/claude-power-pack",
+      "subject_revision": "652c01185bc73adf18df49f5b9d1d5ad77a038c7",
+      "uv_version": "0.9.7"
+    }
+  ]
+}

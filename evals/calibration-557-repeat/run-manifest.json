@@ -1,0 +1,150 @@
+{
+  "kind": "calibration-declaration",
+  "issue": 557,
+  "declared_at": "2026-10-24",
+  "_comment": "Fresh owner-requested repeat, not historical evidence restoration. The approval field records the actual exact-declaration launch review under delegated owner authority.",
+  "approval": {
+    "by": "skillc-complete orchestrator under delegated owner authority",
+    "at": "2026-10-24T22:34:01Z",
+    "attempts_per_arm": 6,
+    "declaration_digest": "sha256:e89f5ae9fd71e69a60701bce8295036c0c0c06b2276188caea92e635956980ee",
+    "source": "Owner request on 2026-10-24: Repeat the full original 18-attempt baseline/natural/provided calibration. Exact-declaration launch ruling from skillc-complete orchestrator (native thread 01a16fc0-b6a3-7011-9980-717e7c02f426), recorded in gate-557-launch.md; the owner did not personally review this digest.",
+    "scope": "Exactly the 18 slots, original seed/order, identities, 1200-second attempt and 21600-second schedule caps and durable retention declared here; normal local Codex subscription login, deterministic grader only, no API judge calls, automatic retries or replacement attempts."
+  },
+  "task": {
+    "path": "evals/calibration-557-repeat/historical-task-v1",
+    "grader_id": "helper-different-question",
+    "grader_revision": "1"
+  },
+  "arms": [
+    {
+      "name": "natural",
+      "subject": {
+        "name": "cpp-codex",
+        "locator": "github.com/cooneycw/claude-power-pack",
+        "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+      },
+      "treatment": "N: the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); goal.md verbatim; the agent chooses for itself"
+    },
+    {
+      "name": "baseline",
+      "subject": null,
+      "treatment": "B: an identical disposable home with no skill installed; goal.md verbatim"
+    },
+    {
+      "name": "provided",
+      "subject": {
+        "name": "cpp-codex",
+        "locator": "github.com/cooneycw/claude-power-pack",
+        "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+      },
+      "treatment": "P: the same install as N; goal.md plus the instruction below",
+      "instruction": "Before you start, read the `flow-auto` and `flow-check` skills and follow what applies to this task.",
+      "named_skills": [
+        "flow-auto",
+        "flow-check"
+      ]
+    }
+  ],
+  "shared": {
+    "client": {
+      "name": "codex",
+      "version": "0.157.1"
+    },
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high",
+    "tools": "the client's defaults inside the trial container; no MCP servers",
+    "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+    "public_requirements": "evals/calibration-557-repeat/historical-task-v1/goal.md, delivered verbatim to every arm; arm provided appends its declared instruction",
+    "image": {
+      "tag": "sha256:b9816879e22d1f62dc6b8614c787e7666c1d9f438437c3d03d3c622513d1a563",
+      "digest": "sha256:b9816879e22d1f62dc6b8614c787e7666c1d9f438437c3d03d3c622513d1a563"
+    },
+    "per_attempt_seconds": 1200,
+    "total_seconds": 21600,
+    "agent_network": {
+      "policy": "egress:provider-only (#442)",
+      "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
+      "codex_server_side_off": [
+        "--strict-config",
+        "-c",
+        "web_search=\"disabled\"",
+        "--disable",
+        "apps",
+        "--disable",
+        "plugins",
+        "--disable",
+        "remote_plugin"
+      ]
+    }
+  },
+  "attempts_per_arm": 6,
+  "arm_order": {
+    "seed": 20261005,
+    "sequence": [
+      "baseline",
+      "baseline",
+      "natural",
+      "baseline",
+      "natural",
+      "provided",
+      "baseline",
+      "natural",
+      "provided",
+      "provided",
+      "natural",
+      "provided",
+      "provided",
+      "natural",
+      "natural",
+      "provided",
+      "baseline",
+      "baseline"
+    ]
+  },
+  "retain_transcripts": true,
+  "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's four criteria (report-verdict, one-section-per-step, approved-content-present, other-content-preserved), status by records.derive_status; installation-ready never enters it",
+  "reported_beside": "readiness_beside per attempt; uptake per attempt (skill_opened, and named_skill_opened for provided) and per arm (opened/observed, named_opened), from confirmed observations only",
+  "report_questions": [
+    "1. Does the grader behave on live attempts (no INCONCLUSIVE from grading plumbing)?",
+    "2. Is difficulty useful: are B, N and P not all at ceiling and not all at floor?",
+    "3. Uptake: what is N's opened rate (k/n), and does P open its named skills?",
+    "4. Value: among P attempts that opened a named skill, how does the primary endpoint compare with B? Descriptive only at this n.",
+    "5. Go / redesign / stop for #203, and the per-attempt time and quota cost."
+  ],
+  "run_store": "~/.local/share/skillc/calibration-557-repeat",
+  "controller": {
+    "source_commit": "5f302a0619dfc88a53025bd177489214353eed0f",
+    "retention_547_reviewed": true,
+    "objects": {
+      "skillc": "8cae4875107661a15d07e6407ab7d99482514dd0",
+      "docker": "174555514d98ace2c68153f4d9922a3389c045e3",
+      "evals/subjects/cpp-codex": "2f6f16635b5ff30d0815b015d7c8bc339b141cf3",
+      "pyproject.toml": "4f1f5d1fda357bcac26d38b25c76c9f6825a2b50",
+      "uv.lock": "646e6922d78f5954d3449814fd26cab2e7dc9a1b"
+    }
+  },
+  "historical_source": {
+    "skillc_commit": "fc028387bfb42e5d4b02ae477f1594d948ef9e6b",
+    "task_path": "evals/level3/helper-different-question",
+    "task_tree": "2321b8cfd1dc45ce10449e87df2e373a02a2629c",
+    "original_declaration": "evals/calibration-203-c3/run-manifest.json",
+    "original_image": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44",
+    "interpretation_limit": "Revision 1 task wording did not explicitly authorize renumbering approved text although its grader requires unique step numbering. Preserve that ambiguity; do not claim generalized improvement or force an eligible failure.",
+    "content": {
+      "version": 1,
+      "goal_digest": "sha256:dd288ba5f15f17cf824de881ba86220b4e4d848b69343072fd070a76f5c701c4",
+      "grader_digest": "sha256:c35cc7f666ac84858640d114804ac3db546dd8a501213ba6dcc7470516050523",
+      "fixture_digest": "sha256:22ba733867862b536a7064596a4800e158494b03d3c2c613cb8518c4a2a62c4f"
+    }
+  },
+  "authorization": {
+    "owner_request": "2026-10-24: Repeat the full original 18-attempt baseline/natural/provided calibration.",
+    "exact_declaration_reviewer": "skillc-complete orchestrator under delegated owner authority",
+    "agent_billing": "normal rotating local Codex subscription login",
+    "judge_tiers": [
+      "deterministic"
+    ],
+    "automatic_retries": 0
+  }
+}

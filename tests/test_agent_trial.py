@@ -1156,6 +1156,85 @@ def test_census_does_not_assess_claude_drift() -> None:
     assert census["transcript_unrecognized_types"] is None  # not assessed, never "no drift"
 
 
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize("versions", [("A", "B"), ("B", "A"), ("A", "B", "A")])
+def test_548_census_never_selects_a_version_from_a_conflicting_population(
+    client: str, versions: tuple[str, ...],
+) -> None:
+    rows = [{"type": "session_meta", "payload": {"cli_version": v}} if client == "codex"
+            else {"type": "system", "version": v} for v in versions]
+    assert at.transcript_census(client, "\n".join(map(json.dumps, rows)))["transcript_client_version"] is None
+
+
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize(("versions", "expected"), [
+    ([], None), (["A"], "A"), (["A", "A"], "A"), (["wrong"], "wrong"),
+    ([None], None), ([""], None), ([" "], None), (["A", None], None),
+    ([None, "A"], None), (["A", 42], None), ([42, "A"], None), ([{}, "A"], None),
+])
+def test_548_version_uncertainty_keeps_prompt_canary_and_credit_facts(
+    client: str, versions: list[object], expected: str | None,
+) -> None:
+    from test_transcript_adapter import CLAUDE_NONCE, CODEX_NONCE, PROMPT_FOR_NONCE
+
+    fixture = _CODEX_FIXTURES if client == "codex" else _CLAUDE_FIXTURES
+    original = (fixture / "live-canary.jsonl").read_text()
+    rows = [{"type": "session_meta", "payload": {"cli_version": v}} if client == "codex"
+            else {"type": "system", "version": v} for v in versions]
+    raw = ("\n".join(map(json.dumps, rows)) + "\n" + original).encode()
+    prompt = PROMPT_FOR_NONCE[CODEX_NONCE if client == "codex" else CLAUDE_NONCE]
+    observation, census, metadata = at.observe_transcript_bytes(
+        at.CLIENT_SPECS[client], raw, expected_prompt=prompt, skill_name="demo-skill")
+    assert census["transcript_client_version"] == expected
+    assert "transcript_census_error" not in census
+    fields = {"status": "observed", **observation.to_fields(), **census}
+    assert observation.prompt_delivered and observation.canary_satisfied
+    assert at.credit_block(fields, client=client, disposition="captured") is None
+    if client == "codex":
+        assert metadata is not None and metadata["cli_version"] == expected
+        pure = _pure_observation(raw, prompt)
+        live = _live_hook_observation(raw, prompt)
+        assert {k: live[k] for k in pure} == pure
+
+
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize("bad", ['{"type":"session_meta"', "null", "[]", "not-json"])
+def test_548_malformed_population_cannot_observe_a_version(client: str, bad: str) -> None:
+    header = {"type": "session_meta", "payload": {"cli_version": "A"}} if client == "codex" else {
+        "type": "system", "version": "A"}
+    raw = json.dumps(header) + "\n" + bad
+    census = at.transcript_census(client, raw)
+    assert census["transcript_client_version"] is None
+    if client == "codex":
+        read_metadata = at.CLIENT_SPECS[client].run_metadata
+        assert read_metadata is not None and read_metadata(raw)["cli_version"] is None
+
+
+@pytest.mark.parametrize("client", sorted(at.CLIENT_SPECS))
+@pytest.mark.parametrize("member", ["version", "identical", "payload", "type"])
+def test_548_serialized_duplicate_members_cannot_hide_version_population(client: str, member: str) -> None:
+    if client == "codex":
+        bad = {
+            "version": '{"type":"session_meta","payload":{"cli_version":"A","cli_version":"B","cli_version":"A"}}',
+            "identical": '{"type":"session_meta","payload":{"cli_version":"A","cli_version":"A"}}',
+            "payload": '{"type":"session_meta","payload":{"cli_version":"B"},"payload":{"cli_version":"A"}}',
+            "type": '{"type":"session_meta","type":"event_msg","payload":{"cli_version":"B"}}',
+        }[member]
+        good = '{"type":"session_meta","payload":{"cli_version":"A"}}'
+    else:
+        bad = {"version": '{"version":"A","version":"B","version":"A"}',
+               "identical": '{"version":"A","version":"A"}',
+               "payload": '{"type":"user","payload":{},"payload":{}}',
+               "type": '{"type":"assistant","type":"user"}'}[member]
+        good = '{"type":"system","version":"A"}'
+    raw = bad + "\n" + good
+    canonical = "\n".join(json.dumps(json.loads(line)) for line in raw.splitlines())
+    observed, last_wins = at.transcript_census(client, raw), at.transcript_census(client, canonical)
+    assert observed.pop("transcript_client_version") == ("A" if client == "claude" and member in ("payload", "type") else None)
+    last_wins.pop("transcript_client_version")
+    assert observed == last_wins  # Classification/counts/errors retain their existing semantics.
+
+
 @pytest.mark.parametrize("raw", ["", "not json\n", '{"type": "session_meta", "payload": {"cli_version": "0.157.1"}}\n'])
 def test_census_with_no_response_items_is_not_assessed(raw: str) -> None:
     """Codex review, red on the first census: an empty, malformed or
@@ -1720,3 +1799,241 @@ def test_the_credit_gate_passes_a_clean_attempt_and_spares_claude_the_codex_cens
     assert at.credit_block(_observed(grading_eligible=False), client="codex", disposition="captured",
                            fixture_block=block) is not None
     assert called == []  # the fixture block is consulted only once everything earlier has passed
+
+
+def test_independently_retained_transcript_is_read_back_and_tampering_refuses(store: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    entry = t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"diagnostic"))
+    retention = at.transcript_retention(experiment, attempt_id, "inconclusive")
+    assert retention["coverage"] == "complete" and retention["digest"] == entry["digest"]
+    path = experiment.object_path(str(entry["digest"]))
+    path.chmod(0o600)
+    path.write_bytes(b"tampered")
+    with pytest.raises(t.Refused, match="modified"):
+        at.transcript_retention(experiment, attempt_id, "inconclusive")
+
+
+def test_independently_retained_partial_transcript_cannot_prove_non_invocation(store: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"diagnostic"), confirmed=False)
+    with pytest.raises(t.Refused, match="partial"):
+        at.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+@pytest.mark.parametrize("fault", [None, "drain", "unsafe"])
+def test_production_gate_output_sink_retains_diagnostics_when_grading_is_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
+    import shlex
+
+    from test_agent_trial_gate_witness import run_case
+
+    from skillc.gate_witness import read_run_output
+
+    controls = json.loads((Path(__file__).parent / "fixtures/retention/cases.json").read_text())
+    raw = ("".join(controls["unsafe_gate_output"]["parts"]).encode() if fault == "unsafe" else b"gate diagnostic\n")
+    script = ("#!/bin/bash\nprintf '%s' " + shlex.quote(raw.decode()) + "\nprintf 'gate stderr\\n' >&2\nexit 3\n").encode()
+    result, _trusted, _backend = run_case(tmp_path, monkeypatch, fault=None if fault == "unsafe" else fault, script=script)
+    [root] = [p for p in (tmp_path / "store").iterdir() if (p / t.LEDGER).is_file()]
+    experiment = t.Experiment.open(root)
+    [event] = [e for e in experiment.events(str(result["attempt_id"])) if e["event"] == "gate-witness-retained"]
+    snapshot = json.loads(t.read_object(experiment, str(event["digest"])))
+    assert snapshot["attempt_id"] == result["attempt_id"]
+    for gate in snapshot["gates"].values():
+        [run] = gate["runs"]
+        assert run["exit_code"] == 3
+        if fault == "unsafe":
+            assert run["output"]["stdout"]["coverage"] == "refused"
+            assert not experiment.object_path(t.sha256_bytes(raw)).exists()
+        else:
+            assert read_run_output(run, "stdout", lambda d: t.read_object(experiment, d)) == raw
+        assert read_run_output(run, "stderr", lambda d: t.read_object(experiment, d)) == b"gate stderr\n"
+        if fault == "drain":
+            assert gate["coverage"] == "channel-unavailable"
+    if fault == "drain":
+        assert result["graded"] is None and result["grading_blocked_reason"]
+
+
+def test_wrong_parent_collector_refuses_before_any_grading_prepare(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, aid, _ = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    other, other_aid = _planned(store)
+    wrong = t.OwnedAttemptIds(other, other_aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+
+    def prepare(self: object, aid: str) -> object:
+        prepared.append(aid)
+        raise AssertionError("wrong-parent collector reached actual prepare")
+
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    with pytest.raises(t.Refused, match="collector belongs to another parent"):
+        verify._grade_and_store(experiment, aid, verify.GraderDef.load(GRADER_ROOT), base,
+                                backend=backend, recorded_attempt_ids=wrong)
+    assert not prepared and wrong == []
+    assert not any(e.get("event") == "owned-attempt" for e in other.events(other_aid))
+
+
+def test_registration_persistence_failure_prevents_probe_preparation(
+    store: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, aid = _planned(store)
+    ids = t.OwnedAttemptIds(experiment, aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+    original_record = t.Experiment.record
+
+    def record(self: t.Experiment, attempt: str, event: str, **detail: object) -> None:
+        if event == "owned-attempt":
+            raise OSError("controlled durable ownership write failure")
+        original_record(self, attempt, event, **detail)
+
+    def prepare(self: object, probe: str) -> object:
+        prepared.append(probe)
+        raise AssertionError("preparation preceded durable registration")
+
+    monkeypatch.setattr(t.Experiment, "record", record)
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    with pytest.raises(OSError, match="durable ownership"):
+        verify.grade_files(verify.GraderDef.load(GRADER_ROOT), [("candidate", b"x", False)], base,
+                           backend=backend, recorded_attempt_ids=ids)
+    assert ids == [] and not prepared
+
+
+def test_receipt_discovery_and_ordinary_grading_share_caller_collector_and_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import test_calibration_run as helpers
+
+    from skillc import calibration_run
+    original_agent, original_run = at.run_one_attempt, calibration_run.run_calibration
+    observed: list[t.OwnedAttemptIds] = []
+    deadlines: list[object] = []
+    executed: set[str] = set()
+    original_execute = d.DockerBackend.execute
+
+    def execute(self: object, *args: object, **kwargs: object) -> object:
+        assert getattr(args[2], "completion_deadline", None) is deadlines[-1]
+        executed.add(str(getattr(args[0], "attempt_id", None)))
+        return original_execute(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    def run(*args: object, **kwargs: object) -> object:
+        kwargs["clock"] = lambda: 0.0
+        return original_run(*args, **kwargs)  # type: ignore[arg-type]
+
+    def agent(**kwargs: object) -> dict[str, object]:
+        ids = kwargs["recorded_attempt_ids"]
+        assert isinstance(ids, t.OwnedAttemptIds)
+        observed.append(ids)
+        deadlines.append(kwargs["completion_deadline"])
+        return original_agent(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(calibration_run, "run_calibration", run)
+    monkeypatch.setattr(at, "run_one_attempt", agent)
+    monkeypatch.setattr(d.DockerBackend, "execute", execute)
+    _, outcomes, _, _ = helpers._run(tmp_path, monkeypatch, total_seconds=100)
+    assert len(observed) == len(outcomes) == 6
+    assert sorted(map(len, observed)) == [1, 1, 1, 1, 1, 3]
+    assert all(ids.all_absent() for ids in observed)
+    assert executed == {aid for ids in observed for aid in [ids.parent_attempt, *ids]}
+    assert Limits(timeout=1).completion_deadline is None
+    for ids in observed:
+        registered = [e["owned_id"] for e in ids.experiment.events(ids.parent_attempt)
+                      if e.get("event") == "owned-attempt"]
+        assert registered == ids
+    assert all(isinstance(o.record.get("completion"), dict) for o in outcomes)
+
+
+def test_duplicate_owned_registration_refuses_across_collector_instances(store: Path) -> None:
+    experiment, aid = _planned(store)
+    first = t.OwnedAttemptIds(experiment, aid)
+    second = t.OwnedAttemptIds(experiment, aid)
+    first.append("probe-controlled-identity")
+    with pytest.raises(t.Refused, match="duplicate"):
+        first.append("probe-controlled-identity")
+    with pytest.raises(t.Refused, match="already registered"):
+        second.append("probe-controlled-identity")
+    assert first == ["probe-controlled-identity"] and second == []
+    assert first.all_absent() is False
+    assert len([e for e in experiment.events(aid) if e.get("event") == "owned-attempt"]) == 1
+
+
+@pytest.mark.parametrize("wrong_parent", [True, False])
+def test_supplied_collector_is_checked_before_legacy_agent_preparation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, wrong_parent: bool,
+) -> None:
+    experiment, aid = _planned(store)
+    other, other_aid = _planned(store)
+    ids = t.OwnedAttemptIds(other, other_aid) if wrong_parent else t.OwnedAttemptIds(experiment, aid)
+    backend = _backend(base, docker_state)
+    prepared: list[str] = []
+
+    def prepare(self: object, attempt: str) -> object:
+        prepared.append(attempt)
+        raise RuntimeError("controlled preparation reached")
+
+    monkeypatch.setattr(type(backend), "prepare", prepare)
+    kwargs = {"backend": backend, "experiment": experiment, "attempt_id": aid, "client": "codex",
+                  "base_argv": _fake_argv(fmt="codex-fake", home=_mapped_home(docker_state, aid),
+                                      transcript_relpath=".codex/sessions/test.jsonl"),
+                  "prompt": "Fix the helper.", "skill_name": None, "surface": {}, "limits": Limits(timeout=5),
+                  "base": base, "credential_explicit_path": _fresh_credential(tmp_path, "codex"),
+                  "recorded_attempt_ids": ids, "completion_deadline": None}
+    if wrong_parent:
+        with pytest.raises(t.Refused, match="owned IDs belong to a different experiment or parent"):
+            at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
+        assert prepared == []
+    else:
+        with pytest.raises(RuntimeError, match="controlled preparation reached"):
+            at.run_one_attempt(**kwargs)  # type: ignore[arg-type]
+        assert prepared == [aid]
+    assert ids == []
+
+
+def test_547_exact_issued_prompt_survives_without_a_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing entrypoint/ledger/CAS APIs: text must survive real teardown."""
+    from collections.abc import Sequence
+
+    from test_lifecycle import FakeBackend, _Handle
+
+    from skillc.backend import Confirmation, ExecuteResult
+
+    class Memory(FakeBackend):
+        def __init__(self, base: Path) -> None:
+            super().__init__(base, force_confirm_stopped=Confirmation.CONFIRMED)
+            self.issued: list[str] = []
+
+        def execute(self, handle: object, argv: Sequence[str], limits: Limits,
+                    cancel: object = None, stdin: bytes | None = None) -> ExecuteResult:
+            assert isinstance(handle, _Handle)
+            self.issued.append(argv[-1])
+            (handle.root / "result.txt").write_text("synthetic task output")
+            return ExecuteResult("exited", 0)
+
+        def read_home_tree(self, *args: object, **kwargs: object) -> dict[str, bytes]:
+            return {}
+
+    monkeypatch.setattr(at, "_make_before_execute", lambda **_: lambda *_: None)
+    monkeypatch.setattr(at.trial_bootstrap, "new_canary_nonce", lambda: "synthetic547nonce")
+    experiment, aid = _planned(t.open_store(tmp_path / "store", []))
+    backend = Memory(tmp_path / "backend")
+    result = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=aid, client="claude",  # type: ignore[arg-type]
+        base_argv=["synthetic-client"], prompt="Preserve these exact lines.\n\u03bb", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=tmp_path / "scratch",
+    )
+    assert aid in backend.destroyed and result["backend_teardown"] == "confirmed"
+    assert _observation(result)["status"] == "unknown"  # unsupported transcript observation
+    assert len(backend.issued) == 1 and "synthetic547nonce" in backend.issued[0]
+    control = b"known-present scan control"
+    t.put_object(experiment, control)
+    objects = [f.read_bytes() for f in (experiment.root / t.OBJECTS).iterdir()]
+    assert control in objects, "the same-store byte scan must see its planted control"
+    expected = backend.issued[0].encode("utf-8")
+    assert expected in objects, "actual post-nonce client input disappeared after teardown"
+    assert any(expected_digest in json.dumps(e) and aid in json.dumps(e)
+               for e in experiment.events(aid) for expected_digest in [t.sha256_bytes(expected)])

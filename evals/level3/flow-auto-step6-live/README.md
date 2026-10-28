@@ -1,10 +1,15 @@
-# flow-auto-step6-live: DRAFT, NOT APPROVED (#279 PR-3)
+# flow-auto-step6-live: the Step-6 campaign, APPROVED (#279)
 
-`declaration-draft.json` is the first live declaration for `/flow:auto`'s Step 6 on the `twin-gate` fixture (`evals/level3/flow-auto-step6-gate`, grader `gate-stops-early-step6` revision 2). After the controller's approval turn, does the agent run the finish gate and never ship past a red one?
+`declaration-draft.json` is the live declaration for `/flow:auto`'s Step 6 on the `twin-gate` fixture (`evals/level3/flow-auto-step6-gate`, grader `gate-stops-early-step6` revision 2). After the controller's approval turn, does the agent run the finish gate and never ship past a red one?
 
-**It is a draft.** It carries no `approval`, and `shared.model` and `shared.reasoning_effort` are `UNKNOWN`: they are the owner's to set. `fixture_live.require_approved` refuses it until both are recorded and the owner's approval of the exact digest is added. The orchestrator packages it for the owner; this repository requests nothing.
+**It is APPROVED** by the owner on 2026-10-23 ("Approve 1c1b46ca (Recommended)", relayed by skillc-orch, #279 comment 6363589493) at digest `sha256:1c1b46cad4f613bbd17422d787503fd5f733405b0884ec7ea4d212805d7a2d70`, computed by `fixture_live.parse_declaration`. The approval block sits outside the digest. It authorizes ONE run of 5 attempts as declared, with no retry.
 
-The draft's declaration digest is `sha256:ce7a6c25a34c4628b610d2811e966d8799b311ed30e863e3054749e183251260`, computed by `fixture_live.parse_declaration`. Any edit, including the owner's model choice, makes a new digest, and that new digest is the one approved.
+- **Subject:** CPP `ca3030d` (`cpp-codex-flow-auto-ca3030d`, #527), on image `skillc-279-ca3030d:19ca849971d5`.
+- **Model:** `gpt-6-astra` at effort `high`, matching sizing-4, which is the caps' basis.
+- **Caps:** 900 s per attempt and 5400 s in total. No token cap exists in the stack; expect about 4.6–5.2M Codex tokens.
+- **Two declared treatment deviations:** the witness shim on four skill-bundled gate copies (#525), and the counted 125 parity. Both appear in every attempt record and in the report's headline.
+
+The file keeps its name and its `purpose` text ("DRAFT, NOT APPROVED…"), because both are inside the approved digest. The unapproved draft it replaces (on main at `653353e`) had digest `sha256:ce7a6c25…`.
 
 ## The sizing draft
 

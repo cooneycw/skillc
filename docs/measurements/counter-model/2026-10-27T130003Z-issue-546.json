@@ -1,0 +1,32 @@
+{
+  "branch": "issue-546-resume-20261027",
+  "counts": {
+    "accepted": 10,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "Skillc-update root orchestrator authorized actual pass3 after pass2 reproduced required #580 actual-Docker dispatch and atomic qualification-publication scope expansion (gate-580-required-dispatch-and-publication.md); prior two passes/five+two findings retained. Actual reviews read working-tree diffs: pass1 main1e7ae69/checkout e451faf patch d62a41687882922703a424d23f1e3de6a4b8eb4cd8cd775c5edc107bf27e395e; pass2 main1e7ae69 patch d8141bb63e4b0be23b225636015fac28357f8267d520f6b193969a0f697e6e75; pass3 main028dde/HEAD92998b8 patch e9831e5282f9094bbe7b19777f9bfcf4d3dad5c1ad6b241cf145f2f0dfd8ccf0. Three actual passes/ten accepted findings total. Pass3 finding repairs and later first-full-red compatibility/fixture repairs were root-inspected after review and NOT independently re-reviewed; no fourth pass or clean-final-review claim. Final working-tree product patch c1164aae5ef03c8a8734299349020e6383cafa16d781bd8fead04a091f4a3662 differs from reviewed source. Red-case counting uses reviewer bullet groups per pass (13+10+10 proposed,8+8+7 already covered at those review points), not unique defects or parametrized executions; named mapping/provenance retained outside source for root inspection. Full retry/PR/merge pending.",
+  "head": "92998b8f7cdb9607ea05918463190287eaae6dce",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T06-27-09-01a17ce6-4b92-7802-b7c7-35181ac56d6a.jsonl",
+    "thread_id": "01a17ce6-4b92-7802-b7c7-35181ac56d6a"
+  },
+  "issue": "546",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-27T13:00:03Z",
+  "red_cases": {
+    "already_covered": 23,
+    "proposed": 33
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T07-40-21-01a17d29-4ee9-76a2-9bd9-6bac916788d4.jsonl",
+    "thread_id": "01a17d29-4ee9-76a2-9bd9-6bac916788d4"
+  },
+  "schema": 2,
+  "scope": "unverified",
+  "status": "ran"
+}

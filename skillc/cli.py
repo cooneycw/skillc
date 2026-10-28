@@ -1115,10 +1115,11 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             else list(cc.DEFAULT_CLIENT_ARGVS[acquired.subject.client])
         )
         image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        grader = verify.GraderDef.load(task_root)
         experiment = sp.plan_selection_probe(
             planned_cases, manifest, treatment_subject_digest=acquired.source.digest,
             baseline_subject_digest=sp.BASELINE_SUBJECT_DIGEST, image_digest=image_digest or "UNKNOWN",
-            store=trial.open_store(store_path, forbidden=[]), experiment_name=experiment_name,
+            store=trial.open_store(store_path, forbidden=[]), experiment_name=experiment_name, grader=grader,
         )
         backend, grading_backend = cc.agent_backends(
             image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
@@ -1127,6 +1128,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             experiment=experiment, backend=backend, base=run_root, client=acquired.subject.client,
             argv_for=lambda _attempt_id: client_argv,
             treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
+            treatment_home_modes=cc._collection_home_modes(acquired.source, acquired.files),
             goal=(task_root / "goal.md").read_text(encoding="utf-8"),
             surface=cc.surface_mapping(cc.task_surface(task_root / "fixture")),
             timeout=agent_timeout, cli_version=acquired.subject.client_version,
@@ -1137,7 +1139,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
         try:
             report = sp.run_planned_selection_probe(
                 experiment, planned_cases, runner, base=run_root,
-                grader=verify.GraderDef.load(task_root), grading_backend=grading_backend,
+                grader=grader, grading_backend=grading_backend,
                 detection_control=control is not None,
             )
         except sp.SelectionProbeRefused as exc:
@@ -1556,12 +1558,14 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
             )
             return 2
         home_files = cc._collection_home_files(acquired.source, acquired.files)
+        home_modes = cc._collection_home_modes(acquired.source, acquired.files)
     finally:
         cc.discard_acquisition(run_dir, declaration.subject_name)
 
     credential_path = Path(args.credential) if args.credential else None
     experiment, outcomes = mp.run_pilot(
         declaration, run_dir=run_dir, treatment_home_files=home_files,
+        treatment_home_modes=home_modes,
         treatment_digest=acquired.source.digest, image_digest=image_digest,
         # By the resolved immutable digest, never the tag: a tag re-pointed
         # mid-run would otherwise change the image under later attempts.
@@ -1691,8 +1695,8 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     `evals/calibration-204/run-manifest.json`) end to end. Refuses (exit 2),
     before any run directory or container exists, a declaration that is not
     approved or still carries an unrecorded identity, a client argv that
-    chooses its own model, a trial image whose pinned client or resolved
-    digest is not the declared one, and a subject whose locator or revision
+    chooses its own model, a trial image whose tag, pinned client or resolved
+    digest differs from the declaration, and a subject whose locator or revision
     is not the declared one. Requires `SKILLC_ALLOW_REAL_AGENT=1` and the
     operator's own subscription login (ADR 0005 rule 6). Everything stays in
     a private run directory; only a leak-checked summary is printed. Exits 1
@@ -1783,10 +1787,15 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             except cr.CalibrationRefused as exc:
                 print(f"skillc: {exc}", file=sys.stderr)
                 return 2
-        elif image_digest != declared_digest:
-            print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
-                  f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
-            return 2
+        else:
+            tag = declared_image.get("tag") if isinstance(declared_image, dict) else None
+            if not isinstance(tag, str) or not tag.strip() or image != tag:
+                print(f"skillc: image tag {image!r} is not the declared shared.image.tag {tag!r}", file=sys.stderr)
+                return 2
+            if image_digest != declared_digest:
+                print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
+                      f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
+                return 2
 
     try:
         private_root = cr.private_root(declaration, args.private_dir)  # #287 P3 (C5): the declared run store
@@ -1831,7 +1840,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         else:
             supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
         if supply is not None:
-            rs.require_kind(supply, selected)
+            rs.require_kind(supply, selected, revision=acquired.subject.revision)
         if supply is not None and supply.image_id != image_digest:
             raise rs.Refused("runtime receipt image differs from the approved resolved image")
     except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
@@ -1989,7 +1998,7 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
         if selected != rs.PROFILE_RUNTIME:
             raise harness.CampaignRefused("the frozen subject does not select the supported pinned runtime")
         supply = rs.RuntimeSupply.from_path(Path(args.runtime_supply_receipt))
-        rs.require_kind(supply, selected)
+        rs.require_kind(supply, selected, revision=acquired.subject.revision)
     except (lc.CampaignRefused, fc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused,
             rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
@@ -2037,6 +2046,23 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
 
 
 def cmd_level3_live(args: argparse.Namespace) -> int:
+    if getattr(args, "preflight_launch_env", False):
+        if args.rehearse is not None or args.judge_replay is not None or args.assume_fixture_finalized:
+            print("skillc: cannot combine --preflight-launch-env with rehearsal or judge replay options",
+                  file=sys.stderr)
+            return 2
+        from . import collection_conformance as cc
+        from . import fixture_live as fl
+
+        try:
+            declaration = fl.load_declaration(Path(args.declaration))
+            fl.preflight_launch_env(declaration, cc.DEFAULT_CLIENT_ARGVS[fl.CLIENT])
+        except (fl.LiveRefused, OSError, ValueError) as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+        print("skillc: current environment permits the real-client opt-in guard; no launch attempted. "
+              "The guard is checked again at launch.", file=sys.stderr)
+        return 0
     if getattr(args, "judge_replay", None):
         return _cmd_level3_live_judge_replay(args)
     return _cmd_level3_live_run(args)
@@ -2186,7 +2212,8 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
         found = (acquired.subject.locator, acquired.subject.revision, acquired.subject.client)
         if found != (subject["locator"], subject["revision"], fl.CLIENT):
             raise fl.LiveRefused(f"acquired subject {found} is not the declared one")
-        treatment = cr.build_treatment(acquired, subject_profile=str(subject["profile"]), root=cr.ROOT)
+        treatment = cr.build_treatment(acquired, subject_profile=str(subject["profile"]), root=cr.ROOT,
+                                       fixture_gate_state=True)
         selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
             gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
@@ -2196,7 +2223,7 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
         supply: rs.RuntimeSupply | None = None
         if bound_receipt is not None:  # the bytes the binding checked, never a second read
             supply = rs.RuntimeSupply(bound_receipt)
-            rs.require_kind(supply, selected)
+            rs.require_kind(supply, selected, revision=acquired.subject.revision)
             if supply.image_id != image_digest:
                 raise rs.Refused("runtime receipt image differs from the declared resolved image")
     except (fl.LiveRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused, OSError,
@@ -2206,7 +2233,7 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
     finally:
         cc.discard_acquisition(run_dir, str(subject["name"]))
 
-    if rehearse == "actor":
+    if rehearse in fl.ACTOR_REHEARSALS:
         credential: Path | None = lc.dummy_credential(run_dir / "codex-credential.dummy.json")
     else:
         credential = Path(args.credential) if args.credential else None
@@ -2233,6 +2260,15 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
               "run_store": {"declared": declaration.data["run_store"], "resolved": str(private_root)}}
     report_path = run_dir / fl.REPORT_FILENAME
     report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    refused_calls = sum(int(a["witness_refused_calls"]["count"]) for a in report["attempts"]
+                        if isinstance(a.get("witness_refused_calls"), dict))
+    print(f"skillc: witness-refused calls: {refused_calls}"
+          + (" - S2/S3 of the flagged attempts are possibly shaped by the harness; see the report head"
+             if refused_calls else ""), file=sys.stderr)
+    if "treatment_deviation" in report:  # #525: first, in the headline
+        shimmed = sorted({p for a in report["treatment_deviation"]["attempts"] for p in a["shimmed"]})
+        print(f"skillc: TREATMENT DEVIATION (declared): {len(report['treatment_deviation']['attempts'])} attempt(s) "
+              f"were set up with the witness shim in place of {shimmed}", file=sys.stderr)
     for case, counts in report["cases"].items():
         print(f"skillc: {case}: {counts}", file=sys.stderr)
     if stop.trigger is not None:
@@ -2700,6 +2736,32 @@ def cmd_profile_diagnose(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retained_export(args: argparse.Namespace) -> int:
+    """Archive or reproduce retained evidence without executing a trial."""
+    from . import retained_export as retained
+
+    try:
+        if args.reproduce:
+            if any((args.run, args.declaration, args.profile, args.repo, args.snapshot, args.out)):
+                raise retained.ExportRefused("--reproduce cannot be combined with export inputs")
+            report, coverage_report = retained.reproduce(Path(args.reproduce))
+            print(json.dumps({"report": report, "coverage": coverage_report}, indent=2))
+        else:
+            if not all((args.run, args.declaration, args.profile, args.out)):
+                raise retained.ExportRefused("export requires --run, --declaration, --profile and --out")
+            retained.export_retained(
+                Path(args.run), Path(args.declaration), Path(args.profile), Path(args.out),
+                root=Path(__file__).resolve().parent.parent,
+                repo=Path(args.repo) if args.repo else None,
+                snapshot=Path(args.snapshot) if args.snapshot else None,
+            )
+            print("skillc: retained export published; historical results preserved, no trial executed")
+    except (retained.ExportRefused, profile.Refused, OSError, ValueError) as exc:
+        print(f"skillc: retained export REFUSED - {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Separate from `main` so #73's README drift check can introspect the
     real subcommand set (`registered_commands` in `ci/readme_drift.py`)
@@ -2712,6 +2774,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"%(prog)s {__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_retained = sub.add_parser("retained-export", help="export retained fixture-live records without a trial")
+    p_retained.add_argument("--reproduce", metavar="EXPORT", help="reproduce public summaries; no private store needed")
+    p_retained.add_argument("--run", help="retained fixture-live run directory")
+    p_retained.add_argument("--declaration", help="the run's approved declaration")
+    p_retained.add_argument("--profile", help="the declared profile.json")
+    p_retained.add_argument("--out", help="fresh export destination (never replaced)")
+    p_source = p_retained.add_mutually_exclusive_group()
+    p_source.add_argument("--repo", help="local subject git repository; read its pinned revision")
+    p_source.add_argument("--snapshot", help="subject source snapshot (verified against approved inventory)")
+    p_retained.set_defaults(func=cmd_retained_export)
 
     p_check = sub.add_parser("check", help="refuse to build skills the spec rejects")
     p_check.add_argument("path", nargs="?", default=".", help="skill dir, tree, or SKILL.md")
@@ -2960,7 +3033,7 @@ def build_parser() -> argparse.ArgumentParser:
              "printed (a real agent run, behind SKILLC_ALLOW_REAL_AGENT=1)",
     )
     p_calibration_run.add_argument("declaration", help="the calibration-declaration JSON to run")
-    p_calibration_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_calibration_run.add_argument("--image", help="exact declared shared.image.tag (default: skillc.demo.DEFAULT_IMAGE)")
     p_calibration_run.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
     p_calibration_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_calibration_run.add_argument("--credential", help="explicit path to the client credential file")
@@ -3012,6 +3085,11 @@ def build_parser() -> argparse.ArgumentParser:
              "SKILLC_ALLOW_REAL_AGENT=1)",
     )
     p_level3_live.add_argument("declaration", help="the level3-fixture-live-declaration JSON to run")
+    p_level3_live.add_argument(
+        "--preflight-launch-env", action="store_true",
+        help="check only the current real-client environment opt-in; no image, credential, store, "
+             "backend or client is touched, and no run is authorized",
+    )
     p_level3_live.add_argument("--image", help="trial image tag (default: the declared shared.image.tag)")
     p_level3_live.add_argument("--runtime-supply-receipt",
                                help="receipt of the pinned runtime image (required unless --rehearse dry)")
@@ -3020,9 +3098,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_level3_live.add_argument("--timeout", type=float, default=60, help="per-container-call timeout, seconds")
     p_level3_live.add_argument("--private-dir", help="must equal the declared run_store when given")
     p_level3_live.add_argument(
-        "--rehearse", choices=["dry", "actor"], default=None,
+        "--rehearse", choices=["dry", "actor", "actor-nested", "actor-bundled", "actor-checkout", "actor-unset"],
+        default=None,
         help="spend nothing: 'dry' starts no container; 'actor' runs the real live path with a scripted actor "
-             "and a dummy credential. Either may run an unapproved declaration (the report says so)",
+             "and a dummy credential; 'actor-nested' (#279) is the Step-6 actor plus one nested codex launch, "
+             "which must read refused and detected; 'actor-bundled' (#525) runs the skill-bundled gate copy; "
+             "'actor-checkout' and 'actor-unset' (#530, the flow-check route task only) run the checkout copy and "
+             "the anchored call with its variable unset. Any may run an unapproved declaration (the report says so)",
     )
     p_level3_live.add_argument(
         "--judge-replay", metavar="RUN_DIR", default=None,

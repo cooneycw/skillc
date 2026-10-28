@@ -45,6 +45,7 @@ KIND = "level3-production-campaign"
 SCHEMA = 1
 OUTCOMES = frozenset({"SATISFIED", "VIOLATED", "UNKNOWN"})
 STATUSES = frozenset({"PASS", "FAIL", "INCONCLUSIVE"})
+RUNTIME_KEYS = frozenset({"runtime_id", "subject_revision", "pyproject_sha256", "lock_sha256"})
 
 #: How the actor sequences its edit and the two prescribed gate calls.
 #:   fresh     - place the candidate, then plan and summary (an honest run)
@@ -157,6 +158,13 @@ def _need(value: object, kind: type, label: str) -> Any:
     return value
 
 
+def _runtime_problems(runtime: object) -> list[str]:
+    if not isinstance(runtime, dict) or set(runtime) != RUNTIME_KEYS:
+        return [f"frozen.runtime must name exactly {sorted(RUNTIME_KEYS)}"]
+    return [f"frozen.runtime.{key} must be nonblank text" for key, value in runtime.items()
+            if not isinstance(value, str) or not value.strip()]
+
+
 def load_manifest(path: Path) -> Manifest:
     data = _need(json.loads(path.read_text(encoding="utf-8")), dict, "manifest")
     if data.get("kind") != KIND or data.get("schema") != SCHEMA:
@@ -164,6 +172,8 @@ def load_manifest(path: Path) -> Manifest:
     frozen = _need(data.get("frozen"), dict, "frozen")
     for key in ("subject", "client", "caps", "tasks", "runtime"):
         _need(frozen.get(key), dict, f"frozen.{key}")
+    if problems := _runtime_problems(frozen["runtime"]):
+        raise CampaignRefused("; ".join(problems))
     rows: list[Row] = []
     seen: set[str] = set()
     for raw in _need(data.get("rows"), list, "rows"):
@@ -272,9 +282,13 @@ def check_frozen(manifest: Manifest, root: Path) -> list[str]:
         if client.get("version") != version:
             problems.append(f"client version {client.get('version')!r} != {source} {version!r}")
     policy = json.loads((root / "skillc" / "runtime-policy.json").read_text(encoding="utf-8"))
-    for key, value in frozen["runtime"].items():
-        if policy.get(key) != value:
-            problems.append(f"runtime policy {key}: {policy.get(key)!r} != frozen {value!r}")
+    runtime = frozen.get("runtime")
+    if runtime_problems := _runtime_problems(runtime):
+        problems.extend(runtime_problems)
+    else:
+        for key, value in runtime.items():
+            if policy.get(key) != value:
+                problems.append(f"runtime policy {key}: {policy.get(key)!r} != frozen {value!r}")
     for key, value in caps().items():
         if frozen["caps"].get(key) != value:
             problems.append(f"cap {key}: frozen {frozen['caps'].get(key)!r} != executed {value!r}")
@@ -361,7 +375,9 @@ def compare(row: Row, graded: Mapping[str, Any] | None) -> list[str]:
 
 
 def plan(manifest: Manifest, store: Path, root: Path, *, image_digest: str, treatment_digest: str,
-         rows: Sequence[Row]) -> tuple[trial.Experiment, dict[str, str]]:
+         rows: Sequence[Row], skill_digests: Sequence[Mapping[str, str]]) -> tuple[trial.Experiment, dict[str, str]]:
+    if not skill_digests:
+        raise CampaignRefused("a treated Level-3 campaign has no skill_digests to pin")
     trials = []
     for row in rows:
         grader = verify.GraderDef.load(root / "evals" / "level3" / row.task)
@@ -371,6 +387,7 @@ def plan(manifest: Manifest, store: Path, root: Path, *, image_digest: str, trea
             "image": {"digest": image_digest},
             "config": {"candidate": row.candidate, "actor": row.actor, "candidate_digest": row.candidate_digest},
             "attempts": 1,
+            "skill_digests": [dict(pin) for pin in skill_digests],
         })
     experiment = trial.plan({"experiment": "level3-campaign", "trials": trials}, store)
     pairs = list(experiment.attempts())
@@ -397,7 +414,8 @@ def run_rows(
     selected = list(manifest.rows if rows is None else rows)
     store = trial.open_store(run_dir / "store", forbidden=[])
     experiment, attempt_ids = plan(manifest, store, root, image_digest=image_digest,
-                                   treatment_digest=treatment.digest, rows=selected)
+                                   treatment_digest=treatment.digest, rows=selected,
+                                   skill_digests=treatment.skill_digests)
     credential = dummy_credential(run_dir / "codex-credential.dummy.json")
     results: list[dict[str, Any]] = []
     for row in selected:

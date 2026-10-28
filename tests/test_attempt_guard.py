@@ -549,3 +549,38 @@ def test_red_a_transcript_that_cannot_be_read_whole_is_not_scanned(text: str) ->
 def test_a_readable_transcript_with_no_launch_is_a_clean_zero() -> None:
     text = json.dumps({"type": "response_item", "payload": {"type": "message", "role": "assistant"}}) + "\n"
     assert ag.scan_transcript_text(text) == []
+
+
+# --- #518 A: the calibration path reads the credential steward too ------------
+
+def _steward_events(guard: ag.AttemptGuard, *names: str) -> None:
+    for seq, name in enumerate(names, start=1):
+        guard.steward.decide({"op": "credential_steward", "event": name, "seq": seq, "opens": 4, "closes": 4})
+
+
+def _clean_observation() -> dict[str, object]:
+    return {"transcript_codex_invocations": [], "transcript_files_found": 1}
+
+
+def test_a_held_steward_leaves_the_calibration_report_clean() -> None:
+    guard = ag.AttemptGuard("a-1")
+    guard.guard.decide({"op": "codex_guard", "decision": "passed-top-level", "argv_digest": "sha256:" + "0" * 64})
+    _steward_events(guard, "armed", "withdrawn", "stopped")
+    report = guard.report(_clean_observation())
+    assert report["credential_steward"]["status"] == "held"
+    assert report["block"] is None and report["stop"] is None
+
+
+@pytest.mark.parametrize(("names", "why"), [
+    (("armed", "withdrawn", "refreshed-captured", "stopped"), "re-appeared in the agent's home"),
+    (("armed", "withdrawn"), "steward record is unknown"),          # never stopped
+    ((), "steward record is unknown"),                              # never started
+])
+def test_red_518_a_steward_record_not_held_blocks_and_stops_a_calibration_attempt(names: tuple[str, ...],
+                                                                                   why: str) -> None:
+    guard = ag.AttemptGuard("a-1")
+    guard.guard.decide({"op": "codex_guard", "decision": "passed-top-level", "argv_digest": "sha256:" + "0" * 64})
+    _steward_events(guard, *names)
+    report = guard.report(_clean_observation())
+    assert report["block"] is not None and why in report["block"]
+    assert report["stop"] is not None and why in report["stop"]

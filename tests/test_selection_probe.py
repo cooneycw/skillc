@@ -11,6 +11,7 @@ stop): `trial.plan()` only ever writes a ledger to a throwaway store.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from skillc import cost_estimate as ce
 from skillc import selection_probe as sp
 from skillc import trial as t
 from skillc import verify
+from skillc.collection_conformance import AcquiredCollection
 
 ROOT = Path(__file__).resolve().parent.parent
 PROBE_DIR = ROOT / "evals" / "selection-probe"
@@ -511,6 +513,7 @@ def test_an_inconclusive_grade_is_unknown_never_a_task_failure(
     report = _run({}, tmp_path)
     treatment = _case(report, INTENDED_USE).treatment
     assert treatment.task_success is None
+    assert treatment.result_id is None and treatment.result_status is None
     assert "INCONCLUSIVE" in treatment.detail and "not contained" in treatment.detail
 
 
@@ -1342,3 +1345,604 @@ def test_no_single_transcript_file_retains_nothing_and_is_not_an_error(tmp_path:
     assert digest is None and reason is None
     digest, reason = sp._retain_transcript({}, tmp_path, "a-1")
     assert digest is None and reason is None
+
+
+# #538: real CLI/public runners, stopping only at physical attempt dispatch.
+class _ModeBoundary(BaseException):
+    pass
+
+
+def _mode_collection(tmp_path: Path) -> AcquiredCollection:
+    from skillc import collection_conformance as cc
+    from skillc import demo, materialize
+
+    surface = tmp_path / "source"
+    files = []
+    for rel, data, mode in (("runner", b"#!/bin/sh\nexit 0\n", 0o755),
+                            ("data.sh", b"plain data\n", 0o644)):
+        path = surface / "modes" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(mode)
+        files.append(demo.SubjectFile("modes", rel, "modes", materialize.sha256_bytes(data)))
+    digest = materialize.tree_digest(surface)
+    source = materialize.Source("snapshot", "owned-mode-control", "snapshot:" + digest,
+                                surface, digest, surface)
+    return cc.AcquiredCollection(demo.load_demo_subject("cpp-codex"), source, files, None)
+
+
+def _record_mode_attempts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    from typing import Any
+
+    calls: list[dict[str, object]] = []
+
+    def boundary(**kwargs: Any) -> dict[str, object]:
+        experiment, aid = kwargs["experiment"], kwargs["attempt_id"]
+        calls.append({"arm": _arm_of(experiment, aid), **kwargs})
+        if len(calls) == len(list(experiment.attempts())):
+            raise _ModeBoundary()
+        return t.finalize(experiment, aid, disposition="unavailable", reason="dispatch control")
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", boundary)
+    return calls
+
+
+def _assert_source_modes(calls: list[dict[str, object]]) -> None:
+    baseline = [c for c in calls if c["arm"] == "baseline"]
+    treatment = [c for c in calls if c["arm"] == "treatment"]
+    assert len(baseline) == len(treatment) == 3
+    assert all(c["extra_home_files"] == {} and not c.get("extra_home_modes") for c in baseline)
+    expected = {".codex/skills/modes/runner": "100755", ".codex/skills/modes/data.sh": "100644"}
+    for call in treatment:
+        assert call["extra_home_files"] == {
+            ".codex/skills/modes/runner": b"#!/bin/sh\nexit 0\n",
+            ".codex/skills/modes/data.sh": b"plain data\n",
+        }
+        assert call.get("extra_home_modes") == expected
+
+
+def test_cli_source_modes_reach_the_selection_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-fix red is a missing-map assertion, not a proposed-API TypeError."""
+    from skillc import cli, demo
+    from skillc import collection_conformance as cc
+
+    acquired = _mode_collection(tmp_path)
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: acquired)
+    monkeypatch.setattr(cc, "discard_acquisition", lambda *a: None)
+    monkeypatch.setattr(cc, "agent_backends", lambda **k: (object(), object()))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: _PLACEHOLDER_IMAGE_DIGEST)
+    calls = _record_mode_attempts(monkeypatch)
+    with pytest.raises(_ModeBoundary):
+        cli.main(["selection-probe", "--base", str(tmp_path / "runs")])
+    _assert_source_modes(calls)
+
+
+def _selection_mode_runner(
+    tmp_path: Path, modes: dict[str, str] | None,
+) -> tuple[t.Experiment, sp.AgentTrialRunner]:
+    from typing import Any
+
+    from skillc import collection_conformance as cc
+
+    acquired = _mode_collection(tmp_path)
+    experiment = _plan(tmp_path)
+    backend: Any = object()  # No physical dispatch in these boundary controls.
+    return experiment, sp.agent_trial_runner(
+        experiment=experiment, backend=backend, base=tmp_path, client="codex",
+        argv_for=lambda _: [], treatment_home_files=cc._collection_home_files(
+            acquired.source, acquired.files), treatment_home_modes=modes,
+    )
+
+
+@pytest.mark.parametrize("modes,owner_modes", [
+    (None, (0o600, 0o600)), ({}, (0o600, 0o600)),
+    ({".codex/skills/modes/runner": "100755"}, (0o700, 0o600)),
+    ({".codex/skills/modes/runner": "100755",
+      ".codex/skills/modes/data.sh": "100644"}, (0o700, 0o600)),
+])
+def test_public_selection_modes_preserve_defaults_and_empty_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    modes: dict[str, str] | None, owner_modes: tuple[int, int],
+) -> None:
+    experiment, runner = _selection_mode_runner(tmp_path, modes)
+    ledger_before = t.canonical(experiment.ledger)
+    # The old positional constructor still leaves the appended field optional.
+    legacy = sp.AgentTrialRunner(*[
+        getattr(runner, f.name) for f in dataclasses.fields(runner)
+        if f.name != "treatment_home_modes"
+    ])
+    assert legacy.treatment_home_modes is None
+    calls = _record_mode_attempts(monkeypatch)
+    with pytest.raises(_ModeBoundary):
+        for td, attempt in experiment.attempts():
+            runner(sp._resolved_trial(experiment, td), attempt)
+    assert t.canonical(experiment.ledger) == ledger_before
+    for call in calls:
+        if call["arm"] == "baseline":
+            assert call["extra_home_files"] == {} and "extra_home_modes" not in call
+        else:
+            assert set(call["extra_home_files"]) == {  # type: ignore[call-overload]
+                ".codex/skills/modes/runner", ".codex/skills/modes/data.sh"}
+            if modes is None:
+                assert "extra_home_modes" not in call
+            else:
+                assert call["extra_home_modes"] == modes
+            assert tuple(agent_trial.delivery_mode(path, modes) for path in (
+                ".codex/skills/modes/runner", ".codex/skills/modes/data.sh")) == owner_modes
+
+
+@pytest.mark.parametrize("modes,reason", [
+    ({".codex/skills/modes/not-delivered": "100755"}, "not delivered"),
+    ({".codex/skills/modes/runner": "120000"}, "unsupported source mode"),
+])
+def test_public_selection_modes_reach_existing_refusal(
+    tmp_path: Path, modes: dict[str, str], reason: str,
+) -> None:
+    experiment, runner = _selection_mode_runner(tmp_path, modes)
+    td, attempt = next(experiment.attempts())
+    with pytest.raises(agent_trial.HomeFileVerificationRefused, match=reason):
+        runner(sp._resolved_trial(experiment, td), attempt)
+
+
+def _existing_home_path_guard(**kwargs: object) -> dict[str, object]:
+    files, modes, base = kwargs["extra_home_files"], kwargs.get("extra_home_modes"), kwargs["base"]
+    assert isinstance(files, dict) and isinstance(base, Path)
+    assert modes is None or isinstance(modes, dict)
+    assert modes == {"../escape": "100755"} if files else modes is None
+    backend = d.DockerBackend(image="unused", base_dir=base)
+    handle = d._Handle(attempt_id="path-control", name="unused", env={})
+    for path, data in files.items():
+        backend.deliver_home_file(handle, path, data, mode=agent_trial.delivery_mode(path, modes))
+    assert isinstance(kwargs["experiment"], t.Experiment)
+    return t.finalize(kwargs["experiment"], str(kwargs["attempt_id"]),
+                      disposition="unavailable", reason="empty-baseline control")
+
+
+def test_public_selection_preserves_the_existing_unsafe_path_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc.backend import BackendUnavailable
+
+    experiment, runner = _selection_mode_runner(tmp_path, {"../escape": "100755"})
+    runner = dataclasses.replace(runner, treatment_home_files={"../escape": b"control"})
+    monkeypatch.setattr(agent_trial, "run_one_attempt", _existing_home_path_guard)
+    td, attempt = next(experiment.attempts())
+    with pytest.raises(BackendUnavailable, match="nonescaping"):
+        runner(sp._resolved_trial(experiment, td), attempt)
+
+
+@pytest.mark.parametrize("task", ["default", "nondefault"])
+def test_cli_plans_actual_grader_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: str,
+) -> None:
+    from skillc import cli
+    from skillc import collection_conformance as cc
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    root = sp.GRADER_ROOT if task == "default" else FINISH_CLOSE_REF_ROOT
+    argv = ["selection-probe", "--base", str(tmp_path)]
+    assert cli.main(argv + (["--task", str(root)] if task == "nondefault" else [])) == 0
+    [call] = seen
+    runner = call["runner"]
+    assert isinstance(runner, sp.AgentTrialRunner)
+    assert runner.goal == (root / "goal.md").read_text(encoding="utf-8")
+    assert runner.surface == cc.surface_mapping(cc.task_surface(root / "fixture"))
+    assert runner.treatment_home_files == {} and runner.treatment_home_modes == {}
+    assert call["grading_backend"] is not runner.backend
+    pairs = set()
+    for td, attempt in runner.experiment.attempts():
+        case = td["case"]
+        assert isinstance(case, dict)
+        pairs.add((case["id"], _arm_of(runner.experiment, str(attempt["attempt_id"]))))
+    assert pairs == {(c["id"], arm) for c in CASES["cases"] for arm in _ARMS}
+    expected = verify.GraderDef.load(root).identity()
+    execution_grader = call["grader"]
+    assert isinstance(execution_grader, verify.GraderDef) and execution_grader.identity() == expected
+    trials = runner.experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    pins = [td["grader"] for td in trials]
+    print("identity-red-setup", task, "complete-pairs", len(pairs), "goal/surface/modes/backend OK")
+    assert pins == [expected] * len(pairs)
+
+
+def _identity_plan(tmp_path: Path, grader: verify.GraderDef | None = None,
+                   cases: dict[str, object] | None = None) -> t.Experiment:
+    return sp.plan_selection_probe(
+        CASES if cases is None else cases, MANIFEST, grader=grader,
+        treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST, baseline_subject_digest=_BASELINE_SUBJECT_DIGEST,
+        image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=t.open_store(tmp_path / "store", forbidden=[]),
+    )
+
+
+def _identity_run(experiment: t.Experiment, tmp_path: Path, calls: list[str],
+                  grader: verify.GraderDef | None = None) -> sp.SelectionProbeReport:
+    def runner(td: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript:
+        calls.append(str(attempt["attempt_id"]))
+        return sp.AttemptTranscript("not-run")
+
+    return sp.run_planned_selection_probe(experiment, CASES, runner, base=tmp_path / "grading",
+                                          grader=grader, allow_host_grading=True)
+
+
+@pytest.mark.parametrize("fault", ["id", "revision", "missing", "nonmapping", "wrongtype", "nonhex"])
+def test_identity_gate_checks_the_last_trial_before_any_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    grade_calls: list[bool] = []
+    original_grade = verify.grade_files
+
+    def grade(*args: object, **kwargs: object) -> verify.Graded:
+        grade_calls.append(True)
+        return original_grade(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "grade_files", grade)
+    experiment = _identity_plan(tmp_path)
+    calls: list[str] = []
+    _identity_run(experiment, tmp_path, calls)
+    assert set(calls) == {str(a["attempt_id"]) for _, a in experiment.attempts()} and len(calls) == 6
+    calls.clear()
+    trials = experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    pin = trials[-1]["grader"]
+    if fault == "nonmapping":
+        trials[-1]["grader"] = ["not a pin"]
+    elif fault == "missing":
+        del pin["digest"]
+    else:
+        key = fault if fault in ("id", "revision") else "digest"
+        pin[key] = 17 if fault == "wrongtype" else "wrong"
+    ledger = (experiment.root / "ledger.json").read_bytes()
+    with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+        _identity_run(experiment, tmp_path, calls)
+    assert calls == [] and grade_calls == []
+    assert (experiment.root / "ledger.json").read_bytes() == ledger
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+@pytest.mark.parametrize("part", ["definition", "probe", "inputs", "judge", "optional-policy"])
+def test_identity_gate_refuses_changed_bytes_under_the_same_names(
+    tmp_path: Path, part: str,
+) -> None:
+    root = tmp_path / "grader"
+    shutil.copytree(GRADER.root, root)
+    grader = verify.GraderDef.load(root)
+    experiment = _identity_plan(tmp_path, grader)
+    calls: list[str] = []
+    _identity_run(experiment, tmp_path, calls, grader)
+    assert len(calls) == 6
+    target = root / "grader.json" if part in ("definition", "optional-policy") else getattr(grader, part)
+    if part == "optional-policy":
+        definition = json.loads(target.read_bytes())
+        definition["optional_criteria"] = ["identity-note"]
+        target.write_text(json.dumps(definition), encoding="utf-8")
+    else:
+        target.write_bytes(target.read_bytes() + b"\n")
+    changed = verify.GraderDef.load(root)
+    assert (changed.id, changed.revision) == (grader.id, grader.revision)
+    calls.clear()
+    with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+        _identity_run(experiment, tmp_path, calls, changed)
+    assert calls == []
+    fresh = _identity_plan(tmp_path / "fresh", changed)
+    _identity_run(fresh, tmp_path, calls, changed)
+    assert len(calls) == 6  # the changed definition is usable when honestly planned
+
+
+def test_identity_gate_leaves_a_canonical_digestless_plan_unchanged(tmp_path: Path) -> None:
+    original = _identity_plan(tmp_path)
+    trials = original.ledger["trials"]
+    assert isinstance(trials, list)
+    specs = []
+    for index, td in enumerate(trials):
+        spec = {key: td[key] for key in ("case", "grader", "subject", "client", "image")}
+        spec["label"] = f"legacy-{index}"
+        spec["grader"] = {key: value for key, value in td["grader"].items() if key != "digest"}
+        spec["config"] = sp._resolved_trial(original, td)["config"]
+        spec["attempts"] = 1
+        specs.append(spec)
+    legacy = t.plan({"experiment": "digestless-control", "trials": specs},
+                    t.open_store(tmp_path / "legacy", forbidden=[]))
+    before = (legacy.root / "ledger.json").read_bytes()
+    calls: list[str] = []
+    with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+        _identity_run(legacy, tmp_path, calls)
+    assert calls == [] and (legacy.root / "ledger.json").read_bytes() == before
+    assert t.Experiment.open(legacy.root).ledger == legacy.ledger
+
+
+@pytest.mark.parametrize("form", ["standalone-omitted", "standalone-explicit", "onecall-omitted",
+                                  "onecall-explicit", "twocall-omitted", "twocall-explicit"])
+def test_identity_api_defaults_and_explicit_custom_task(tmp_path: Path, form: str) -> None:
+    custom = verify.GraderDef.load(FINISH_CLOSE_REF_ROOT)
+    cases = {**CASES, "base_task": {"grader": str(FINISH_CLOSE_REF_ROOT / "grader.json")}}
+    if form.startswith("standalone"):
+        expected = custom if form.endswith("omitted") else GRADER
+        experiment = _identity_plan(tmp_path, None if form.endswith("omitted") else GRADER, cases)
+    elif form.startswith("onecall"):
+        expected = GRADER if form.endswith("omitted") else custom
+        seen: list[dict[str, object]] = []
+
+        def runner(td: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript:
+            seen.append(td)
+            return sp.AttemptTranscript("not-run")
+
+        sp.run_selection_probe(
+            cases, MANIFEST, runner, treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST,
+            baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST,
+            store=t.open_store(tmp_path / "store", forbidden=[]), base=tmp_path / "grading",
+            grader=None if form.endswith("omitted") else custom, allow_host_grading=True,
+        )
+        assert len(seen) == 6
+        assert all(td["grader"] == expected.identity() for td in seen)
+        return
+    else:
+        expected = GRADER if form.endswith("omitted") else custom
+        experiment = _identity_plan(tmp_path, expected)
+        calls: list[str] = []
+        _identity_run(experiment, tmp_path, calls, None if form.endswith("omitted") else custom)
+        assert len(calls) == 6
+    trials = experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    assert all(td["grader"] == expected.identity() for td in trials)
+    if expected is custom:
+        calls = []
+        with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+            _identity_run(experiment, tmp_path, calls)  # omission never repairs a custom plan
+        assert calls == []
+
+
+def test_cli_resolves_one_grader_for_plan_and_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    loaded: list[verify.GraderDef] = []
+    original = verify.GraderDef.load
+
+    def load(root: Path) -> verify.GraderDef:
+        grader = original(root)
+        loaded.append(grader)
+        return grader
+
+    monkeypatch.setattr(verify.GraderDef, "load", load)
+    assert cli.main(["selection-probe", "--task", str(FINISH_CLOSE_REF_ROOT), "--base", str(tmp_path)]) == 0
+    assert len(loaded) == 1 and seen[0]["grader"] is loaded[0]
+
+
+def test_real_selection_stores_one_result_per_eligible_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Actual controller captures must cease owing grading, not just print a grade."""
+    calls: list[object] = []
+    grade_files = verify.grade_files
+
+    def counted(*args: object, **kwargs: object) -> verify.Graded:
+        calls.append(kwargs.get("backend"))
+        return grade_files(*args, **kwargs)  # type: ignore[arg-type]
+
+    observed: list[str] = []
+    read_observation = verify._stored_observation
+
+    def bound(current: t.Experiment, aid: str, issued: object) -> dict[str, object]:
+        assert t._holds_lock(current.root)
+        assert len(list(current.root.glob("lifecycle-*.json"))) == 6
+        assert aid not in observed, "duplicate grading of a captured attempt"
+        observed.append(aid)
+        return read_observation(current, aid, issued)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "_stored_observation", bound)
+    monkeypatch.setattr(verify, "grade_files", counted)
+    report, experiment, backend = _run_real(tmp_path, {
+        (INTENDED_USE, "treatment"): _script(plant=("qa-test",)),
+        (OVERLAPPING, "treatment"): _script(plant=("security-deep",), candidate=BAD_CANDIDATE),
+    })
+    aids = [str(a["attempt_id"]) for _, a in experiment.attempts()]
+    assert len(aids) == len(backend.delivered) == 6 and len(report.cases) == 3
+    assert _case(report, INTENDED_USE).treatment.task_success is True
+    assert _case(report, OVERLAPPING).treatment.task_success is False
+    for aid in aids:
+        assert json.loads((experiment.root / f"lifecycle-{aid}.json").read_text())["disposition"] == "captured"
+        obs = json.loads((experiment.root / verify.observation_record_name(aid)).read_text())
+        assert obs["status"] == "observed" and obs["transcript"]["grading_eligible"] is True
+    results = [json.loads(p.read_text()) for p in experiment.root.glob("result-*.json")]
+    assert len(results) == len(aids) == 6, "eligible captured attempts still have no stored results"
+    from skillc import checks, records
+
+    assert set(observed) == set(aids) and len(observed) == 6
+    assert len(calls) == 6 and all(b is not None and b is not backend for b in calls)
+    assert len({v["result_id"] for v in results}) == 6
+    assert {v["attempt_id"] for v in results} == set(aids)
+    for result in results:
+        aid = result["attempt_id"]
+        assert result["trial_id"] == experiment.trial_of(aid)["trial_id"]
+        assert result["grader"] == GRADER.identity()
+        assert result["graded_digests"] == sorted({str(a["digest"]) for a in t.frozen_artifacts(experiment, aid)})
+        assert not checks.run_record(records.Record(experiment.root / f"result-{result['result_id']}.json", result))
+        readiness = [c for c in result["criteria"] if c["id"] == verify.READINESS_CRITERION]
+        assert len(readiness) == 1 and readiness[0]["mandatory"] is True and readiness[0]["outcome"] == "UNKNOWN"
+        assert result["verification"]["readiness_source"] == "agent-observation"
+    linked = [arm for case in report.cases for arm in (case.treatment, case.baseline)]
+    assert {arm.result_id for arm in linked} == {v["result_id"] for v in results}
+    assert all(arm.result_status == "INCONCLUSIVE" for arm in linked if arm.task_success is True)
+    copied = tmp_path / "accounting-copy"
+    shutil.copytree(experiment.root, copied)
+
+    def accounting() -> list[str]:
+        bundle = records.bundle_at(copied)
+        assert bundle is not None and len(bundle.of_kind(records.TRIAL_LEDGER)) == 1
+        return [f.detail for f in checks.run_bundle(bundle, only="attempt-accounting")]
+
+    assert accounting() == []
+    removed = copied / f"result-{results[0]['result_id']}.json"
+    original = removed.read_bytes()
+    removed.unlink()
+    assert any(results[0]["attempt_id"] in f and "grading is still owed" in f for f in accounting())
+    removed.write_bytes(original)
+    assert accounting() == [] and removed.read_bytes() == original
+
+
+def test_cli_real_selection_stores_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only acquisition/transport factories are substituted; CLI/driver/grader run."""
+    from skillc import cli, demo
+    from skillc import collection_conformance as cc
+
+    state = tmp_path / "docker-state"
+    docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(state)]
+    credential_path = _codex_credential(tmp_path)
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: SimpleNamespace(
+        subject=SimpleNamespace(client="codex", client_version="0.157.1", revision="v1"),
+        source=SimpleNamespace(digest=_TREATMENT_SUBJECT_DIGEST), files=[],
+    ))
+    monkeypatch.setattr(cc, "_collection_home_files", lambda *a: _COLLECTION)
+    monkeypatch.setattr(cc, "_collection_home_modes", lambda *a: {})
+    monkeypatch.setattr(cc, "discard_acquisition", lambda *a: None)
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: _PLACEHOLDER_IMAGE_DIGEST)
+    def backends(*, image: str, base: Path, **_kwargs: object) -> tuple[d.DockerBackend, d.DockerBackend]:
+        options = {"image": image, "base_dir": base, "docker_bin": docker_bin,
+                   "daemon_timeout": FAKE_DOCKER_DAEMON_TIMEOUT}
+        return _HomeRecordingBackend(**options), d.DockerBackend(**options)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cc, "agent_backends", backends)
+    actual_factory = sp.agent_trial_runner
+    experiments: list[t.Experiment] = []
+
+    def factory(**kwargs: object) -> sp.AgentTrialRunner:
+        experiment = kwargs["experiment"]
+        assert isinstance(experiment, t.Experiment)
+        experiments.append(experiment)
+        kwargs["argv_for"] = _argv_for(experiment, state, {})
+        return actual_factory(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sp, "agent_trial_runner", factory)
+    assert cli.main([
+        "selection-probe", "--base", str(tmp_path), "--image", "fake-image:1",
+        "--docker-bin", " ".join(docker_bin), "--credential", str(credential_path), "--agent-timeout", "5",
+    ]) == 0
+    [experiment] = experiments
+    aids = {str(a["attempt_id"]) for _, a in experiment.attempts()}
+    assert len(aids) == 6
+    for aid in aids:
+        obs = json.loads((experiment.root / verify.observation_record_name(aid)).read_text())
+        assert obs["status"] == "observed" and obs["transcript"]["grading_eligible"] is True
+    results = [json.loads(p.read_text()) for p in experiment.root.glob("result-*.json")]
+    assert len(results) == 6, "CLI captures still owe stored verified results"
+    assert {v["attempt_id"] for v in results} == aids
+    document = json.loads((experiment.root.parent / "selection-probe-report.json").read_text())
+    links = [c[arm] for c in document["cases"] for arm in ("treatment", "baseline")]
+    assert {v["result_id"] for v in links} == {v["result_id"] for v in results}
+    assert all(v["result_status"] == "INCONCLUSIVE" and v["task_success"] is True for v in links)
+
+
+@pytest.mark.parametrize("fault", [
+    "healthy", "missing", "symlink", "schema", "attempt", "trial", "ineligible", "frozen-changed", "frozen-missing",
+])
+def test_real_selection_requires_bound_capture_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    actual = sp.AgentTrialRunner.__call__
+    seen: list[tuple[sp.AgentTrialRunner, str]] = []
+
+    def changed(self: sp.AgentTrialRunner, issued: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript | None:
+        transcript = actual(self, issued, attempt)
+        seen.append((self, str(attempt["attempt_id"])))
+        if len(seen) != 6:
+            return transcript
+        _, aid = seen[0]
+        path = self.experiment.root / verify.observation_record_name(aid)
+        if fault == "missing":
+            path.unlink()
+        elif fault == "symlink":
+            target = path.with_suffix(".saved")
+            path.rename(target)
+            path.symlink_to(target)
+        elif fault.startswith("frozen-"):
+            blob = self.experiment.object_path(str(t.frozen_artifacts(self.experiment, aid)[0]["digest"]))
+            if fault == "frozen-changed":
+                blob.chmod(0o600)  # deliberately corrupt this test-owned object
+                blob.write_bytes(b"modified frozen capture")
+            else:
+                blob.unlink()
+        elif fault != "healthy":
+            data = json.loads(path.read_text())
+            if fault == "schema":
+                data["version"] = 999
+            elif fault == "attempt":
+                data["attempt_id"] = "foreign-attempt"
+            elif fault == "trial":
+                data["trial_id"] = "foreign-trial"
+            else:
+                data["transcript"]["grading_eligible"] = False
+                data["transcript"]["canary_satisfied"] = False
+            path.write_text(json.dumps(data))
+        return transcript
+
+    monkeypatch.setattr(sp.AgentTrialRunner, "__call__", changed)
+    if fault == "healthy":
+        report, experiment, _ = _run_real(tmp_path, {})
+        assert len(list(experiment.root.glob("result-*.json"))) == 6
+        assert all(c.treatment.task_success is True for c in report.cases)
+    else:
+        with pytest.raises(sp.SelectionProbeRefused, match="stored grading refused"):
+            _run_real(tmp_path, {})
+        assert len(seen) == 6
+        runner, _ = seen[0]
+        assert len(list(runner.experiment.root.glob("lifecycle-*.json"))) == 6
+        assert not list(runner.experiment.root.glob("result-*.json"))
+
+
+def test_real_selection_ignores_copied_transcript_candidate_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual = sp.AgentTrialRunner.__call__
+
+    def poisoned(self: sp.AgentTrialRunner, issued: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript | None:
+        transcript = actual(self, issued, attempt)
+        assert transcript is not None
+        return dataclasses.replace(transcript, candidate_files=tuple(_candidate_files(BAD_CANDIDATE)))
+
+    monkeypatch.setattr(sp.AgentTrialRunner, "__call__", poisoned)
+    report, experiment, _ = _run_real(tmp_path, {})
+    assert all(c.treatment.task_success is True and c.baseline.task_success is True for c in report.cases)
+    assert len(list(experiment.root.glob("result-*.json"))) == 6
+
+
+@pytest.mark.parametrize("fault", ["foreign", "no-backend-host-optin"])
+def test_real_selection_policy_refuses_before_dispatch(tmp_path: Path, fault: str) -> None:
+    experiment, runner, _ = _real_runner_parts(tmp_path)
+    if fault == "foreign":
+        runner = dataclasses.replace(runner, experiment=_plan(tmp_path / "other"))
+    with pytest.raises(sp.SelectionProbeRefused, match="another experiment" if fault == "foreign" else "no grading_backend"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, allow_host_grading=True,
+        )
+    assert runner.backend.delivered == {}  # type: ignore[attr-defined]
+
+
+def test_synthetic_lookalike_keeps_fixture_policy_and_no_result_ids(tmp_path: Path) -> None:
+    experiment = _plan(tmp_path)
+    runner = _fake_runner({})
+    runner.experiment = experiment  # type: ignore[attr-defined]
+    runner.backend = object()  # type: ignore[attr-defined]
+    with pytest.raises(sp.SelectionProbeRefused, match="no grading_backend"):
+        sp.run_planned_selection_probe(experiment, CASES, runner, base=tmp_path / "work", grader=GRADER)
+    report = sp.run_planned_selection_probe(
+        experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, allow_host_grading=True,
+    )
+    assert all(c.treatment.task_success is True for c in report.cases)
+    assert all(a.result_id is None and a.result_status is None for c in report.cases for a in (c.treatment, c.baseline))
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+def test_incomplete_attendance_precedes_any_grade(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(verify, "grade_files", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(verify, "grade_agent_attempt", lambda *a, **kw: calls.append(a))
+    experiment = _plan(tmp_path)
+    with pytest.raises(sp.SelectionProbeRefused, match="missing 6 planned"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, lambda *a: None, base=tmp_path / "work", grader=GRADER, allow_host_grading=True,
+        )
+    assert calls == [] and not list(experiment.root.glob("result-*.json"))

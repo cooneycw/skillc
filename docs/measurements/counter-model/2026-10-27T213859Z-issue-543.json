@@ -1,0 +1,31 @@
+{
+  "branch": "issue-543-gate-stops-early-family-graders-partial-gate-zero",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "4c8f5f452464199da0e6702c74180e10eb012fd4",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T12-58-20-01a17e4c-6d14-72e3-b17d-1974ad91f80b.jsonl",
+    "thread_id": "01a17e4c-6d14-72e3-b17d-1974ad91f80b"
+  },
+  "issue": "543",
+  "local_credentials": "absent",
+  "network": "unverified",
+  "passes": 2,
+  "recorded_at": "2026-10-27T21:38:59Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 21
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T17-04-20-01a17f2d-a785-72d1-9d09-eb1a33abc14f.jsonl",
+    "thread_id": "01a17f2d-a785-72d1-9d09-eb1a33abc14f"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

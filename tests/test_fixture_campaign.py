@@ -147,7 +147,9 @@ def _recorded(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 def _inputs(tmp_path: Path) -> dict[str, Any]:
     treatment = types.SimpleNamespace(receipt_context="RC", verify_home_files={"a": "sha256:0"},
-                                      preflight_tools=[{"id": "t"}], gate_entrypoint=".claude/scripts/g.sh")
+                                      preflight_tools=[{"id": "t"}], gate_entrypoint=".claude/scripts/g.sh",
+                                      bundled_gate_entrypoints=(), bundled_checksum_manifest=None,
+                                      checkout_gate_entrypoints={}, gate_state_protocol=None)
     return {"experiment": "EXP", "attempt_id": "A1", "backend": "AGENT", "grading_backend": "GRADING",
             "base": tmp_path, "base_argv": ["python3", "actor.py"], "extra_home_files": {"x": b"y"},
             "cli_version": "0.157.1", "task_root": TASK_ROOT, "surface": {"repo": "R"},
@@ -401,3 +403,28 @@ def test_the_campaign_kwargs_bind_to_run_one_attempt(tmp_path: Path, monkeypatch
     ours = fc.attempt_kwargs(**i, fixture="FIXTURE")  # type: ignore[arg-type]
     assert "gate_witness" in ours and ours["gate_witness"] is None
     inspect.signature(agent_trial.run_one_attempt).bind(**ours)
+
+
+def test_attempt_kwargs_only_adds_explicit_protocol_and_binds_signature(tmp_path: Path) -> None:
+    import inspect
+
+    from test_gate_state import PROTOCOL
+
+    from skillc import agent_trial
+    i = _inputs(tmp_path)
+    assert "gate_state_protocol" not in fc.attempt_kwargs(**i, fixture=None)
+    i["treatment"].gate_state_protocol = PROTOCOL
+    kwargs = fc.attempt_kwargs(**i, fixture=None)
+    assert kwargs["gate_state_protocol"] is PROTOCOL
+    inspect.signature(agent_trial.run_one_attempt).bind(**kwargs)
+
+
+def test_campaign_refuses_reused_opted_treatment_before_any_side_effect(tmp_path: Path) -> None:
+    from test_gate_state import PROTOCOL
+
+    from skillc import calibration_run as cr
+    t = cr.Treatment({}, "digest", None, gate_state_protocol=PROTOCOL)
+    with pytest.raises(fc.CampaignRefused, match="fixture-only"):
+        fc.run_rows(None, root=tmp_path, run_dir=tmp_path / "run", treatment=t,  # type: ignore[arg-type]
+                    backends=lambda: pytest.fail("backend must not be constructed"), image_digest="image")
+    assert not (tmp_path / "run").exists()

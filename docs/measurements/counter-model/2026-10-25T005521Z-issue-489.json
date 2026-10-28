@@ -1,0 +1,59 @@
+{
+  "branch": "issue-489-emit-cicd-negative-control-fences-from-ci-negative",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "ffbf03dfde659ec5ddb42c5019ca370ab265eaff",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "flow_scope": {
+      "approval_execution": "unverified",
+      "approval_sha256": "1eb06f103c2ece1e7202052abf7989c99ac2ec652f6cc1815fe1dc4af25c6470",
+      "approved_plan_sha256": "5126b38e46e6d842a24bee176dcc1078613c06761fca941c78b89b6c1cf7c9d9",
+      "base": "a3e9ba8049c6dd3a97c64fd8d9d35e7296cd3835",
+      "branch": "issue-489-emit-cicd-negative-control-fences-from-ci-negative",
+      "clean_probe_sha256": null,
+      "creation_line": 2292,
+      "creation_sha256": "9cebe29a13a671a0267fc4770744e98b83f42c25b720ef9cdb798e1944a08c00",
+      "excluded_prefix_models": [
+        "gpt-6-astra",
+        "gpt-6.1-sol"
+      ],
+      "excluded_prefix_records": 135,
+      "head": "ffbf03dfde659ec5ddb42c5019ca370ab265eaff",
+      "included_model_contexts": 5,
+      "initial_cleanliness": "unmeasured",
+      "issue": "489",
+      "kind": "fresh-flow-run",
+      "originating_turn_id": "01a16fc7-b10e-7141-9fd3-4e8880df5547",
+      "rollout_bytes": 13306519,
+      "rollout_sha256": "e4b6b9d52b0ca0f6cf599f158567bf96574cf31de9f8e1af76585df16b3191c0",
+      "run_id": "f129a2fad5174424b170b282a92b2171",
+      "snapshot_records": 4436,
+      "start_execution_id": "exec-d29a495c-d9cd-412e-88c6-093acad4267d",
+      "start_line": 136,
+      "version": 1
+    },
+    "rollout": "2026/10/24/rollout-2026-10-24T17-12-43-01a16fc2-3e17-7590-b1a5-40fb3710d1d6.jsonl",
+    "thread_id": "01a16fc2-3e17-7590-b1a5-40fb3710d1d6"
+  },
+  "issue": "489",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-25T00:55:21Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T18-58-28-01a17023-109a-7aa0-a225-481174ca0803.jsonl",
+    "thread_id": "01a17023-109a-7aa0-a225-481174ca0803"
+  },
+  "schema": 3,
+  "scope": "unverified",
+  "status": "ran"
+}

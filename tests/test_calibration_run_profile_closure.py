@@ -18,6 +18,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -375,6 +376,12 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
                 return real_selector(**kwargs)
 
         monkeypatch.setattr(runtime_supply, "requires_supply", select_fixture)
+        # #279 policy B: the synthetic subject can never be a supported pin, so
+        # selection is stubbed; the receipt's own pin check is waived with it -
+        # only the kind is checked here (the pin check's reds: test_runtime_policy_b).
+        real_require_kind = runtime_supply.require_kind
+        monkeypatch.setattr(runtime_supply, "require_kind",
+                            lambda supply, selected, revision=None: real_require_kind(supply, selected))
     _write_declaration(root / profile_name, revision, gate_entrypoint=entrypoint, dependencies=dependencies)
     inventory = p.validate(p.Profile.load(root / profile_name / "profile.json"),
                            p.GitTree(content_repo, revision))
@@ -431,7 +438,8 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
                               reason="CLI control stops before subject dispatch")
 
     monkeypatch.setattr(agent_trial, "run_one_attempt", observe_attempt)
-    args = ["calibration-run", str(declaration), "--private-dir", str(tmp_path / "private")]
+    args = ["calibration-run", str(declaration), "--image", shared["image"]["tag"],
+            "--private-dir", str(tmp_path / "private")]
     if (runtime or fault == "unrelated-receipt") and fault != "missing-receipt":
         receipt = tmp_path / "runtime-receipt.json"
         receipt_value = json.loads(RECEIPT)
@@ -609,3 +617,49 @@ def test_red_case_an_inventory_pin_for_a_skill_that_is_not_installed_is_refused(
     monkeypatch.setattr(p, "skill_digest_pins", phantom)
     with pytest.raises(cr.CalibrationRefused, match="never-installed/SKILL.md.*not installed"):
         cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+
+
+@needs_git
+def test_protocol_is_bound_to_revalidated_inventory_and_fixture_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_gate_state import CONFIG
+
+    from skillc import gate_state
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    name = "subject-profile"
+    _write_declaration(root / name, revision, gate_entrypoint=".codex/skills/gate-check/SKILL.md",
+                       gate_state_protocol=CONFIG)
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("fixture", tmp_path / "base", checkout=content_repo)
+    inventory = p.validate(p.Profile.load(root / name / "profile.json"), p.GitTree(content_repo, revision))
+    (root / name / "evidence").mkdir()
+    evidence = root / name / "evidence/inventory.json"
+    evidence.write_text(json.dumps(inventory))
+    with pytest.raises(cr.CalibrationRefused, match="fixture-live"):
+        cr.build_treatment(acquired, subject_profile=name, root=root)
+    treatment = cr.build_treatment(acquired, subject_profile=name, root=root, fixture_gate_state=True)
+    assert treatment.gate_state_protocol == gate_state.Protocol.from_inventory(inventory)
+    assert treatment.gate_state_protocol.producer_revision == revision
+    inventory["gate_state_protocol"]["version"] = 2
+    evidence.write_text(json.dumps(inventory))
+    with pytest.raises(cr.CalibrationRefused, match="stale"):
+        cr.build_treatment(acquired, subject_profile=name, root=root, fixture_gate_state=True)
+
+
+@pytest.mark.parametrize("route", ["normal", "discrimination", "degrade"])
+def test_unsupported_routes_refuse_reused_protocol_before_store(tmp_path: Path, route: str) -> None:
+    from test_gate_state import PROTOCOL
+    t = cr.Treatment({}, "digest", None, gate_state_protocol=PROTOCOL)
+    kwargs: dict[str, Any] = {"run_dir": tmp_path / "run", "image_digest": None,
+              "backends": lambda: pytest.fail("backend"), "argv_for": lambda _: [], "root": tmp_path}
+    with pytest.raises(cr.CalibrationRefused, match="fixture-only"):
+        if route == "normal":
+            cr.run_calibration(None, treatment=t, **kwargs)  # type: ignore[arg-type]
+        elif route == "discrimination":
+            cr.run_discrimination(None, intact=t, **kwargs)  # type: ignore[arg-type]
+        else:
+            cr.degraded_treatment(t, None)  # type: ignore[arg-type]
+    assert not (tmp_path / "run").exists()

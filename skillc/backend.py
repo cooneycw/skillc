@@ -77,7 +77,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .completion import CompletionDeadline
 
 #: The fixed uid/gid of the trial container's candidate user - the identity
 #: `docker_backend` runs every subject as, and `/home/candidate`'s owner.
@@ -288,6 +291,9 @@ class Limits:
     grace: float = 2.0
     max_captured_stdout_bytes: int = 8 * 1024 * 1024
     max_captured_stderr_bytes: int = 8 * 1024 * 1024
+    # In-process selected Docker dispatch only; never a serialized remote clock.
+    completion_deadline: CompletionDeadline | None = field(default=None, repr=False, compare=False)
+    execution_deadline: float | None = field(default=None, repr=False, compare=False)
 
 
 @runtime_checkable

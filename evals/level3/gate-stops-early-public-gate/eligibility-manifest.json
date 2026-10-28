@@ -1,0 +1,19 @@
+{
+  "task": {
+    "path": "evals/level3/gate-stops-early-public-gate",
+    "grader_id": "gate-stops-early",
+    "grader_revision": "6",
+    "grader_digest": "sha256:385c6bc509f20b6fb3f5b3b293cf7a7bbef90d186018b4fb76107833a6a254f1"
+  },
+  "fixtures": [
+    "fixture",
+    "discrimination/fixture"
+  ],
+  "status": "offline qualification only; no study declaration or approval",
+  "historical_evidence": "Original #375/#271/#287 evidence keeps its old meaning and does not qualify this successor.",
+  "qualification_inputs": {
+    "qualification-sources.sha256": "69dfd87f72a0fa9cf302a70327fbd4bb95a2e442669eb6367001c8fda5a60354",
+    "qualification-expectations.json": "6be0e40cb4ebdf490207b8e0f82389fccd7c3ca5ad49137e7959330a513c172e",
+    "public-gate-controls.json": "3df8893a4477fb19dfa23c18a4c68c6a99598abcc5b5cf09d44ff322eb4d7c7f"
+  }
+}

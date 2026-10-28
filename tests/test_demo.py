@@ -213,8 +213,8 @@ def test_resolve_image_digest_is_none_when_the_daemon_is_unreachable(docker_stat
 # --------------------------------------------------------------- build_paste_back
 
 
-def test_build_paste_back_renders_all_four_reap_outcomes_distinctly() -> None:
-    """`REAP_OUTCOMES` names four distinct values - this proves the paste-back
+def test_build_paste_back_renders_all_five_reap_outcomes_distinctly() -> None:
+    """`REAP_OUTCOMES` names five distinct values - this proves the paste-back
     text actually distinguishes them rather than collapsing any pair into the
     same rendered line."""
     report = reap.ReapReport(
@@ -224,6 +224,7 @@ def test_build_paste_back_renders_all_four_reap_outcomes_distinctly() -> None:
             reap.ReapOutcome("a2", "already-absent"),
             reap.ReapOutcome("a3", "left-running"),
             reap.ReapOutcome("a4", "unknown"),
+            reap.ReapOutcome("a5", "left-present"),
         ),
     )
     text = demo.build_paste_back([], "fake-image:1", "sha256:deadbeef", report)
@@ -231,6 +232,7 @@ def test_build_paste_back_renders_all_four_reap_outcomes_distinctly() -> None:
     assert "a2: already-absent" in text
     assert "a3: left-running" in text
     assert "a4: unknown" in text
+    assert "a5: left-present" in text
 
 
 def test_build_paste_back_reports_unknown_digest_explicitly() -> None:
@@ -297,7 +299,7 @@ def test_acceptance_items_flags_an_unknown_reap_outcome_as_not_met() -> None:
     items = demo._acceptance_items(
         _ok_lifecycle_record(), _ok_graded(), unknown_report, _ok_host_diff(), "sha256:x",
     )
-    cleanup_item = next(i for i in items if i.name == "cleanup sweep confirms no owned container left running")
+    cleanup_item = next(i for i in items if i.name == "cleanup sweep confirms no selected resources remain")
     assert cleanup_item.met is False
 
 
@@ -652,7 +654,7 @@ def test_subject_acceptance_items_flags_left_running_as_not_met() -> None:
     left_running = _ok_subject_result(
         reap_report=reap.ReapReport(daemon_reachable=True, outcomes=(reap.ReapOutcome("a1", "left-running"),))
     )
-    reap_item = next(i for i in demo._subject_acceptance_items(left_running) if "no owned container left running" in i.name)
+    reap_item = next(i for i in demo._subject_acceptance_items(left_running) if "no selected resources remain" in i.name)
     assert reap_item.met is False
 
 
@@ -660,7 +662,7 @@ def test_subject_acceptance_items_flags_unknown_reap_outcome_as_not_met() -> Non
     unknown = _ok_subject_result(
         reap_report=reap.ReapReport(daemon_reachable=True, outcomes=(reap.ReapOutcome("a1", "unknown"),))
     )
-    reap_item = next(i for i in demo._subject_acceptance_items(unknown) if "no owned container left running" in i.name)
+    reap_item = next(i for i in demo._subject_acceptance_items(unknown) if "no selected resources remain" in i.name)
     assert reap_item.met is False
 
 
@@ -1588,7 +1590,7 @@ def test_acceptance_items_exercises_cleanup_and_host_paths_when_prepare_did_succ
 
     lifecycle_record: dict[str, object] = {"disposition": "captured"}
     graded = Graded(status="PASS", category="", detail="", criteria=[], containment={})
-    clean_reap = reap.ReapReport(daemon_reachable=True, outcomes=())
+    clean_reap = _ok_reap_report()
     clean_host_diff = reap.HostPathDiff(changed=(), unresolved=())
 
     items = demo._acceptance_items(lifecycle_record, graded, clean_reap, clean_host_diff, "sha256:x")
@@ -1829,3 +1831,53 @@ def test_cmd_demo_interrupt_sweep_survives_a_second_ctrl_c(
     assert exit_code == 1
     assert "best-effort cleanup - outcomes=[('att-ours', 'reaped')]" in capsys.readouterr().err
     assert signal.getsignal(signal.SIGINT) is before
+
+
+@pytest.mark.parametrize(("report", "clean"), [
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "reaped"),)), True),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "already-absent"),)), True),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "reaped", errors=("lost reply",)),)), True),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "left-present", remaining_networks=("n",)),)), False),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "left-running"),)), False),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "unknown"),)), False),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "invalid"),)), False),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "reaped", remaining_containers=("c",)),)), False),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "already-absent", remaining_networks=("n",)),)), False),
+    (reap.ReapReport(True, (reap.ReapOutcome("a", "reaped", uncertain=True),)), False),
+    (reap.ReapReport(False, (reap.ReapOutcome("a", "reaped"),)), False),
+    (reap.ReapReport(True, ()), False),
+])
+def test_complete_recovery_verdict_controls_both_builders_and_normal_cli(
+    report: reap.ReapReport, clean: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from skillc import cli
+
+    items = demo._acceptance_items(_ok_lifecycle_record(), _ok_graded(), report, _ok_host_diff(), "sha256:x")
+    subject = demo._subject_acceptance_items(_ok_subject_result(reap_report=report))
+    assert report.clean is clean
+    assert next(i for i in items if "cleanup sweep" in i.name).met is clean
+    assert next(i for i in subject if "cleanup sweep" in i.name).met is clean
+    result = SimpleNamespace(ok=all(i.met for i in items),
+                             paste_back=demo.build_paste_back(items, "fake:1", "sha256:x", report))
+    monkeypatch.setattr(demo, "run_demo", lambda **kwargs: result)
+    assert cli.cmd_demo(_demo_args()) == (0 if clean else 1)
+
+
+def test_interrupt_cli_keeps_network_residue_visible_and_exits_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skillc import cli
+
+    def interrupted(**kwargs: object) -> None:
+        recorded = kwargs["recorded_attempt_ids"]
+        assert isinstance(recorded, list)
+        recorded.append("owned-interrupted")
+        raise KeyboardInterrupt
+
+    report = reap.ReapReport(True, (reap.ReapOutcome("owned-interrupted", "left-present"),))
+    monkeypatch.setattr(demo, "run_demo", interrupted)
+    monkeypatch.setattr(reap, "reap", lambda *args, **kwargs: report)
+    assert cli.cmd_demo(_demo_args()) == 1
+    assert "left-present" in capsys.readouterr().err

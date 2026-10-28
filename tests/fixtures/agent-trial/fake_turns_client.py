@@ -45,6 +45,9 @@ APPROVAL_PREFIX = "Approved"
 
 def _header(session_id: str, mode: str) -> str:
     lines = ["OpenAI Codex v0.157.1", "--------", "workdir: /work", "model: gpt-6-astra"]
+    if mode == "tracing":  # #516: the client's own tracing lines, as measured, before its header
+        lines[:0] = ["Reading additional input from stdin...",
+                     "2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models"]
     if mode != "absent":
         lines.append(f"session id: {session_id}")
         if mode == "twice":

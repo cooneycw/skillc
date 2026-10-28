@@ -206,15 +206,16 @@ declaration does not acquire a lane, an obligation or an authorization through
 this section; every live arm still needs its own approved declaration
 ([ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)).
 
-### 10.1 The three lanes
+### 10.1 Measurement lanes
 
 | Lane | Question | Arms | Scored |
 |---|---|---|---|
 | **Explicit contract** | When a user explicitly invokes a published workflow, is it carried out as published, every time? | One treatment arm is sufficient; a model/client contrast is optional | Adherence, preservation and honesty against the invoked contract; task outcome beside them |
 | **Matched outcome** | Does the treatment change the project outcome under matched conditions? (#203's lane) | Baseline vs treatment, natural discovery or a declared nudge | Common project acceptance only |
 | **Expanded instruction** | Does packaging the workflow as a skill matter, versus giving the same obligations as prose? | Explicit skill invocation (S) vs the equivalent expanded instructions (E) | Adherence, preservation, honesty and outcome on one shared obligation set, plus convenience |
+| **Explicit product** | Does explicitly requesting the pinned skill product improve the common project result? | Exactly baseline versus explicitly instructed treatment | Common project acceptance; requested use observed separately |
 
-Rules shared by all three:
+Rules shared by all lanes:
 
 - **Common project requirements are identical across arms.** They come from
   the task's public goal and the fixture's own documents (`goal.md`,
@@ -236,6 +237,15 @@ or a hint about the fixture. Both arms get the same helpers at the same paths
 with the same modes (helper parity), and a reviewer audits E's text against the
 contract before approval. The prompt bytes and startup context of both arms are
 recorded in full, so instruction length is measured, not assumed.
+
+The private controller-input trace (#547) supplies the exact post-nonce initial
+prompt and each actually prepared resume argument, with measured UTF-8 byte
+sizes. It is a bounded precursor to this requirement: it does not supply all
+system/tool messages, startup context or interactive clarification. Declared
+prompt fingerprints alone do not supply these runtime bytes. Missing/refused
+inputs or absent/conflicting terminal population deny a complete trace; backend
+launch and transcript-confirmed reception remain separate facts. A study that
+requires this evidence must check it explicitly before making that claim.
 
 ### 10.2 Where obligations come from
 
@@ -409,3 +419,49 @@ cheaper success (section 7).
   reported.
 - **No fixture chosen to make a treatment win.** A case is admitted because its
   obligations apply, never because of the result it is expected to give.
+
+### 10.8 Explicit product comparison (568A)
+
+Opt in with `kind: calibration-declaration`, `lane: explicit-product` and
+`common-task-outcome` version 1. Exactly two arms are allowed: `baseline`
+with null subject and no instruction, names or inventory; and one treated arm
+with a pinned subject, nonempty literal `instruction` and distinct `named_skills`
+that the instruction names as whole names. No implicit natural arm is added.
+Other lanes, existing declarations, approval digests and historical exceptions
+retain their semantics. Shared goal, tools, permissions, model and caps apply
+to both arms; treatment installation and its explicit-use instruction are the
+comparison, not a claim about natural selection or packaging alone.
+
+The closed `explicit_product` object requires exactly `version: 1`,
+`prompt_digests` (one SHA-256 digest per declared arm), sorted distinct nonempty
+`selected_skills`, and `installed_home_digest`. All named skills must be selected.
+Approval binds this whole object, instruction and names; every trial retains
+the existing immutable full declaration snapshot. This object is refused on
+other lanes. Missing actual Treatment/receipt, selection or delivered-file
+drift, invalid paths/modes, unapproved changes or prompt drift refuse before
+run-store/backend creation and before direct planning.
+
+The base prompt is the loaded goal text unchanged for baseline. For treatment
+it is `goal.rstrip() + "\n\n" + instruction + "\n"`, encoded as UTF-8.
+These hashes exclude the subsequently generated canary and controller turns;
+they do not certify full prompt retention. The installed manifest hashes the
+canonical JSON list sorted by path of `{path, digest, mode}` for every
+treatment-supplied home file: content SHA-256 plus the effective delivery mode
+as four octal digits (`0600` default, `0700` for executable source files).
+Paths must be canonical nonescaping relative file paths and modes use the
+existing delivery helper. This population excludes runtime-created files and
+credentials; an empty population is refused. Selected skills must equal the
+actual Treatment receipt's complete declared population, with existing per-skill
+body/description pins still required.
+
+Reports derive requested names from the immutable declaration. Caller metadata
+must match exactly if supplied. `named_skill_opened` is observational only:
+false or unknown opening neither fails a correct task nor removes any scheduled
+attempt from the primary denominator. Existing model/containment validity
+checks remain separate.
+
+This representation is only 568A. Before any live declaration, 568B still needs
+a certified coding task/grader, full isolated profile/runtime proof, actual full
+prompt and running identity evidence, deterministic paired execution rehearsals,
+a frozen unapproved run declaration, sizing evidence and a disjoint reserved
+holdout family. No live run or study GO follows from this schema support.

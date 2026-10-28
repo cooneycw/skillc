@@ -98,6 +98,7 @@ still owes:
 skillc check ./skills         # check a collection after validating the rules
 skillc selftest                # prove every rule can still report the other verdict
 skillc check-records <path>    # refuse evaluation records the contract rejects
+skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
@@ -110,6 +111,7 @@ skillc selection-probe         # #26: the three selection cases, or --detection-
 skillc calibration-run <declaration> # #207: run an APPROVED two- or three-arm calibration declaration (#204, #231); evidence stays private
 skillc level3-campaign --runtime-supply-receipt <receipt> # #375: the frozen Level-3 production-path campaign, scripted subjects, no model; evidence stays private
 skillc level3-live <declaration> --runtime-supply-receipt <receipt> # #434: the model runs flow:auto on the fixture-service task (approved declaration; --rehearse dry|actor spends nothing)
+skillc level3-live <declaration> --preflight-launch-env # #536: check only the current real-client opt-in environment; launch nothing
 skillc uptake-study <declaration> --rewritten <dir> # #237: run an APPROVED two-arm uptake study (published vs a rewritten description); evidence stays private
 skillc pilot-report <run_dir>  # #12: rebuild a pilot's report from its private run, merging reviewed claims
 skillc configuration-compare --a <record.json> --b <record.json> --vary <field> # #13: compare two captured evidence records, refusing an unmatched configuration

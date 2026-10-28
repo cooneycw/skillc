@@ -71,19 +71,50 @@ def unavailable(reason: str) -> dict[str, object]:
     return {"status": "unavailable", "reason": reason}
 
 
-def _document(text: str) -> tuple[dict[str, object] | None, str, str | None]:
+def _document(text: str, *, strict: bool = False) -> tuple[dict[str, object] | None, str, str | None]:
     """`(document, verdict_word, None)` or `(None, "", why)`."""
     lines = text.split("\n")
     opens = [i for i, line in enumerate(lines) if line == "{"]
     closes = [i for i, line in enumerate(lines) if line == "}"]
     if len(opens) != 1 or len(closes) != 1 or closes[0] < opens[0]:
         return None, "", f"expected exactly one column-0 JSON document, found {len(opens)} open/{len(closes)} close"
+    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def constant(value: str) -> object:
+        raise ValueError("non-finite JSON constant")
+
     try:
-        document = json.loads("\n".join(lines[opens[0]:closes[0] + 1]))
-    except json.JSONDecodeError as exc:
-        return None, "", f"runner JSON does not parse ({exc.msg})"
+        raw = "\n".join(lines[opens[0]:closes[0] + 1])
+        document = (json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
+                    if strict else json.loads(raw))
+    except ValueError as exc:
+        return None, "", f"runner JSON does not parse ({exc})"
     if not isinstance(document, dict):
         return None, "", "runner JSON is not an object"
+    if strict:
+        outside = lines[:opens[0]] + lines[closes[0] + 1:]
+        verdicts = [line for line in lines if line.strip().startswith(_VERDICT_PREFIX)]
+        if len(verdicts) != 1:
+            return None, "", "expected exactly one verdict line"
+        for line in outside:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(_VERDICT_PREFIX):
+                continue
+            # Other JSON values/documents must not hide in a compact prefix,
+            # suffix, indentation or other formatting the legacy reader ignores.
+            try:
+                json.JSONDecoder().raw_decode(stripped)
+            except ValueError:
+                if stripped.startswith(("{", "[")):
+                    return None, "", "extra JSON-like document outside runner report"
+            else:
+                return None, "", "extra JSON value outside runner report"
     trailing = [line for line in lines[closes[0] + 1:] if line.strip()]
     if not trailing or not trailing[-1].startswith(_VERDICT_PREFIX):
         return None, "", "no FLOW_FINISH_GATE verdict line after the runner JSON"

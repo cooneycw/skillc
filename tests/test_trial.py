@@ -848,3 +848,66 @@ def test_admission_refuses_when_the_ledger_is_gone(store: Path) -> None:
                                    "trial_id": experiment.trial_of(attempt_id)["trial_id"],
                                    "client": {"name": "fake", "version": "1"}})
     assert not list(experiment.root.glob("receipt-*.json"))
+
+
+_RETENTION_CASES = json.loads((Path(__file__).parent / "fixtures/retention/cases.json").read_text())
+
+
+@pytest.mark.parametrize("case", _RETENTION_CASES["transcript"], ids=lambda c: c["name"])
+def test_retained_transcript_reader_controls(store: Path, case: dict[str, Any]) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = str(next(experiment.attempts())[1]["attempt_id"])
+    raw = _RETENTION_CASES["bytes"].encode()
+    digest = t.put_object(experiment, raw)
+    entry = {k: attempt_id if v == "$attempt" else v for k, v in case["entry"].items()}
+    if case["object"] == "missing":
+        experiment.object_path(digest).unlink()
+    elif case["object"] == "altered":
+        experiment.object_path(digest).chmod(0o600)
+        experiment.object_path(digest).write_bytes(b"altered")
+    experiment.record(attempt_id, "transcript-retained", observation=entry)
+    if case["accept"]:
+        assert t.read_retained_transcript(experiment, attempt_id) == entry
+    else:
+        with pytest.raises(t.Refused):
+            t.read_retained_transcript(experiment, attempt_id)
+
+
+def test_transcript_retention_is_bounded_and_write_once(store: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = str(next(experiment.attempts())[1]["attempt_id"])
+    assert t.read_retained_transcript(experiment, attempt_id) is None
+    entry = t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"12345"),
+                                limits=t.Limits(max_stream_bytes=3))
+    assert entry["coverage"] == "partial" and t.read_object(experiment, str(entry["digest"])) == b"123"
+    with pytest.raises(t.Refused, match="frozen"):
+        t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"replacement"))
+    assert not any(e["event"] == "captured" for e in experiment.events(attempt_id))
+
+
+def test_transcript_storage_failure_is_recorded_without_bytes(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = str(next(experiment.attempts())[1]["attempt_id"])
+    def fail(*args: object) -> str:
+        raise OSError("injected storage failure")
+    monkeypatch.setattr(t, "_put_object", fail)
+    t.retain_transcript(experiment, attempt_id, t.TranscriptEvidence(b"diagnostic"))
+    retained = t.read_retained_transcript(experiment, attempt_id)
+    assert retained is not None and retained["coverage"] == "missing"
+    assert "storage refused" in str(retained["reason"]) and "digest" not in retained
+
+
+def test_547_terminal_detail_after_finalization_cannot_reopen_prompt_bytes(store: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    aid = _only(experiment)
+    t.begin_prompt_inputs(experiment, aid, 0)
+    t.retain_prompt_input(experiment, aid, 1, "synthetic exact input", lambda _: [])
+    raw = t.finalize(experiment, aid)
+    before = (experiment.root / f"lifecycle-{aid}.json").read_bytes()
+    t.finish_prompt_inputs(experiment, aid, [1], "lifecycle-ended")
+    assert t.read_prompt_inputs(experiment, aid).coverage == "complete"
+    assert t.read_prompt_inputs(experiment, aid).inputs[0].launched is False
+    assert raw["disposition"] == "not-run"
+    assert (experiment.root / f"lifecycle-{aid}.json").read_bytes() == before
+    with pytest.raises(t.Refused):
+        t.retain_prompt_input(experiment, aid, 1, "replacement", lambda _: [])

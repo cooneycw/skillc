@@ -23,9 +23,7 @@
 #      change what fires); comparing the packaged run against a same-day SOURCE
 #      run of the identical fixture pair can.
 #
-# Not wired into Woodpecker: this issue's own scope note says CI expansion is not
-# required, and the build+venv round trip is slower than the four gates CI
-# already runs on every push. Run it by hand, or from a local pre-release check.
+# Runs in make verify and Woodpecker with both sabotage controls (#72).
 #
 # COMMITTED NEGATIVE CONTROL. `CLEAN_INSTALL_CONTROL=<mode>` inverts this script's
 # own verdict: the mode's job is to break the thing step 2 or step 3 checks and
@@ -44,8 +42,8 @@
 #     That run must reproduce step 1's "controls directory absent" refusal
 #     rather than a false certify; if it does not, the control reports FAILURE.
 #
-# Neither mode is run in CI (this whole script is not); run either by hand
-# before trusting a change to this file or to `_controls_root`/`cmd_selftest`.
+# Both modes run in CI and make verify; run them directly when developing
+# changes to this file or to `_controls_root`/`cmd_selftest`.
 set -uo pipefail
 
 fail() { echo "clean-install-check: FAIL - $*" >&2; exit 1; }
@@ -218,7 +216,7 @@ cat "$scratch/packaged-bad.err" "$scratch/packaged-good.err" >&2
 
 # Compare the STRUCTURED verdict, not just the exit code: same rules, same
 # skills_checked count. python3 (stdlib only) rather than adding a jq dependency.
-python3 - "$scratch/baseline-bad.json" "$scratch/packaged-bad.json" "$scratch/baseline-good.json" "$scratch/packaged-good.json" <<'PY'
+python3 - "$scratch/baseline-bad.json" "$scratch/packaged-bad.json" "$scratch/baseline-good.json" "$scratch/packaged-good.json" <<'PY' || fail "packaged structured verdicts differ from source"
 import json
 import sys
 

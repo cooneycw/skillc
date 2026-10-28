@@ -64,9 +64,9 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from . import agent_trial, calibration, demo, profile, trial, verify
+from . import agent_trial, calibration, completion, demo, gate_state, profile, trial, verify
 from . import attempt_guard as ag
 from . import collection_conformance as cc
 from . import matched_pilot as mp
@@ -120,6 +120,13 @@ class Treatment:
     #: default flow-check witness), carried straight through like
     #: `gate_entrypoint`.
     gate_witness: str | None = None
+    #: #525: the profile's declared skill-bundled gate copies, witnessed beside
+    #: `gate_entrypoint`. Empty for every profile that declares none.
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: the subject's checksum-manifest name the bundled mirrors are proven against.
+    bundled_checksum_manifest: str | None = None
+    #: #529: the profile's declared checkout gate copies (path -> skill).
+    checkout_gate_entrypoints: Mapping[str, str] = field(default_factory=dict)
     #: #424: a `trial.skill_digests` value - each installed skill's own
     #: `SKILL.md` destination with the `body_digest`/`description_digest` of the
     #: bytes this treatment INSTALLS. Empty only for a hand-built treatment; the
@@ -129,6 +136,7 @@ class Treatment:
     #: `100755`), so an installed helper arrives executable when its source is.
     #: Empty only for a hand-built treatment, which keeps the 0600 delivery.
     home_modes: Mapping[str, str] = field(default_factory=dict)
+    gate_state_protocol: gate_state.Protocol | None = None
 
 
 @dataclass(frozen=True)
@@ -144,11 +152,20 @@ class _ClosureResult:
     gate_entrypoint: str | None
     #: #287 auto6: the inventory's declared `gate_witness`, absent = `None`.
     gate_witness: str | None = None
+    #: #525: the inventory's declared `bundled_gate_entrypoints`, absent = ().
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    #: #525: the inventory's declared `checksum_consumers` (path -> reason).
+    checksum_consumers: Mapping[str, str] = field(default_factory=dict)
+    #: #525: the subject's checksum-manifest name, with a bundled gate only.
+    bundled_checksum_manifest: str | None = None
+    #: #529: the inventory's declared `checkout_gate_entrypoints`, absent = {}.
+    checkout_gate_entrypoints: Mapping[str, str] = field(default_factory=dict)
     #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
     #: cross-checked against the pins derived from the installed bytes.
     skill_pins: tuple[dict[str, str], ...] = ()
     #: #505: `profile.installed_home_modes` of the same verified records.
     home_modes: dict[str, str] = field(default_factory=dict)
+    gate_state_protocol: gate_state.Protocol | None = None
 
 
 def _installed_skill_pins(
@@ -235,14 +252,24 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
         raise CalibrationRefused(f"profile {subject_profile!r}: {exc}") from exc
     gate_witness = inventory.get("gate_witness")
     assert gate_witness is None or isinstance(gate_witness, str)
-    return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
-                          gate_witness=gate_witness, skill_pins=skill_pins,
+    # Whether each declared bundled copy is DELIVERED is decided at assembly,
+    # over the whole home (a neighbour skill's copy is outside this closure).
+    bundled = tuple(str(p) for p in inventory.get("bundled_gate_entrypoints", ()))
+    consumers = {str(c["path"]): str(c["reason"]) for c in inventory.get("checksum_consumers", ())}
+    checkout = {str(k): str(v) for k, v in dict(inventory.get("checkout_gate_entrypoints", {})).items()}
+    return _ClosureResult(gate_state_protocol=(gate_state.Protocol.from_inventory(inventory)
+                                               if "gate_state_protocol" in inventory else None),
+                          home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
+                          gate_witness=gate_witness, bundled_gate_entrypoints=bundled, checksum_consumers=consumers,
+                          bundled_checksum_manifest=inventory.get("bundled_checksum_manifest"),
+                          checkout_gate_entrypoints=checkout,
+                          skill_pins=skill_pins,
                           home_modes=profile.installed_home_modes(inventory, tree))
 
 
 def build_treatment(
     acquired: cc.AcquiredCollection, *, listing_client_argv: Sequence[str] | None = None,
-    subject_profile: str | None = None, root: Path | None = None,
+    subject_profile: str | None = None, root: Path | None = None, fixture_gate_state: bool = False,
 ) -> Treatment:
     """The treatment arm from an acquisition, built exactly as
     `run_collection_agent_attempt` builds its own - the same home files, the
@@ -272,9 +299,16 @@ def build_treatment(
     preflight_tools: tuple[dict[str, object], ...] = ()
     gate_entrypoint: str | None = None
     gate_witness: str | None = None
+    bundled_gate_entrypoints: tuple[str, ...] = ()
+    bundled_checksum_manifest: str | None = None
+    checkout_gate_entrypoints: Mapping[str, str] = {}
+    protocol: gate_state.Protocol | None = None
     if subject_profile is not None:
         assert root is not None
         closure = _closure_home_files(acquired, subject_profile, root)
+        protocol = closure.gate_state_protocol
+        if protocol is not None and fixture_gate_state is not True:
+            raise CalibrationRefused("gate-state protocol is supported only by fixture-live construction")
         closure_files = closure.home_files
         # A validated profile's own closure covers the selected skill's
         # bundled files too (profile.py installs skills AND dependencies
@@ -301,6 +335,16 @@ def build_treatment(
                 f"{mode_disagreeing}"
             )
         home_files.update(closure_files)
+        # #525: the bundled-gate checks over the WHOLE delivered home, not only
+        # the profile's closure - a subject selecting more skills installs them
+        # all, and any of them could run an unwitnessed bundled gate or verify
+        # the shimmed skill's checksums (counter-model review).
+        problems = profile.bundled_gate_problems(
+            home_files, closure.gate_entrypoint, closure.bundled_gate_entrypoints, closure.checksum_consumers,
+            manifest_name=closure.bundled_checksum_manifest, require_consumers_installed=True,
+            checkout=closure.checkout_gate_entrypoints)
+        if problems:
+            raise CalibrationRefused(f"profile {subject_profile!r}, as delivered: {problems[0][1]}")
         home_modes.update(closure.home_modes)
         # Every closure file, not a curated subset (orchestrator ruling:
         # "read back the digest of every closure
@@ -308,9 +352,19 @@ def build_treatment(
         # the inventory inside `installed_home_files`, so this is simply
         # that same digest, carried forward for the in-container re-check.
         verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
+        # #279 ca3030d: a neighbour's bundled copy and its siblings are delivered
+        # from the acquired subject, not the closure - read back in the container
+        # like every closure file, so the overlay mirrors only verified bytes.
+        for path in (*closure.bundled_gate_entrypoints, *closure.checkout_gate_entrypoints):
+            prefix = path.rsplit("/", 1)[0] + "/"
+            verify_home_files.update({dest: m.sha256_bytes(data) for dest, data in home_files.items()
+                                      if dest.startswith(prefix) and dest not in verify_home_files})
         preflight_tools = closure.tools
         gate_entrypoint = closure.gate_entrypoint
         gate_witness = closure.gate_witness
+        bundled_gate_entrypoints = closure.bundled_gate_entrypoints
+        bundled_checksum_manifest = closure.bundled_checksum_manifest
+        checkout_gate_entrypoints = closure.checkout_gate_entrypoints
         # Two derivations of the same fact - the installed bytes and the
         # validated inventory - must agree, or the pins would describe skills
         # this treatment does not install (#424). Per path, as a SUBSET (#432,
@@ -334,12 +388,16 @@ def build_treatment(
                 f"digests: {disagreements}"
             )
     return Treatment(
+        gate_state_protocol=protocol,
         home_files=home_files,
         home_modes=home_modes,
         digest=acquired.source.digest,
         skill_digests=skill_digests,
         gate_entrypoint=gate_entrypoint,
         gate_witness=gate_witness,
+        bundled_gate_entrypoints=bundled_gate_entrypoints,
+        bundled_checksum_manifest=bundled_checksum_manifest,
+        checkout_gate_entrypoints=dict(checkout_gate_entrypoints),
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,
@@ -420,10 +478,84 @@ def _outcome_task_inputs(
     return goal.decode("utf-8"), cc.surface_mapping(files)
 
 
+def base_prompt(declaration: calibration.CalibrationDeclaration, arm: str, goal: str) -> str:
+    """Exact pre-bootstrap prompt; canary and later controller turns are separate."""
+    instruction = calibration.arm_spec(declaration, arm).get("instruction")
+    return f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
+
+
+def installed_home_digest(treatment: Treatment) -> str:
+    """Hash every treatment-supplied home file at its effective delivery mode."""
+    if not treatment.home_files or set(treatment.home_modes) - set(treatment.home_files):
+        raise CalibrationRefused("explicit_product has empty home files or orphan file modes")
+    manifest = []
+    for path, body in sorted(treatment.home_files.items()):
+        relative = PurePosixPath(path)
+        if not path or str(relative) != path or relative.is_absolute() or ".." in relative.parts \
+                or not relative.parts or "\0" in path:
+            raise CalibrationRefused("explicit_product home paths must be canonical relative file paths")
+        try:
+            mode = agent_trial.delivery_mode(path, treatment.home_modes)
+        except agent_trial.HomeFileVerificationRefused as exc:
+            raise CalibrationRefused(str(exc)) from exc
+        manifest.append({"path": path, "digest": trial.sha256_bytes(body), "mode": f"{mode:04o}"})
+    return trial.sha256_bytes(trial.canonical(manifest))
+
+
+def _require_explicit_product(
+    declaration: calibration.CalibrationDeclaration, root: Path, treatment: Treatment | None,
+) -> None:
+    if declaration.lane != calibration.EXPLICIT_PRODUCT_LANE:
+        return
+    if treatment is None or treatment.receipt_context is None:
+        raise CalibrationRefused("explicit_product requires the actual Treatment and installed receipt context")
+    raw = declaration.data["explicit_product"]
+    assert isinstance(raw, dict)
+    if sorted(treatment.receipt_context.declared) != raw["selected_skills"]:
+        raise CalibrationRefused("explicit_product selected_skills differs from the actual installed population")
+    if installed_home_digest(treatment) != raw["installed_home_digest"]:
+        raise CalibrationRefused("explicit_product installed_home_digest differs from actual delivered bytes/modes")
+    surface = m.SURFACES.get(treatment.receipt_context.surface_name)
+    if surface is None or surface.client != declared_client(declaration)[0]:
+        raise CalibrationRefused("explicit_product receipt surface differs from the declared client")
+    prefix = PurePosixPath(surface.home_skills_relpath)
+    expected_paths = {str(prefix / name / "SKILL.md") for name in raw["selected_skills"]}
+    installed_paths = {path for path in treatment.home_files
+                       if PurePosixPath(path).name == "SKILL.md" and PurePosixPath(path).parent.parent == prefix}
+    if installed_paths != expected_paths:
+        raise CalibrationRefused("explicit_product installed skill entrypoints differ from selected_skills")
+    pins = []
+    for path in sorted(expected_paths):
+        try:
+            description, body = profile.skill_md_digests(treatment.home_files[path])
+        except FrontmatterError as exc:
+            raise CalibrationRefused(f"{path}: {exc}") from exc
+        pins.append({"path": path, "body_digest": body, "description_digest": description})
+    if sorted(treatment.skill_digests, key=lambda pin: pin["path"]) != pins:
+        raise CalibrationRefused("explicit_product skill pins differ from the actual installed skill bytes")
+    goal, _surface = _outcome_task_inputs(declaration, root)
+    prompts = {arm: trial.sha256_bytes(base_prompt(declaration, arm, goal).encode("utf-8"))
+               for arm in declaration.arms}
+    if prompts != raw["prompt_digests"]:
+        raise CalibrationRefused("explicit_product prompt_digests differ from actual base prompts")
+
+
+def _launch_declaration(declaration: calibration.CalibrationDeclaration) -> calibration.CalibrationDeclaration:
+    """Mutable data cannot erase the opt-in cached when this declaration was parsed."""
+    if declaration.lane == calibration.EXPLICIT_PRODUCT_LANE or "explicit_product" in declaration.data \
+            or calibration.outcome_endpoint(declaration) is not None:
+        parsed = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
+        if declaration.lane == calibration.EXPLICIT_PRODUCT_LANE and parsed.lane != declaration.lane:
+            raise CalibrationRefused("explicit_product lane differs from the parsed declaration")
+        return parsed
+    return declaration
+
+
 def plan_calibration(
     declaration: calibration.CalibrationDeclaration, store: Path, *,
     root: Path, treatment_digest: str, image_digest: str | None,
     skill_digests: Sequence[Mapping[str, str]] = (),
+    treatment: Treatment | None = None,
 ) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
     """Plan one trial per attempt through the real controller, in
     `arm_order.sequence`. `repeat` is the arm's own 1-based attempt count.
@@ -434,14 +566,17 @@ def plan_calibration(
     installs nothing and stays unpinned (its contamination rule is #427)."""
     if not skill_digests and any(arm != calibration.BASELINE_ARM for arm in declaration.arm_order):
         raise CalibrationRefused("a treated arm has no skill_digests to pin; refusing to plan it unpinned")
-    if calibration.outcome_endpoint(declaration) is not None:
-        declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
+    declaration = _launch_declaration(declaration)
     client_name, client_version = declared_client(declaration)
     grader = verify.GraderDef.load(root / declaration.task_path)
     grader_identity = grader.identity()
     snapshot = None
     if calibration.outcome_endpoint(declaration) is not None:
         calibration.require_approved(declaration, root)
+        _require_explicit_product(declaration, root, treatment)
+        if declaration.lane == calibration.EXPLICIT_PRODUCT_LANE and treatment is not None \
+                and (treatment.digest != treatment_digest or tuple(skill_digests) != treatment.skill_digests):
+            raise CalibrationRefused("explicit_product planned treatment digest/pins differ from actual Treatment")
         if image_digest != _shared_str(declaration, "image", "digest"):
             raise CalibrationRefused("planned image differs from the approved declaration")
         _outcome_task_inputs(declaration, root)
@@ -538,6 +673,7 @@ def run_calibration(
     clock: Callable[[], float] = time.monotonic,
     total_seconds: float | None = None,
     rehearse: bool = False,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, plan and run the whole declared schedule. `backends()`
     returns a fresh `(agent backend, grading backend)` pair per attempt;
@@ -545,10 +681,15 @@ def run_calibration(
     one every time; a test's scripted client needs the attempt id), to which
     the declared model and effort are added. `total_seconds` overrides the
     declared total cap - for tests only; the CLI never sets it."""
+    if treatment is not None and treatment.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
+    declared_total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
+    completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
+                           else completion_deadline.child(declared_total))
     # ADR 0005: nothing - no store, no plan, no container - before this.
-    if calibration.outcome_endpoint(declaration) is not None:
-        declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
+    declaration = _launch_declaration(declaration)
     calibration.require_approved(declaration, root)
+    _require_explicit_product(declaration, root, treatment)
     if calibration.outcome_endpoint(declaration) is not None:
         if image_digest != _shared_str(declaration, "image", "digest"):
             raise CalibrationRefused("planned image differs from the approved declaration")
@@ -584,6 +725,7 @@ def run_calibration(
     experiment, schedule = plan_calibration(
         declaration, store, root=root, treatment_digest=treatment.digest, image_digest=image_digest,
         skill_digests=treatment.skill_digests,
+        treatment=treatment,
     )
     outcomes: list[mp.AttemptOutcome] = []
     write_outcomes(run_dir, experiment, outcomes, declaration)
@@ -591,17 +733,19 @@ def run_calibration(
     guarded = guard_kwargs(client_name, model)
     stop = GuardStop()
 
-    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
+    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float,
+                    deadline: completion.CompletionDeadline) -> dict[str, object]:
+        owned = trial.OwnedAttemptIds(experiment, scheduled.attempt_id)
         if rehearse:  # #287 P2: only the attempt is swapped; everything around it is the real path
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
         if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
             return skipped
         treated = scheduled.arm != calibration.BASELINE_ARM
-        instruction = calibration.arm_spec(declaration, scheduled.arm).get("instruction")
-        prompt = f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
+        prompt = base_prompt(declaration, scheduled.arm, goal)
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
+            completion_deadline=deadline, recorded_attempt_ids=owned,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=treatment.home_files if treated else {},
@@ -617,6 +761,8 @@ def run_calibration(
             preflight_tools=treatment.preflight_tools if treated else None,
             gate_entrypoint=treatment.gate_entrypoint if treated else None,
             gate_witness=treatment.gate_witness if treated else None,
+            bundled_gate_entrypoints=treatment.bundled_gate_entrypoints if treated else (),
+            checkout_gate_entrypoints=treatment.checkout_gate_entrypoints if treated else {},
             # #505: the installed files' source modes, for a treated arm only.
             extra_home_modes=dict(treatment.home_modes) if treated and treatment.home_modes else None,
             **guarded,  # type: ignore[arg-type]
@@ -629,8 +775,9 @@ def run_calibration(
 
     try:
         mp.run_schedule(
-            experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
+            experiment, schedule, None, total_seconds=total, per_attempt_seconds=per_attempt,
             clock=clock, on_outcome=on_outcome,
+                        run_attempt_with_deadline=run_attempt, completion_deadline=completion_deadline,
         )
     except KeyboardInterrupt:
         # An operator's interrupt still accounts for every planned attempt
@@ -836,6 +983,8 @@ def degraded_treatment(intact: Treatment, declaration: calibration.Discriminatio
     was run at. Derived rather than re-acquired because both degrade-subject
     paths lose the checkout a profile closure needs, and a snapshot-sourced
     degrade can never carry the declared `git:` revision label."""
+    if intact.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
     mutation = declaration.mutation
     skill, path = str(mutation.get("skill")), str(mutation.get("path"))
     if path == "SKILL.md":
@@ -871,7 +1020,8 @@ def degraded_treatment(intact: Treatment, declaration: calibration.Discriminatio
     return Treatment(home_files=home_files, digest=tree, receipt_context=context,
                      verify_home_files=verify_home_files, preflight_tools=intact.preflight_tools,
                      gate_entrypoint=intact.gate_entrypoint, gate_witness=intact.gate_witness,
-                     skill_digests=intact.skill_digests, home_modes=intact.home_modes)
+                     bundled_gate_entrypoints=intact.bundled_gate_entrypoints, skill_digests=intact.skill_digests, home_modes=intact.home_modes,
+                     checkout_gate_entrypoints=intact.checkout_gate_entrypoints)
 
 
 def require_textual_evidence(declaration: calibration.DiscriminationDeclaration, root: Path) -> dict[str, object]:
@@ -1134,6 +1284,7 @@ def run_discrimination(
     total_seconds: float | None = None,
     rehearse: bool = False,
     precondition_report: Path | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, derive the degraded arm, plan and run a discrimination
     declaration (#287 P2). Nothing - no store, no plan - before the approval
@@ -1142,6 +1293,11 @@ def run_discrimination(
     approval, derivation, planning, the store, the cap-enforcing schedule and
     reconciliation are the real ones, so a rehearsal accounts for every slot a
     live run would. `total_seconds` overrides the declared cap (tests only)."""
+    if intact is not None and intact.gate_state_protocol is not None:
+        raise CalibrationRefused("gate-state treatment is fixture-only")
+    declared_total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
+    completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
+                           else completion_deadline.child(declared_total))
     calibration.require_approved_discrimination(declaration, root)
     require_precondition(declaration, precondition_report, root, rehearse=rehearse)  # #287 option 1, ruling (A)
     if image_digest != _shared_str(declaration, "image", "digest"):
@@ -1174,7 +1330,9 @@ def run_discrimination(
     guarded = guard_kwargs(client_name, model)
     stop = GuardStop()
 
-    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
+    def run_attempt(scheduled: mp.ScheduledAttempt, budget: float,
+                    deadline: completion.CompletionDeadline) -> dict[str, object]:
+        owned = trial.OwnedAttemptIds(experiment, scheduled.attempt_id)
         if rehearse:
             return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable", reason=REHEARSAL_REASON)
         if (skipped := stop.skip(experiment, scheduled.attempt_id)) is not None:
@@ -1183,6 +1341,7 @@ def run_discrimination(
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
+            completion_deadline=deadline, recorded_attempt_ids=owned,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=chosen.home_files, client=client_name, cli_version=client_version,
@@ -1190,7 +1349,8 @@ def run_discrimination(
             credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
             verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
             gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,
-            extra_home_modes=dict(chosen.home_modes) if chosen.home_modes else None,
+            bundled_gate_entrypoints=chosen.bundled_gate_entrypoints,
+            checkout_gate_entrypoints=chosen.checkout_gate_entrypoints, extra_home_modes=dict(chosen.home_modes) if chosen.home_modes else None,
             **guarded,  # type: ignore[arg-type]
         )
 
@@ -1200,8 +1360,9 @@ def run_discrimination(
         write_outcomes(run_dir, experiment, outcomes, declaration)
 
     try:
-        mp.run_schedule(experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
-                        clock=clock, on_outcome=on_outcome)
+        mp.run_schedule(experiment, schedule, None, total_seconds=total, per_attempt_seconds=per_attempt,
+                        clock=clock, on_outcome=on_outcome,
+                        run_attempt_with_deadline=run_attempt, completion_deadline=completion_deadline)
     except KeyboardInterrupt:
         write_outcomes(run_dir, experiment, reconcile(experiment, outcomes), declaration)
         raise
@@ -1292,7 +1453,7 @@ def build_discrimination_report(
     declaration: calibration.DiscriminationDeclaration, *, rehearsal: bool = False,
 ) -> dict[str, object]:
     """The calibration report body (endpoint, readiness, model check per
-    attempt) plus, per arm, `flow-check-honest` beside the endpoint and the
+    attempt) plus, per arm, the bound task's honesty role beside the endpoint and the
     tolerance verdict. Descriptive only: no Fisher test is run here (the pilot
     exists to size the main study)."""
     experiment = trial.Experiment.open(experiment.root)
@@ -1305,12 +1466,14 @@ def build_discrimination_report(
     report = build_report(experiment, outcomes, declared_model=model, declared_effort=effort)
     endpoint = declaration.endpoint
     for entry, outcome in zip(report["attempts"], reconcile(experiment, outcomes), strict=True):  # type: ignore[call-overload]
-        entry["process_honesty_beside"] = _honesty_beside(outcome.record)
+        entry["process_honesty_beside"] = _honesty_beside(
+            outcome.record, task_path=declaration.task_path,
+            grader=experiment.trial_of(outcome.scheduled.attempt_id).get("grader"))
         if endpoint is not None:
             # #287 option 1: the launch-bound declaration's obligation endpoint
             # is what the attempt is scored, and its evaluability counted, on.
             # The composite stays beside it, never dropped.
-            entry["task_grader_beside"] = entry["primary_endpoint"]
+            entry["task_grader_beside"] = calibration.raw_primary_endpoint(outcome.record)
             entry["primary_endpoint"] = calibration.primary_endpoint(outcome.record, endpoint=endpoint)
     if endpoint is not None:
         report["arms"] = summarize_arms(report["attempts"])  # type: ignore[arg-type]
@@ -1449,19 +1612,58 @@ def _raw_task_beside(record: Mapping[str, object]) -> dict[str, object]:
         if isinstance(graded, dict) else {"status": calibration.NOT_GRADED, "criteria": None}
 
 
-def _honesty_beside(record: Mapping[str, object]) -> dict[str, object]:
+# Reviewed roles belong to exact grader content, not a name or an endpoint.
+# Keep this outside frozen grader definitions/approvals (#544, sibling #534).
+_HONESTY_ROLES: Mapping[tuple[str, str, str, str], str | None] = {
+    ("evals/level3/gate-stops-early-public-gate", "gate-stops-early", "6",
+     "sha256:385c6bc509f20b6fb3f5b3b293cf7a7bbef90d186018b4fb76107833a6a254f1"): "flow-check-honest",
+    ("evals/level3/gate-stops-early", "gate-stops-early", "5",
+     "sha256:332318a553fdb7cfcd518d1baf0bef9a04895c7941a3ddd9307669bca15b21bc"): "flow-check-honest",
+    ("evals/level3/gate-stops-early-auto6", "gate-stops-early-auto6", "1",
+     "sha256:5f857a35e3fe6cc6351b3d9d821efc190f24d295e96a9b76844c6949fa2b9790"): "gate-report-honest",
+    ("evals/level3/slugkit-pipeline", "slugkit-pipeline", "1",
+     "sha256:670e04a0394943a6d60b519380d5f578e94f533fb04a3f59660d3962184d8e2e"): "pipeline-honest",
+    ("evals/level1/slug-small-fix", "slug-small-fix", "2",
+     "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"): None,
+}
+_KNOWN_HONESTY_IDS = frozenset(role for role in _HONESTY_ROLES.values() if role is not None)
+
+
+def _honesty_beside(record: Mapping[str, object], *, task_path: str, grader: object) -> dict[str, object]:
+    """Project a reviewed role from this trial's stored identity, never disk.
+
+    This is a beside-column, not authentication of arbitrary raw grade rows.
+    Functional endpoint selection and other functional rows do not define honesty.
+    """
     graded = record.get("graded")
     if not isinstance(graded, dict):
         return {"status": calibration.NOT_GRADED, "criteria": [], "reason": "attempt was not graded"}
+    bound = grader if isinstance(grader, Mapping) else {}
+    cid, revision, digest = (bound.get(key) for key in ("id", "revision", "digest"))
+    missing: dict[str, object] = {"status": "MISSING", "criteria": [],
+                                 "reason": f"unmapped process-honesty role for bound grader identity "
+                                           f"{task_path!r}, {cid!r}, {revision!r}, {digest!r}"}
+    if not isinstance(cid, str) or not isinstance(revision, str) or not isinstance(digest, str):
+        return missing
+    identity = (task_path, cid, revision, digest)
+    if identity not in _HONESTY_ROLES:
+        return missing
+    role = _HONESTY_ROLES[identity]
+    if role is None:
+        return {"status": "MISSING", "criteria": [], "reason": "bound task declares no process-honesty role"}
     raw = graded.get("criteria")
-    rows = [row for row in raw if isinstance(row, dict) and row.get("id") == "flow-check-honest"] \
+    rows = [row for row in raw if isinstance(row, dict) and row.get("id") == role] \
         if isinstance(raw, list) else []
-    status = "MISSING" if isinstance(raw, list) and not rows else "MALFORMED"
-    if len(rows) == 1 and rows[0].get("mandatory") is True \
-            and rows[0].get("outcome") in ("SATISFIED", "VIOLATED", UNKNOWN):
-        status = str(rows[0]["outcome"])
-    return {"status": status, "criteria": rows,
-            "reason": None if rows else "raw task grade contains no process-honesty row"}
+    malformed = (not isinstance(raw, list)
+                 or any(not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in raw)
+                 or any(row["id"] in _KNOWN_HONESTY_IDS and row["id"] != role for row in raw))
+    if malformed or len(rows) > 1 or (rows and (rows[0].get("mandatory") is not True
+                                              or rows[0].get("outcome") not in ("SATISFIED", "VIOLATED", UNKNOWN))):
+        return {"status": "MALFORMED", "criteria": rows,
+                "reason": f"invalid or conflicting process-honesty rows for {role!r}"}
+    if not rows:
+        return {"status": "MISSING", "criteria": [], "reason": f"raw task grade lacks process-honesty role {role!r}"}
+    return {"status": rows[0]["outcome"], "criteria": rows, "reason": None}
 
 
 def build_report(
@@ -1485,7 +1687,12 @@ def build_report(
         _shared_str(declaration, "model"), _shared_str(declaration, "reasoning_effort"),
     ):
         raise CalibrationRefused("report model/effort differs from the bound declaration")
-    if endpoint is not None and named_skills:
+    if declaration is not None and declaration.lane == calibration.EXPLICIT_PRODUCT_LANE:
+        bound_names = named_skills_by_arm(declaration)
+        if named_skills is not None and {k: tuple(v) for k, v in named_skills.items()} != bound_names:
+            raise CalibrationRefused("report named_skills differs from the bound explicit_product declaration")
+        named_skills = bound_names
+    elif endpoint is not None and named_skills:
         raise CalibrationRefused("common-task-outcome cannot add post-run named-skill eligibility")
     ids = [outcome.scheduled.attempt_id for outcome in outcomes]
     if len(set(ids)) != len(ids):
@@ -1515,7 +1722,10 @@ def build_report(
             "disposition": disposition,
             "primary_endpoint": calibration.primary_endpoint(record, endpoint=endpoint),
             **({"task_grader_beside": _raw_task_beside(record),
-                "process_honesty_beside": _honesty_beside(record)} if endpoint is not None else {}),
+                "process_honesty_beside": _honesty_beside(
+                    record, task_path=declaration.task_path,
+                    grader=experiment.trial_of(outcome.scheduled.attempt_id).get("grader"))}
+               if endpoint is not None and declaration is not None else {}),
             "readiness_beside": calibration.readiness_beside(verified_result(experiment, record)),
             "model_declared": declared_model,
             "model_observed": observed_model,
@@ -1565,7 +1775,7 @@ def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[st
     `opened` is the uptake rate's numerator and `observed` its denominator
     (k/n, #203 ruling 3c): an attempt whose invocations were not recorded is
     in neither. A provided-skill arm also counts `named_opened`, the attempts
-    eligible for the value comparison."""
+    with recorded requested use; this never changes the scheduled primary counts."""
     arms: dict[str, dict[str, object]] = {}
     for entry in entries:
         arm = str(entry.get("arm"))

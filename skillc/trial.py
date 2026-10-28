@@ -48,13 +48,13 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Concatenate, ParamSpec, TypeVar
 
-from . import checks, records
+from . import checks, completion, records
 from .materialize import Refused as NotOwned
 from .materialize import cleanup as remove_owned
 from .materialize import create_root, forbidden_roots, refuse_protected
@@ -203,16 +203,20 @@ def _write_new(path: Path, data: bytes, mode: int = FILE_MODE) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _replace(path: Path, data: bytes) -> None:
-    """Atomically replace `path` (the ledger, on an append-only revision only)."""
+def _replace(path: Path, data: bytes, *, mode: int = FILE_MODE) -> None:
+    """Publish complete controller bytes atomically; clean failed temporaries."""
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, FILE_MODE)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            if handle.write(data) != len(data):
+                raise OSError("short atomic publication write")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _append(path: Path, entry: dict[str, object]) -> None:
@@ -320,7 +324,27 @@ class Experiment:
     def record(self, attempt_id: str, event: str, **detail: object) -> None:
         if event not in records.LIFECYCLE_EVENTS and event not in _DETAIL_EVENTS:
             raise ValueError(f"unknown lifecycle event {event!r}")
-        _append(self.journal(attempt_id), {"event": event, "at": _now(), **detail})
+        entry = {"event": event, "at": _now(), **detail}
+        final = event == "completion-qualified"
+        with experiment_lock(self.root) if final else nullcontext():
+            # A stable directory lock survives journal replacement. Every writer
+            # opens the journal AFTER this lock, so no append targets an old inode.
+            fd = os.open(self.root / JOURNAL, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                path = self.journal(attempt_id)
+                if final:
+                    old = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                    with os.fdopen(old, "rb") as stream:
+                        prefix = stream.read()
+                    _replace(path, prefix + (json.dumps(entry, sort_keys=True) + "\n").encode(), mode=0o600)
+                else:
+                    _append(path, entry)
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(fd)
 
     @classmethod
     def open(cls, root: Path) -> Experiment:
@@ -415,8 +439,9 @@ def experiment_lock(root: Path) -> Iterator[None]:
     `verify.grade` from its first snapshot to its stored result, so a sibling
     attempt's commit waits for a grade instead of reading to it as tampering.
     An attempt's journal and spool are written while it RUNS, for minutes,
-    and are not locked; `verify.grade` scopes them out of its comparison
-    instead.
+    and are not held behind this experiment lock; `verify.grade` scopes them
+    out of its comparison instead. A short journal-directory lock serializes
+    individual event writes and atomic qualification replacement.
 
     The `flock` is on the experiment DIRECTORY's own descriptor (the
     precedent is `cli._export_pilot_evidence`), so taking it creates no file
@@ -464,7 +489,52 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: picked up as the workspace record and crash with KeyError (confirmed) or, for a
 #: path/nonce-shaped forgery, silently misdirect cleanup.
 _DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
-                  "controller-turn")
+                  "controller-turn", "transcript-retained", "gate-witness-retained",
+                  "prompt-inputs", "prompt-input", "prompt-inputs-ended",
+                  "completion-opt-in", "completion-qualified", "owned-attempt", "owned-attempt-cleanup", "launch-suppressed")
+
+
+class OwnedAttemptIds(list[str]):
+    """Caller-visible IDs persisted before preparation; retention is not cleanup."""
+
+    def __init__(self, experiment: Experiment, parent_attempt: str) -> None:
+        super().__init__()
+        experiment.trial_of(parent_attempt)
+        self.experiment, self.parent_attempt = experiment, parent_attempt
+        self._ownership_lock = threading.RLock()
+        self._absent: dict[str, bool] = {}
+        self._journal_appends: list[bytes] = []
+
+    def bound_to(self, experiment: Experiment, attempt: str) -> bool:
+        return self.experiment.root.resolve() == experiment.root.resolve() and self.parent_attempt == attempt
+
+    def append(self, attempt: str) -> None:
+        with experiment_lock(self.experiment.root), self._ownership_lock:
+            if not isinstance(attempt, str) or not attempt or attempt == self.parent_attempt or attempt in self:
+                raise Refused("invalid or duplicate owned attempt identity")
+            if any(e.get("event") == "owned-attempt" and e.get("owned_id") == attempt
+                   for _, planned in self.experiment.attempts()
+                   for e in self.experiment.events(str(planned["attempt_id"]))):
+                raise Refused("owned attempt was already registered")
+            self._record("owned-attempt", owned_id=attempt)
+            super().append(attempt)
+            self._absent[attempt] = False
+
+    def confirm(self, attempt: str, absent: bool) -> None:
+        with experiment_lock(self.experiment.root), self._ownership_lock:
+            if attempt not in self._absent:
+                raise Refused("cannot confirm an unregistered owned attempt")
+            self._record("owned-attempt-cleanup", owned_id=attempt, confirmed=absent)
+            self._absent[attempt] = absent
+
+    def _record(self, event: str, **detail: object) -> None:
+        at = _now()
+        self.experiment.record(self.parent_attempt, event, at=at, **detail)
+        self._journal_appends.append((json.dumps({"event": event, "at": at, **detail}, sort_keys=True) + "\n").encode())
+
+    def all_absent(self) -> bool:
+        with self._ownership_lock:
+            return all(self._absent.values())
 
 
 def _read_object(root: Path, digest: str) -> bytes:
@@ -803,6 +873,7 @@ def run_attempt(
     env: dict[str, str] | None = None,
     cancel: Callable[[], bool] | None = None,
     grace: float = 2.0,
+    completion_deadline: completion.CompletionDeadline | None = None,
 ) -> dict[str, object]:
     """Run the subject once and confirm it stopped.
 
@@ -824,6 +895,16 @@ def run_attempt(
     stop: dict[str, object]
     with open(out_path, "xb") as out, open(err_path, "xb") as err:
         try:
+            if completion_deadline is not None:
+                try:
+                    timeout = completion_deadline.remaining(timeout)
+                except completion.CompletionUnavailable as exc:
+                    experiment.record(attempt_id, "launch-suppressed", reason=str(exc))
+                    stop = {"reason": "launch-failed", "confirmed": True, "exit_code": None, "error": str(exc)}
+                    experiment.record(attempt_id, "stopped", **stop)
+                    experiment.record(attempt_id, "stop-confirmed")
+                    return stop
+            deadline = time.monotonic() + timeout
             proc = subprocess.Popen(
                 argv, cwd=cwd, env=env if env is not None else {"PATH": os.environ.get("PATH", os.defpath)},
                 stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True,
@@ -840,13 +921,23 @@ def run_attempt(
         # group, record what can be recorded, then re-raise.
         try:
             experiment.record(attempt_id, "started", pid=proc.pid)
-            deadline = time.monotonic() + timeout
             reason = "exited"
             while proc.poll() is None:
+                # Preserve cancellation already witnessed by the controller before
+                # a later shared-clock expiry can replace its cause.
+                if completion_deadline is not None and cancel is not None and cancel():
+                    reason = "operator-cancelled"
+                    break
+                try:
+                    if completion_deadline is not None:
+                        completion_deadline.remaining(timeout)
+                except completion.CompletionUnavailable:
+                    reason = "timeout"
+                    break
                 if time.monotonic() >= deadline:
                     reason = "timeout"
                     break
-                if cancel is not None and cancel():
+                if completion_deadline is None and cancel is not None and cancel():
                     reason = "operator-cancelled"
                     break
                 time.sleep(0.02)
@@ -1029,6 +1120,300 @@ def _transcript_observation(
         **entry, "coverage": coverage, "ref": f"{OBJECTS}/{sha256_bytes(data).removeprefix('sha256:')}",
         "digest": _put_object(experiment.root, data), "size": len(data),
     }
+
+
+@_locked
+def retain_transcript(
+    experiment: Experiment, attempt_id: str, transcript: TranscriptEvidence, *,
+    confirmed: bool = True, limits: Limits | None = None,
+) -> dict[str, object]:
+    """Keep already-observed client bytes independently of artifact capture.
+
+    This DETAIL event never satisfies capture or execution. The caller has
+    already leak-checked the bytes. Object-storage failures are retained as
+    missing evidence, so they cannot skip the lifecycle driver's teardown.
+    """
+    events = experiment.events(attempt_id)
+    if any(e.get("event") == "transcript-retained" for e in events):
+        raise Refused("the transcript retention outcome is frozen once")
+    if (experiment.root / _lifecycle_name(attempt_id)).exists():
+        raise Refused("a finalized attempt is closed to transcript retention")
+    try:
+        entry = _transcript_observation(experiment, attempt_id, transcript, limits or Limits(), [])
+    except Exception as exc:  # noqa: BLE001 - storage refusal must not bypass accounting
+        entry = {"stream": records.CLIENT_TRANSCRIPT, "origin": "client-reported", "attempt_id": attempt_id,
+                 "coverage": "missing", "reason": f"transcript storage refused ({type(exc).__name__})"}
+    if not confirmed and entry["coverage"] != "missing":
+        entry = {**entry, "coverage": "partial", "reason": "the attempt's stop was not confirmed"}
+    experiment.record(attempt_id, "transcript-retained", observation=entry)
+    return entry
+
+
+def read_retained_transcript(experiment: Experiment, attempt_id: str) -> dict[str, object] | None:
+    """Read a unique journal-bound reference and verify its identity and bytes.
+
+    None means historical absence. A recorded refusal is missing with a reason;
+    a malformed, misbound or tampered reference raises rather than claiming
+    complete retention. The journal is controller-owned, not authenticated
+    against an operator who can rewrite the entire store.
+    """
+    events = [e for e in experiment.events(attempt_id) if e.get("event") == "transcript-retained"]
+    if not events:
+        return None
+    if len(events) != 1:
+        raise Refused("ambiguous retained transcript: multiple outcomes")
+    entry = events[0].get("observation")
+    if (not isinstance(entry, dict) or entry.get("attempt_id") != attempt_id
+            or entry.get("stream") != records.CLIENT_TRANSCRIPT or entry.get("origin") != "client-reported"
+            or set(entry) - {"attempt_id", "stream", "origin", "coverage", "reason", "ref", "digest", "size"}):
+        raise Refused("retained transcript identity or schema is invalid")
+    if entry.get("coverage") == "missing":
+        if (not isinstance(entry.get("reason"), str) or not entry["reason"]
+                or any(k in entry for k in ("ref", "digest", "size"))):
+            raise Refused("missing retained transcript must name a reason and no bytes")
+    elif entry.get("coverage") in ("complete", "partial"):
+        digest, size = entry.get("digest"), entry.get("size")
+        if (not isinstance(digest, str) or not _OBJECT_DIGEST.fullmatch(digest)
+                or type(size) is not int or size < 0
+                or entry.get("ref") != f"{OBJECTS}/{digest.removeprefix('sha256:')}"):
+            raise Refused("retained transcript reference is invalid")
+        if len(read_object(experiment, digest)) != size:
+            raise Refused("retained transcript size does not match its bytes")
+    else:
+        raise Refused("retained transcript coverage is invalid")
+    return dict(entry)
+
+
+# Controller-issued inputs are private detail evidence, not public observations.
+_PROMPT_EVENTS = ("prompt-inputs", "prompt-input", "prompt-inputs-ended")
+_PROMPT_REASONS = {"capacity", "encoding", "unsafe-text", "scanner", "storage"}
+_PROMPT_STOPS = {"lifecycle-ended", "declared-complete", "header-unavailable", "resume-precondition"}
+
+
+@dataclass(frozen=True)
+class PromptInput:
+    index: int
+    data: bytes | None
+    reason: str | None
+    launched: bool | None
+
+
+@dataclass(frozen=True)
+class PromptInputs:
+    coverage: str
+    inputs: tuple[PromptInput, ...] = ()
+
+
+def _prompt_details(experiment: Experiment, attempt_id: str) -> list[dict[str, object]]:
+    return [e for e in experiment.events(attempt_id) if e.get("event") in _PROMPT_EVENTS]
+
+
+def _prompt_shape(entry: dict[str, object], keys: set[str], attempt_id: str) -> None:
+    if set(entry) != keys | {"event", "at", "attempt"} or entry.get("attempt") != attempt_id:
+        raise Refused("invalid prompt input identity or schema")
+
+
+def _prompt_marker(entries: list[dict[str, object]], attempt_id: str) -> int:
+    if not entries or entries[0].get("event") != "prompt-inputs":
+        raise Refused("missing prompt input expectation")
+    marker = entries[0]
+    _prompt_shape(marker, {"version", "declared", "limit"}, attempt_id)
+    declared = marker.get("declared")
+    if (type(marker.get("version")) is not int or marker["version"] != 1
+            or type(declared) is not int or not 1 <= declared <= 4
+            or type(marker.get("limit")) is not int or marker["limit"] != Limits().max_stream_bytes):
+        raise Refused("invalid prompt input expectation")
+    return declared
+
+
+@_locked
+def begin_prompt_inputs(experiment: Experiment, attempt_id: str, resumes: int) -> None:
+    if type(resumes) is not int or not 0 <= resumes <= 3 or _prompt_details(experiment, attempt_id):
+        raise Refused("invalid or repeated prompt input expectation")
+    if (experiment.root / _lifecycle_name(attempt_id)).exists():
+        raise Refused("cannot prepare inputs for a finalized attempt")
+    experiment.record(attempt_id, "prompt-inputs", attempt=attempt_id, version=1,
+                      declared=resumes + 1, limit=Limits().max_stream_bytes)
+
+
+def _prompt_bytes(experiment: Experiment, digest: object, size: object, ref: object, remaining: int) -> bytes:
+    if (not isinstance(digest, str) or not _OBJECT_DIGEST.fullmatch(digest)
+            or type(size) is not int or not 0 <= size <= remaining
+            or ref != f"{OBJECTS}/{digest.removeprefix('sha256:')}"):
+        raise Refused("invalid prompt byte reference")
+    try:
+        objects = os.open(experiment.root / OBJECTS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            fd = os.open(digest.removeprefix("sha256:"), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=objects)
+        finally:
+            os.close(objects)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size != size:
+                raise Refused("prompt object type or size differs")
+            data = stream.read(size + 1)
+        if data is None or len(data) != size or sha256_bytes(data) != digest:
+            raise Refused("prompt bytes do not match their reference")
+        data.decode("utf-8", errors="strict")
+        if b"\x00" in data:
+            raise Refused("invalid prompt encoding")
+    except (OSError, UnicodeError) as exc:
+        raise Refused("prompt bytes unavailable or invalid") from exc
+    return data
+
+
+@_locked
+def retain_prompt_input(
+    experiment: Experiment, attempt_id: str, index: int, text: str,
+    check: Callable[[bytes], list[str]],
+) -> None:
+    """Bound before encoding; failed diagnostics never manufacture exact bytes."""
+    entries = _prompt_details(experiment, attempt_id)
+    declared = _prompt_marker(entries, attempt_id)
+    if (type(index) is not int or index != len(entries) or index > declared
+            or any(e.get("event") != "prompt-input" for e in entries[1:])
+            or (experiment.root / _lifecycle_name(attempt_id)).exists()):
+        raise Refused("prompt input order is frozen")
+    remaining = Limits().max_stream_bytes - sum(
+        len(i.data) for i in read_prompt_inputs(experiment, attempt_id).inputs if i.data is not None)
+    entry: dict[str, object] = {"index": index, "role": "initial" if index == 1 else "resume"}
+    reason = None
+    data = b""
+    if len(text) > remaining:
+        reason = "capacity"
+    else:
+        try:
+            data = text.encode("utf-8", errors="strict")
+        except UnicodeError:
+            reason = "encoding"
+        if reason is None and len(data) > remaining:
+            reason = "capacity"
+        if reason is None:
+            try:
+                if b"\x00" in data or check(data):
+                    reason = "unsafe-text"
+            except Exception:  # noqa: BLE001 - no unsafe exception text in diagnostics
+                reason = "scanner"
+    if reason is None:
+        digest = sha256_bytes(data)
+        ref = f"{OBJECTS}/{digest.removeprefix('sha256:')}"
+        try:
+            try:
+                _write_new(experiment.object_path(digest), data)
+            except Refused:  # existing objects must pass the SAME bounded read
+                _prompt_bytes(experiment, digest, len(data), ref, remaining)
+            entry.update(coverage="complete", digest=digest, ref=ref, size=len(data))
+        except Exception:  # noqa: BLE001 - storage cannot skip execution/accounting
+            reason = "storage"
+    if reason is not None:
+        entry.update(coverage="missing", reason=reason)
+    experiment.record(attempt_id, "prompt-input", attempt=attempt_id, **entry)
+
+
+@_locked
+def finish_prompt_inputs(experiment: Experiment, attempt_id: str, prepared: list[int], reason: str) -> None:
+    """A post-finalization DETAIL write; freeze actual preparation, not the maximum."""
+    entries = _prompt_details(experiment, attempt_id)
+    declared = _prompt_marker(entries, attempt_id)
+    if (not prepared or any(type(i) is not int for i in prepared)
+            or prepared != list(range(1, len(prepared) + 1)) or len(prepared) > declared
+            or reason not in _PROMPT_STOPS or any(e.get("event") == "prompt-inputs-ended" for e in entries)):
+        raise Refused("invalid or repeated prompt terminal population")
+    experiment.record(attempt_id, "prompt-inputs-ended", attempt=attempt_id, prepared=prepared, reason=reason)
+
+
+def _prompt_launched(events: list[dict[str, object]], index: int, finalized: bool) -> bool | None:
+    ran = {"exited", "timeout", "operator-cancelled"}
+    never = {"launch-failed", "attempt-not-running"}
+    if index == 1:
+        stopped = [e for e in events if e.get("event") == "stopped"]
+        started = [e for e in events if e.get("event") == "started"]
+        dispatched = [e for e in events if e.get("event") == "dispatched"]
+        if len(stopped) == len(started) == len(dispatched) == 1:
+            reason = stopped[0].get("reason")
+            if isinstance(reason, str) and reason in ran:
+                return True
+            if isinstance(reason, str) and reason in never:
+                # Legacy final stop may describe a never-started resume.
+                return any(
+                    e.get("event") == "controller-turn" and type(e.get("index")) is int
+                    and isinstance(index_value := e["index"], int) and 2 <= index_value <= 4 and e.get("dispatched") is True
+                    and any(other.get("event") == "controller-turn" and other.get("index") == e["index"]
+                            and "ended" in other for other in events)
+                    for e in events)
+        if (finalized and not dispatched and not started and not stopped
+                and not any(e.get("event") == "controller-turn" for e in events)):
+            return False
+    else:
+        turns = [e for e in events if e.get("event") == "controller-turn"
+                 and type(e.get("index")) is int and e["index"] == index]
+        outcomes = [e for e in turns if type(e.get("delivered")) is bool]
+        dispatches = [e for e in turns if e.get("dispatched") is True]
+        if len(outcomes) == 1:
+            outcome = outcomes[0]
+            ended = outcome.get("ended")
+            if (outcome["delivered"] is False and len(dispatches) <= 1
+                    and ("ended" not in outcome or len(dispatches) == 1 and isinstance(ended, str) and ended in never)):
+                return False
+            if len(dispatches) == 1 and outcome["delivered"] is True and isinstance(ended, str) and ended in ran:
+                return True
+    return None
+
+
+@_locked
+def read_prompt_inputs(experiment: Experiment, attempt_id: str) -> PromptInputs:
+    """Read private exact bytes. Launch is separate; model reception is unproven.
+
+    Historical absence and missing terminal population cannot claim a complete
+    trace. The controller host is trusted, as with the existing journal/CAS.
+    """
+    events = experiment.events(attempt_id)
+    entries = [e for e in events if e.get("event") in _PROMPT_EVENTS]
+    if not entries:
+        return PromptInputs("not-recorded")
+    declared = _prompt_marker(entries, attempt_id)
+    inputs: list[PromptInput] = []
+    remaining = Limits().max_stream_bytes
+    terminals: list[dict[str, object]] = []
+    finalized = (experiment.root / _lifecycle_name(attempt_id)).exists()
+    for entry in entries[1:]:
+        if entry.get("event") == "prompt-inputs-ended":
+            terminals.append(entry)
+            continue
+        if terminals or entry.get("event") != "prompt-input":
+            raise Refused("prompt input order or expectation is ambiguous")
+        index = len(inputs) + 1
+        if (type(entry.get("index")) is not int or entry["index"] != index or index > declared
+                or entry.get("role") != ("initial" if index == 1 else "resume")):
+            raise Refused("invalid prompt turn identity")
+        keys = {"index", "role", "coverage"}
+        data: bytes | None = None
+        reason: str | None = None
+        if entry.get("coverage") == "complete":
+            _prompt_shape(entry, keys | {"digest", "ref", "size"}, attempt_id)
+            data = _prompt_bytes(experiment, entry["digest"], entry["size"], entry["ref"], remaining)
+            remaining -= len(data)
+        elif entry.get("coverage") == "missing":
+            _prompt_shape(entry, keys | {"reason"}, attempt_id)
+            value = entry.get("reason")
+            if not isinstance(value, str) or value not in _PROMPT_REASONS:
+                raise Refused("invalid prompt refusal class")
+            reason = value
+        else:
+            raise Refused("invalid prompt input coverage")
+        inputs.append(PromptInput(index, data, reason, _prompt_launched(events, index, finalized)))
+    coverage = "unknown"
+    if len(terminals) == 1:
+        terminal = terminals[0]
+        _prompt_shape(terminal, {"prepared", "reason"}, attempt_id)
+        prepared = terminal.get("prepared")
+        if (isinstance(prepared, list) and prepared and all(type(i) is int for i in prepared)
+                and prepared == list(range(1, len(inputs) + 1)) and len(prepared) <= declared
+                and isinstance(terminal.get("reason"), str) and terminal["reason"] in _PROMPT_STOPS
+                and (terminal["reason"] != "declared-complete" or len(prepared) == declared)):
+            coverage = "complete" if all(i.data is not None for i in inputs) else "missing"
+    return PromptInputs(coverage, tuple(inputs))
 
 
 def _claimed_attempts(value: object) -> Iterator[str]:

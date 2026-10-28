@@ -1,0 +1,25 @@
+{
+ "report": {
+  "checks": {
+   "lint": {
+    "status": "PASS"
+   },
+   "test": {
+    "status": "PASS"
+   },
+   "typecheck": {
+    "status": "PASS"
+   }
+  }
+ },
+ "steps": [
+  {
+   "gate": "plan",
+   "route": "absolute"
+  },
+  {
+   "gate": "summary",
+   "route": "absolute"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+{
+  "branch": "issue-536-fixture-live-record-fidelity-real-agent-opt-in-in",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "79fbaaffe5c22606d5356d268d0b42b74201f885",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T17-39-48-01a16fdb-0b9d-7133-83ae-fd9718f95524.jsonl",
+    "thread_id": "01a16fdb-0b9d-7133-83ae-fd9718f95524"
+  },
+  "issue": "536",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-25T02:39:01Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 178
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/24/rollout-2026-10-24T22-35-30-01a170e9-c2b6-7b63-9f13-7fdbb59372db.jsonl",
+    "thread_id": "01a170e9-c2b6-7b63-9f13-7fdbb59372db"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

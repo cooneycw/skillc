@@ -132,7 +132,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import IO
 
@@ -147,6 +147,7 @@ from .backend import (
     ExecuteResult,
     Limits,
 )
+from .completion import CompletionUnavailable, number
 from .decide_reply_channel import DecideFn, DecideReplyChannel, LoggedDecision
 from .lifecycle import CANARY_NONCE_KEY
 from .verify import SURFACE_EXECUTABLE_KEY
@@ -352,12 +353,22 @@ def _ensure_private_trigger_dir(path: Path) -> None:
     further for 0700 (every bit already absent from "group"/"other"), but
     stating the final mode explicitly removes any dependence on what the
     umask happens to be rather than reasoning about whether it is safe
-    this time."""
-    if not path.exists():
+    this time. Concurrent creators arbitrate with mkdir itself: only the
+    successful creator finalizes its mode. An existing or competing leaf must
+    pass lstat/type/owner/mode checks without following a link or changing it.
+    This does not exclude later same-uid path replacement."""
+    try:
         path.mkdir(parents=True, mode=0o700)
+    except FileExistsError:
+        pass  # validate the winner exactly as any already-existing leaf
+    else:
         os.chmod(path, 0o700)
         return
-    st = path.stat()
+    st = path.lstat()
+    if not stat.S_ISDIR(st.st_mode):
+        raise BackendUnavailable(
+            f"refusing to use trigger socket directory {path}: not a real directory"
+        )
     if st.st_uid != os.getuid():
         raise BackendUnavailable(
             f"refusing to use trigger socket directory {path}: owned by uid {st.st_uid}, "
@@ -871,6 +882,16 @@ class _Handle:
     egress_proxy: str | None = None
 
 
+def _unconfirmed_cleanup_note(reason: str, attempt_id: str) -> str:
+    """#540: the clause a raising prepare() adds when its cleanup ran without
+    the daemon's answer to `run -d`, so a create still in flight may land
+    after it. Names the label a sweep can find that container by."""
+    return (
+        f"; {reason}, so a container it creates after this cleanup is not removed - "
+        f"find it by label {ATTEMPT_LABEL_KEY}={attempt_id}"
+    )
+
+
 @dataclass(frozen=True)
 class DockerBackend:
     """One `ExecutionBackend` per attempt lifecycle. `image` should be pinned
@@ -1053,7 +1074,9 @@ class DockerBackend:
         daemon overload, not a pull - is read exactly like a nonzero exit: the
         best-effort `rm -f` cleanup below runs either way, itself bounded, and
         `prepare()` raises rather than returning a handle for a container this
-        call cannot confirm the state of."""
+        call cannot confirm the state of. After a timeout, that cleanup waits
+        for the daemon's answer first (`_run_awaiting_answer`, issue #540), so
+        a create still in flight cannot land behind it."""
         env = _docker_env()
         if probe_daemon(self.docker_bin, self.daemon_timeout, env) is None:
             raise BackendUnavailable(f"docker daemon unreachable via {' '.join(self.docker_bin)!r}")
@@ -1083,10 +1106,8 @@ class DockerBackend:
             self._stop_egress(egress_proxy, egress_network, env)
             raise
         try:
-            started = subprocess.run(
-                argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            started, timed_out, answered = self._run_awaiting_answer(argv, env)
+        except OSError as exc:
             # Best-effort: whether or not a container was actually created,
             # this makes sure none is left behind under this name. Also
             # bounded - a cleanup call that itself hangs must not turn a
@@ -1107,10 +1128,32 @@ class DockerBackend:
             self._best_effort_rm(name, env)
             self._stop_egress(egress_proxy, egress_network, env)
             raise
+        if timed_out is not None:
+            # #540: the cleanup runs only once the daemon has answered, so a
+            # create still in flight cannot land after it. A daemon that never
+            # answered leaves that unconfirmable, and the message says so.
+            if channel is not None:
+                channel.close()
+            cleanup_note = self._best_effort_rm(name, env)
+            if not answered:
+                cleanup_note += _unconfirmed_cleanup_note(
+                    f"the daemon did not answer 'docker run -d' within a further {self.daemon_timeout}s", attempt_id,
+                )
+            cleanup_note += self._stop_egress(egress_proxy, egress_network, env)
+            raise BackendUnavailable(
+                f"docker run failed to start a container for {attempt_id!r}: {timed_out}{cleanup_note}"
+            ) from timed_out
+        assert started is not None
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
-            cleanup_note = self._best_effort_rm(name, env) + self._stop_egress(egress_proxy, egress_network, env)
+            cleanup_note = self._best_effort_rm(name, env)
+            if not answered:
+                cleanup_note += _unconfirmed_cleanup_note(
+                    f"the 'docker run -d' CLI was ended by signal {-started.returncode} before the daemon answered",
+                    attempt_id,
+                )
+            cleanup_note += self._stop_egress(egress_proxy, egress_network, env)
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}{cleanup_note}"
             )
@@ -1233,6 +1276,49 @@ class DockerBackend:
         except (OSError, subprocess.TimeoutExpired):
             return None
         return done.stdout if done.returncode == 0 else None
+
+    def _run_awaiting_answer(
+        self, argv: list[str], env: Mapping[str, str],
+    ) -> tuple[subprocess.CompletedProcess[str] | None, subprocess.TimeoutExpired | None, bool]:
+        """prepare()'s `run -d`, bounded by `daemon_timeout`. Returns
+        `(completed, None, True)` within the bound, else `(None, timeout,
+        answered)`.
+
+        Issue #540: `run -d` is create-then-start in one CLI call, and killing
+        the CLI at its bound does not stop a create the daemon is still
+        working on. The cleanup that followed found "No such container", and
+        the create landed after it: kyle19's never-started
+        `skillc-a-live-conformance-fbba8d601e10`. So a timed-out call is given
+        one further `daemon_timeout` to return. Once it has, the daemon has
+        settled whether NAME exists, and the caller's `rm -f` is reliable.
+        `answered` is False when it did not return then either (the CLI is
+        killed), or when something else ended it by a signal in either window;
+        either way the caller cannot confirm its cleanup."""
+        proc = subprocess.Popen(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        )
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=self.daemon_timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = subprocess.TimeoutExpired(argv, self.daemon_timeout)
+                try:
+                    proc.communicate(timeout=self.daemon_timeout)
+                except subprocess.TimeoutExpired:
+                    return None, timed_out, False
+                # A CLI ended by a signal never heard the daemon's answer, so
+                # its exit says nothing about whether the create has settled.
+                return None, timed_out, proc.returncode >= 0
+            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr), None, proc.returncode >= 0
+        finally:
+            if proc.poll() is None:
+                # Reap without draining: a pipe held open by anything the CLI
+                # left behind must not turn this bounded call into a hang.
+                proc.kill()
+                proc.wait()
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
 
     def _best_effort_rm(self, name: str, env: Mapping[str, str]) -> str:
         """prepare()'s failure-path cleanup: make sure no container is left
@@ -1772,7 +1858,7 @@ class DockerBackend:
              "platform=sys.platform,machine=platform.machine())))")]))
         if measured_python != declared["python"]:
             raise rs.Refused("actual Python identity differs from selected runtime")
-        policy = rs.supported_policy()
+        policy = self.runtime_supply.policy  # #279 policy B: the receipt's own pin
         uv = read(["uv", "--version"]).decode("utf-8", errors="strict").split()
         if len(uv) < 2 or uv[:2] != ["uv", policy["uv_version"]]:
             raise rs.Refused("actual uv version differs from selected runtime")
@@ -1996,6 +2082,19 @@ class DockerBackend:
         exec_argv += list(argv)
 
         try:
+            if limits.completion_deadline is not None:
+                limits = replace(limits, timeout=limits.completion_deadline.remaining(limits.timeout))
+            if limits.execution_deadline is not None:
+                left = number(limits.execution_deadline) - number(time.monotonic())
+                if left <= 0:
+                    raise CompletionUnavailable("local execution deadline exhausted")
+                limits = replace(limits, timeout=min(limits.timeout, left))
+        except CompletionUnavailable as exc:
+            return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+        deadline = time.monotonic() + limits.timeout
+        if limits.execution_deadline is not None:
+            deadline = min(deadline, limits.execution_deadline)
+        try:
             proc = subprocess.Popen(
                 exec_argv, env=handle.env,
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
@@ -2036,7 +2135,6 @@ class DockerBackend:
 
             threading.Thread(target=_feed_stdin, daemon=True).start()
 
-        deadline = time.monotonic() + limits.timeout
         reason = "exited"
         while proc.poll() is None:
             if time.monotonic() >= deadline:
@@ -2150,6 +2248,8 @@ class DockerBackend:
         container - see that field's own docstring for the forgeability
         reasoning."""
         assert isinstance(handle, _Handle)
+        if limits.completion_deadline is not None and limits.execution_deadline is None:
+            limits = replace(limits, execution_deadline=time.monotonic() + limits.timeout)
         reachable, absent, status = self._inspect(handle)
         if reachable and (absent or status != "running"):
             # #304: a second `execute()` against an already-stopped handle
@@ -2201,6 +2301,8 @@ class DockerBackend:
             exec_env=dict(self.agent_exec_env()) if self.agent_exec_env is not None else None,
         )
         if isinstance(launched, ExecuteResult):
+            if limits.completion_deadline is not None or limits.execution_deadline is not None:
+                self._kill_container(handle, "KILL")
             # Launch itself failed (`OSError` from `Popen`) - `_launch_and_wait`
             # already built the `launch-failed` result; add the one piece of
             # context only THIS caller has (whether the wrap prefix it asked
@@ -2784,6 +2886,39 @@ class DockerBackend:
         except (OSError, subprocess.TimeoutExpired):
             return False
         return proc.returncode == 0
+
+    def start_root_daemon_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None) -> bool:
+        """Starts `argv` DETACHED inside the live container AS ROOT
+        (`docker exec -d -u 0`): #518's credential steward, which must outlive
+        this call and run as a uid the candidate cannot signal. Returns `True`
+        when docker accepted the start, `False` on any failure - never raises.
+        A caller confirms the daemon by its own first report (the steward's
+        `armed` event over the trigger socket), never by this return value."""
+        assert isinstance(handle, _Handle)
+        wait = timeout if timeout is not None else self.daemon_timeout
+        try:
+            proc = subprocess.run([*self.docker_bin, "exec", "-d", "-u", "0", "--", handle.name, *argv],
+                                  capture_output=True, env=handle.env, timeout=wait, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    def root_output_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None,
+                               max_bytes: int = 1 << 20) -> bytes | None:
+        """Runs `argv` inside the container AS ROOT and returns its stdout, or
+        `None` on any failure, a nonzero exit or output over `max_bytes`
+        (#518: the steward's vault and signals, which the candidate cannot
+        reach). Never raises."""
+        assert isinstance(handle, _Handle)
+        wait = timeout if timeout is not None else self.daemon_timeout
+        try:
+            proc = subprocess.run([*self.docker_bin, "exec", "-u", "0", "--", handle.name, *argv],
+                                  capture_output=True, env=handle.env, timeout=wait, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0 or len(proc.stdout) > max_bytes:
+            return None
+        return proc.stdout
 
     def remove_file_in_attempt(self, handle: object, path: str, timeout: float = 5.0) -> bool:
         """Deletes `path` inside the attempt's container and confirms it is

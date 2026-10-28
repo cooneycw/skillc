@@ -79,6 +79,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import posixpath
 import re
 import secrets
 import shlex
@@ -92,11 +93,13 @@ from typing import Any
 
 from . import attempt_guard as ag
 from . import codex_guard as cg
-from . import controller_turns as ct
 from . import (
+    completion,
     credential,
     demo,
     gate_overlay,
+    gate_state,
+    launch_evidence,
     leak,
     profile,
     records,
@@ -106,6 +109,8 @@ from . import (
     verify,
     witness_capture,
 )
+from . import controller_turns as ct
+from . import credential_steward as cs
 from . import egress as eg
 from . import fixture_overlay as fo
 from . import fixture_service as fs
@@ -296,7 +301,6 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
     rule has been grounded for it yet (#124 is the Claude Code arm) - `None`
     means "not assessed", never "no drift"."""
     line_types: dict[str, int] = {}
-    client_version: str | None = None
     model: str | None = None
     unrecognized: set[str] = set()
     response_items = 0
@@ -318,8 +322,6 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
         key = f"{top}/{payload_type}" if payload_type is not None else top
         line_types[key] = line_types.get(key, 0) + 1
         if client == "codex":
-            if top == "session_meta" and isinstance(payload, dict) and isinstance(payload.get("cli_version"), str):
-                client_version = client_version or payload["cli_version"]
             if top == "turn_context" and isinstance(payload, dict) and isinstance(payload.get("model"), str):
                 model = model or payload["model"]
             if top == "response_item":
@@ -332,13 +334,11 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
                 elif payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
                     unrecognized.add(payload_type)
         else:
-            if isinstance(obj.get("version"), str):
-                client_version = client_version or obj["version"]
             message = obj.get("message")
             if top == "assistant" and isinstance(message, dict) and isinstance(message.get("model"), str):
                 model = model or message["model"]
     return {
-        "transcript_client_version": client_version,
+        "transcript_client_version": ta.observed_client_version(client, raw),
         "transcript_model": model,
         "transcript_line_types": dict(sorted(line_types.items())),
         "transcript_response_items_inspected": response_items if client == "codex" else None,
@@ -507,7 +507,140 @@ _FLOW_AUTO_GATE_SHIM_SOURCE = (
 )
 _FLOW_FINISH_GATE = "flow-auto-finish"
 _FLOW_FINISH_PLAN = "finish"
+#: #332: flow-check's two prescribed calls (`reference.md` Step 2 and Step 5),
+#: re-read at CPP 652c0118 (#529): gate name -> argv after the gate script.
+FLOW_CHECK_GATE_ARGS: dict[str, tuple[str, ...]] = {
+    "flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
+    "flow-check-summary": ("--check-summary",),
+}
+#: #529: the flow-check shim for a MIRRORED gate copy (bundled or checkout).
+#: Outside `docker/trial/` like the flow-auto shim, so the pinned flow-check
+#: runtime's build context is unchanged; `docker/trial/flow-check-gate-shim.py`
+#: keeps witnessing the installed copy exactly as before.
+FLOW_CHECK_BUNDLED_GATE_SHIM_SOURCE = (
+    Path(__file__).resolve().parent.parent / "docker" / "fixture-service" / "flow-check-bundled-gate-shim.py"
+)
+#: #525: the shim line a mirrored gate copy sets (`docker/fixture-service/
+#: flow-auto-gate-shim.py`, and `flow-check-bundled-gate-shim.py` since #529);
+#: a shim without it - the installed-path flow-check shim - cannot witness one.
+_SHIM_VIA_LINE = b"_VIA: str | None = None\n"
+#: #279: the most shim refusals one attempt records before saying the log is full.
+MAX_GATE_REFUSALS = 256
+#: #525: each witnessed bundled gate's root-owned mirror of its skill's whole
+#: `scripts/` directory, so the real script's BASH_SOURCE-relative siblings
+#: (`gate-lib.sh`, `counter-model-receipt.py`) are the skill's own.
+_BUNDLED_GATE_HARNESS_ROOT = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/bundled"
+#: #529: each witnessed CHECKOUT gate copy's mirror, and the controller-written
+#: manifest that proves it (a checkout ships no skill manifest).
+_CHECKOUT_GATE_HARNESS_ROOT = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/checkout"
+#: #529 (counter-model review): a mirror path component - one safe name.
+_SAFE_MIRROR_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
+
+def bundled_gate_shim(shim_source: bytes, via: str) -> bytes:
+    """#525: a mirrored-copy shim with its one `_VIA` line set to `via`."""
+    if shim_source.count(_SHIM_VIA_LINE) != 1:
+        raise HomeFileVerificationRefused("this gate shim cannot witness a mirrored gate copy (no _VIA line): a "
+                                          "flow-check copy is witnessed by flow-check-bundled-gate-shim.py (#529)")
+    return shim_source.replace(_SHIM_VIA_LINE, f"_VIA: str | None = {via!r}\n".encode())
+
+
+def _bundled_via(path: str) -> str:
+    """`<skills root>/<skill>/<dir>/<gate>` -> `bundled:<skill>` - derived from
+    the declared path's own shape, never a subject's layout named here."""
+    parts = path.split("/")
+    if len(parts) < 3 or not all(parts[-3:]):
+        raise HomeFileVerificationRefused(f"bundled gate entrypoint {path!r} has no <skill>/<dir>/<gate> shape")
+    return f"bundled:{parts[-3]}"
+
+
+def _overlay_bundled_gates(
+    backend: DockerBackend, handle: object, bundled: Sequence[str], verify_home_files: Mapping[str, str],
+    home_files: Mapping[str, bytes], home_modes: Mapping[str, str] | None, shim_source: bytes, manifest: str | None,
+    checkout: Mapping[str, str] | None = None,
+) -> list[dict[str, object]]:
+    """#525: witness each skill-bundled gate copy - and, from #529, each
+    declared CHECKOUT copy. Mirror the copy's whole directory root-owned, move
+    the real gate into the mirror with the shim in its place (`gate_overlay`,
+    unchanged), then PROVE the mirror is the shipped tree: it must pass
+    `sha256sum -c`, and the in-place directory must fail on exactly the
+    shimmed file. A bundled copy is proven against its skill's own manifest; a
+    checkout copy, which ships none, against a root-owned manifest the
+    controller writes from the verified closure digests. Returns the declared
+    treatment deviations; refuses on any doubt."""
+    deviations: list[dict[str, object]] = []
+    copies: list[tuple[str, str, str | None]] = [(path, _bundled_via(path), None) for path in bundled]
+    copies += [(path, f"checkout:{skill}", skill) for path, skill in sorted((checkout or {}).items())]
+    planned: list[tuple[str, str, str | None, str]] = []
+    for path, via, checkout_skill in copies:
+        # Counter-model review (#529): every name a mirror path is built from
+        # is one safe component, so no privileged write leaves the harness
+        # root; and a route and a mirror name exactly one copy. Checked for
+        # ALL copies before the first write.
+        owner = via.split(":", 1)[1]
+        dir_name = posixpath.basename(posixpath.dirname(path))
+        if not (_SAFE_MIRROR_COMPONENT.fullmatch(owner) and _SAFE_MIRROR_COMPONENT.fullmatch(dir_name)):
+            raise HomeFileVerificationRefused(f"gate copy {path!r} names an unsafe mirror ({owner!r}, {dir_name!r})")
+        root = _BUNDLED_GATE_HARNESS_ROOT if checkout_skill is None else _CHECKOUT_GATE_HARNESS_ROOT
+        planned.append((path, via, checkout_skill, f"{root}/{owner}/{dir_name}"))
+    if len({v for _p, v, _s, _m in planned}) != len(planned) or len({m for *_x, m in planned}) != len(planned):
+        raise HomeFileVerificationRefused("two gate copies would share one route or one mirror: a route names exactly "
+                                          "one copy (#529)")
+    for path, via, checkout_skill, mirror in planned:
+        scripts_dir = posixpath.dirname(path)
+        gate_name = posixpath.basename(path)
+        real_digest = verify_home_files.get(path)
+        if real_digest is None:
+            raise HomeFileVerificationRefused(f"gate copy {path!r} is not in the verified closure")
+        siblings = {dest[len(scripts_dir) + 1:]: data for dest, data in home_files.items()
+                    if dest.startswith(scripts_dir + "/") and dest != path}
+        if checkout_skill is None:
+            if not manifest or manifest not in siblings:
+                raise HomeFileVerificationRefused(f"{scripts_dir} ships no {manifest}: the bundled-gate mirror "
+                                                  "cannot be proven to be the shipped skill (#525)")
+            proof = manifest
+        else:
+            # #529: the proof is the verified closure itself, written root-owned
+            # OUTSIDE the mirror so the mirror holds exactly the shipped files.
+            digests = {rel: verify_home_files.get(f"{scripts_dir}/{rel}") for rel in siblings}
+            digests[gate_name] = real_digest
+            proof = f"{mirror}.sha256"
+            lines = "".join(f"{str(d)[len('sha256:'):]}  {rel}\n" for rel, d in sorted(digests.items()) if d)
+            if not backend.write_root_owned_file_in_attempt(handle, proof, lines.encode(), mode=0o644):
+                raise HomeFileVerificationRefused(f"could not write the root-owned manifest for {scripts_dir}")
+        for rel, data in sorted(siblings.items()):
+            dest = f"{scripts_dir}/{rel}"
+            if verify_home_files.get(dest) != "sha256:" + hashlib.sha256(data).hexdigest():
+                raise HomeFileVerificationRefused(f"{dest} is not a verified closure file; refusing to mirror it")
+            mode = 0o755 if (home_modes or {}).get(dest) == "100755" else 0o644
+            if not backend.write_root_owned_file_in_attempt(handle, f"{mirror}/{rel}", data, mode=mode):
+                raise HomeFileVerificationRefused(f"could not write the root-owned mirror of {dest}")
+        shim = bundled_gate_shim(shim_source, via)
+        gate_overlay.apply_flow_check_gate_overlay(
+            backend, handle, subject_root=CONTAINER_HOME, harness_root=mirror, subject_path=path,
+            harness_path=gate_name, expected_real_digest=real_digest[len("sha256:"):],
+            expected_shim_digest=hashlib.sha256(shim).hexdigest(), shim_content=shim,
+        )
+        check = 'cd -- "$1" && sha256sum -c --quiet -- "$2"'
+        if backend.root_output_in_attempt(handle, ["sh", "-c", check, "sh", mirror, proof]) is None:
+            raise HomeFileVerificationRefused(f"the mirror of {scripts_dir} does not verify against "
+                                              f"{proof}: it is not byte-identical to the shipped skill (#525)")
+        in_place = backend.root_output_in_attempt(
+            handle, ["sh", "-c", 'cd -- "$1" && { sha256sum -c -- "$2" 2>/dev/null; true; }', "sh",
+                     f"{CONTAINER_HOME}/{scripts_dir}", proof])
+        failures = sorted(line.rsplit(":", 1)[0] for line in (in_place or b"").decode("utf-8", "replace").splitlines()
+                          if not line.endswith(": OK"))
+        if in_place is None or failures != [gate_name]:
+            raise HomeFileVerificationRefused(f"the installed {scripts_dir} differs from {proof} on {failures}, "
+                                              f"not on exactly the declared shim {gate_name!r} (#525)")
+        deviation: dict[str, object] = {
+            "path": path, "via": via, "real_digest": real_digest,
+            "shim_digest": "sha256:" + hashlib.sha256(shim).hexdigest(), "mirror": mirror,
+            "mirror_verified": True, "in_place_checksum_failures": failures}
+        if checkout_skill is not None:
+            deviation["proven_against"] = "verified closure digests (controller-written manifest)"
+        deviations.append(deviation)
+    return deviations
 
 
 def _gate_witness_choice(
@@ -529,8 +662,67 @@ def _gate_witness_choice(
             raise HomeFileVerificationRefused("gate_witness 'flow-finish' needs a declared gate_entrypoint to witness")
         return {_FLOW_FINISH_GATE: ()}, {_FLOW_FINISH_GATE: _FLOW_FINISH_PLAN}, _FLOW_AUTO_GATE_SHIM_SOURCE
     if fixture is not None:
-        return fixture.gates, None, fixture.gate_shim_source
+        # #530: a fixture may declare which gate carries which plan's stages.
+        return fixture.gates, (dict(getattr(fixture, "stage_plans", None) or {}) or None), fixture.gate_shim_source
     return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
+
+
+def _require_bundled_route(bundled: Sequence[str], gate_entrypoint: str | None, fixture: AttemptFixture | None,
+                           shim_source: Path, gate_args: Mapping[str, Sequence[str]] | None,
+                           manifest: str | None = None, checkout: Mapping[str, str] | None = None) -> None:
+    """#525: where a mirrored gate copy may be witnessed at all; refuses
+    otherwise. #529: the flow-check map as well as the flow-auto bare call,
+    each only with ITS shim, so a prescribed call is never a 125 by mismatch."""
+    if not bundled and not checkout:
+        return
+    if bundled and not manifest:
+        raise HomeFileVerificationRefused("a bundled gate's mirror needs the subject's checksum manifest to be proven")
+    if gate_entrypoint is None:
+        raise HomeFileVerificationRefused("bundled gate entrypoints need the declared gate_entrypoint they copy")
+    if fixture is None:
+        # Counter-model review: only the fixture-live report surfaces the
+        # declared deviation (record AND head); a calibration or
+        # discrimination report would drop it, so those routes refuse.
+        raise HomeFileVerificationRefused("a bundled gate is witnessed only on the fixture-live route, whose "
+                                          "report declares the treatment deviation (#525)")
+    if shim_source.read_bytes().count(_SHIM_VIA_LINE) != 1:
+        raise HomeFileVerificationRefused("this attempt's gate witness cannot see a mirrored gate copy (no _VIA "
+                                          "line): a flow-check copy needs flow-check-bundled-gate-shim.py (#529)")
+    declared = {gate: tuple(args) for gate, args in (gate_args or {}).items()}
+    if declared == {_FLOW_FINISH_GATE: ()}:
+        expected = _FLOW_AUTO_GATE_SHIM_SOURCE
+    elif declared == FLOW_CHECK_GATE_ARGS:
+        expected = FLOW_CHECK_BUNDLED_GATE_SHIM_SOURCE
+    else:
+        raise HomeFileVerificationRefused(f"a bundled gate is witnessed as {_FLOW_FINISH_GATE!r} (a bare call) or as "
+                                          "flow-check's two prescribed calls, and this attempt declares neither "
+                                          "(#525, #529)")
+    if shim_source.read_bytes() != expected.read_bytes():
+        raise HomeFileVerificationRefused(f"this attempt's gate map is witnessed by {expected.name}, not by the shim "
+                                          "it supplies: a prescribed call would be refused by mismatch (#529)")
+
+
+def gate_state_problem(root: Path, paths: Sequence[str]) -> str | None:
+    """#530: why a run starting on `root` may have its stages carried in from
+    resumable state rather than executed - a declared state path that exists
+    and is not an empty directory - or None. The source digest excludes `.git`,
+    where a runner keeps such state, so it cannot see this on its own."""
+    for rel in paths:
+        path = root / rel
+        if (path.is_symlink() or path.exists()) and (path.is_symlink() or not path.is_dir() or any(path.iterdir())):
+            return f"resumable gate state present at {rel}"
+    return None
+
+
+def _register_mirror_variants(session: _WitnessSession, deviations: Sequence[Mapping[str, object]]) -> None:
+    """#525: one declared variant per witnessed mirrored copy - #529: of EVERY
+    gate in the attempt's map (flow-check's two, or the flow-auto bare call),
+    each running that copy's mirror with that gate's own argv."""
+    gate_map = session.gate_args if session.gate_args is not None else FLOW_CHECK_GATE_ARGS
+    for deviation in deviations:
+        for gate, args in gate_map.items():
+            session.variants.setdefault(gate, {})[str(deviation["via"])] = [
+                "bash", f"{deviation['mirror']}/{posixpath.basename(str(deviation['path']))}", *args]
 
 
 @dataclass
@@ -559,6 +751,26 @@ class _WitnessSession:
     #: make, as the SHIM reported them. Subject-reported, never evidence: kept
     #: out of the gate-witness record and of everything grading reads.
     passthrough_log: list[dict[str, object]] = field(default_factory=list, repr=False)
+    #: #525: gate -> {via: argv} for each witnessed skill-bundled gate copy,
+    #: set by the overlay before `bind_and_check`; empty keeps the witness as it was.
+    variants: dict[str, dict[str, list[str]]] = field(default_factory=dict, repr=False)
+    #: #279 (orchestrator): calls a gate shim REFUSED (exit 125) - behaviour the
+    #: subject would not meet in real use - as the shim reported them. Counted,
+    #: never silent: the attempt record and the report's headline carry them.
+    refusals: list[dict[str, object]] = field(default_factory=list, repr=False)
+    #: #529: the gate_entrypoint is itself a mirrored copy, so no installed
+    #: copy exists and every genuine run names its `via`; one that does not is
+    #: refused, never run against an absent harness path.
+    require_via: bool = False
+    #: #530: record each run's SOURCE digest of the gated repository at its
+    #: start even without the ordering counter (a fixture that opts in).
+    source_digest: bool = False
+    #: #530 (counter-model re-review): repository-relative paths where the
+    #: gate's runner keeps RESUMABLE state; present at a run's start, the run's
+    #: source digest reads unreadable, so its stages are never attributable.
+    gate_state_paths: tuple[str, ...] = ()
+    gate_state_protocol: gate_state.Protocol | None = None
+    output_store: Callable[[bytes], str] | None = field(default=None, repr=False)
     nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
     ready: bool = False
     finalization_started: bool = False
@@ -577,7 +789,24 @@ class _WitnessSession:
             raise ChannelRefusal("witness session is not ready for gates")
         if request.get("op") == pg.PASSTHROUGH_OP:
             return self._log_passthrough(request)
+        if request.get("op") == "gate_refused":
+            return self._log_refusal(request)
+        if self.require_via and request.get("op") == "run_gate" and "via" not in request:
+            raise ChannelRefusal("this attempt installs no gate copy outside its mirrored ones: a run names its via (#529)")
         return self.witness.decide(request)
+
+    def _log_refusal(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        """Record one shim refusal, bounded. A refusal the agent forges only
+        RAISES the count (a more conservative reading), never lowers it."""
+        if len(self.refusals) >= MAX_GATE_REFUSALS:
+            return {"logged": False, "reason": "the refusal log is full"}
+        argv, cwd, via = request.get("argv"), request.get("cwd"), request.get("via")
+        if (not isinstance(argv, list) or len(argv) > 64 or not all(isinstance(a, str) and len(a) <= 512 for a in argv)
+                or not isinstance(cwd, str) or len(cwd) > 4096 or (via is not None and not isinstance(via, str))):
+            raise ChannelRefusal("gate_refused fields are malformed or oversized")
+        self.refusals.append({"argv": list(argv), "cwd": cwd, "via": via, "at": time.time(),
+                              "shim_reported": True})
+        return {"logged": True}
 
     def _log_passthrough(self, request: Mapping[str, object]) -> Mapping[str, object]:
         """Record one shim pass-through, bounded; never a gate run."""
@@ -619,7 +848,24 @@ class _WitnessSession:
                 root = sd.repository_root(Path(directory), rel)
                 if root is None:
                     return "unreadable: no repository contains the gate's working directory"
+                state = gate_state_problem(root, self.gate_state_paths)
+                if state is not None and self.gate_state_protocol is None:
+                    return f"unreadable: {state}"
                 return sd.digest_tree(root)
+
+        def state_snapshot(cwd: str | None) -> gate_state.Snapshot:
+            rel = sd.workspace_relative(cwd, CONTAINER_WORKSPACE)
+            if rel is None:
+                return gate_state.Snapshot(None, None, {}, "cwd-outside-workspace")
+            with tempfile.TemporaryDirectory(prefix="skillc-gate-state-") as directory:
+                exported = Path(directory)
+                backend.export(handle, exported)
+                root = sd.repository_root(exported, rel)
+                if root is None:
+                    return gate_state.Snapshot(None, None, {}, "no-containing-repository")
+                return gate_state.snapshot(root, self.gate_state_paths,
+                                           repository=root.relative_to(exported).as_posix(),
+                                           source=sd.digest_tree(root))
 
         if self.witness is not None:
             # #508: the cross-gate order is the single `_exec_lock` of ONE
@@ -627,8 +873,7 @@ class _WitnessSession:
             raise HomeFileVerificationRefused("an attempt's gate witness is bound once; a second one is refused")
         harness = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/{_FLOW_CHECK_GATE_HARNESS_PATH}"
         if self.gate_args is None:
-            gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
-                     "flow-check-summary": ["bash", harness, "--check-summary"]}
+            gates = {gate: ["bash", harness, *args] for gate, args in FLOW_CHECK_GATE_ARGS.items()}
         else:
             gates = {gate: ["bash", harness, *args] for gate, args in self.gate_args.items()}
         staged: dict[str, pg.StagedRunner] = {}
@@ -638,6 +883,10 @@ class _WitnessSession:
             gates[pg.GATE] = [pg.REAL_MAKE, self.project_gate.goal]
             staged[pg.GATE] = pg.StagedRunner(self.project_gate)
         self.witness = GateWitness(
+            resume_state=(gate_state.Ledger(self.gate_state_protocol, self.attempt_id)
+                          if self.gate_state_protocol is not None else None),
+            state_snapshot_fn=state_snapshot if self.gate_state_protocol is not None else None,
+            output_store=self.output_store,
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
             declared_env={gate: self.gate_environment() for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
@@ -647,8 +896,9 @@ class _WitnessSession:
             stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {
                 gate: functools.partial(stage_capture.capture_stages, plan=plan)
                 for gate, plan in (self.stage_plans or {}).items()},
-            order=self.order, source_digest_fn=source_snapshot if self.order is not None else None,
-            staged=staged or None,
+            order=self.order,
+            source_digest_fn=source_snapshot if self.order is not None or self.source_digest else None,
+            staged=staged or None, declared_variants=self.variants or None,
         )
         script = (
             "import json,socket,sys; "
@@ -697,6 +947,19 @@ class _WitnessSession:
             if self.witness is not None:
                 self.witness.channel_unavailable = True
             raise
+        finally:
+            # Keep the diagnostic witness even when the credit gate blocks
+            # grading (including a failed channel drain). Its coverage records
+            # that failure; retaining it never makes it eligible for grading.
+            if self.witness is not None:
+                snapshot = self.witness.finalize(self.attempt_id)
+                try:
+                    digest = trial.put_object(experiment, snapshot.to_json_bytes())
+                except Exception as exc:  # noqa: BLE001 - retention cannot bypass teardown
+                    experiment.record(self.attempt_id, "gate-witness-retained", coverage="missing",
+                                      reason=f"witness storage refused ({type(exc).__name__})")
+                else:
+                    experiment.record(self.attempt_id, "gate-witness-retained", coverage="complete", digest=digest)
 
 def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str]:
     """A `{relpath: sha256-hex}` content snapshot of every file currently
@@ -971,6 +1234,10 @@ def _make_before_execute(
     runtime_ready: Callable[[DockerBackend, object], None] | None = None,
     gate_shim_source: Path = _FLOW_CHECK_GATE_SHIM_SOURCE,
     extra_home_modes: Mapping[str, str] | None = None,
+    bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
+    treatment_deviation: list[dict[str, object]] | None = None,
+    checkout_gate_entrypoints: Mapping[str, str] | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -1069,16 +1336,29 @@ def _make_before_execute(
                 )
             assert real_digest.startswith("sha256:")
             shim_content = gate_shim_source.read_bytes()
-            gate_overlay.apply_flow_check_gate_overlay(
-                backend, handle,
-                subject_root=CONTAINER_HOME,
-                harness_root=_FLOW_CHECK_GATE_HARNESS_ROOT,
-                subject_path=gate_entrypoint,
-                harness_path=_FLOW_CHECK_GATE_HARNESS_PATH,
-                expected_real_digest=real_digest[len("sha256:"):],
-                expected_shim_digest=hashlib.sha256(shim_content).hexdigest(),
-                shim_content=shim_content,
-            )
+            # #529: an entrypoint that is itself a mirrored copy has no
+            # installed overlay - moving it away from its siblings breaks it.
+            if gate_entrypoint not in bundled_gate_entrypoints:
+                gate_overlay.apply_flow_check_gate_overlay(
+                    backend, handle,
+                    subject_root=CONTAINER_HOME,
+                    harness_root=_FLOW_CHECK_GATE_HARNESS_ROOT,
+                    subject_path=gate_entrypoint,
+                    harness_path=_FLOW_CHECK_GATE_HARNESS_PATH,
+                    expected_real_digest=real_digest[len("sha256:"):],
+                    expected_shim_digest=hashlib.sha256(shim_content).hexdigest(),
+                    shim_content=shim_content,
+                )
+            # #525: then each declared skill-bundled copy - the last setup step,
+            # after the installed gate, for the same re-read reason. Its
+            # deviations are an OUT-parameter, like `delivered_credential_bytes`.
+            if bundled_gate_entrypoints or checkout_gate_entrypoints:
+                deviations = _overlay_bundled_gates(
+                    backend, handle, bundled_gate_entrypoints, resolved_verify_home_files, extra_home_files,
+                    extra_home_modes, shim_content, bundled_checksum_manifest,
+                    checkout=checkout_gate_entrypoints)
+                if treatment_deviation is not None:
+                    treatment_deviation.extend(deviations)
 
     return hook
 
@@ -1367,19 +1647,19 @@ def retainable_transcript(raw: bytes) -> trial.TranscriptEvidence:
 def _stored_transcript_entry(experiment: trial.Experiment, attempt_id: str) -> dict[str, object] | None:
     path = experiment.root / f"manifest-{attempt_id}.json"
     if path.is_symlink() or not path.is_file():
-        return None
+        return trial.read_retained_transcript(experiment, attempt_id)
     manifest = json.loads(path.read_bytes())
     for entry in manifest.get("observations") or ():
         if isinstance(entry, dict) and entry.get("stream") == records.CLIENT_TRANSCRIPT:
             return entry
-    return None
+    return trial.read_retained_transcript(experiment, attempt_id)
 
 
 def transcript_retention(experiment: trial.Experiment, attempt_id: str, disposition: object) -> dict[str, object]:
     """What the store holds of this attempt's transcript, read back from its
-    manifest - never from what the hook intended to store. No manifest (the
-    attempt was not captured) and no entry are both `missing`, each with its
-    own reason, never an absent key."""
+    manifest or independent journal-bound retention - never from what the
+    hook intended to store. Historical absence is missing, never inferred
+    from a failed artifact capture when independently retained bytes exist."""
     entry = _stored_transcript_entry(experiment, attempt_id)
     if entry is None:
         reason = (
@@ -1392,6 +1672,73 @@ def transcript_retention(experiment: trial.Experiment, attempt_id: str, disposit
         "coverage": entry.get("coverage"), "digest": entry.get("digest"), "size": entry.get("size"),
         "reason": entry.get("reason"),
     }
+
+
+def retained_client_version(experiment: trial.Experiment, attempt_id: str) -> str | None:
+    """Re-derive a transcript fact, never certify a historical scalar or binary.
+
+    Only this attempt's complete, digest-checked retained bytes count. Missing,
+    incompatible or damaged evidence is unknown without changing task results.
+    """
+    planned = experiment.trial_of(attempt_id)
+    client = planned["client"]
+    if not isinstance(client, dict) or client.get("name") not in CLIENT_SPECS:
+        return None
+    binding_keys = ("attempt_id", "stream", "origin", "coverage", "ref", "digest", "size")
+    try:
+        journal = experiment.journal(attempt_id)
+        for line in journal.read_text().splitlines() if journal.exists() else ():
+            if not line.strip():
+                continue
+            event = ta.diagnostic_json(line)
+            if ta.duplicate_members(event, ("event",)):
+                return None
+            if (isinstance(event, dict) and event.get("event") == "transcript-retained"
+                    and (ta.duplicate_members(event, ("observation",))
+                         or ta.duplicate_members(event.get("observation"), binding_keys))):
+                return None
+        independent = trial.read_retained_transcript(experiment, attempt_id)
+        entry = independent
+        manifest = experiment.root / f"manifest-{attempt_id}.json"
+        if manifest.is_symlink():
+            return None
+        if manifest.exists():
+            if not manifest.is_file():
+                return None
+            metadata = ta.diagnostic_json(manifest.read_bytes())
+            if (not isinstance(metadata, dict)
+                    or ta.duplicate_members(metadata, ("version", "kind", "producer", "attempt_id", "trial_id", "observations"))
+                    or metadata.get("version") != 2
+                    or metadata.get("kind") != records.ARTIFACT_MANIFEST or metadata.get("producer") != "controller"
+                    or metadata.get("attempt_id") != attempt_id or metadata.get("trial_id") != planned["trial_id"]):
+                return None
+            entries = metadata.get("observations", [])
+            if not isinstance(entries, list):
+                return None
+            if any(ta.duplicate_members(e, ("stream",)) for e in entries):
+                return None
+            transcripts = [e for e in entries if isinstance(e, dict) and e.get("stream") == records.CLIENT_TRANSCRIPT]
+            if len(transcripts) > 1:
+                return None
+            if transcripts:
+                entry = transcripts[0]
+        if entry is None or entry.get("coverage") != "complete":
+            return None
+        if independent is not None and any(independent.get(k) != entry.get(k) for k in ("digest", "coverage")):
+            return None
+        digest, size = entry.get("digest"), entry.get("size")
+        if (ta.duplicate_members(entry, binding_keys)
+                or entry.get("attempt_id") != attempt_id or entry.get("origin") != "client-reported"
+                or not isinstance(digest, str) or type(size) is not int or size <= 0
+                or entry.get("ref") != f"{trial.OBJECTS}/{digest.removeprefix('sha256:')}"):
+            return None
+        raw = trial.read_object(experiment, digest)
+        if size != len(raw):
+            return None
+        value = transcript_census(str(client["name"]), raw.decode("utf-8"))["transcript_client_version"]
+        return value if isinstance(value, str) else None
+    except (OSError, ValueError, TypeError, AttributeError, trial.Refused):
+        return None
 
 
 def recompute_skill_invocations(experiment: trial.Experiment, attempt_id: str, client: str) -> tuple[str, ...]:
@@ -1499,6 +1846,7 @@ def _make_observe_before_teardown(
     local_mcp_servers: frozenset[str] = frozenset(),
     sessions: list[dict[str, object]] | None = None,
     scan_codex: bool = False,
+    credential_reader: Callable[[ExecutionBackend, object], bytes | None] | None = None,
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
     """`sessions` (#500), when given, receives EVERY transcript file of an
     attempt that left more than one, redacted and leak-checked, with each
@@ -1515,8 +1863,14 @@ def _make_observe_before_teardown(
         cred_relpath_bytes = delivered_credential_bytes.get("relpath")
         cred_bytes = delivered_credential_bytes.get("bytes")
         if isinstance(cred_relpath_bytes, bytes) and isinstance(cred_bytes, bytes):
-            current = backend.read_home_file(handle, cred_relpath_bytes.decode("utf-8"))
-            refresh_observed = credential.refresh_observed(cred_bytes, current)
+            if credential_reader is not None:
+                # #518: the steward withdrew the credential into its vault; the
+                # home no longer holds it. An unreadable vault is unknown.
+                vaulted = credential_reader(backend, handle)
+                refresh_observed = credential.refresh_observed(cred_bytes, vaulted) if vaulted is not None else None
+            else:
+                current = backend.read_home_file(handle, cred_relpath_bytes.decode("utf-8"))
+                refresh_observed = credential.refresh_observed(cred_bytes, current)
 
         tree = backend.read_home_tree(handle, spec.transcript_container_reldir)
         matches = {path: data for path, data in tree.items() if path.endswith(spec.transcript_suffix)}
@@ -1893,6 +2247,8 @@ def _measure_discovery(
     backend: DockerBackend, id_prefix: str, client_argv: Sequence[str],
     extra_home_files: Mapping[str, bytes], selected: frozenset[str],
     limits: Limits, base: Path,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> _DiscoveryMeasurement:
     """Prepare a fresh, dedicated, throwaway container - NEVER the agent's
     own. `DockerBackend.execute()`'s own docstring is explicit: "Intended to
@@ -1910,6 +2266,8 @@ def _measure_discovery(
     way an unobtainable listing does - never SATISFIED."""
     unmeasured = {name: "UNMEASURED" for name in selected}
     attempt_id = f"{id_prefix}-{secrets.token_hex(4)}"
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(attempt_id)
     try:
         handle = backend.prepare(attempt_id)
     except BackendUnavailable as exc:
@@ -1922,6 +2280,7 @@ def _measure_discovery(
         image_digest = backend.image_id(handle)
         listing, unexpected, reason = demo.run_subject_discovery(
             backend, handle, list(client_argv), set(selected), limits, base,
+            completion_deadline=completion_deadline,
         )
         result = _DiscoveryMeasurement(listing, unexpected, reason, image_digest)
     except BackendUnavailable as exc:
@@ -1931,6 +2290,8 @@ def _measure_discovery(
     finally:
         backend.destroy(handle)
         absent = backend.confirm_absent(handle)
+        if recorded_attempt_ids is not None:
+            recorded_attempt_ids.confirm(attempt_id, absent is Confirmation.CONFIRMED)
     if absent != Confirmation.CONFIRMED:
         # Overrides whatever was measured above (review point 3): an
         # unconfirmed teardown means this container's own state - and so its
@@ -2002,6 +2363,8 @@ def _build_discovery_receipt(
     limits: Limits,
     base: Path,
     context: InstallationReceiptContext,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> dict[str, object] | None:
     """Measure (or reuse a cached measurement of) discovery before and after
     delivering `extra_home_files` into fresh throwaway containers, and build
@@ -2039,10 +2402,10 @@ def _build_discovery_receipt(
     key: DiscoveryCacheKey = (planned_image_digest, context.tree_digest)
     if key not in context.cache:
         baseline = _measure_discovery(
-            backend, f"{attempt_id}-baseline", client_argv, {}, context.declared, limits, base,
+            backend, f"{attempt_id}-baseline", client_argv, {}, context.declared, limits, base, completion_deadline, recorded_attempt_ids,
         )
         discovery = _measure_discovery(
-            backend, f"{attempt_id}-discovery", client_argv, extra_home_files, context.declared, limits, base,
+            backend, f"{attempt_id}-discovery", client_argv, extra_home_files, context.declared, limits, base, completion_deadline, recorded_attempt_ids,
         )
         context.cache[key] = (baseline, discovery)
     baseline, discovery = context.cache[key]
@@ -2106,28 +2469,56 @@ def _build_discovery_receipt(
     }
 
 
-def _fixture_credit_block(session: FixtureSession) -> str | None:
+def _steward_vault_reader(fixture_session: FixtureSession | None, attempt_guard: ag.AttemptGuard | None
+                          ) -> Callable[[ExecutionBackend, object], bytes | None] | None:
+    """#518: where the credential is at teardown - the steward's vault."""
+    holder = fixture_session or attempt_guard
+    if holder is None:
+        return None
+
+    def read(backend: ExecutionBackend, handle: object) -> bytes | None:
+        driver = holder.steward_driver
+        return driver.vault_bytes(backend, handle) if driver is not None else None  # type: ignore[arg-type]
+    return read
+
+
+def _fixture_credit_block(session: FixtureSession, observation: object = None) -> str | None:
     """#434's credit-gate reasons, or `None` when the fixture's evidence lets
-    the attempt be graded at all (the judge still decides each criterion)."""
+    the attempt be graded at all (the judge still decides each criterion).
+    #518: the guard's own record is not enough - a nested client that never came
+    through it (a login shell's PATH) is read from the transcript too."""
     if session.failure is not None:
         return f"not credited: {session.failure}"
     if session.record is None:
         return "not credited: the fixture service record was never finalized"
-    return cg.credit_block(session.guard_record(), nested_policy=session.nested_policy)
+    guard = session.guard_record()
+    block = cg.credit_block(guard, nested_policy=session.nested_policy)
+    if block is None and (bypass := ag.nested_bypass(ag.guard_nested(guard), observation, session.nested_policy)):
+        block = "not credited: nested codex past the guard (" + "; ".join(bypass) + ")"
+    return block or cs.credit_block(session.steward_record())  # #518
 
 
 def _fixture_extras(session: FixtureSession | None,
-                    stored_transcript: Mapping[str, trial.TranscriptEvidence]) -> dict[str, object] | None:
+                    stored_transcript: Mapping[str, trial.TranscriptEvidence],
+                    gate_entrypoint: str | None = None) -> dict[str, object] | None:
     """The controller-held evidence beside the gate witness: the final report
-    is the agent's last message as the stored transcript recorded it."""
+    is the agent's last message as the stored transcript recorded it. #530: a
+    fixture that opts in also gets the transcript's positive evidence of a
+    failed gate LAUNCH (`launch_evidence.scan`), for the gate's own name."""
     if session is None:
         return None
     evidence = stored_transcript.get("evidence")
     report: str | None = None
+    text: str | None = None
     if evidence is not None and evidence.data is not None:
-        message = ta.codex_run_metadata(evidence.data.decode("utf-8", errors="replace")).get("final_agent_message")
+        text = evidence.data.decode("utf-8", errors="replace")
+        message = ta.codex_run_metadata(text).get("final_agent_message")
         report = message if isinstance(message, str) else None
-    return session.extras(report)
+    extras = session.extras(report)
+    if session.fixture.launch_evidence:
+        extras["gate_launch_evidence"] = launch_evidence.scan(
+            text, posixpath.basename(gate_entrypoint) if gate_entrypoint else "")
+    return extras
 
 
 def run_one_attempt(
@@ -2154,6 +2545,9 @@ def run_one_attempt(
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
+    bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
+    checkout_gate_entrypoints: Mapping[str, str] | None = None,
     project_gate: pg.ProjectGate | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
@@ -2163,6 +2557,9 @@ def run_one_attempt(
     codex_guard: bool = False,
     declared_model: str | None = None,
     extra_home_modes: Mapping[str, str] | None = None,
+    gate_state_protocol: gate_state.Protocol | None = None,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2254,6 +2651,13 @@ def run_one_attempt(
     record, a nested-codex count that is not zero), and grading receives the
     controller-held evidence as `verify`'s `trusted_extras`. `None` (the
     default) changes nothing for any other caller."""
+    if recorded_attempt_ids is not None and not recorded_attempt_ids.bound_to(experiment, attempt_id):
+        raise trial.Refused("owned IDs belong to a different experiment or parent")
+    completion_marker = None
+    if completion_deadline is not None:
+        completion_marker = completion.mark(experiment, attempt_id, completion_deadline)
+        if recorded_attempt_ids is None:
+            recorded_attempt_ids = trial.OwnedAttemptIds(experiment, attempt_id)
     if nested_codex_policy is not None and nested_codex_policy not in cg.NESTED_POLICIES:
         raise ValueError(f"nested_codex_policy must be one of {cg.NESTED_POLICIES}, not {nested_codex_policy!r}")
     if extra_home_modes is not None:
@@ -2287,7 +2691,22 @@ def run_one_attempt(
                 "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
                 f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
             )
+    if gate_state_protocol is not None:
+        expected = {"flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
+                    "flow-check-summary": ("--check-summary",)}
+        if (not isinstance(gate_state_protocol, gate_state.Protocol) or fixture is None
+                or gate_witness is not None or gate_entrypoint is None
+                or gate_state_protocol.plan != "check"
+                or dict(gate_state_protocol.operations) != {"flow-check-plan": "runner", "flow-check-summary": "inspection"}
+                or {k: tuple(v) for k, v in fixture.gates.items()} != expected
+                or dict(fixture.stage_plans) != {"flow-check-plan": "check"}
+                or fixture.source_digest is not True or tuple(fixture.gate_state_paths) != (gate_state_protocol.state_path,)):
+            raise HomeFileVerificationRefused("gate-state protocol requires the exact supported fixture route")
     gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
+    #: #525: the declared treatment deviations the bundled-gate overlay makes.
+    treatment_deviation: list[dict[str, object]] = []
+    _require_bundled_route(bundled_gate_entrypoints, gate_entrypoint, fixture, gate_shim_source, gate_args,
+                           bundled_checksum_manifest, checkout_gate_entrypoints)
     if project_gate is not None:
         if fixture is not None:
             raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; project_gate cannot also be set")
@@ -2304,12 +2723,18 @@ def run_one_attempt(
         if "PATH" not in agent_env:
             raise HomeFileVerificationRefused("the project-gate shim was not placed before the agent launch")
         return dict(agent_env)
-    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args", "make_env") if project_gate is not None else ())})
+    run_gate_keys = frozenset({"op", "gate", "cwd", *(("make_args", "make_env") if project_gate is not None else ()),
+                               # #525: a bundled-gate shim names its copy; only then.
+                               *(("via",) if bundled_gate_entrypoints or checkout_gate_entrypoints else ())})
     passthrough_route = ({pg.PASSTHROUGH_OP: (witness_session.decide,
                                               frozenset({"op", "argv", "cwd", "exit_code", "why"}))}
                          if project_gate is not None and witness_session is not None else {})
     if witness_session is not None:
+        witness_session.gate_state_protocol = gate_state_protocol
         witness_session.order = attempt_order
+        witness_session.require_via = gate_entrypoint in bundled_gate_entrypoints
+        witness_session.source_digest = bool(fixture is not None and fixture.source_digest)
+        witness_session.gate_state_paths = tuple(fixture.gate_state_paths) if fixture is not None else ()
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
         if not isinstance(backend, DockerBackend):
@@ -2324,6 +2749,7 @@ def run_one_attempt(
             trigger = fixture_session.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
                 "run_gate": (witness_session.decide, run_gate_keys),
+                "gate_refused": (witness_session.decide, frozenset({"op", "argv", "cwd", "via"})),
                 **passthrough_route,
                 **fixture_session.routes(),
             }))
@@ -2332,6 +2758,7 @@ def run_one_attempt(
             trigger = attempt_guard.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
                 "run_gate": (witness_session.decide, run_gate_keys),
+                "gate_refused": (witness_session.decide, frozenset({"op", "argv", "cwd", "via"})),
                 **passthrough_route,
                 **attempt_guard.routes(),
             }))
@@ -2395,6 +2822,20 @@ def run_one_attempt(
         attempt_id, base_argv, supports_name=spec.supports_name_flag,
     )
     argv = (*invocation.argv, full_prompt)
+    prepared_inputs = [1]
+    prompt_stop = "lifecycle-ended"
+
+    def keep_input(index: int, text: str) -> None:
+        try:
+            trial.retain_prompt_input(experiment, attempt_id, index, text, transcript_leak_findings)
+        except Exception:  # noqa: BLE001, S110 - diagnostic loss cannot block raw task facts
+            pass  # terminal population exposes the missing entry to the reader
+
+    try:
+        trial.begin_prompt_inputs(experiment, attempt_id, len(declared_turns))
+    except Exception:  # noqa: BLE001, S110 - no usable marker means UNKNOWN, never complete
+        pass
+    keep_input(1, argv[-1])
     for text in declared_turns:
         # Every resume argv is checked before any container exists: the same
         # #442 preflight as turn 1, on the exact shape that will run.
@@ -2409,17 +2850,37 @@ def run_one_attempt(
         _backend: ExecutionBackend, _handle: object, done: int, previous: ExecuteResult,
     ) -> Sequence[str] | None:
         """#279: the argv of the turn after `done` turns, or `None`."""
+        nonlocal prompt_stop
         if done == 1:
             turn_state["session_id"] = ct.session_id_from_header(previous.stderr)
             turn_state["session_id_found"] = turn_state["session_id"] is not None
+            # #516: why, kept in the record - turn 1's stderr is not retained
+            # on an exit-0 attempt, so this is the only trace of a refusal.
+            turn_state["header_refusal"] = ct.header_refusal(previous.stderr)
         if done > len(declared_turns):
+            prompt_stop = "declared-complete"
             turn_state["stopped"] = "every declared turn was delivered"
             return None
         session_id = turn_state.get("session_id")
         if not isinstance(session_id, str):
+            prompt_stop = "header-unavailable"
             turn_state["stopped"] = "no session id in turn 1's client header: no further turn"
             return None
-        return ct.resume_argv(client, invocation.argv, session_id, declared_turns[done - 1])
+        # #518: the resumed client needs the credential back - for its startup
+        # reads only. The steward re-arms first, then the file is restored.
+        holder = fixture_session or attempt_guard
+        driver = holder.steward_driver if holder is not None else None
+        if driver is not None:
+            try:
+                driver.restore_for_turn(_backend, _handle)  # type: ignore[arg-type]
+            except cs.StewardFailed as exc:
+                prompt_stop = "resume-precondition"
+                turn_state["stopped"] = f"the credential steward could not cover the resume: {exc}"
+                return None
+        resumed = ct.resume_argv(client, invocation.argv, session_id, declared_turns[done - 1])
+        prepared_inputs.append(done + 1)
+        keep_input(done + 1, resumed[-1])
+        return resumed
 
     ctx = _AttemptContext(workdir=resolved_workdir, mcp_servers=resolved_mcp_servers, cli_version=resolved_cli_version)
     delivered_credential_bytes: dict[str, bytes] = {}
@@ -2444,6 +2905,8 @@ def run_one_attempt(
         runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
         gate_shim_source=gate_shim_source,
         extra_home_modes=extra_home_modes,
+        bundled_gate_entrypoints=tuple(bundled_gate_entrypoints), bundled_checksum_manifest=bundled_checksum_manifest,
+        treatment_deviation=treatment_deviation, checkout_gate_entrypoints=dict(checkout_gate_entrypoints or {}),
     )
     if witness_session is not None:
         install_and_verify = before_execute
@@ -2451,6 +2914,7 @@ def run_one_attempt(
         def before_execute(ready_backend: ExecutionBackend, handle: object) -> None:
             install_and_verify(ready_backend, handle)
             assert isinstance(ready_backend, DockerBackend)
+            _register_mirror_variants(witness_session, treatment_deviation)
             witness_session.bind_and_check(ready_backend, handle)
             if fixture_session is not None:
                 fixture_session.bind(ready_backend, handle, witness_session.environment)
@@ -2472,6 +2936,13 @@ def run_one_attempt(
             env = rs.environment(ready_backend.controller_output(handle, ["env", "-0"], bounded))
             attempt_guard.bind(ready_backend, handle, env)
 
+    if witness_session is not None:
+        def output_store(data: bytes) -> str:
+            if transcript_leak_findings(data):
+                raise trial.Refused("gate output failed the identity/credential check")
+            return trial.put_object(experiment, data)
+        witness_session.output_store = output_store
+
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,
     # leak-checked first. Empty only when the hook itself failed before it
@@ -2484,7 +2955,8 @@ def run_one_attempt(
         delivered_credential_bytes=delivered_credential_bytes,
         retained_transcript=retained_transcript, stored_transcript=stored_transcript,
         local_mcp_servers=frozenset(resolved_mcp_servers),
-        sessions=transcript_sessions, scan_codex=attempt_guard is not None,
+        sessions=transcript_sessions, scan_codex=attempt_guard is not None or fixture_session is not None,
+        credential_reader=_steward_vault_reader(fixture_session, attempt_guard),
     )
     if attempt_guard is not None:
         observe_unguarded = observe_before_teardown
@@ -2559,14 +3031,28 @@ def run_one_attempt(
                 imports.append(trial.Import(path, stream, "client-reported", trial.sha256_bytes(evidence.data)))
         return imports
 
+    stewarded = [h for h in (fixture_session, attempt_guard) if h is not None]
+
+    def before_stop(stopping_backend: ExecutionBackend, handle: object) -> None:
+        """#518: the steward reports `stopped` and its vault is read while the
+        container still runs; `finish()`, after the stop, cannot reach it."""
+        for holder in stewarded:
+            if holder.steward_driver is not None:
+                holder.steward_driver.stop(stopping_backend, handle)  # type: ignore[arg-type]
+
     record = run_through_backend(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
+        before_stop=before_stop if stewarded else None,
         transcript_for_capture=transcript_for_capture,
         imports_for_capture=imports_for_capture,
         next_turn=next_turn if declared_turns else None,
-        order=attempt_order,
+        order=attempt_order, completion_deadline=completion_deadline,
     )
+    try:
+        trial.finish_prompt_inputs(experiment, attempt_id, prepared_inputs, prompt_stop)
+    except Exception:  # noqa: BLE001, S110 - absent terminal denies complete coverage, preserves facts
+        pass
     delivered = sum(1 for e in experiment.events(attempt_id)
                     if e.get("event") == "controller-turn" and e.get("delivered") is True)
     if attempt_guard is not None:
@@ -2586,7 +3072,7 @@ def run_one_attempt(
     # stored separately, and only when grading runs.
     fixture_evidence: str | None = None
     if fixture_session is not None:
-        extras = _fixture_extras(fixture_session, stored_transcript)
+        extras = _fixture_extras(fixture_session, stored_transcript, gate_entrypoint)
         fixture_evidence = trial.put_object(experiment, trial.canonical(extras)) if extras is not None else None
 
     graded: dict[str, object] | None = None
@@ -2600,7 +3086,8 @@ def run_one_attempt(
             observation, client=client, disposition=record.get("disposition"),
             witness_failure=(witness_session.failure or "controller witness was never finalized")
             if witness_session is not None and (witness_session.failure or witness_session.record is None) else None,
-            fixture_block=(lambda: _fixture_credit_block(fixture_session)) if fixture_session is not None
+            fixture_block=(lambda: _fixture_credit_block(fixture_session, observation))
+            if fixture_session is not None
             else (lambda: ag.credit_block(attempt_guard.report(observation, declared_model)))
             if attempt_guard is not None else None,
         )
@@ -2633,7 +3120,8 @@ def run_one_attempt(
                         client=client, client_version=resolved_cli_version,
                         client_argv=receipt_context.listing_client_argv or [client],
                         extra_home_files=extra_home_files or {}, limits=limits, base=base,
-                        context=receipt_context,
+                        context=receipt_context, completion_deadline=completion_deadline,
+                        recorded_attempt_ids=recorded_attempt_ids,
                     ) if receipt_context is not None else None
                 )
                 if receipt is not None:
@@ -2654,7 +3142,8 @@ def run_one_attempt(
                     stored, graded_result = verify._grade_and_store(
                         experiment, attempt_id, grader, base, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
-                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
+                        recorded_attempt_ids=recorded_attempt_ids, completion_deadline=completion_deadline,
                     )
                 else:
                     # The observation stands in for the installation receipt
@@ -2664,7 +3153,8 @@ def run_one_attempt(
                     stored, graded_result = verify.grade_agent_attempt(
                         experiment, attempt_id, grader, base, observation, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
-                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript, gate_entrypoint),
+                        recorded_attempt_ids=recorded_attempt_ids, completion_deadline=completion_deadline,
                     )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
@@ -2689,6 +3179,7 @@ def run_one_attempt(
                 "status": graded_result.status, "category": graded_result.category,
                 "detail": graded_result.detail, "criteria": graded_result.criteria,
                 "result_id": stored["result_id"], "result_status": stored["status"],
+                "cleanup": graded_result.containment.get("cleanup"),
             }
 
     result: dict[str, object] = {
@@ -2701,22 +3192,51 @@ def run_one_attempt(
         result["fixture"] = {"case": fixture_session.fixture.case, "failure": fixture_session.failure,
                              "git_unreadable": fixture_session.git_unreadable,
                              "codex_guard": fixture_session.guard_record()["nested"],
+                             "credential_steward": fixture_session.steward_record(),
                              "evidence_digest": fixture_evidence}
     if attempt_guard is not None:
         result["codex_guard"] = attempt_guard.report(observation, declared_model)
+    if witness_session is not None and fixture_session is not None:
+        # #279 (orchestrator): counted on every witnessed fixture attempt, zero included.
+        result["witness_refusals"] = {"count": len(witness_session.refusals),
+                                      "calls": [dict(r) for r in witness_session.refusals]}
+    if treatment_deviation:
+        # #525 (orchestrator): a declared deviation is part of the attempt's own
+        # record, never only a detail field; the report's head repeats it.
+        result["treatment_deviation"] = [dict(d) for d in treatment_deviation]
     if declared_turns:
         result["controller_turns"] = {
             "declared": len(declared_turns), "delivered": delivered,
             "expected_top_level": ct.expected_top_level(delivered),
             "session_id_source": turn_state["session_id_source"],
             "session_id_found": turn_state["session_id_found"], "stopped": turn_state["stopped"],
+            "header_refusal": turn_state.get("header_refusal"),
         }
     result["transcript_retention"] = transcript_retention(experiment, attempt_id, record.get("disposition"))
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -
     # lost it for good.
+    if completion_deadline is not None:
+        assert completion_marker is not None and recorded_attempt_ids is not None
+        cleanup = result.get("cleanup")
+        cleaned = (isinstance(cleanup, dict) and cleanup.get("status") in {"removed", "not-needed"}
+                   and result.get("backend_teardown") == Confirmation.CONFIRMED.value
+                   and (graded is None or graded.get("cleanup") == "removed")
+                   and recorded_attempt_ids.all_absent())
+        qualification = completion_deadline.qualify(completion_marker, cleaned)
+        result.update(completion_required=True, completion_marker=completion_marker, completion=None)
     result["observation_record"] = write_observation_record(
         experiment, attempt_id,
         build_observation_record(result, client=client, grader_supplied=grader is not None),
     )
+    if completion_deadline is not None:
+        # Publication success is separate from the already frozen timing sample.
+        qualification["publication_confirmed"] = result["observation_record"] == "written"
+        try:
+            experiment.record(attempt_id, "completion-qualified", qualification=qualification)
+        except OSError as exc:
+            # Retain the verified raw task grade; missing final evidence cannot PASS.
+            result["completion_publication_error"] = type(exc).__name__
+        else:
+            result["completion"] = qualification
     return result

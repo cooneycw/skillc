@@ -1,0 +1,1 @@
+- Store selection-probe verified results for eligible real-adapter captures, with report links and task outcomes separate from unknown installation readiness.

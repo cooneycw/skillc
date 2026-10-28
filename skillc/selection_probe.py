@@ -35,8 +35,9 @@ returning `"selected"` there is exactly this probe's own contamination
 signal - one mechanism, not two: `baseline_contaminated` is a named alias of
 that same result for the arm where it is never desired.
 
-TASK SUCCESS IS GRADED, NEVER INFERRED FROM SELECTION. `verify.grade_files`
-(#76) grades the SAME `slug-small-fix` task's public outcome for every
+TASK SUCCESS IS GRADED, NEVER INFERRED FROM SELECTION. The real adapter
+stores a result through `verify.grade_agent_attempt`; synthetic fixtures use
+`verify.grade_files`. Both grade the SAME `slug-small-fix` task's public outcome for every
 arm and every case - a correct fix without invoking any skill is a valid,
 successful result (#26's own text), and an invoked-but-wrong-fix attempt is
 still a failure. The two facts are reported side by side, never folded into
@@ -105,21 +106,23 @@ def load_manifest(path: Path = PROBE_ROOT / "run-manifest.json") -> dict[str, ob
 def plan_selection_probe(
     cases: dict[str, object], manifest: dict[str, object], *,
     treatment_subject_digest: str, baseline_subject_digest: str, image_digest: str, store: Path,
-    experiment_name: str = "selection-probe",
+    experiment_name: str = "selection-probe", grader: verify.GraderDef | None = None,
 ) -> trial.Experiment:
     """Plans BOTH arms of every case as its own trial through the real
     controller - the exact shape `tests/test_selection_probe.py`'s own
     no-run deliverable already proved round-trips through `trial.plan()`
     (issue #26), now the ONE place that shape is built, shared by that test
     and by `run_selection_probe` below, rather than two copies that could
-    drift apart."""
+    drift apart. An explicit grader owns the complete pin; omission keeps the
+    task declared by cases.base_task, now with its content digest."""
     case_list = cases["cases"]
     assert isinstance(case_list, list)
     client = cases["client"]
     assert isinstance(client, dict)
-    repo_root = PROBE_ROOT.parent.parent
-    grader_path = repo_root / str(cases["base_task"]["grader"])  # type: ignore[index]
-    base_grader = json.loads(grader_path.read_text(encoding="utf-8"))
+    if grader is None:
+        grader_path = PROBE_ROOT.parent.parent / str(cases["base_task"]["grader"])  # type: ignore[index]
+        grader = verify.GraderDef.load(grader_path.parent)
+    grader_pin = grader.identity()
     manifest_repeat = manifest["repeat_schedule"]  # type: ignore[index]
     assert isinstance(manifest_repeat, dict)
     attempts_per_trial = manifest_repeat["attempts_per_trial"]
@@ -131,7 +134,7 @@ def plan_selection_probe(
             trials.append({
                 "label": f"{str(case['kind']).replace('-', '_')}_{arm}",
                 "case": {"id": case["id"], "revision": case["revision"], "observes_selection": case["observes_selection"]},
-                "grader": {"id": base_grader["id"], "revision": base_grader["revision"]},
+                "grader": dict(grader_pin),
                 "subject": {"digest": treatment_subject_digest if arm == "treatment" else baseline_subject_digest},
                 "client": {"name": client["name"], "version": client["version"]},
                 "image": {"digest": image_digest},
@@ -235,12 +238,28 @@ def _grade(
     if transcript.disposition != "captured":
         return None, ""
     graded = verify.grade_files(grader, list(transcript.candidate_files), base, backend=backend)
+    return _task_outcome(graded)
+
+
+def _task_outcome(graded: verify.Graded) -> tuple[bool | None, str]:
     # Only PASS and FAIL are verdicts about the candidate. Anything else (an
     # INCONCLUSIVE grade: an unconfirmed containment, a judge that did not
     # return a verdict) is a fact about the GRADING, and reporting it as
     # task failure would blame the candidate for the grader's own gap.
     success = {"PASS": True, "FAIL": False}.get(graded.status)
     return success, "" if success is not None else f"grading {graded.status}: {graded.detail}"
+
+
+def _stored_grade(
+    experiment: trial.Experiment, attempt_id: str, grader: verify.GraderDef,
+    base: Path, backend: ExecutionBackend,
+) -> tuple[dict[str, object], verify.Graded]:
+    # The observation read and assembler share the same reentrant lock. Reopen
+    # before binding it; neither a stale instance nor transcript bytes is proof.
+    with trial.experiment_lock(experiment.root):
+        current = trial.Experiment.open(experiment.root)
+        observation = verify._stored_observation(current, attempt_id, current.trial_of(attempt_id))
+        return verify.grade_agent_attempt(current, attempt_id, grader, base, observation, backend=backend)
 
 
 @dataclass(frozen=True)
@@ -257,6 +276,10 @@ class ArmResult:
     #: transcript can be re-scanned, and why not when it cannot.
     transcript_retained_digest: str | None = None
     transcript_retention_reason: str | None = None
+    #: Only the concrete real adapter admits results. Synthetic fixture grades
+    #: and noneligible captures have no authoritative result reference.
+    result_id: str | None = None
+    result_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -329,9 +352,10 @@ def run_selection_probe(
     plans with `plan_selection_probe` first and calls
     `run_planned_selection_probe` directly; this is exactly that, in one
     call, for a runner that does not."""
+    grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
     experiment = plan_selection_probe(
         cases, manifest, treatment_subject_digest=treatment_subject_digest,
-        baseline_subject_digest=baseline_subject_digest, image_digest=image_digest, store=store,
+        baseline_subject_digest=baseline_subject_digest, image_digest=image_digest, store=store, grader=grader,
     )
     return run_planned_selection_probe(
         experiment, cases, runner, base=base, grader=grader, grading_backend=grading_backend,
@@ -357,8 +381,12 @@ def run_planned_selection_probe(
         (`AgentTrialRunner.backend`), or that has network egress.
       - a plan that does not cover every (case, arm) the supplied cases
         declare, including an empty one.
-      - no `grading_backend` without `allow_host_grading=True`. With no
-        backend, `verify.grade_files` executes the candidate as a HOST
+      - any issued trial whose grader id/revision/digest does not match the
+        execution grader. The whole population is checked before dispatch.
+      - a real adapter without a separate `grading_backend`, even with
+        `allow_host_grading=True`; a foreign runner experiment is also refused.
+        Synthetic callbacks require that flag when no backend is given:
+        `verify.grade_files` then executes the candidate as a HOST
         subprocess - acceptable only for committed, trusted fixture
         candidates (this module's own fake-runner tests), never for what a
         real agent wrote. The default is the safe one.
@@ -373,6 +401,11 @@ def run_planned_selection_probe(
         `applicable_skills`, never against `cases`, so editing the case file
         after planning cannot change a verdict; `cases` supplies only the
         case's kind for the report."""
+    real_runner = isinstance(runner, AgentTrialRunner)
+    if isinstance(runner, AgentTrialRunner) and (
+        runner.experiment.root.resolve() != experiment.root.resolve() or runner.experiment.id != experiment.id
+    ):
+        raise SelectionProbeRefused("the real runner belongs to another experiment")
     named = getattr(runner, "skill_name", None)
     if named is not None and not detection_control:
         raise SelectionProbeRefused(
@@ -383,7 +416,7 @@ def run_planned_selection_probe(
         raise SelectionProbeRefused(
             "a detection control needs a runner whose canary names the skill it must detect"
         )
-    if grading_backend is None and not allow_host_grading:
+    if grading_backend is None and (real_runner or not allow_host_grading):
         raise SelectionProbeRefused(
             "no grading_backend: the candidate would be executed on the host - pass a separate "
             "grading backend, or allow_host_grading=True for trusted fixture candidates only"
@@ -402,6 +435,14 @@ def run_planned_selection_probe(
             "never gets egress (collection_conformance.agent_backends' own split)"
         )
     grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
+
+    identity = grader.identity()
+    issued_trials = experiment.ledger["trials"]
+    assert isinstance(issued_trials, list)
+    for issued in issued_trials:
+        pin = issued.get("grader") if isinstance(issued, dict) else None
+        if not isinstance(pin, Mapping) or any(pin.get(key) != value for key, value in identity.items()):
+            raise SelectionProbeRefused("planned grader identity (id, revision, digest) does not match execution")
 
     planned = [(_resolved_trial(experiment, trial_dict), attempt) for trial_dict, attempt in experiment.attempts()]
     planned_ids = {str(attempt["attempt_id"]) for _trial, attempt in planned}
@@ -452,12 +493,12 @@ def run_planned_selection_probe(
             "every planned attempt must appear in the report, or none of it can be trusted"
         )
 
-    by_case: dict[str, dict[str, list[tuple[dict[str, object], AttemptTranscript]]]] = {}
+    by_case: dict[str, dict[str, list[tuple[dict[str, object], str, AttemptTranscript]]]] = {}
     for trial_dict, attempt in planned:
         case_id = str(trial_dict["case"]["id"])  # type: ignore[index]
         arm = str(trial_dict["config"]["arm"])  # type: ignore[index]
         by_case.setdefault(case_id, {}).setdefault(arm, []).append(
-            (trial_dict, transcripts[str(attempt["attempt_id"])])
+            (trial_dict, str(attempt["attempt_id"]), transcripts[str(attempt["attempt_id"])])
         )
 
     results = []
@@ -466,13 +507,23 @@ def run_planned_selection_probe(
         arm_results: dict[str, ArmResult] = {}
         applicable: tuple[str, ...] = ()
         for arm in ARMS:
-            [(trial_dict, transcript)] = arms[arm]  # exactly one - refused above otherwise
+            [(trial_dict, attempt_id, transcript)] = arms[arm]  # exactly one - refused above otherwise
             frozen_applicable = trial_dict["config"]["applicable_skills"]  # type: ignore[index]
             assert isinstance(frozen_applicable, list)
             arm_applicable = tuple(str(name) for name in frozen_applicable)
             if arm == "treatment":
                 applicable = arm_applicable
-            success, grading_detail = _grade(grader, transcript, base, grading_backend)
+            result_id = result_status = None
+            if real_runner and transcript.disposition == "captured":
+                assert grading_backend is not None  # real code never runs on the host
+                try:
+                    stored, graded = _stored_grade(experiment, attempt_id, grader, base, grading_backend)
+                except (verify.Refused, trial.Refused, OSError, ValueError) as exc:
+                    raise SelectionProbeRefused(f"attempt {attempt_id}: stored grading refused: {exc}") from exc
+                success, grading_detail = _task_outcome(graded)
+                result_id, result_status = str(stored["result_id"]), str(stored["status"])
+            else:
+                success, grading_detail = _grade(grader, transcript, base, grading_backend)
             arm_results[arm] = ArmResult(
                 disposition=transcript.disposition,
                 selection=selection_status(transcript, arm_applicable),
@@ -483,6 +534,7 @@ def run_planned_selection_probe(
                 observation_confirmed=transcript.observation_confirmed,
                 transcript_retained_digest=transcript.transcript_retained_digest,
                 transcript_retention_reason=transcript.transcript_retention_reason,
+                result_id=result_id, result_status=result_status,
             )
         results.append(CaseResult(
             case_id=case_id, kind=str(case["kind"]), applicable_skills=applicable,
@@ -565,6 +617,7 @@ def agent_trial_runner(
     client: str,
     argv_for: Callable[[str], Sequence[str]],
     treatment_home_files: Mapping[str, bytes],
+    treatment_home_modes: Mapping[str, str] | None = None,
     goal: str | None = None,
     surface: Mapping[str, object] | None = None,
     timeout: float = 30,
@@ -585,6 +638,12 @@ def agent_trial_runner(
     extra, whatever the caller passes: its whole meaning is "no skill
     installed", and that is enforced here rather than trusted to a caller.
 
+    Optional `treatment_home_modes` comes from the same acquired population's
+    `_collection_home_modes`. None preserves the old call shape and 0600
+    delivery; known empty/partial maps retain missing-file defaults. Baseline
+    receives neither treatment files nor modes. Existing attempt validation
+    refuses unknown mode keys or unsupported values.
+
     The prompt is the fixed task's own `goal.md` plus the case's
     `prompt_addendum` (empty for the near-miss case). `argv_for(attempt_id)`
     returns the launch argv before the prompt, exactly as
@@ -592,8 +651,10 @@ def agent_trial_runner(
     every time; the fake-docker tests need the attempt id to map the home.
 
     No grading happens here: `run_planned_selection_probe` grades every
-    captured attempt itself, through its own `grading_backend`, so there is
-    ONE grading path whichever runner produced the transcript.
+    eligible capture after complete attendance, using the stored observation
+    and locked assembler. Synthetic callbacks retain fixture-only grade_files.
+    Recognizing this adapter is a trusted Python API boundary, not authenticated
+    producer origin. The grading backend must be separate and network-none.
 
     Launching a real `claude`/`codex` still requires
     `SKILLC_ALLOW_REAL_AGENT=1` - `lifecycle.py`'s own guard, unchanged.
@@ -610,7 +671,7 @@ def agent_trial_runner(
     control."""
     return AgentTrialRunner(
         experiment=experiment, backend=backend, base=base, client=client, argv_for=argv_for,
-        treatment_home_files=treatment_home_files,
+        treatment_home_files=treatment_home_files, treatment_home_modes=treatment_home_modes,
         goal=goal if goal is not None else (GRADER_ROOT / "goal.md").read_text(encoding="utf-8"),
         surface=(
             surface if surface is not None
@@ -681,6 +742,7 @@ class AgentTrialRunner:
     credential_explicit_path: str | Path | None
     minimum_credential_seconds: float
     skill_name: str | None = None
+    treatment_home_modes: Mapping[str, str] | None = None
 
     def __call__(self, trial_dict: dict[str, object], attempt: dict[str, object]) -> AttemptTranscript | None:
         config = trial_dict["config"]
@@ -691,6 +753,9 @@ class AgentTrialRunner:
         addendum = str(config.get("prompt_addendum") or "")
         prompt = f"{self.goal}\n\n{addendum}" if addendum else self.goal
         attempt_id = str(attempt["attempt_id"])
+        mode_kwargs: dict[str, object] = {}
+        if arm == "treatment" and self.treatment_home_modes is not None:
+            mode_kwargs["extra_home_modes"] = dict(self.treatment_home_modes)
         record = agent_trial.run_one_attempt(
             backend=self.backend, experiment=self.experiment, attempt_id=attempt_id, client=self.client,
             base_argv=self.argv_for(attempt_id), prompt=prompt, skill_name=self.skill_name,
@@ -699,6 +764,7 @@ class AgentTrialRunner:
             minimum_credential_seconds=self.minimum_credential_seconds, cli_version=self.cli_version,
             extra_home_files=dict(self.treatment_home_files) if arm == "treatment" else {},
             retain_transcript=True,
+            **mode_kwargs,  # type: ignore[arg-type]
         )
         digest, reason = _retain_transcript(record.get("retained_transcript"), self.base, attempt_id)  # type: ignore[arg-type]
         transcript = transcript_from_record(record, self.experiment, attempt_id)

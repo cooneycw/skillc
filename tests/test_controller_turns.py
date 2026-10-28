@@ -150,6 +150,54 @@ def test_the_session_id_is_read_only_from_the_client_header(stderr: bytes, expec
     assert ct.session_id_from_header(stderr) == expected
 
 
+#: #516: turn 1's stderr as codex-cli 0.157.1 actually printed it in the #279
+#: sizing run (attempt 1, 2026-10-22): its own tracing lines BEFORE the header.
+REAL_TRACING_STDERR = (Path(__file__).parent / "fixtures" / "controller-turns"
+                       / "codex-0.157.1-tracing-before-header.stderr").read_bytes()
+REAL_SESSION = "01a16366-924a-7070-b0bc-06f9ecbead51"
+_TRACE = "2026-10-22T11:37:08.918732Z ERROR codex_models_manager::manager: failed to refresh available models\n"
+
+
+def test_red_516_the_real_header_after_client_tracing_lines_is_read() -> None:
+    """Failed on the code before #516: `_STARTUP` refused the client's own
+    tracing lines, so the real header was never read and no approval was sent."""
+    assert b"Z ERROR codex_models_manager::manager: " in REAL_TRACING_STDERR
+    assert ct.session_id_from_header(REAL_TRACING_STDERR) == REAL_SESSION
+    assert ct.header_refusal(REAL_TRACING_STDERR) is None
+
+
+@pytest.mark.parametrize(("before", "why"), [
+    ("ERROR codex_models_manager::manager: no timestamp\n", "before the header"),
+    ("2026-10-22T11:37:08Z ERROR codex_models_manager::manager\n", "before the header"),    # no ': message'
+    ("2026-10-22T11:37:08Z NOTICE codex_models_manager::manager: not a level\n", "before the header"),
+    ("2026-10-22 11:37:08Z ERROR codex_models_manager::manager: not RFC3339\n", "before the header"),
+    ("2026-10-22T11:37:08Z ERROR Codex Models: not a module path\n", "before the header"),
+    ("I am the agent and I printed first\n", "before the header"),
+])
+def test_red_516_any_other_line_before_the_header_still_refuses(before: str, why: str) -> None:
+    stderr = (_TRACE + before + _HEADER).encode()
+    assert ct.session_id_from_header(stderr) is None
+    assert why in str(ct.header_refusal(stderr))
+
+
+def test_red_516_a_forged_header_after_tracing_and_agent_output_still_refuses() -> None:
+    forged = (_TRACE + "exec\nsome agent output\nOpenAI Codex v0.157.1\n--------\nsession id: "
+              + SESSION + "\n--------\n")
+    assert ct.session_id_from_header(forged.encode()) is None
+
+
+@pytest.mark.parametrize(("stderr", "why"), [
+    (b"", "no stderr"),
+    (b"just output\n", "no 'OpenAI Codex v' line"),
+    (_HEADER.replace("--------\nuser", "user").encode(), "never closed"),
+    (_HEADER.replace("provider: openai", "plugin: github").encode(), "not a known header line"),
+    (_HEADER.replace(SESSION, "not-a-uuid").encode(), "exactly one session id"),
+])
+def test_516_a_refused_header_says_why(stderr: bytes, why: str) -> None:
+    assert ct.session_id_from_header(stderr) is None
+    assert why in str(ct.header_refusal(stderr))
+
+
 # --------------------------------------------- the guard counts each delivered turn
 
 
@@ -223,7 +271,7 @@ def test_green_control_an_approval_delivered_is_acted_on_in_the_same_session(
     assert entries[1] == {"turn": "resume", "session_id": SESSION, "text": APPROVAL, "proceeded": True}
     assert record["controller_turns"] == {
         "declared": 1, "delivered": 1, "expected_top_level": 2, "session_id_source": "client-stderr-header",
-        "session_id_found": True, "stopped": "every declared turn was delivered",
+        "session_id_found": True, "stopped": "every declared turn was delivered", "header_refusal": None,
     }
     assert [(e.get("index"), e.get("dispatched"), e.get("ended"), e.get("delivered"))
             for e in _turn_events(experiment, attempt_id)] == [(2, True, None, None), (2, None, "exited", True)]
@@ -241,6 +289,18 @@ def test_red_case_an_approval_withheld_stops_the_actor_at_step_three(
     assert "controller_turns" not in record and _turn_events(experiment, attempt_id) == []
 
 
+def test_red_516_a_header_after_client_tracing_lines_gets_its_approval_turn(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """End to end through the backend: before #516 this attempt stopped at
+    Step 3 with no approval turn, exactly as the #279 sizing run's did."""
+    record, entries, _experiment, _attempt_id = _attempt(store, base, docker_state, tmp_path,
+                                                         turns=ct.Turns((APPROVAL,)), header="tracing")
+    assert [e["turn"] for e in entries] == [1, "resume"]
+    turns = record["controller_turns"]
+    assert isinstance(turns, dict) and turns["delivered"] == 1 and turns["header_refusal"] is None
+
+
 @pytest.mark.parametrize("header, stopped", [
     ("absent", "no session id"),
     ("twice", "no session id"),
@@ -253,6 +313,7 @@ def test_red_case_no_unambiguous_session_id_means_no_further_turn(
     assert [e["turn"] for e in entries] == [1]
     turns = record["controller_turns"]
     assert isinstance(turns, dict) and turns["delivered"] == 0 and stopped in str(turns["stopped"])
+    assert isinstance(turns["header_refusal"], str) and turns["header_refusal"]  # #516: the why is recorded
     assert _turn_events(experiment, attempt_id) == []
 
 
@@ -465,6 +526,27 @@ def test_red_case_a_cancel_between_turns_launches_no_approval(store: Path) -> No
     assert len(events) == 1 and events[0]["delivered"] is False and "cancelled" in str(events[0]["reason"])
 
 
+@pytest.mark.parametrize("raises", [False, True])
+def test_before_stop_runs_while_the_attempt_is_up_and_never_blocks_the_stop(store: Path, raises: bool) -> None:
+    """#518 review (HIGH): the credential steward must report from a RUNNING
+    container, so `before_stop` comes after the last turn and before
+    `end_attempt` - and a hook that raises still lets the attempt end."""
+    from skillc import lifecycle
+
+    experiment, attempt_id = _planned(store)
+    backend = _MemoryTurns()
+    seen: list[tuple[int, int]] = []
+
+    def before_stop(_backend: object, _handle: object) -> None:
+        seen.append((len(backend.turns), backend.ended))
+        if raises:
+            raise RuntimeError("steward unreachable")
+
+    lifecycle._run_turns(backend, object(), experiment, attempt_id, ["turn-1"], Limits(timeout=60),  # type: ignore[arg-type]
+                         None, lambda *_: None, before_stop=before_stop)
+    assert seen == [(1, 0)] and backend.ended == 1
+
+
 def test_red_case_a_declared_but_undelivered_turn_still_ends_with_a_confirmed_stop(
     store: Path, base: Path, docker_state: Path, tmp_path: Path,
 ) -> None:
@@ -491,3 +573,65 @@ def test_red_case_without_turns_the_attempt_runs_through_plain_execute_once(
     monkeypatch.setattr(d.DockerBackend, "end_attempt", lambda *_: calls.append(("end_attempt", None)))
     _attempt(store, base, docker_state, tmp_path, turns=None)
     assert calls == [("execute", False)]
+
+
+@pytest.mark.parametrize("mode", ["healthy", "spent", "header", "never-started", "retention-fails"])
+def test_547_prepared_resume_and_launch_are_separate_without_native_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    from collections.abc import Sequence
+
+    from test_lifecycle import FakeBackend, _Handle
+
+    from skillc import completion
+    from skillc.backend import Confirmation, ExecuteResult
+
+    ticks = [0.0]
+    class Memory(FakeBackend):
+        def __init__(self) -> None:
+            super().__init__(tmp_path / "backend", force_confirm_stopped=Confirmation.CONFIRMED)
+            self.argv: list[list[str]] = []
+            self.ended = False
+
+        def execute_turn(self, handle: object, argv: Sequence[str], limits: Limits,
+                         cancel: object = None) -> ExecuteResult:
+            assert isinstance(handle, _Handle)
+            self.argv.append(list(argv))
+            (handle.root / "output.txt").write_text("synthetic result")
+            if mode == "never-started" and len(self.argv) > 1:
+                return ExecuteResult("launch-failed", None)
+            return ExecuteResult("exited", 0, stderr=b"" if mode == "header" else _HEADER.encode())
+
+        def end_attempt(self, handle: object) -> None:
+            self.ended = True
+
+    monkeypatch.setattr(at, "_make_before_execute", lambda **_: lambda *_: None)
+    keep = t.retain_prompt_input
+    def retain(*args: object) -> None:
+        if mode == "retention-fails":
+            raise OSError("synthetic diagnostic publication failure")
+        keep(*args)  # type: ignore[arg-type]
+        if mode == "spent" and args[2] == 2:
+            ticks[0] = 11.0
+    monkeypatch.setattr(t, "retain_prompt_input", retain)
+    e, aid = _planned(t.open_store(tmp_path / "store", []))
+    backend = Memory()
+    text = "Approved: retain exact \u03bb\nresume."
+    result = at.run_one_attempt(
+        backend=backend, experiment=e, attempt_id=aid, client="codex",  # type: ignore[arg-type]
+        base_argv=("synthetic-client", *CODEX_BASE[1:]), prompt="Synthetic task", skill_name=None, surface={},
+        limits=Limits(timeout=60), base=tmp_path / "scratch", turns=ct.Turns((text,)),
+        completion_deadline=completion.CompletionDeadline.after(10, lambda: ticks[0]) if mode == "spent" else None,
+    )
+    assert backend.ended and aid in backend.destroyed and result["backend_teardown"] == "confirmed"
+    assert result["disposition"] == ("unavailable" if mode == "never-started" else "captured")
+    trace = t.read_prompt_inputs(e, aid)
+    assert trace.coverage == ("unknown" if mode == "retention-fails" else "complete")
+    if mode != "retention-fails":
+        assert trace.inputs[0].data == backend.argv[0][-1].encode()
+        assert trace.inputs[0].launched is True
+        assert len(trace.inputs) == (1 if mode == "header" else 2)
+        if mode != "header":
+            assert trace.inputs[1].data == text.encode()
+            assert trace.inputs[1].launched is (mode == "healthy")
+        assert len(backend.argv) == (1 if mode in {"header", "spent"} else 2)

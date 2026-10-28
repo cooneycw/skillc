@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import codex_guard as cg
+from . import credential_steward as cs
 from . import fixture_overlay as fo
 from . import fixture_service as fs
 from . import git_snapshot as gs
@@ -75,6 +76,20 @@ class AttemptFixture:
     #: oracle in a throwaway container of the attempt's measured image here).
     #: None leaves the capture exactly as before.
     post_capture: Callable[[dict[str, Any], Any, object], dict[str, Any]] | None = None
+    #: #530: opt in to `gate_launch_evidence` in the trusted extras (the
+    #: flow-check-route task's `report-honest`). Off keeps every earlier
+    #: fixture's record byte-identical.
+    launch_evidence: bool = False
+    #: #530: gate name -> runner plan whose stage outcomes a run of it carries
+    #: (`stage_capture`). Empty keeps every earlier fixture stage-less.
+    stage_plans: Mapping[str, str] = field(default_factory=dict)
+    #: #530: record each gate run's SOURCE digest of the gated repository at
+    #: its start (`source_digest.digest_tree`), for a judge that must know
+    #: what the run gated, not only what was left at the end.
+    source_digest: bool = False
+    #: #530: repository-relative paths of the gate runner's resumable state
+    #: (the task's own fact); see `agent_trial.gate_state_problem`.
+    gate_state_paths: tuple[str, ...] = ()
 
 
 class _FixtureBackend(Protocol):
@@ -86,6 +101,13 @@ class _FixtureBackend(Protocol):
     def trigger_log(self, handle: object) -> object: ...
 
     def trigger_dropped(self, handle: object) -> int | None: ...
+
+    # #518: the credential steward's root primitives.
+    def start_root_daemon_in_attempt(self, handle: object, argv: Sequence[str],
+                                     timeout: float | None = None) -> bool: ...
+
+    def root_output_in_attempt(self, handle: object, argv: Sequence[str], timeout: float | None = None,
+                               max_bytes: int = ...) -> bytes | None: ...
 
 
 @dataclass
@@ -112,14 +134,22 @@ class FixtureSession:
     #: digest of every remote ref head and the extras the controller turns.
     order: Order | None = None
     turn_records: list[dict[str, Any]] | None = None
+    #: #518: the credential steward's record and driver.
+    steward: cs.CredentialStewardSession = field(init=False)
+    steward_driver: cs.CredentialSteward | None = None
+    _steward_record: dict[str, Any] | None = None
     _finishing: bool = False
+    finalization: dict[str, object] = field(default_factory=lambda: {
+        "status": "not-observed", "reason": "fixture finalization was not reached"})
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
         self.guard = cg.CodexGuardSession(self.attempt_id)
+        self.steward = cs.CredentialStewardSession(self.attempt_id)
 
     def routes(self) -> dict[str, tuple[Callable[[Mapping[str, object]], Mapping[str, object]], frozenset[str]]]:
-        return {"gh": (self._gh, fs.REQUEST_KEYS), "codex_guard": (self._guard, cg.REQUEST_KEYS)}
+        return {"gh": (self._gh, fs.REQUEST_KEYS), "codex_guard": (self._guard, cg.REQUEST_KEYS),
+                "credential_steward": (self.steward.decide, cs.REQUEST_KEYS)}
 
     def watch(self, decide: Callable[[Mapping[str, object]], Mapping[str, object]]
               ) -> Callable[[Mapping[str, object]], Mapping[str, object]]:
@@ -133,6 +163,8 @@ class FixtureSession:
             except ChannelRefusal:
                 if request.get("op") == "codex_guard":
                     self.guard.channel_unavailable = True
+                elif request.get("op") == "credential_steward":
+                    self.steward.channel_unavailable = True
                 raise
         return watched
 
@@ -152,6 +184,7 @@ class FixtureSession:
         try:
             self.overlays["gh"] = fo.install_gh_shim(backend, handle, environment).__dict__
             self.overlays["codex_guard"] = fo.install_codex_guard(backend, handle, environment)
+            self.steward_driver = cs.start_for(self.steward, backend, handle)  # #518
             remote = ExecGitRemote(backend, handle, git_dir=self.fixture.git_dir)
             service = fs.FixtureService(self.fixture.declaration, remote, self.attempt_id, order=self.order,
                                         ship_stamper=(lambda commit: _ship_stamp(backend, handle, self.fixture.remote_relpath,
@@ -164,13 +197,29 @@ class FixtureSession:
             self.service = service
 
     def finish(self, backend: _FixtureBackend, handle: object) -> None:
-        """After the agent stops: finalize the service against a snapshot of
-        the exported remote, capture the git state, close the guard record."""
+        """Latch the first outcome, including errors after evidence exists."""
         with self._lock:
             if self._finishing:
                 return
             self._finishing = True
-            service = self.service
+            # An interruption can never leave success.
+            self.finalization = {"status": "failed", "reason": "fixture finalization did not complete"}
+        try:
+            self._finish(backend, handle)
+        except Exception as exc:
+            self.failure = self.failure or f"fixture finalization failed ({type(exc).__name__})"
+            self.finalization = {"status": "failed", "reason": f"fixture finalization failed ({type(exc).__name__})"}
+            raise
+        else:
+            self.finalization = ({"status": "succeeded", "reason": None} if self.failure is None else
+                                 {"status": "failed", "reason": "a fixture failure was latched"})
+
+    def _finish(self, backend: _FixtureBackend, handle: object) -> None:
+        """After the agent stops: finalize the service against a snapshot of
+        the exported remote, capture the git state, close the guard record."""
+        service = self.service
+        if self.steward_driver is not None:
+            self.steward_driver.stop(backend, handle)  # while the channel still listens
         channel_ok = True
         try:
             channel_ok = backend.trigger_log(handle) is not None
@@ -184,8 +233,10 @@ class FixtureSession:
             # A connection closed before any route saw it may have been a guard
             # line (counter-model review, pass 2): the count cannot be zero.
             self.guard.channel_unavailable = True
+            self.steward.channel_unavailable = True
         if not channel_ok:
             self.guard.channel_unavailable = True
+            self.steward.channel_unavailable = True
             if service is not None:
                 service.channel_unavailable = True
         with tempfile.TemporaryDirectory(prefix="skillc-fixture-export-") as directory:
@@ -212,6 +263,11 @@ class FixtureSession:
                                                                      self.git.get("remote_refs"))
         self.guard.finalize()
 
+    def steward_record(self) -> dict[str, Any]:
+        if self._steward_record is None:
+            self._steward_record = cs.record_of(self.steward, self.steward_driver)
+        return self._steward_record
+
     def guard_record(self) -> dict[str, Any]:
         return cg.summarize(self.attempt_id, list(self.guard.decisions), self.guard.channel_unavailable,
                             expected_top_level=self.expected_top_level, nested_policy=self.nested_policy)
@@ -220,7 +276,8 @@ class FixtureSession:
         extras: dict[str, object] = {
             "case": self.fixture.case, "service": self.record, "git": self.git,
             "git_unreadable": self.git_unreadable, "final_report": final_report,
-            "codex_guard": self.guard_record()}
+            "codex_guard": self.guard_record(), "credential_steward": self.steward_record(),
+            "finalization": dict(self.finalization)}
         if self.order is not None:
             # #279 PR-2a: the turns as the controller recorded them, ordered.
             extras["controller_turns"] = list(self.turn_records or [])

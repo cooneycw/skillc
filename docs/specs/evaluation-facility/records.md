@@ -406,6 +406,31 @@ knows, then leak-checks the record twice: each string as it reads once parsed,
 and the serialized text. A record that fails is not written, and the attempt
 says `observation_record: refused-leak`.
 
+The census's `client_version` is a transcript observation, not an executable
+measurement. Current readers return the exact unique nonblank version across
+the version-bearing records, or null for missing, malformed or conflicting
+evidence. Repeated records with an identical version are allowed. Duplicate
+version, population or binding members within one JSON object are ambiguous,
+even when their values match; matching-wrong-matching across records is unknown.
+Ordinary Claude messages without a version field do not invalidate a header.
+This uses the existing text/null field; version uncertainty adds no census
+error and changes no task grade or eligibility decision.
+
+Pilot and fixture-live reports derive `cli_version_observed` from this attempt's
+complete retained transcript bytes, checked through the existing object reader.
+Legacy captured manifests and independent failure-retention journals are both
+supported. A manifest and its selected stream must bind to the attempt's ledger
+identities, canonical object reference and actual recorded size; malformed,
+foreign or conflicting bindings yield no version fact.
+Missing, partial, damaged, incompatible or ambiguous bytes read `UNKNOWN`.
+An old scalar or agreement between old first/last metadata fields cannot
+establish population consistency. `client_declared` separately copies this
+attempt's ledger client name/version; it supplies no match or qualification
+boolean. A wrong but consistently observed version remains observable beside
+the declaration. Existing grades, model eligibility, comparisons and carried
+replay decisions remain unchanged. Historical reports retain their original
+meaning and bytes; generating these diagnostics does not re-certify them.
+
 Three facts must agree inside the record:
 
 - **Eligibility:** `grading_eligible` is exactly `prompt_delivered AND canary_satisfied`.
@@ -1152,3 +1177,100 @@ This completes #4's contract versioning. What it deliberately does not do:
   names the constraint a controller-authored witness record must satisfy to be
   cited as `CONFIRMED` evidence; it does not define that witness record. #269
   owns it.
+
+### Diagnostic retention independent of artifact capture (#547)
+
+The controller's raw journal permits diagnostic **detail** events. These are
+not lifecycle transitions, do not satisfy `captured`, and do not change any v2
+ledger, manifest, lifecycle or agent-observation schema:
+
+- `transcript-retained` carries `observation`, using the manifest's existing
+  `client-transcript` observation metadata (`attempt_id`, `origin`, `coverage`,
+  object `ref`/`digest`/`size`, or a missing reason). The caller supplies already
+  leak-checked bytes. Retention runs after observation and before export and
+  liveness checks, so a failed capture can keep its diagnostic transcript while
+  remaining inconclusive. An unconfirmed stop or a bounded prefix is partial.
+  Callback failures and storage refusal name their class without copying
+  exception payloads. A missing outcome carries no byte reference.
+- `gate-witness-retained` names the content-addressed diagnostic witness with
+  `coverage: complete` and `digest`, or records `coverage: missing` with a
+  storage-refusal reason. This snapshot is retained even when channel or credit
+  checks block grading. Complete **retention** does not imply complete witness
+  coverage: each declared gate and each run still records its own status. See
+  [gate-witness.md](gate-witness.md) for per-run output references.
+
+`trial.read_retained_transcript` requires one outcome bound to the requested
+attempt, the expected stream/origin, valid coverage/reference metadata, and
+object bytes whose digest and size match. Missing, symlinked, altered, misbound
+or ambiguous references refuse. `agent_trial.transcript_retention` and invocation
+recomputation can use this independently retained transcript when no manifest
+entry exists. Partial transcripts remain diagnostic and cannot prove that a
+skill was not invoked. Historical stores with neither reference remain missing;
+no transcript is reconstructed from a later run. The journal is controller-owned
+and is not a signature against an operator who can rewrite the entire store.
+
+The controller-held raw fixture extras also gain a `finalization` object:
+`{"status": "succeeded", "reason": null}`, or `failed`/`not-observed` with a
+nonempty reason. The first outcome covers the entire fixture `finish`, including
+exceptions after service/git evidence was produced; retrying cannot replace it.
+Reasons record failure classes rather than copying exception payloads. These
+extras remain a separate content-addressed evidence artifact, not a v2 record
+family. Existing service, git, guard and credential checks remain necessary.
+
+Strict fixture judge replay accepts only a well-formed recorded `succeeded`
+outcome. A recorded failure, malformed outcome or unobserved finalization blocks
+replay even with `--assume-fixture-finalized`. Only **historical absence** can use
+that explicit assumption. Replay labels list the attempts whose finalization was
+established and those whose historical finalization was assumed. Historical D3
+stores are unchanged and do not acquire evidence of successful finalization.
+
+### Private controller-issued input retention (#547)
+
+`agent_trial.run_one_attempt` records the exact prompt argument after runtime
+nonce assembly and each final resume argument when actually prepared. Healthy
+client transcripts can already contain these messages; this is independent
+controller evidence when those transcripts are absent or unusable. It does not
+record argv, session IDs, credentials, environment or model reception.
+
+Three private journal detail events bind evidence by `attempt`:
+
+- `prompt-inputs`: `version: 1`, `declared` (initial plus zero to three resumes)
+  and `limit` (the existing capture stream default, 8 MiB aggregate).
+- `prompt-input`: consecutive `index` (1 initial, 2-4 resume), `role`, and
+  `coverage: complete` with canonical object `ref`, SHA-256 `digest` and actual
+  UTF-8 `size`, or `coverage: missing` with a bounded refusal class. Text is
+  never normalized, redacted or truncated into a complete claim. Character
+  length is bounded before encoding, then actual aggregate bytes are checked.
+  Existing raw/decoded leak and secret checks must accept bytes before storage.
+- `prompt-inputs-ended`: the actual consecutive `prepared` indices and a safe
+  stop class (`lifecycle-ended`, `declared-complete`, `header-unavailable` or
+  `resume-precondition`). This ordinary-return detail may follow lifecycle
+  finalization; it takes the same experiment lock as retention and verification.
+  A declared maximum does not establish which turns were actually prepared.
+
+`trial.read_prompt_inputs` returns actual verified bytes and an independent
+launch status per prepared turn. Descriptor reads reject links/nonregular files,
+size/digest/encoding mismatch and over-cap objects before unbounded allocation.
+Identity, role, order, schema and prepared population must agree. Missing or
+conflicting terminal evidence makes whole-trace coverage `unknown`; verified
+individual bytes can remain available. Recorded byte refusal is `missing`;
+historical marker absence is `not-recorded`. None upgrades old task grades.
+Launch status follows separate existing dispatch/started/turn outcomes and is
+unknown when those facts do not establish it. Backend launch does not prove the
+model read anything. Existing transcript-delivery observations stay separate.
+
+Private CAS objects and journals stay in the source store. Records-only bundle
+export does not copy them; retained public export withholds raw object bytes.
+Storage/scanner failures never erase raw task outcomes or bypass cleanup. A
+future consumer requiring this trace must refuse its retention claim on missing,
+unknown or malformed required evidence. This adds no public v2 record kind.
+
+The remaining #547 bounds are explicit: per-path `skill_digests` already retain
+planned versions for pinned trials; historical/unpinned absence remains unknown,
+and coverage reports still require their separate declared inventory. General
+witness citations establish captured-digest membership/internal consistency,
+not universal semantic authenticity; stale-identity retains its separate #272
+receipt binding. The current schema has no independent external claimed-skill
+identity that could support an accepted `declared-skill-not-installed` case;
+its vocabulary remains unchanged. These bounds do not close every unpinned
+planner, capture all startup context or certify downstream study readiness.

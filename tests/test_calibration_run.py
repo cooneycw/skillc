@@ -85,6 +85,7 @@ def _declaration_data(*, attempts: int | None = None, approved: bool = True) -> 
     if not approved:
         data["approval"] = None
     data["shared"]["image"]["digest"] = _IMAGE_DIGEST
+    data["shared"]["image"]["tag"] = _IMAGE
     if attempts is not None:
         names = [a["name"] for a in data["arms"]]
         data["attempts_per_arm"] = attempts
@@ -408,13 +409,15 @@ def test_red_an_attempt_not_observed_running_the_declared_model_is_ineligible_an
 def test_an_attempt_with_no_total_cap_left_is_not_run_and_still_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each attempt advances the fake clock by 1000s: the first starts at 0,
-    the second at 1000 (agent limit cut to the 500s left of a 1500s total),
-    and the other four start with nothing left - `not-run`, never dropped."""
+    """Setup consumes the total cap; every unstarted slot remains reported."""
     experiment, outcomes, _, _ = _run(tmp_path, monkeypatch, total_seconds=1500, tick=1000)
     report = _report(experiment, outcomes)
     entries = _entries(report)
-    assert [e["disposition"] for e in entries] == ["captured", "captured"] + ["not-run"] * 4
+    assert [e["disposition"] for e in entries] == ["captured", "unavailable"] + ["not-run"] * 4
+    second = outcomes[1].scheduled.attempt_id
+    events = experiment.events(second)
+    assert not any(e["event"] == "started" for e in events)
+    assert "original completion deadline exhausted" in str(outcomes[1].record)
     assert "agent limit cut to 500s" in str(entries[1]["runner_note"])
     assert all("total time cap reached" in str(e["runner_note"]) for e in entries[2:])
     assert all(e["primary_endpoint"]["status"] == calibration.NOT_GRADED for e in entries[2:])  # type: ignore[index]
@@ -490,13 +493,84 @@ def test_a_treatment_that_installs_nothing_is_refused() -> None:
         cr.build_treatment(acquired)
 
 
+@pytest.mark.parametrize("case", ["alias", "declared", "default", "wrong-id", "rehearsal"])
+def test_548_legacy_cli_binds_the_effective_tag_and_id_before_run_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], case: str,
+) -> None:
+    from skillc import trial_bootstrap
+
+    declaration = calibration.load_declaration(MANIFEST)
+    calibration.require_approved(declaration, ROOT)  # Real historical approval, never waived.
+    tag, digest = cr._shared_str(declaration, "image", "tag"), cr._shared_str(declaration, "image", "digest")
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: cr.declared_client(declaration)[1])
+    resolutions: list[str] = []
+
+    def resolve(_docker: object, image: str, *_args: object) -> str:
+        resolutions.append(image)
+        return "sha256:" + "0" * 64 if case == "wrong-id" else digest
+
+    class NextStage(Exception):
+        pass
+
+    entered: list[bool] = []
+
+    def stop_before_directory(*_args: object) -> None:
+        entered.append(True)
+        raise NextStage
+
+    monkeypatch.setattr(demo, "resolve_image_digest", resolve)
+    monkeypatch.setattr(cr, "private_root", stop_before_directory)
+    monkeypatch.setattr(cc, "acquire_collection", lambda *_: pytest.fail("acquisition before image refusal"))
+    private = tmp_path / "private"
+    args = ["calibration-run", str(MANIFEST), "--private-dir", str(private)]
+    if case != "default":
+        args += ["--image", "alternate:1" if case in {"alias", "rehearsal"} else tag]
+    if case == "rehearsal":
+        args += ["--rehearse"]
+    try:
+        code: int | None = cli.main(args)
+    except NextStage:
+        code = None
+    assert not private.exists()
+    assert (code, bool(entered)) == ((2, False) if case in {"alias", "wrong-id"} else (None, True))
+    assert resolutions == ([] if case == "rehearsal" else ["alternate:1" if case == "alias" else tag])
+    error = capsys.readouterr().err
+    if case == "alias":
+        assert "shared.image.tag" in error
+    elif case == "wrong-id":
+        assert "refusing a run on an image other than the declared one" in error
+    elif case == "rehearsal":
+        assert "REHEARSAL - no container, client or model" in error
+
+
+@pytest.mark.parametrize("tag", ["missing", None, "", " ", {}, 42])
+def test_548_malformed_legacy_tags_are_refused_by_existing_approval_before_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tag: object,
+) -> None:
+    data = _declaration_data()
+    shared = data["shared"]
+    assert isinstance(shared, dict) and isinstance(shared["image"], dict)
+    if tag == "missing":
+        del shared["image"]["tag"]
+    else:
+        shared["image"]["tag"] = tag
+    path = tmp_path / "declaration.json"
+    path.write_text(json.dumps(stamp_approval(data)))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *_: pytest.fail("unapproved image was resolved"))
+    monkeypatch.setattr(cr, "private_root", lambda *_: pytest.fail("unapproved run reached private_root"))
+    assert cli.main(["calibration-run", str(path), "--private-dir", str(tmp_path / "private")]) == 2
+    assert "identities not recorded" in capsys.readouterr().err  # Earlier approval gate, not new tag guard.
+    assert not (tmp_path / "private").exists()
+
+
 def test_cli_refuses_an_image_other_than_the_declared_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The COMMITTED declaration names the real trial image's digest; the fake
-    docker resolves `fake-image:1` to another. Refused before any run directory."""
+    docker resolves its declared tag to another ID. Refused before any run directory."""
     private = tmp_path / "private"
-    code = cli.main(["calibration-run", str(MANIFEST), "--private-dir", str(private), "--image", _IMAGE,
+    tag = cr._shared_str(calibration.load_declaration(MANIFEST), "image", "tag")
+    code = cli.main(["calibration-run", str(MANIFEST), "--private-dir", str(private), "--image", tag,
                      "--docker-bin", " ".join(_docker_bin(tmp_path / "docker-state"))])
     assert code == 2
     assert "refusing a run on an image other than the declared one" in capsys.readouterr().err

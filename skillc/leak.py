@@ -53,7 +53,7 @@ not proof of absence:
   never reports a bare mount point on its own (`/workspace`, `/root`, `/opt`,
   `/srv`, `/tmp`) - too generic to identify a machine - and a `host-path`
   match is a path-boundary one: directly abutted by another character with
-  no `/`, whitespace, quote or line end between them, it stays silent.
+  no recognized token delimiter between them, it stays silent (see `_END`).
 - a public IPv4 address, a loopback or link-local one (127.0.0.0/8,
   169.254.0.0/16 - neither identifies a specific machine; see `_is_private`),
   or any IPv6 address.
@@ -225,17 +225,22 @@ def conditional_exemptions() -> frozenset[str]:
         transcripts of the #203 calibration.
       - `/home/user`: the generic example path in third-party skill text an
         agent reads (cpp-codex's flow-auto `reference.md`).
+      - `/home/u`: CPP's fixed developer example; `/home/proof`: the disposable
+        flow-auto cold-profile identity (#581). Neither is a blanket prefix.
 
     Exact match only: the operator's own uid, a longer number that starts
     with 10001, and a longer home directory name all still fire. A scan run on a host that HAS such an
-    account keeps the strict behaviour."""
+    account keeps the strict behaviour. Local account absence says nothing about
+    identities on foreign hosts. Callers must still supply live home/cwd paths,
+    which are checked independently even when an exact home is exempt."""
     exempt = set()
     if not _host_has_uid(CANDIDATE_UID):
         exempt.add(f"uid={CANDIDATE_UID}")
     if not _host_has_gid(CANDIDATE_GID):
         exempt.add(f"gid={CANDIDATE_GID}")
-    if not _host_has_account("user"):
-        exempt.add("/home/user")
+    for name in ("user", "u", "proof"):
+        if not _host_has_account(name):
+            exempt.add(f"/home/{name}")
     return frozenset(exempt)
 
 #: `--denylist`, then this environment variable, then nothing (#63). Real host
@@ -364,17 +369,19 @@ def scan_text(
 
     `host_paths` (#134 item 5) is normally `default_host_paths()`, passed in
     by the caller rather than computed here - see that function's docstring.
-    Each is matched at a PATH BOUNDARY - the character right after it must be
-    `/`, whitespace, a quote, or end of line - never as a raw substring
+    Explicit candidates also require at least two path segments below root;
+    bare mount points identify no machine, just as in `default_host_paths`.
+    Each is matched at a PATH BOUNDARY using `_END`: separators, whitespace,
+    quotes, closing punctuation, sentence-final period, or end of line - never as a raw substring
     (cross-model review on PR #154): a raw substring would let a shorter
     host path match inside a longer, unrelated one sharing its prefix, the
     same class of bug `ALLOWLIST`'s exact-match comparison exists to avoid
     for `HOME_PATH_RE`.
     """
     host_path_patterns = [
-        (host_path, re.compile(re.escape(host_path) + r"""(?=[/\s'"]|$)"""))
+        (host_path, re.compile(re.escape(host_path) + _END))
         for host_path in host_paths
-        if host_path
+        if _is_specific_enough(host_path)
     ]
     conditional = conditional_exemptions()
     for lineno, line in enumerate(text.splitlines(), start=1):

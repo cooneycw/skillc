@@ -32,8 +32,9 @@ grade(experiment, attempt, grader)
 
 ## A grader is three files and a definition
 
-`evals/level1/<task>/grader.json` declares a grader. Every field is required and
-unknown fields are refused:
+`evals/level1/<task>/grader.json` declares a grader. The fields below are
+required; only `dimensions` and `optional_criteria` are optional. Unknown fields
+are refused:
 
 | Field | Meaning |
 |---|---|
@@ -143,13 +144,39 @@ classified as follows:
 
 **3. Assemble: in the verifier's own process.**
 
-- The report must carry exactly the definition's criteria, each mandatory, each
-  once (`criteria-set`). It must also pass records.md's `criterion-vocabulary` and
-  `result-evidence` rules (`contract`).
+- The report must carry every definition `criteria` ID exactly once with literal
+  `mandatory: true`. The required list is nonempty. It may additionally carry
+  IDs explicitly allowed by `optional_criteria`, each at most once and with
+  literal `mandatory: false`. Unknown IDs, duplicates, overlapping declarations
+  and wrong flags are refused (`criteria-set`). All rows still pass records.md's
+  `criterion-vocabulary` and `result-evidence` rules (`contract`).
 - Only then do its criteria stand. Otherwise each required criterion becomes
   UNKNOWN, naming why.
 - The judge's own `status`, `grader` or any other claim is dropped. The status
   is `records.derive_status` over the criteria.
+
+### Measured diagnostics (#544)
+
+A definition may opt in with `"optional_criteria": ["measured-flag"]`. This is
+an allowed-ID list, not permission to accept arbitrary optional rows. Its IDs
+must be unique nonblank strings, disjoint from required IDs and the verifier's
+reserved `installation-ready` ID. An empty allowed list permits no extra rows;
+an empty required list is always refused. Dimensions continue to describe the
+mandatory criteria only.
+
+A declared diagnostic may be omitted; omission invents no outcome or evidence.
+Present diagnostic rows remain in returned and stored criteria and satisfy the
+same outcome/evidence rules as other rows. They never affect derived status,
+required-violation sets, or the explanation of unmet requirements. A diagnostic
+cannot rescue a mandatory failure or unknown, create a required population, or
+be selected as a mandatory primary endpoint. Model judges receive only required
+IDs; their tier scores and disagreement do not include diagnostic rows.
+
+Definitions omitting the field retain their exact legacy pin and behavior. An
+explicit optional policy, including an empty list, participates in the pin;
+changing the loaded policy changes that identity. Read-once and changed-judge
+checks remain in force. This does not revise any frozen task or historical
+result, or extend fixture-live's separately strict legacy judge-replay contract.
 
 ## The result
 

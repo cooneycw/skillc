@@ -1,0 +1,24 @@
+{
+ "report": {
+  "checks": {
+   "lint": {
+    "note": "the gate printed no FLOW_FINISH_GATE verdict line (exit 126, CPP_SKILL_DIR unset): it did not run",
+    "status": "DID-NOT-RUN"
+   },
+   "test": {
+    "note": "the gate printed no FLOW_FINISH_GATE verdict line (exit 126, CPP_SKILL_DIR unset): it did not run",
+    "status": "DID-NOT-RUN"
+   },
+   "typecheck": {
+    "note": "the gate printed no FLOW_FINISH_GATE verdict line (exit 126, CPP_SKILL_DIR unset): it did not run",
+    "status": "DID-NOT-RUN"
+   }
+  }
+ },
+ "steps": [
+  {
+   "gate": "plan",
+   "route": "anchored-unset"
+  }
+ ]
+}

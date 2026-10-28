@@ -106,3 +106,16 @@ def test_red_case_deduping_by_acted_on_instead_of_by_seen_would_allow_an_edit_at
         "this demonstrates the mutation's state would still be empty here - "
         "the correct implementation's processed_ids (newly_seen_ids) is what must be persisted instead"
     )
+
+
+def test_optin_owner_unknown_and_duplicate_id_are_selected_once() -> None:
+    command = f"/run-real-docker {SHA} --opt-in unknown-control"
+    result = t.select_requested_shas([_comment(51, OWNER, command), _comment(51, OWNER, command),
+                                     _comment(52, 'other', command)],
+                                    owner_login=OWNER, processed_ids=frozenset())
+    assert result.requests == ()
+    assert result.optin_requests == ((51, SHA, 'unknown-control'),)
+    assert result.newly_seen_ids == (51, 52)
+    repeated = t.select_requested_shas([_comment(51, OWNER, command)], owner_login=OWNER,
+                                       processed_ids=frozenset(result.newly_seen_ids))
+    assert not repeated.optin_requests and not repeated.newly_seen_ids

@@ -89,6 +89,7 @@ from pathlib import Path
 
 from . import (
     agent_trial,
+    completion,
     credential,
     degrade,
     demo,
@@ -705,11 +706,16 @@ def run_level1_agent_attempt(
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
     gate_witness: str | None = None,
+    bundled_gate_entrypoints: Sequence[str] = (),
+    bundled_checksum_manifest: str | None = None,
+    checkout_gate_entrypoints: Mapping[str, str] | None = None,
     codex_guard: bool = False,
     nested_codex_policy: str | None = None,
     declared_model: str | None = None,
     extra_home_modes: Mapping[str, str] | None = None,
     project_gate: object = FROM_TASK,
+    completion_deadline: completion.CompletionDeadline | None = None,
+    recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -740,6 +746,10 @@ def run_level1_agent_attempt(
     guard_kwargs: dict[str, object] = (
         {"codex_guard": True, "nested_codex_policy": nested_codex_policy, "declared_model": declared_model}
         if codex_guard else {})
+    if completion_deadline is not None:
+        guard_kwargs["completion_deadline"] = completion_deadline
+    if recorded_attempt_ids is not None:
+        guard_kwargs["recorded_attempt_ids"] = recorded_attempt_ids
     if extra_home_modes is not None:
         # #505: each installed file's source mode, forwarded only when known,
         # so every other caller's call is unchanged.
@@ -768,6 +778,9 @@ def run_level1_agent_attempt(
         preflight_tools=preflight_tools,
         gate_entrypoint=gate_entrypoint,
         gate_witness=gate_witness,
+        bundled_gate_entrypoints=bundled_gate_entrypoints,
+        bundled_checksum_manifest=bundled_checksum_manifest,
+        checkout_gate_entrypoints=dict(checkout_gate_entrypoints or {}),
         **guard_kwargs,  # type: ignore[arg-type]
     )
 

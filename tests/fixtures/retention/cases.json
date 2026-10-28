@@ -1,0 +1,317 @@
+{
+  "bytes": "diagnostic\n",
+  "transcript": [
+    {
+      "name": "valid",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": true
+    },
+    {
+      "name": "wrong-attempt",
+      "entry": {
+        "attempt_id": "other-attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "missing-object",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "missing",
+      "accept": false
+    },
+    {
+      "name": "altered-object",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "altered",
+      "accept": false
+    },
+    {
+      "name": "wrong-size",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 999,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "bool-size",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": true,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "invalid-digest",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "complete",
+        "digest": "../../elsewhere",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "wrong-origin",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "observed",
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "unknown-coverage",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "unknown",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "partial",
+      "entry": {
+        "attempt_id": "$attempt",
+        "stream": "client-transcript",
+        "origin": "client-reported",
+        "coverage": "partial",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "ref": "objects/d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c"
+      },
+      "object": "valid",
+      "accept": true
+    }
+  ],
+  "gate": [
+    {
+      "name": "valid",
+      "entry": {
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "truncated": false,
+        "incomplete": false
+      },
+      "object": "valid",
+      "accept": true
+    },
+    {
+      "name": "missing-object",
+      "entry": {
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "truncated": false,
+        "incomplete": false
+      },
+      "object": "missing",
+      "accept": false
+    },
+    {
+      "name": "altered-object",
+      "entry": {
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "truncated": false,
+        "incomplete": false
+      },
+      "object": "altered",
+      "accept": false
+    },
+    {
+      "name": "wrong-size",
+      "entry": {
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 999,
+        "truncated": false,
+        "incomplete": false
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "bool-size",
+      "entry": {
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": true,
+        "truncated": false,
+        "incomplete": false
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "invalid-digest",
+      "entry": {
+        "coverage": "complete",
+        "digest": "bad",
+        "size": 11,
+        "truncated": false,
+        "incomplete": false
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "complete-truncated",
+      "entry": {
+        "coverage": "complete",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "truncated": true,
+        "incomplete": false
+      },
+      "object": "valid",
+      "accept": false
+    },
+    {
+      "name": "partial-prefix",
+      "entry": {
+        "coverage": "partial",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "truncated": true,
+        "incomplete": false
+      },
+      "object": "valid",
+      "accept": true
+    },
+    {
+      "name": "partial-drain",
+      "entry": {
+        "coverage": "partial",
+        "digest": "sha256:d8bcbfa307f670d5532559fc030ee82ff7be48160c1fff837950e0d7528d0a4c",
+        "size": 11,
+        "truncated": false,
+        "incomplete": true
+      },
+      "object": "valid",
+      "accept": true
+    }
+  ],
+  "fixture": [
+    {
+      "name": "succeeded",
+      "value": {
+        "status": "succeeded",
+        "reason": null
+      },
+      "accept": true
+    },
+    {
+      "name": "failed",
+      "value": {
+        "status": "failed",
+        "reason": "injected late failure"
+      },
+      "accept": false
+    },
+    {
+      "name": "unknown",
+      "value": {
+        "status": "not-observed",
+        "reason": "not reached"
+      },
+      "accept": false
+    },
+    {
+      "name": "malformed",
+      "value": {
+        "status": "succeeded"
+      },
+      "accept": false
+    },
+    {
+      "name": "null",
+      "value": null,
+      "accept": false
+    },
+    {
+      "name": "success-with-reason",
+      "value": {
+        "status": "succeeded",
+        "reason": "actually failed"
+      },
+      "accept": false
+    },
+    {
+      "name": "invented-status",
+      "value": {
+        "status": "complete",
+        "reason": null
+      },
+      "accept": false
+    }
+  ],
+  "unsafe_gate_output": {
+    "parts": [
+      "private source /",
+      "home/",
+      "retention-control/private\n"
+    ],
+    "coverage": "refused"
+  }
+}

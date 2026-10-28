@@ -20,10 +20,15 @@ _ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE = _ROOT / "tests" / "fixtures" / "uv-offline-cache-miss-0.9.7.txt"
 
 
-def _oracle():
-    with patch.dict("os.environ", {"SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK": "none"}), \
+@pytest.fixture(params=["closure", "cold-install"])
+def oracle(request):
+    filename, env = {
+        "closure": ("test_profile_closure_preflight_live.py", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK"),
+        "cold-install": ("test_profile_install_cold_container_live.py", "SKILLC_COLDINSTALL_LIVE_BREAK"),
+    }[request.param]
+    with patch.dict("os.environ", {env: "none"}), \
             patch("shutil.which", return_value=None):
-        ns = runpy.run_path(str(_ROOT / "tests" / "test_profile_closure_preflight_live.py"))
+        ns = runpy.run_path(str(_ROOT / "tests" / filename))
     return ns["_offline_cache_miss"]
 
 
@@ -31,8 +36,8 @@ def _real() -> str:
     return _FIXTURE.read_text(encoding="utf-8")
 
 
-def test_real_uv_output_is_accepted() -> None:
-    assert _oracle()(_real())
+def test_real_uv_output_is_accepted(oracle) -> None:
+    assert oracle(_real())
 
 
 # uv wraps at a width, so a break can fall INSIDE either required phrase.
@@ -40,13 +45,14 @@ def test_real_uv_output_is_accepted() -> None:
 # raw substring match pass; these cases are what make normalisation testable.
 _WRAPPED_INSIDE = {
     "inside-network-clause": "Network connectivity is\n      disabled, but the requested data wasn't found in the cache for:",
+    "spaces-tabs": "Network\tconnectivity  is disabled, but the requested data wasn't found in\tthe  cache for:",
     "inside-cache-clause": "Network connectivity is disabled, but the requested data wasn't found in\n      the cache for:",
 }
 
 
 @pytest.mark.parametrize("text", list(_WRAPPED_INSIDE.values()), ids=list(_WRAPPED_INSIDE))
-def test_a_break_inside_either_phrase_is_accepted(text: str) -> None:
-    assert _oracle()(text)
+def test_a_break_inside_either_phrase_is_accepted(oracle, text: str) -> None:
+    assert oracle(text)
 
 
 def test_an_unnormalised_oracle_rejects_the_wrapped_cases() -> None:
@@ -72,5 +78,5 @@ def test_the_old_oracle_rejects_real_uv_output() -> None:
     "error: failed to create directory .venv: Permission denied (os error 13)",
     "",
 ], ids=["invented-paraphrase", "cache-miss-only", "network-only", "permission-failure", "empty"])
-def test_other_failures_are_rejected(text: str) -> None:
-    assert not _oracle()(text)
+def test_other_failures_are_rejected(oracle, text: str) -> None:
+    assert not oracle(text)

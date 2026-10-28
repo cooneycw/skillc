@@ -674,3 +674,14 @@ def test_every_uptake_attempt_receives_its_arm_s_source_modes(
         delivered = call["extra_home_files"]
         assert isinstance(delivered, dict) and set(modes) <= set(delivered)
         assert {str(v) for v in modes.values()} <= {"100644", "100755"}
+
+
+def test_uptake_refuses_any_reused_protocol_arm_before_approval_or_store(tmp_path: Path) -> None:
+    from test_gate_state import PROTOCOL
+
+    from skillc import calibration_run as cr
+    t = cr.Treatment({}, "digest", None, gate_state_protocol=PROTOCOL)
+    with pytest.raises(us.StudyRefused, match="fixture-only"):
+        us.run_study(None, run_dir=tmp_path / "run", treatments={"second-arm": t},  # type: ignore[arg-type]
+                     image_digest=None, backends=lambda: pytest.fail("backend"), argv_for=lambda _: [], root=tmp_path)
+    assert not (tmp_path / "run").exists()

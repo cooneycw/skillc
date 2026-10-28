@@ -397,9 +397,25 @@ def build_case(task_root: Path, case: str, where: Path) -> tuple[dict[str, objec
     facts = build.build(where, case, remote_url=GIT_DIR)
     (where / ".remote").mkdir()
     (where / "remote.git").rename(where / ".remote" / "widget.git")
+    # #530: a task's builder may declare its own gate map and shim (the
+    # flow-check task: both prescribed calls, the mirrored-copy shim); one
+    # that declares none keeps the flow-auto default, byte for byte.
+    witness: dict[str, Any] = {}
+    if hasattr(build, "GATES"):
+        witness["gates"] = {str(g): tuple(a) for g, a in build.GATES.items()}
+    if hasattr(build, "GATE_SHIM"):
+        witness["gate_shim_source"] = Path(build.GATE_SHIM)
+    if getattr(build, "LAUNCH_EVIDENCE", False) is True:
+        witness["launch_evidence"] = True
+    if hasattr(build, "GATE_STATE_PATHS"):
+        witness["gate_state_paths"] = tuple(str(p) for p in build.GATE_STATE_PATHS)
+    if getattr(build, "SOURCE_DIGEST", False) is True:
+        witness["source_digest"] = True
+    if hasattr(build, "STAGE_PLANS"):
+        witness["stage_plans"] = {str(g): str(p) for g, p in build.STAGE_PLANS.items()}
     fixture = fa.AttemptFixture(case=case, declaration=build.declaration(case, GIT_DIR, facts), facts=facts,
                                 capture=lambda export, held: build.capture_snapshot(export, dict(held)),
-                                post_capture=getattr(build, "post_capture", None))
+                                post_capture=getattr(build, "post_capture", None), **witness)
     return {"repo": where / "repo", ".remote": where / ".remote"}, fixture
 
 
@@ -440,9 +456,13 @@ def attempt_kwargs(*, experiment: trial.Experiment, attempt_id: str, backend: Do
         "extra_home_files": extra_home_files, "receipt_context": treatment.receipt_context,
         "verify_home_files": treatment.verify_home_files, "preflight_tools": treatment.preflight_tools,
         "gate_entrypoint": treatment.gate_entrypoint, "fixture": fixture,
+        "bundled_gate_entrypoints": treatment.bundled_gate_entrypoints,
+        "bundled_checksum_manifest": treatment.bundled_checksum_manifest,
+        "checkout_gate_entrypoints": treatment.checkout_gate_entrypoints,
         # #287 auto6: the fixture route keeps its own gate map; a non-default
         # gate_witness is refused alongside a fixture.
         "gate_witness": None,
+        **({"gate_state_protocol": treatment.gate_state_protocol} if treatment.gate_state_protocol is not None else {}),
     }
 
 
@@ -510,6 +530,8 @@ def run_rows(manifest: Manifest, *, root: Path, run_dir: Path, treatment: cr.Tre
              rows: Sequence[Row] | None = None, interpreter: str = "/usr/bin/python3",
              on_row: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """Run each row once, in manifest order, and return the campaign report."""
+    if treatment.gate_state_protocol is not None:
+        raise CampaignRefused("gate-state treatment is fixture-only; this campaign does not support it")
     if treatment.gate_entrypoint is None:
         raise CampaignRefused("the treatment declares no gate_entrypoint; nothing would witness the gates")
     selected = list(manifest.rows if rows is None else rows)

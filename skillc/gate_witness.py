@@ -107,13 +107,16 @@ Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Protocol
 
+from . import gate_state
 from .backend import ExecuteResult, ExecutionBackend, Limits
 from .decide_reply_channel import ChannelRefusal
 from .ordering import Order
@@ -184,6 +187,11 @@ class _Run:
     order_requested: int | None = None
     order_completed: int | None = None
     source_digest_at_start: str | None = None
+    #: #525: the declared variant this run executed (which copy of the gate the
+    #: subject invoked); None for the gate's own default argv.
+    via: str | None = None
+    output: Mapping[str, object] | None = None
+    state_evidence: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +211,10 @@ class GateRunRecord:
     order_requested: int | None = None
     order_completed: int | None = None
     source_digest_at_start: str | None = None
+    #: #525: see `_Run.via`.
+    via: str | None = None
+    output: Mapping[str, object] | None = None
+    state_evidence: Mapping[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -212,7 +224,12 @@ class GateRunRecord:
             "reason": self.reason,
             "tree_digest_at_start": self.tree_digest_at_start,
             "stop_confirmed": self.stop_confirmed,
+            "output": dict(self.output) if self.output is not None else {
+                stream: {"coverage": "missing", "reason": "no controller output was retained"}
+                for stream in ("stdout", "stderr")},
         }
+        if self.state_evidence is not None:
+            data["state_evidence"] = dict(self.state_evidence)
         if self.stages is not None:
             data["stages"] = dict(self.stages)
         if self.order_requested is not None:
@@ -221,6 +238,14 @@ class GateRunRecord:
             data["order_requested"] = self.order_requested
             data["order_completed"] = self.order_completed
             data["source_digest_at_start"] = self.source_digest_at_start
+        elif self.source_digest_at_start is not None:
+            # #530: an unordered run whose fixture opted into the source digest;
+            # every other unordered record is byte-identical.
+            data["source_digest_at_start"] = self.source_digest_at_start
+        if self.via is not None:
+            # Only a run through a declared variant carries it (#525), so
+            # every other record is byte-identical.
+            data["via"] = self.via
         return data
 
 
@@ -295,6 +320,44 @@ class GateWitnessRecord:
         }).encode("utf-8")
 
 
+def _output_digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def read_run_output(run: Mapping[str, object], stream: str, read_object: Callable[[str], bytes]) -> bytes | None:
+    """Verify one retained stream. Historical/missing/refused is not empty.
+
+    Partial bytes may be read for diagnosis; coverage is never promoted. A
+    reference with absent/altered bytes, wrong size or invalid flags refuses.
+    """
+    if stream not in ("stdout", "stderr"):
+        raise ValueError("unknown output stream")
+    output = run.get("output")
+    if output is None:
+        return None
+    if not isinstance(output, dict) or set(output) != {"stdout", "stderr"}:
+        raise ValueError("invalid output schema")
+    entry = output[stream]
+    if not isinstance(entry, dict):
+        raise TypeError("invalid output entry")
+    coverage = entry.get("coverage")
+    if coverage in ("missing", "refused"):
+        if set(entry) != {"coverage", "reason"} or not isinstance(entry["reason"], str) or not entry["reason"]:
+            raise ValueError("unretained output must give a reason and no bytes")
+        return None
+    if (coverage not in ("complete", "partial")
+            or set(entry) != {"coverage", "digest", "size", "truncated", "incomplete"}
+            or type(entry["size"]) is not int or entry["size"] < 0
+            or type(entry["truncated"]) is not bool or type(entry["incomplete"]) is not bool
+            or (coverage == "partial") != (entry["truncated"] or entry["incomplete"])
+            or not isinstance(entry["digest"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", entry["digest"])):
+        raise ValueError("invalid retained output reference")
+    data = read_object(entry["digest"])
+    if len(data) != entry["size"] or _output_digest(data) != entry["digest"]:
+        raise ValueError("retained output bytes do not match the reference")
+    return data
+
+
 class GateWitness:
     """Owns the per-attempt gate state and supplies `decide` to a
     `DecideReplyChannel` (#183) constructed against this attempt's socket.
@@ -326,6 +389,7 @@ class GateWitness:
         limits: Limits,
         *,
         gate_exclusivity: bool,
+        output_store: Callable[[bytes], str] | None = None,
         exclusivity_basis: str,
         #: None (the default, #404): each stream up to its capture bound in
         #: `limits`, which is never a truncation - a capped capture is refused.
@@ -338,10 +402,19 @@ class GateWitness:
         order: Order | None = None,
         source_digest_fn: Callable[[str | None], str] | None = None,
         staged: Mapping[str, StagedGate] | None = None,
+        declared_variants: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+        resume_state: gate_state.Ledger | None = None,
+        state_snapshot_fn: Callable[[str | None], gate_state.Snapshot] | None = None,
     ) -> None:
         #: #279 PR-2a: the attempt's ordering counter and the source-digest
         #: function (given the gate's working directory). Both None for every
         #: attempt without controller turns, whose record is then unchanged.
+        if (resume_state is None) != (state_snapshot_fn is None):
+            raise ValueError("resume state and state snapshot must be declared together")
+        if resume_state is not None and set(dict(resume_state.protocol.operations)) != set(declared_gates):
+            raise ValueError("resume protocol must name exactly the declared fixture gates")
+        self._resume_state = resume_state
+        self._state_snapshot_fn = state_snapshot_fn
         self._order = order
         self._source_digest_fn = source_digest_fn
         if not declared_gates:
@@ -355,6 +428,19 @@ class GateWitness:
         self._declared_argv: dict[str, tuple[str, ...]] = {
             gate: tuple(argv) for gate, argv in declared_gates.items()
         }
+        #: #525: per-gate VARIANTS - other copies of the same gate the subject
+        #: may invoke (a skill-bundled gate beside the installed one). A request
+        #: naming `via` runs that variant's argv, declared by the CALLER like the
+        #: default; an undeclared `via` is refused. The run is recorded under the
+        #: SAME gate name, with `via`, so a grader reading the gate is unchanged.
+        self._declared_variants: dict[str, dict[str, tuple[str, ...]]] = {}
+        for gate, variants in (declared_variants or {}).items():
+            if gate not in self._declared_argv:
+                raise ValueError(f"declared_variants names an undeclared gate: {gate!r}")
+            for via, argv in variants.items():
+                if not via or not argv:
+                    raise ValueError(f"declared_variants[{gate!r}] needs a non-empty name and argv")
+            self._declared_variants[gate] = {via: tuple(argv) for via, argv in variants.items()}
         #: #332: per-gate exec environment, declared by the CALLER exactly
         #: like `_declared_argv` - never read from the subject. A gate with
         #: no entry here runs under `exec_in_attempt()`'s own default
@@ -396,6 +482,8 @@ class GateWitness:
         self._limits = limits
         self._gate_exclusivity = gate_exclusivity
         self._exclusivity_basis = exclusivity_basis
+        self._output_store = output_store
+        self._output_limits = (limits.max_captured_stdout_bytes, limits.max_captured_stderr_bytes)
         self._stdout_reply_cap = limits.max_captured_stdout_bytes if reply_byte_cap is None else reply_byte_cap
         self._stderr_reply_cap = limits.max_captured_stderr_bytes if reply_byte_cap is None else reply_byte_cap
         self._lock = Lock()
@@ -474,13 +562,26 @@ class GateWitness:
             )
         return resolved
 
+    def _state_snapshot(self, cwd: str | None) -> gate_state.Snapshot:
+        assert self._state_snapshot_fn is not None
+        try:
+            return self._state_snapshot_fn(cwd)
+        except Exception:  # noqa: BLE001 - failed controller export is unavailable
+            return gate_state.Snapshot(None, None, {}, "state-export-unreadable")
+
     def _decide_run_gate(self, request: Mapping[str, object]) -> Mapping[str, object]:
         gate = request.get("gate")
         if not isinstance(gate, str) or gate not in self._declared_argv:
             # Red case 1: the controller's own declared set is the only
             # source of truth for what may be run at all.
             raise ChannelRefusal(f"run_gate: {gate!r} is not a declared gate for this attempt")
+        via = request.get("via")
+        if "via" in request and (not isinstance(via, str) or via not in self._declared_variants.get(gate, {})):
+                raise ChannelRefusal(f"run_gate: {via!r} is not a declared variant of {gate!r}")
         runner = self._staged.get(gate)
+        if via is not None and runner is not None:
+            raise ChannelRefusal(f"run_gate: a variant of the staged gate {gate!r} is not supported (#525)")
+        argv = self._declared_variants[gate][via] if isinstance(via, str) else self._declared_argv[gate]
         requested_stages: tuple[str, ...] | None = None
         make_args = request.get("make_args", [])
         if runner is None and ("make_args" in request or "make_env" in request):
@@ -520,68 +621,89 @@ class GateWitness:
                             f"run_gate: {gate!r} refused - workspace-integrity-unknown "
                             "(an earlier queued execution was not confirmed stopped)"
                         )
-                # A gate waiting behind another gate must snapshot AFTER it,
-                # not measure the tree that existed when its request arrived.
-                tree_digest = self._tree_digest_fn()
-                source: str | None = None
-                if self._order is not None:
-                    try:
-                        source = (self._source_digest_fn(gate_cwd) if self._source_digest_fn is not None
-                                  else "unreadable: no source-digest function")
-                    except Exception as exc:  # noqa: BLE001 - an unreadable tree never matches a commit
-                        source = f"unreadable: {type(exc).__name__}"
-                with self._lock:
-                    run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest,
-                               order_requested=self._order.next() if self._order is not None else None,
-                               source_digest_at_start=source)
-                    self._runs[gate].append(run)
-                    unsupported = self._backend_unsupported
-                staged_capture: Mapping[str, object] | None = None
-                if unsupported:
-                    result = ExecuteResult(reason="unsupported", exit_code=None)
-                elif runner is not None:
-                    assert requested_stages is not None and isinstance(make_args, list)
-                    result, staged_capture = runner.run(
-                        self._backend, self._handle, self._limits, requested_stages, cwd=gate_cwd,
-                        env=self._declared_env.get(gate), confine_root=self._workspace_root,
-                        make_args=[str(a) for a in make_args])
-                else:
-                    result = self._backend.exec_in_attempt(
-                        self._handle, list(self._declared_argv[gate]), self._limits,
-                        cwd=gate_cwd, env=self._declared_env.get(gate),
-                        # #338's opened-directory boundary, never replaced by
-                        # the earlier realpath check or a subject status claim.
-                        confine_root=self._workspace_root,
+                execution = (self._resume_state.begin(gate_cwd, self._state_snapshot(gate_cwd))
+                             if self._resume_state is not None else None)
+                try:
+                    # A gate waiting behind another gate must snapshot AFTER it,
+                    # not measure the tree that existed when its request arrived.
+                    tree_digest = self._tree_digest_fn()
+                    source: str | None = None
+                    # #530: a source digest without the ordering counter, for a
+                    # fixture that opts in (every earlier caller passes the
+                    # function only together with an order, so nothing changes).
+                    if self._order is not None or self._source_digest_fn is not None:
+                        try:
+                            source = (self._source_digest_fn(gate_cwd) if self._source_digest_fn is not None
+                                      else "unreadable: no source-digest function")
+                        except Exception as exc:  # noqa: BLE001 - an unreadable tree never matches a commit
+                            source = f"unreadable: {type(exc).__name__}"
+                    if execution is not None:
+                        source = execution.before.source
+                    with self._lock:
+                        run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest,
+                                   order_requested=self._order.next() if self._order is not None else None,
+                                   source_digest_at_start=source, via=via if isinstance(via, str) else None)
+                        self._runs[gate].append(run)
+                        unsupported = self._backend_unsupported
+                    staged_capture: Mapping[str, object] | None = None
+                    if unsupported:
+                        result = ExecuteResult(reason="unsupported", exit_code=None)
+                    elif runner is not None:
+                        assert requested_stages is not None and isinstance(make_args, list)
+                        result, staged_capture = runner.run(
+                            self._backend, self._handle, self._limits, requested_stages, cwd=gate_cwd,
+                            env=self._declared_env.get(gate), confine_root=self._workspace_root,
+                            make_args=[str(a) for a in make_args])
+                    else:
+                        result = self._backend.exec_in_attempt(
+                            self._handle, list(argv), self._limits,
+                            cwd=gate_cwd, env=self._declared_env.get(gate),
+                            # #338's opened-directory boundary, never replaced by
+                            # the earlier realpath check or a subject status claim.
+                            confine_root=self._workspace_root,
+                        )
+                    output_bad = result.reason == "exited" and (
+                        result.stdout is None or result.stdout_truncated
+                        or result.stdout_incomplete or result.stderr_incomplete
+                        # #334: a capped raw stderr cannot be forwarded as whole.
+                        or result.stderr_truncated
                     )
-                output_bad = result.reason == "exited" and (
-                    result.stdout is None or result.stdout_truncated
-                    or result.stdout_incomplete or result.stderr_incomplete
-                    # #334: a capped raw stderr cannot be forwarded as whole.
-                    or result.stderr_truncated
-                )
-                stages: Mapping[str, object] | None
-                if runner is not None:
-                    stages = (dict(staged_capture, cwd=gate_cwd, workspace_root=self._workspace_root)
-                              if staged_capture is not None and not output_bad
-                              else _stages_unavailable("controller output is missing or incomplete" if output_bad
-                                                       else f"run did not start (reason {result.reason!r})"))
-                else:
-                    stages = self._read_stages(gate, result, output_bad, gate_cwd)
-                with self._lock:
-                    if result.reason == "unsupported":
-                        self.channel_unavailable = True
-                        self._backend_unsupported = True
-                    if output_bad:
-                        self.channel_unavailable = True
-                    if result.stop_confirmed is False:
-                        self._workspace_integrity_unknown = True
-                    run.completed_at = time.time()
-                    if self._order is not None:
-                        run.order_completed = self._order.next()
-                    run.exit_code = result.exit_code
-                    run.reason = result.reason
-                    run.stop_confirmed = result.stop_confirmed
-                    run.stages = stages
+                    stages: Mapping[str, object] | None
+                    if runner is not None:
+                        stages = (dict(staged_capture, cwd=gate_cwd, workspace_root=self._workspace_root)
+                                  if staged_capture is not None and not output_bad
+                                  else _stages_unavailable("controller output is missing or incomplete" if output_bad
+                                                           else f"run did not start (reason {result.reason!r})"))
+                    else:
+                        stages = self._read_stages(gate, result, output_bad, gate_cwd)
+                    retained = self._retain_output(result)
+                    state_evidence = None
+                    if execution is not None:
+                        assert self._resume_state is not None
+                        stages, state_evidence = self._resume_state.finish(
+                            execution, gate, result, retained, self._state_snapshot(gate_cwd), stages)
+                    with self._lock:
+                        if result.reason == "unsupported":
+                            self.channel_unavailable = True
+                            self._backend_unsupported = True
+                        if output_bad:
+                            self.channel_unavailable = True
+                        if result.stop_confirmed is False:
+                            self._workspace_integrity_unknown = True
+                        run.completed_at = time.time()
+                        if self._order is not None:
+                            run.order_completed = self._order.next()
+                        run.exit_code = result.exit_code
+                        run.reason = result.reason
+                        run.stop_confirmed = result.stop_confirmed
+                        run.stages = stages
+                        run.output = retained
+                        run.state_evidence = state_evidence
+                except BaseException:
+                    if execution is not None:
+                        assert self._resume_state is not None
+                        self._resume_state.invalidate(execution.key, execution.sequence)
+                    raise
                 if output_bad:
                     raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
                 lossless: dict[str, object] = {}
@@ -606,6 +728,28 @@ class GateWitness:
             # wedge this gate's in-flight claim forever.
             with self._lock:
                 self._in_flight[gate] = False
+
+    def _retain_output(self, result: ExecuteResult) -> dict[str, object]:
+        retained: dict[str, object] = {}
+        streams = (("stdout", result.stdout, result.stdout_truncated, result.stdout_incomplete),
+                   ("stderr", result.stderr, result.stderr_truncated, result.stderr_incomplete))
+        for (stream, raw, truncated, incomplete), cap in zip(streams, self._output_limits, strict=True):
+            if raw is None or self._output_store is None:
+                retained[stream] = {"coverage": "missing", "reason": "no raw output" if raw is None else
+                                    "no controller output store"}
+                continue
+            data = raw[:cap]
+            try:
+                digest = self._output_store(data)
+                if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or digest != _output_digest(data):
+                    raise ValueError("output sink returned the wrong digest")
+            except Exception as exc:  # noqa: BLE001 - retention must not alter the observed gate result
+                retained[stream] = {"coverage": "refused", "reason": f"output retention refused ({type(exc).__name__})"}
+                continue
+            retained[stream] = {"coverage": "partial" if truncated or incomplete or len(raw) > cap else "complete",
+                                "digest": digest, "size": len(data), "truncated": truncated or len(raw) > cap,
+                                "incomplete": incomplete}
+        return retained
 
     def _read_stages(self, gate: str, result: ExecuteResult, output_bad: bool,
                      gate_cwd: str | None) -> Mapping[str, object] | None:
@@ -651,6 +795,8 @@ class GateWitness:
         - interrupted, not dropped. If it is `False`, every run for this
         gate already has a definite `reason` (codex `code_review`
         correction)."""
+        if self._resume_state is not None and attempt_id != self._resume_state.attempt_id:
+            raise ValueError("resume ledger belongs to another attempt")
         with self._lock:
             records: dict[str, GateRecord] = {}
             for gate, runs in self._runs.items():
@@ -664,7 +810,8 @@ class GateWitness:
                                 else _stages_unavailable("run never resolved") if gate in self._stage_capture
                                 else None),
                         order_requested=r.order_requested, order_completed=r.order_completed,
-                        source_digest_at_start=r.source_digest_at_start,
+                        source_digest_at_start=r.source_digest_at_start, via=r.via, output=r.output,
+                        state_evidence=r.state_evidence,
                     )
                     for r in runs
                 )

@@ -801,3 +801,60 @@ def test_an_inventory_that_is_a_json_array_not_an_object_is_refused(tmp_path: Pa
     declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=path))
     with pytest.raises(calibration.DeclarationRefused, match="not a JSON object"):
         calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+_EXPLICIT_CASES = json.loads((HERE / "fixtures/calibration-explicit-product/cases.json").read_text())
+
+
+def test_explicit_product_committed_positive() -> None:
+    declaration = calibration.parse_declaration(_EXPLICIT_CASES["valid"])
+    calibration.require_approved(declaration, ROOT)
+    assert declaration.lane == "explicit-product"
+    assert len(declaration.arms) == 2
+
+
+@pytest.mark.parametrize("case", _EXPLICIT_CASES["reject"], ids=lambda case: case["name"])
+def test_explicit_product_committed_negative(case: dict[str, object]) -> None:
+    calibration.parse_declaration(_EXPLICIT_CASES["valid"])
+    data = copy.deepcopy(_EXPLICIT_CASES["valid"])
+    path = case["path"]
+    assert isinstance(path, list)
+    target = data
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = case["value"]
+    with pytest.raises(calibration.DeclarationRefused):
+        calibration.parse_declaration(data)
+
+
+def test_explicit_product_binding_cannot_be_smuggled_into_legacy_lane() -> None:
+    data = json.loads(MANIFEST.read_text())
+    calibration.parse_declaration(data)
+    data["explicit_product"] = _EXPLICIT_CASES["valid"]["explicit_product"]
+    with pytest.raises(calibration.DeclarationRefused, match="explicit_product"):
+        calibration.parse_declaration(data)
+
+
+def test_both_primary_endpoint_branches_combine_after_raw_criteria() -> None:
+    from skillc import completion
+    clock = [0.0]
+    deadline = completion.CompletionDeadline.after(10, lambda: clock[0])
+    marker = deadline.marker("a")
+    raw: dict[str, object] = {"attempt_id": "a", "graded": {"status": "PASS", "criteria": [
+        {"id": "task", "mandatory": True, "outcome": "SATISFIED", "evidence": ["r1"]}]}}
+    for endpoint in (None, calibration.OutcomeEndpoint(("task",))):
+        assert calibration.primary_endpoint(raw, endpoint=endpoint)["status"] == "PASS"
+        opted = {**raw, "completion_required": True, "completion_marker": marker}
+        assert calibration.primary_endpoint(opted, endpoint=endpoint)["status"] == "UNKNOWN"
+        qualified = {**opted, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
+        assert calibration.primary_endpoint(qualified, endpoint=endpoint)["status"] == "PASS"
+        clock[0] = deadline.end + 1
+        late = {**opted, "completion": {**deadline.qualify(marker, True), "publication_confirmed": True}}
+        assert calibration.primary_endpoint(late, endpoint=endpoint)["status"] == "UNKNOWN"
+        assert calibration.raw_primary_endpoint(late, endpoint=endpoint)["status"] == "PASS"
+        failed = {**late, "graded": {"criteria": [
+            {"id": "task", "mandatory": True, "outcome": "VIOLATED", "evidence": ["r1"]}]}}
+        assert calibration.primary_endpoint(failed, endpoint=endpoint)["status"] == "FAIL"
+        # A fresh, separate endpoint for the next branch avoids backwards fake time.
+        deadline = completion.CompletionDeadline.after(10, lambda: clock[0])
+        marker = deadline.marker("a")

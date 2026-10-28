@@ -459,6 +459,8 @@ def run_study(
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     """Authorize, plan and run the whole declared schedule. Nothing - no
     store, no plan, no container - exists before `require_approved`."""
+    if any(t.gate_state_protocol is not None for t in treatments.values()):
+        raise StudyRefused("gate-state treatment is fixture-only")
     require_approved(declaration, root)
     if set(treatments) != set(declaration.arms):
         raise StudyRefused(f"treatments must be given for exactly {list(declaration.arms)}")

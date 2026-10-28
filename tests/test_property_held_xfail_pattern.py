@@ -45,13 +45,41 @@ in this family (`check_pins.py`, `check_interpreters.py`, `check_helpers.py`).
 
 from __future__ import annotations
 
+import io
 import re
+import sys
 import textwrap
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
 
 pytest_plugins = ["pytester"]
+
+
+def _run_control(pytester: pytest.Pytester, verdict: str, name: str, *args: str) -> pytest.RunResult:
+    """Label one child using its PREDECLARED expected hard-failure verdict.
+
+    GOOD may include expected xfails; it means no hard failure is expected in
+    that child, not that the deliberately mutated subject is correct. Existing
+    assert_outcomes/per-node assertions still decide the outer test's result.
+    Both raw streams share one fence so stderr summaries cannot escape it or
+    create a second apparent invocation. No observed outcome selects a label.
+    """
+    if verdict not in ("BAD", "GOOD") or re.fullmatch(r"[A-Za-z0-9_.-]+", name) is None:
+        raise ValueError("control needs a BAD/GOOD verdict and a stable colon-free name")
+    output = io.StringIO()
+    print(f"::cicd-negative-control:BEGIN:{verdict}:{name}::")
+    try:
+        with redirect_stdout(output), redirect_stderr(output):
+            return pytester.runpytest(*args)
+    finally:
+        raw = output.getvalue()
+        sys.stdout.write(raw)
+        if raw and not raw.endswith("\n"):
+            sys.stdout.write("\n")  # framing separator; no child content is removed
+        print(f"::cicd-negative-control:END:{verdict}:{name}::")
+
 
 # uv 0.9.7's real offline cache-miss output, line wrapping included (#360).
 # An invented paraphrase here once matched an oracle uv never satisfied.
@@ -81,7 +109,7 @@ _INNER_TEST_SOURCE = textwrap.dedent("""
 
 def test_the_dedicated_exception_narrows_xfail_to_only_the_real_property(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(_INNER_TEST_SOURCE)
-    result = pytester.runpytest("-v")
+    result = _run_control(pytester, "BAD", "marker-specific-infra", "-v")
 
     # Overall tally: two of the three inner tests resolve as XFAILED
     # (a: the real property firing; c: the old marker's own wrong pass),
@@ -137,7 +165,7 @@ def test_a_neighboring_propertys_subtype_does_not_satisfy_this_propertys_marker(
     not merely asserted in prose - this is the exact property every one
     of #341's four converted live files now depends on."""
     pytester.makepyfile(_CROSS_PROPERTY_INNER_TEST_SOURCE)
-    result = pytester.runpytest("-v")
+    result = _run_control(pytester, "BAD", "marker-neighbor", "-v")
     result.assert_outcomes(xfailed=1, failed=1)
     result.stdout.fnmatch_lines(["*test_a_the_targeted_propertys_own_subtype_is_xfailed XFAIL*"])
     result.stdout.fnmatch_lines(["*test_b_a_neighboring_propertys_subtype_is_a_hard_failure FAILED*"])
@@ -158,7 +186,7 @@ def test_widening_the_marker_back_to_the_shared_base_type_wrongly_passes(pyteste
     )
     assert widened_source != _CROSS_PROPERTY_INNER_TEST_SOURCE, "fixture bug: the substitution found nothing to replace"
     pytester.makepyfile(widened_source)
-    result = pytester.runpytest("-v")
+    result = _run_control(pytester, "GOOD", "marker-widened", "-v")
     # Both inner tests now XFAIL - the widened marker wrongly accepts
     # property B's own failure as if it were property A's.
     result.assert_outcomes(xfailed=2, failed=0)
@@ -255,7 +283,7 @@ def _cold_control_source(*, widen: bool) -> str:
 @pytest.mark.parametrize("widen", [False, True], ids=["specific", "mutated-base"])
 def test_cold_install_real_markers_discriminate_observed_properties(pytester: pytest.Pytester, widen: bool) -> None:
     pytester.makepyfile(_cold_control_source(widen=widen))
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", f"cold-mounts-{widen}", "-v", "--tb=short")
     # Five targeted failures, twenty ordered neighbor pairs, five intact
     # strict XPASSes, five infra failures and fifteen mount-integrity failures.
     result.assert_outcomes(xfailed=25 if widen else 5, failed=25 if widen else 45)
@@ -329,7 +357,7 @@ def _closure_control_source(mutation: str) -> str:
 @pytest.mark.parametrize("mutation", ["none", "base", "inverted"])
 def test_closure_real_marker_and_refusal_oracle(pytester: pytest.Pytester, mutation: str) -> None:
     pytester.makepyfile(_closure_control_source(mutation))
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", f"closure-{mutation}", "-v", "--tb=short")
     result.assert_outcomes(xfailed=4 if mutation == "base" else 2, failed=12 if mutation == "base" else 14)
     for mode in _CLOSURE_MODES:
         suffix = mode.replace("-", "_")
@@ -363,7 +391,7 @@ def test_image_tools_real_marker_excludes_infrastructure(pytester: pytest.Pytest
         add_case('test_infra', 'no-uv', infra)
     """)
     pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", f"image-tools-{widen}", "-v", "--tb=short")
     result.assert_outcomes(xfailed=3 if widen else 2, failed=1 if widen else 2)
     result.stdout.fnmatch_lines(["*test_target XFAIL*", "*test_wrong_version XFAIL*", "*test_intact FAILED*"])
     result.stdout.fnmatch_lines([f"*test_infra {'XFAIL' if widen else 'FAILED'}*"])
@@ -438,7 +466,7 @@ def _cwd_control_source(*, widen: bool) -> str:
 @pytest.mark.parametrize("widen", [False, True], ids=["specific", "mutated-exception"])
 def test_cwd_confinement_real_marker_requires_the_followed_swap(pytester: pytest.Pytester, widen: bool) -> None:
     pytester.makepyfile(_cwd_control_source(widen=widen))
-    result = pytester.runpytest("-v", "--tb=line")
+    result = _run_control(pytester, "GOOD" if widen else "BAD", f"cwd-{widen}", "-v", "--tb=line")
     result.assert_outcomes(xfailed=len(_CWD_KINDS) if widen else 1, failed=0 if widen else len(_CWD_KINDS) - 1)
     if not widen:
         # Each hard failure must be the live test's own assertion, never a
@@ -575,7 +603,7 @@ def _family_control_source(family: str, widen: bool) -> str:
 @pytest.mark.parametrize("widen", [False, True], ids=["specific", "mutated-base"])
 def test_live_family_real_markers_and_predicates(pytester: pytest.Pytester, family: str, widen: bool) -> None:
     pytester.makepyfile(_family_control_source(family, widen))
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", f"live-family-{family}-{widen}", "-v", "--tb=short")
     modes = _FAMILIES[family][2]
     properties = {
         "channel": ("connectivity", "uid", "decision"),
@@ -695,8 +723,8 @@ def test_actual_cleanup_joins_with_a_bound_even_when_destroy_fails(stuck, destro
     thread.join.assert_called_once_with(timeout=2 + ns["GATE_GRACE"])
 
 
-def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: pytest.Pytester) -> None:
-    source = _live_control_source(
+def _cold_cache_complete_source(text: str, *, raw: bool = False) -> str:
+    return (_live_control_source(
         "test_profile_install_cold_container_live.py", "SKILLC_COLDINSTALL_LIVE_BREAK", ("cold-cache",),
         "test_profile_runs_cold_with_no_operator_mounts", widen=False,
     ) + textwrap.dedent("""
@@ -721,15 +749,64 @@ def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: py
                 '_run': run, '_container_mounts': lambda container: [],
             }), patch.object(ns['gate_path'], 'classify_gate_output', return_value='real-runner'):
                 test(Path(tmp))
-        add_case('test_target', 'cold-cache', lambda ns: observe(ns, 1, "wasn't found in the cache"))
+        add_case('test_permission', 'cold-cache', lambda ns: observe(ns, 1, 'Permission denied'))
+        add_case('test_cache_only', 'cold-cache', lambda ns: observe(ns, 1, "wasn't found in the cache"))
+        add_case('test_network_only', 'cold-cache', lambda ns: observe(ns, 1, 'Network connectivity is disabled'))
+        add_case('test_setup', 'cold-cache', infra)
         add_case('test_intact', 'cold-cache', lambda ns: observe(ns, 0, ''))
         add_case('test_unrelated', 'cold-cache', lambda ns: observe(ns, 127, 'uv not found'))
     """)
-    pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
-    result.assert_outcomes(xfailed=1, failed=2)
-    result.stdout.fnmatch_lines(["*test_target XFAIL*", "*test_intact FAILED*", "*test_unrelated FAILED*"])
-    result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+    + textwrap.dedent(f"""
+        if {raw!r}:
+            import inspect
+            ns = MODULES['cold-cache'][0]
+            predicate = ns['_offline_cache_miss']
+            source = inspect.getsource(predicate)
+            normalization = 'flat = " ".join(text.split())'
+            assert source.count(normalization) == 1, 'select exactly the actual normalization'
+            exec(source.replace(normalization, 'flat = text'), predicate.__globals__)
+        add_case('test_target', 'cold-cache', lambda ns: observe(ns, 1, {text!r}))
+    """))
+
+
+def _cold_cache_diagnostic(kind: str) -> str:
+    text = _UV_OFFLINE_CACHE_MISS
+    if kind == "network-wrap":
+        return text.replace("Network connectivity is disabled", "Network connectivity is\n      disabled")
+    if kind == "cache-wrap":
+        return text.replace("wasn't found in the cache", "wasn't found in\n      the cache")
+    if kind == "spaces-tabs":
+        return text.replace("wasn't found in the cache", "wasn't\tfound  in\tthe cache")
+    assert kind == "contiguous"
+    return text
+
+
+def _assert_cold_cache_acceptance(result: pytest.RunResult) -> None:
+    assert any("::test_target XFAIL" in line for line in result.stdout.lines), "cold-cache target must reach narrow XFAIL"
+    result.assert_outcomes(xfailed=1, failed=6)
+    result.stdout.fnmatch_lines(["*test_permission FAILED*", "*test_cache_only FAILED*",
+                               "*test_network_only FAILED*", "*test_setup FAILED*", "*test_intact FAILED*",
+                               "*test_unrelated FAILED*", "*test_target XFAIL*", "*XPASS(strict)*"])
+
+
+@pytest.mark.parametrize("kind", ["contiguous", "network-wrap", "cache-wrap", "spaces-tabs"])
+def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: pytest.Pytester, kind: str) -> None:
+    pytester.makepyfile(_cold_cache_complete_source(_cold_cache_diagnostic(kind)))
+    result = _run_control(pytester, "BAD", "cold-cache-complete-" + kind, "-v", "--tb=short")
+    _assert_cold_cache_acceptance(result)
+
+
+@pytest.mark.parametrize("kind", ["contiguous", "cache-wrap"])
+def test_cold_cache_complete_control_rejects_disabled_normalization(pytester: pytest.Pytester, kind: str) -> None:
+    pytester.makepyfile(_cold_cache_complete_source(_cold_cache_diagnostic(kind), raw=True))
+    result = _run_control(pytester, "BAD", "cold-cache-raw-" + kind, "-v", "--tb=short")
+    if kind == "contiguous":
+        _assert_cold_cache_acceptance(result)
+    else:
+        result.assert_outcomes(failed=7)
+        result.stdout.fnmatch_lines(["*test_target FAILED*"])
+        with pytest.raises(AssertionError, match="cold-cache target must reach narrow XFAIL"):
+            _assert_cold_cache_acceptance(result)
 
 
 def _drive_closure(ns, refusal, monkeypatch, output_fault=None, subject_fault=None) -> None:
@@ -871,7 +948,7 @@ def test_closure_complete_function_refusals_and_missed_refusal(pytester: pytest.
                          lambda ns, k=kind: observe(ns, k))
     """)
     pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", "closure-complete", "-v", "--tb=short")
     result.assert_outcomes(xfailed=2, failed=4)
     for mode in _CLOSURE_MODES:
         suffix = mode.replace("-", "_")
@@ -895,7 +972,7 @@ def test_closure_output_faults_cannot_receive_targeted_xfail_credit(pytester: py
                          lambda ns, f=fault: observe(ns, f))
     """)
     pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", "closure-output-faults", "-v", "--tb=short")
     result.assert_outcomes(failed=2 * len(_CLOSURE_OUTPUT_FAULTS))
     result.stdout.fnmatch_lines(["*XPASS(strict)*"])
     for mode in _CLOSURE_MODES:
@@ -936,7 +1013,7 @@ def test_closure_forwarding_identity_real_marker(pytester: pytest.Pytester, wide
         add_case('test_infra', mode, infra)
     """)
     pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", f"closure-forwarding-{widen}", "-v", "--tb=short")
     result.assert_outcomes(xfailed=4 if widen else 3, failed=6 if widen else 7)
     for target in _IDENTITY_TARGETS:
         result.stdout.fnmatch_lines([f"*test_target_{target} XFAIL*"])
@@ -1056,7 +1133,7 @@ def test_runtime_real_markers_exclude_neighbor_properties(pytester, widen) -> No
                          lambda ns, k=kind: observe(ns, k))
     """)
     pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", f"runtime-markers-{widen}", "-v", "--tb=short")
     result.assert_outcomes(xfailed=6 if widen else 3, failed=9 if widen else 12)
     for mode in _RUNTIME_MODES:
         for kind, status in (("target", "XFAIL"), ("intact", "FAILED"),
@@ -1081,7 +1158,7 @@ def test_runtime_complete_function_target_missed_and_unrelated_failures(pytester
                          lambda ns, k=kind: observe(ns, k))
     """)
     pytester.makepyfile(source)
-    result = pytester.runpytest("-v", "--tb=short")
+    result = _run_control(pytester, "BAD", "runtime-complete", "-v", "--tb=short")
     result.assert_outcomes(xfailed=3, failed=6)
     for mode in _RUNTIME_MODES:
         for kind, status in (("target", "XFAIL"), ("intact", "FAILED"), ("unrelated", "FAILED")):

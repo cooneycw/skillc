@@ -47,8 +47,11 @@ file_list="$scratch/files.lst"
 tar -C "$root" --null -T "$file_list" -cf - \
     | tar -C "$scratch/tree" -xf - || fail "could not copy the tree"
 
-# Derived, not hardcoded: a renamed test module must not silently empty this case.
-target="$(cd "$scratch/tree" && find tests -name 'test_*.py' | sort | head -n 1)"
+# Probe authored test modules only: a fixture may be excluded from mypy, or
+# remain in scope after authored tests are dropped. Neither proves this gate.
+# Derived, not hardcoded, so renamed tests stay eligible; sort independently
+# of the caller's locale so every host picks the same regular file.
+target="$(cd "$scratch/tree" && find tests -maxdepth 1 -type f -name 'test_*.py' | LC_ALL=C sort | head -n 1)"
 [[ -n "$target" ]] || fail "no tests/test_*.py to plant an error in"
 
 # Baseline: the unmodified copy must pass, so the red below is attributable to
