@@ -53,6 +53,13 @@ FRAGMENT_DIR = "changelog.d"
 #: `changelog.d/<issue>.md`, or `<issue>-<slug>.md` for a second PR on the
 #: same issue. `changelog.d/README.md` (the rule itself) never matches.
 FRAGMENT_RE = re.compile(r"^changelog\.d/([0-9]+)(-[a-z0-9-]+)?\.md$")
+# git-status(1) porcelain-v1 table: ordinary index/worktree states plus seven
+# unmerged pairs and untracked. --no-renames excludes R/C; ignored is not asked for.
+_STATUS_PAIRS = {
+    b" M", b" T", b" A", b" D", b"D ", b"??",
+    b"DD", b"AU", b"UD", b"UA", b"DU", b"AA", b"UU",
+    *(bytes((index, worktree)) for index in b"MTA" for worktree in b" MTD"),
+}
 
 _UNRELEASED_RE = re.compile(r"^## \[Unreleased\]\s*\n(.*?)(?=^## \[|\Z)", re.MULTILINE | re.DOTALL)
 _TRAILER_LINE_RE = re.compile(rf"^{ESCAPE_TRAILER}\s*:\s*(.+)$", re.IGNORECASE)
@@ -188,12 +195,13 @@ def _pending_inputs() -> list[str]:
         raise ValueError("truncated git status")
     pending = []
     for entry in raw.split(b"\0")[:-1]:
-        if (len(entry) < 4 or entry[2:3] != b" " or entry[:2] == b"  "
-                or not re.fullmatch(rb"(?:[ MADTU]{2}|\?\?)", entry[:2])):
+        if len(entry) < 4 or entry[2:3] != b" " or entry[:2] not in _STATUS_PAIRS:
             raise ValueError(f"malformed git status: {entry!r}")
         path = os.fsdecode(entry[3:])
         if any(part in ("", ".", "..") for part in path.split("/")):
             raise ValueError(f"malformed git path: {path!r}")
+        if not (touches_skillc([path]) or path == FRAGMENT_DIR or path.startswith(FRAGMENT_DIR + "/")):
+            raise ValueError(f"unexpected git status path: {path!r}")
         if touches_skillc([path]) or is_fragment(path):
             pending.append(f"{entry[:2].decode('ascii')} {path!r}")
     return pending

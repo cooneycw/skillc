@@ -477,14 +477,34 @@ def test_actual_target_wiring_control(tmp_path: Path) -> None:
 
 
 @needs_git
-def test_pending_fragment_symlink_never_reads_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("blind", [False, True], ids=["intact", "initial-only-disabled"])
+def test_pending_fragment_symlink_never_reads_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blind: bool,
+) -> None:
     repo = _local_gate_repo(tmp_path)
-    (repo / FRAGMENT).parent.mkdir()
-    (repo / FRAGMENT).symlink_to(tmp_path / "unreadable-or-absent")
+    fragment = repo / FRAGMENT
+    fragment.parent.mkdir()
+    fragment.write_text(GOOD_BULLET)
+    _commit(repo, "changed eligible fragment")
+    assert _guard(repo) == 0  # committed, healthy reader path
+    fragment.unlink()
+    fragment.symlink_to(tmp_path / "unreadable-or-absent")
+    real = cc._clean_input_problem
+    calls = 0
+    def skip_initial(head):
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else real(head)
     def forbidden(*args):
         pytest.fail("pending fragment content was read")
+    if blind:
+        monkeypatch.setattr(cc, "_clean_input_problem", skip_initial)
     monkeypatch.setattr(cc, "_show", forbidden)
-    assert _guard(repo) == 2
+    if blind:
+        with pytest.raises(pytest.fail.Exception, match="pending fragment content was read"):
+            assert _guard(repo) == 2
+    else:
+        assert _guard(repo) == 2
 
 
 @needs_git
@@ -507,3 +527,30 @@ def test_guarded_git_failures_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyP
     else:
         monkeypatch.setattr(cc.subprocess, "run", observed)
     assert _guard(repo) == 2
+
+
+@needs_git
+@pytest.mark.parametrize("status,want", [
+    (b"U  changelog.d/README.md\0", 2), (b" M outside.py\0", 2),
+    (b"", 0), (b" M changelog.d/README.md\0", 0),
+], ids=["invalid-XY", "unexpected-path", "clean-twin", "ineligible-fragment-twin"])
+def test_status_response_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                  status: bytes, want: int) -> None:
+    repo = _local_gate_repo(tmp_path)
+    real = subprocess.run
+    def observed(argv, *args, **kwargs):
+        if argv[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(argv, 0, status, b"")
+        return real(argv, *args, **kwargs)
+    monkeypatch.setattr(cc.subprocess, "run", observed)
+    assert _guard(repo) == want
+
+
+@needs_git
+@pytest.mark.parametrize("xy", [
+    " M", " T", " A", " D", "M ", "MM", "MT", "MD", "T ", "TM", "TT", "TD",
+    "A ", "AM", "AT", "AD", "D ", "DD", "AU", "UD", "UA", "DU", "AA", "UU", "??",
+])
+def test_valid_porcelain_pairs_allow_ineligible_fragment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                       xy: str) -> None:
+    test_status_response_contract(tmp_path, monkeypatch, (xy + " changelog.d/README.md\0").encode(), 0)
