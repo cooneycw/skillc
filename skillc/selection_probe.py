@@ -565,6 +565,7 @@ def agent_trial_runner(
     client: str,
     argv_for: Callable[[str], Sequence[str]],
     treatment_home_files: Mapping[str, bytes],
+    treatment_home_modes: Mapping[str, str] | None = None,
     goal: str | None = None,
     surface: Mapping[str, object] | None = None,
     timeout: float = 30,
@@ -584,6 +585,12 @@ def agent_trial_runner(
     the one surface-reading convention). The baseline arm receives NOTHING
     extra, whatever the caller passes: its whole meaning is "no skill
     installed", and that is enforced here rather than trusted to a caller.
+
+    Optional `treatment_home_modes` comes from the same acquired population's
+    `_collection_home_modes`. None preserves the old call shape and 0600
+    delivery; known empty/partial maps retain missing-file defaults. Baseline
+    receives neither treatment files nor modes. Existing attempt validation
+    refuses unknown mode keys or unsupported values.
 
     The prompt is the fixed task's own `goal.md` plus the case's
     `prompt_addendum` (empty for the near-miss case). `argv_for(attempt_id)`
@@ -610,7 +617,7 @@ def agent_trial_runner(
     control."""
     return AgentTrialRunner(
         experiment=experiment, backend=backend, base=base, client=client, argv_for=argv_for,
-        treatment_home_files=treatment_home_files,
+        treatment_home_files=treatment_home_files, treatment_home_modes=treatment_home_modes,
         goal=goal if goal is not None else (GRADER_ROOT / "goal.md").read_text(encoding="utf-8"),
         surface=(
             surface if surface is not None
@@ -681,6 +688,7 @@ class AgentTrialRunner:
     credential_explicit_path: str | Path | None
     minimum_credential_seconds: float
     skill_name: str | None = None
+    treatment_home_modes: Mapping[str, str] | None = None
 
     def __call__(self, trial_dict: dict[str, object], attempt: dict[str, object]) -> AttemptTranscript | None:
         config = trial_dict["config"]
@@ -691,6 +699,9 @@ class AgentTrialRunner:
         addendum = str(config.get("prompt_addendum") or "")
         prompt = f"{self.goal}\n\n{addendum}" if addendum else self.goal
         attempt_id = str(attempt["attempt_id"])
+        mode_kwargs: dict[str, object] = {}
+        if arm == "treatment" and self.treatment_home_modes is not None:
+            mode_kwargs["extra_home_modes"] = dict(self.treatment_home_modes)
         record = agent_trial.run_one_attempt(
             backend=self.backend, experiment=self.experiment, attempt_id=attempt_id, client=self.client,
             base_argv=self.argv_for(attempt_id), prompt=prompt, skill_name=self.skill_name,
@@ -699,6 +710,7 @@ class AgentTrialRunner:
             minimum_credential_seconds=self.minimum_credential_seconds, cli_version=self.cli_version,
             extra_home_files=dict(self.treatment_home_files) if arm == "treatment" else {},
             retain_transcript=True,
+            **mode_kwargs,  # type: ignore[arg-type]
         )
         digest, reason = _retain_transcript(record.get("retained_transcript"), self.base, attempt_id)  # type: ignore[arg-type]
         transcript = transcript_from_record(record, self.experiment, attempt_id)

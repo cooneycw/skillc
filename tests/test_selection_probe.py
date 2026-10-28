@@ -19,6 +19,7 @@ from skillc import cost_estimate as ce
 from skillc import selection_probe as sp
 from skillc import trial as t
 from skillc import verify
+from skillc.collection_conformance import AcquiredCollection
 
 ROOT = Path(__file__).resolve().parent.parent
 PROBE_DIR = ROOT / "evals" / "selection-probe"
@@ -1342,3 +1343,169 @@ def test_no_single_transcript_file_retains_nothing_and_is_not_an_error(tmp_path:
     assert digest is None and reason is None
     digest, reason = sp._retain_transcript({}, tmp_path, "a-1")
     assert digest is None and reason is None
+
+
+# #538: real CLI/public runners, stopping only at physical attempt dispatch.
+class _ModeBoundary(BaseException):
+    pass
+
+
+def _mode_collection(tmp_path: Path) -> AcquiredCollection:
+    from skillc import collection_conformance as cc
+    from skillc import demo, materialize
+
+    surface = tmp_path / "source"
+    files = []
+    for rel, data, mode in (("runner", b"#!/bin/sh\nexit 0\n", 0o755),
+                            ("data.sh", b"plain data\n", 0o644)):
+        path = surface / "modes" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(mode)
+        files.append(demo.SubjectFile("modes", rel, "modes", materialize.sha256_bytes(data)))
+    digest = materialize.tree_digest(surface)
+    source = materialize.Source("snapshot", "owned-mode-control", "snapshot:" + digest,
+                                surface, digest, surface)
+    return cc.AcquiredCollection(demo.load_demo_subject("cpp-codex"), source, files, None)
+
+
+def _record_mode_attempts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    from typing import Any
+
+    calls: list[dict[str, object]] = []
+
+    def boundary(**kwargs: Any) -> dict[str, object]:
+        experiment, aid = kwargs["experiment"], kwargs["attempt_id"]
+        calls.append({"arm": _arm_of(experiment, aid), **kwargs})
+        if len(calls) == len(list(experiment.attempts())):
+            raise _ModeBoundary()
+        return t.finalize(experiment, aid, disposition="unavailable", reason="dispatch control")
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", boundary)
+    return calls
+
+
+def _assert_source_modes(calls: list[dict[str, object]]) -> None:
+    baseline = [c for c in calls if c["arm"] == "baseline"]
+    treatment = [c for c in calls if c["arm"] == "treatment"]
+    assert len(baseline) == len(treatment) == 3
+    assert all(c["extra_home_files"] == {} and not c.get("extra_home_modes") for c in baseline)
+    expected = {".codex/skills/modes/runner": "100755", ".codex/skills/modes/data.sh": "100644"}
+    for call in treatment:
+        assert call["extra_home_files"] == {
+            ".codex/skills/modes/runner": b"#!/bin/sh\nexit 0\n",
+            ".codex/skills/modes/data.sh": b"plain data\n",
+        }
+        assert call.get("extra_home_modes") == expected
+
+
+def test_cli_source_modes_reach_the_selection_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-fix red is a missing-map assertion, not a proposed-API TypeError."""
+    from skillc import cli, demo
+    from skillc import collection_conformance as cc
+
+    acquired = _mode_collection(tmp_path)
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: acquired)
+    monkeypatch.setattr(cc, "discard_acquisition", lambda *a: None)
+    monkeypatch.setattr(cc, "agent_backends", lambda **k: (object(), object()))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: _PLACEHOLDER_IMAGE_DIGEST)
+    calls = _record_mode_attempts(monkeypatch)
+    with pytest.raises(_ModeBoundary):
+        cli.main(["selection-probe", "--base", str(tmp_path / "runs")])
+    _assert_source_modes(calls)
+
+
+def _selection_mode_runner(
+    tmp_path: Path, modes: dict[str, str] | None,
+) -> tuple[t.Experiment, sp.AgentTrialRunner]:
+    from typing import Any
+
+    from skillc import collection_conformance as cc
+
+    acquired = _mode_collection(tmp_path)
+    experiment = _plan(tmp_path)
+    backend: Any = object()  # No physical dispatch in these boundary controls.
+    return experiment, sp.agent_trial_runner(
+        experiment=experiment, backend=backend, base=tmp_path, client="codex",
+        argv_for=lambda _: [], treatment_home_files=cc._collection_home_files(
+            acquired.source, acquired.files), treatment_home_modes=modes,
+    )
+
+
+@pytest.mark.parametrize("modes,owner_modes", [
+    (None, (0o600, 0o600)), ({}, (0o600, 0o600)),
+    ({".codex/skills/modes/runner": "100755"}, (0o700, 0o600)),
+    ({".codex/skills/modes/runner": "100755",
+      ".codex/skills/modes/data.sh": "100644"}, (0o700, 0o600)),
+])
+def test_public_selection_modes_preserve_defaults_and_empty_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    modes: dict[str, str] | None, owner_modes: tuple[int, int],
+) -> None:
+    experiment, runner = _selection_mode_runner(tmp_path, modes)
+    ledger_before = t.canonical(experiment.ledger)
+    # The old positional constructor still leaves the appended field optional.
+    legacy = sp.AgentTrialRunner(*[
+        getattr(runner, f.name) for f in dataclasses.fields(runner)
+        if f.name != "treatment_home_modes"
+    ])
+    assert legacy.treatment_home_modes is None
+    calls = _record_mode_attempts(monkeypatch)
+    with pytest.raises(_ModeBoundary):
+        for td, attempt in experiment.attempts():
+            runner(sp._resolved_trial(experiment, td), attempt)
+    assert t.canonical(experiment.ledger) == ledger_before
+    for call in calls:
+        if call["arm"] == "baseline":
+            assert call["extra_home_files"] == {} and "extra_home_modes" not in call
+        else:
+            assert set(call["extra_home_files"]) == {  # type: ignore[call-overload]
+                ".codex/skills/modes/runner", ".codex/skills/modes/data.sh"}
+            if modes is None:
+                assert "extra_home_modes" not in call
+            else:
+                assert call["extra_home_modes"] == modes
+            assert tuple(agent_trial.delivery_mode(path, modes) for path in (
+                ".codex/skills/modes/runner", ".codex/skills/modes/data.sh")) == owner_modes
+
+
+@pytest.mark.parametrize("modes,reason", [
+    ({".codex/skills/modes/not-delivered": "100755"}, "not delivered"),
+    ({".codex/skills/modes/runner": "120000"}, "unsupported source mode"),
+])
+def test_public_selection_modes_reach_existing_refusal(
+    tmp_path: Path, modes: dict[str, str], reason: str,
+) -> None:
+    experiment, runner = _selection_mode_runner(tmp_path, modes)
+    td, attempt = next(experiment.attempts())
+    with pytest.raises(agent_trial.HomeFileVerificationRefused, match=reason):
+        runner(sp._resolved_trial(experiment, td), attempt)
+
+
+def _existing_home_path_guard(**kwargs: object) -> dict[str, object]:
+    files, modes, base = kwargs["extra_home_files"], kwargs.get("extra_home_modes"), kwargs["base"]
+    assert isinstance(files, dict) and isinstance(base, Path)
+    assert modes is None or isinstance(modes, dict)
+    assert modes == {"../escape": "100755"} if files else modes is None
+    backend = d.DockerBackend(image="unused", base_dir=base)
+    handle = d._Handle(attempt_id="path-control", name="unused", env={})
+    for path, data in files.items():
+        backend.deliver_home_file(handle, path, data, mode=agent_trial.delivery_mode(path, modes))
+    assert isinstance(kwargs["experiment"], t.Experiment)
+    return t.finalize(kwargs["experiment"], str(kwargs["attempt_id"]),
+                      disposition="unavailable", reason="empty-baseline control")
+
+
+def test_public_selection_preserves_the_existing_unsafe_path_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc.backend import BackendUnavailable
+
+    experiment, runner = _selection_mode_runner(tmp_path, {"../escape": "100755"})
+    runner = dataclasses.replace(runner, treatment_home_files={"../escape": b"control"})
+    monkeypatch.setattr(agent_trial, "run_one_attempt", _existing_home_path_guard)
+    td, attempt = next(experiment.attempts())
+    with pytest.raises(BackendUnavailable, match="nonescaping"):
+        runner(sp._resolved_trial(experiment, td), attempt)

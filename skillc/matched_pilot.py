@@ -946,6 +946,7 @@ def run_pilot(
     *,
     run_dir: Path,
     treatment_home_files: Mapping[str, bytes],
+    treatment_home_modes: Mapping[str, str] | None = None,
     treatment_digest: str,
     image_digest: str | None,
     backends: Callable[[], tuple[object, object]],
@@ -960,7 +961,10 @@ def run_pilot(
     BASE client invocation for one attempt (a real run passes the same argv
     every time; a test's scripted client needs the attempt id), to which
     `launch_argv` adds the declared model and effort. `total_seconds`
-    overrides the declared total cap - for tests only; the CLI never sets it."""
+    overrides the declared total cap - for tests only; the CLI never sets it.
+    Optional treatment modes describe the same installed byte population;
+    None preserves the old call shape and 0600 default. Known maps retain
+    existing missing/invalid-key semantics and are never sent to baseline."""
     total = declaration.total_seconds if total_seconds is None else total_seconds
     completion_deadline = (completion.CompletionDeadline.after(total, clock) if completion_deadline is None
                            else completion_deadline.child(total))
@@ -983,6 +987,9 @@ def run_pilot(
                     deadline: completion.CompletionDeadline) -> dict[str, object]:
         owned = trial.OwnedAttemptIds(experiment, scheduled.attempt_id)
         agent_backend, grading_backend = backends()
+        mode_kwargs: dict[str, object] = {}
+        if scheduled.arm == TREATMENT and treatment_home_modes is not None:
+            mode_kwargs["extra_home_modes"] = treatment_home_modes
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
@@ -991,6 +998,7 @@ def run_pilot(
             cli_version=declaration.client_version, timeout=budget,
             completion_deadline=deadline, recorded_attempt_ids=owned,
             credential_explicit_path=credential_explicit_path,
+            **mode_kwargs,  # type: ignore[arg-type]
         )
 
     def on_outcome(outcome: AttemptOutcome) -> None:
