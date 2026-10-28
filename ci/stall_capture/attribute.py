@@ -40,6 +40,8 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import math
+import statistics
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -70,6 +72,13 @@ class Thresholds:
     steal_share: float = 0.2
     throttle_share: float = 0.1
 
+    def __post_init__(self) -> None:
+        # A NaN threshold makes every comparison false: a zero-stall report
+        # from a detector that could not fire.
+        bad = [k for k, v in asdict(self).items() if not math.isfinite(v)]
+        if bad:
+            raise Refused(f"non-finite threshold(s): {', '.join(bad)}")
+
 
 def load(path: Path, source: str) -> list[dict[str, Any]]:
     try:
@@ -96,6 +105,12 @@ def _usable(records: list[dict[str, Any]], what: str) -> tuple[list[dict[str, An
         raise Refused(f"{what} stream has {len(good)} usable sample(s) ({len(records) - len(good)} error "
                       "record(s)); at least two are needed to compute a rate")
     return good, len(records) - len(good)
+
+
+def _consecutive(records: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Pairs of usable records with no error record between them: a rate is
+    never computed across a gap."""
+    return [(a, b) for a, b in itertools.pairwise(records) if "error" not in a and "error" not in b]
 
 
 def _mbps(a: dict[str, Any], b: dict[str, Any], key: str, dt: float) -> float:
@@ -167,10 +182,29 @@ class Stall:
     unassessed: list[str]
 
 
+def _guest_ticks(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Guest ticks in time order. An error record ends a run: the tick after it
+    has no predecessor (its rates are unassessed rather than bridged across the
+    gap), and it is flagged `after_gap` so no stall window spans the gap."""
+    ticks, prev, gap = [], None, False
+    for record in records:
+        if "error" in record:
+            prev, gap = None, True
+            continue
+        tick = _guest_tick(prev, record)
+        tick["after_gap"] = gap
+        ticks.append(tick)
+        prev, gap = record, False
+    return ticks
+
+
 def _windows(ticks: list[dict[str, Any]], th: Thresholds) -> list[list[dict[str, Any]]]:
     windows: list[list[dict[str, Any]]] = []
     run: list[dict[str, Any]] = []
     for tick in ticks:
+        if tick["after_gap"] and run:
+            windows.append(run)
+            run = []
         if tick["io_psi"] >= th.io_psi or tick["cpu_psi"] >= th.cpu_psi:
             run.append(tick)
         elif run:
@@ -195,10 +229,15 @@ def _judge(window: list[dict[str, Any]], lead: dict[str, Any] | None, host: list
             unassessed.append("discard")
         else:
             evidence["discard_mbps_max"], evidence["write_mbps_max"] = round(discard, 1), round(writes, 1)
-            if discard >= th.discard_mbps and discard > writes:
+            # Both conditions on the SAME interval: a write burst elsewhere in
+            # the span must not mask an interval where discard dominated.
+            if any(t["discard_mbps"] is not None and t["discard_mbps"] >= th.discard_mbps
+                   and t["discard_mbps"] > t["write_mbps"] for t in span):
                 causes.append("discard")
         lo, hi = span[0]["t"] - interval, window[-1]["t"]
-        inside = [h for h in host if h["t0"] <= hi and h["t"] >= lo] if host is not None else []
+        # Positive-duration overlap only: an interval that merely touches the
+        # window's edge happened entirely before or after it.
+        inside = [h for h in host if h["t0"] < hi and h["t"] > lo] if host is not None else []
         if not inside:
             unassessed.extend(HOST_RULES)
         else:
@@ -247,8 +286,9 @@ def attribute(guest: list[dict[str, Any]], host: list[dict[str, Any]] | None = N
               self_vm: str | None = None, th: Thresholds | None = None) -> dict[str, Any]:
     th = th or Thresholds()
     good, guest_errors = _usable(guest, "guest")
-    ticks = [_guest_tick(None, good[0])] + [_guest_tick(a, b) for a, b in itertools.pairwise(good)]
-    interval = (ticks[-1]["t"] - ticks[0]["t"]) / (len(ticks) - 1)
+    ticks = _guest_ticks(guest)
+    # The typical spacing, not the mean: a gap of error records must not widen it.
+    interval = statistics.median(b["t"] - a["t"] for a, b in itertools.pairwise(ticks))
     host_ticks = None
     host_errors = 0
     if host is not None:
@@ -260,11 +300,12 @@ def attribute(guest: list[dict[str, Any]], host: list[dict[str, Any]] | None = N
                           f"({sorted(hgood[-1]['vms'])})")
         if float(hgood[-1]["t"]) < float(good[0]["t"]) or float(hgood[0]["t"]) > float(good[-1]["t"]):
             raise Refused("the host stream does not overlap the guest stream in time")
-        host_ticks = [_host_tick(a, b, self_vm) for a, b in itertools.pairwise(hgood)]
+        host_ticks = [_host_tick(a, b, self_vm) for a, b in _consecutive(host)]
     stalls = []
     for window in _windows(ticks, th):
         i = ticks.index(window[0])
-        stalls.append(_judge(window, ticks[i - 1] if i > 0 else None, host_ticks, th, interval))
+        lead = ticks[i - 1] if i > 0 and not window[0]["after_gap"] else None
+        stalls.append(_judge(window, lead, host_ticks, th, interval))
     summary: dict[str, int] = {}
     for s in stalls:
         summary[s.verdict] = summary.get(s.verdict, 0) + 1
@@ -292,8 +333,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for name, value in asdict(Thresholds()).items():
         ap.add_argument("--" + name.replace("_", "-"), type=float, default=value)
     args = ap.parse_args(argv)
-    th = Thresholds(**{k: getattr(args, k) for k in asdict(Thresholds())})
     try:
+        th = Thresholds(**{k: getattr(args, k) for k in asdict(Thresholds())})
         report = attribute(load(args.guest, "guest"), load(args.host, "host") if args.host else None,
                            self_vm=args.self_vm, th=th)
     except Refused as exc:

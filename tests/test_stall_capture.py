@@ -393,3 +393,44 @@ def test_red_a_host_interval_overlapping_a_one_tick_stall_is_joined() -> None:
 def test_red_a_missing_cgroup_root_is_refused(tmp_path: Path) -> None:
     with pytest.raises(pf.Unreadable, match="not a directory"):
         guest.sample(_tree(tmp_path), "dev-g", "/no/such/cgroup/root")
+
+
+def test_red_a_host_interval_only_touching_the_window_is_not_joined() -> None:
+    """A one-tick stall with no lead-in sample (the first one) ends at +0; a host
+    interval (+0, +10] happened entirely after it and must not explain it."""
+    g, h = _streams("quiet")
+    g[0]["psi"]["io"]["some_avg10"] = 90.0
+    for record in h:
+        record["t"] -= 3  # host ticks on the guest's own timestamps
+    for record in h[1:]:
+        record["vms"]["vm-a"]["wbytes"] += int(500e6 * mf.TICK)
+    (stall,) = at.attribute(g, h, self_vm="vm-ci")["stalls"]
+    assert stall["end"] == mf.T0 and "neighbour" not in stall["causes"]
+
+
+def test_red_a_write_burst_elsewhere_does_not_mask_dominant_discard() -> None:
+    g, h = _streams("discard")
+    for record in g[4:]:  # the lead-in interval (tick 4) also writes 2 GB/s
+        record["disk"]["write_sectors"] += int(2000 * mf.TICK * mf.MB_SECTORS)
+    (stall,) = at.attribute(g, h, self_vm="vm-ci")["stalls"]
+    assert stall["verdict"] == "discard"
+
+
+def test_red_error_records_split_a_window_and_rates() -> None:
+    g, _ = _streams("quiet")
+    for i in (4, 8):
+        g[i]["psi"]["io"]["some_avg10"] = 90.0
+    for i in (5, 6, 7):
+        g[i] = {"source": "guest", "t": g[i]["t"], "error": "gone"}
+    stalls = at.attribute(g)["stalls"]
+    assert [(s["start"], s["ticks"]) for s in stalls] == [(mf.T0 + 40, 1), (mf.T0 + 80, 1)]
+    assert "discard" in stalls[1]["unassessed"]  # no rate is bridged across the gap
+
+
+@pytest.mark.parametrize("name", ["io_psi", "cpu_psi", "device_await_ms"])
+def test_red_a_non_finite_threshold_is_refused(name: str, tmp_path: Path, capsys: Any) -> None:
+    with pytest.raises(at.Refused, match="non-finite"):
+        at.Thresholds(**{name: float("nan")})
+    flag = "--" + name.replace("_", "-")
+    assert at.main(["--guest", str(FIXTURES / "device.guest.jsonl"), flag, "nan"]) == 2
+    assert "non-finite" in capsys.readouterr().err
