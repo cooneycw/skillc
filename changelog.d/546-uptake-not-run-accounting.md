@@ -1,0 +1,1 @@
+- **Separate uptake slots that did not run** (#546). Report not-run, unavailable and unknown dispositions separately from applicable undecided rows, preserving raw classifier booleans and comparison statistics.
