@@ -89,6 +89,7 @@ def _decide() -> object:
 def test_the_proxy_policy_allows_only_listed_hosts_on_443(target: str, allowed: bool) -> None:
     decide = _decide()
     assert decide(target, frozenset(eg.ALLOWED_HOSTS)) is allowed  # type: ignore[operator]
+    assert eg.target_allowed(target) is allowed
 
 
 def test_the_allowlist_is_exactly_the_measured_provider_hosts() -> None:
