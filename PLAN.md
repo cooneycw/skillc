@@ -1,10 +1,10 @@
 # Plan: trustworthy goal-driven skill evaluations
 
 - Date: 2026-09-20
-- Status: planning baseline with scaffolded work; runtime capability not implemented
+- Status: historical planning baseline; runtime implementation and retained live evidence now exist. See [current status](README.md#status) and [0.5.0 release notes](docs/release-notes/0.5.0.md).
 - Home: skillc; first external subject: Claude Power Pack (CPP)
 - Roadmap tracker: [#1](https://github.com/cooneycw/skillc/issues/1)
-- This delivery: documentation PR/merge and issues, not implementation or paid trials
+- Original delivery (2026-09-20): documentation and issues. The delivery gates below describe that historical sequence; current implementation and evidence are summarized above.
 
 ## Outcome
 
