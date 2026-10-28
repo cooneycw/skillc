@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run ordinary tests, reap pytest, then run load self-tests without xdist (#462).
+"""Run ordinary tests, reap pytest, then run isolated self-tests without xdist (#462).
 
 One independent, unpartitioned collection is the population authority. Both
 lane reports are mandatory, including a zero-item lane under a user selection.

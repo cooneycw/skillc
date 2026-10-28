@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from ci.merge_pytest_reports import SERIAL_FILE
+from ci.merge_pytest_reports import SERIAL_FILES
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -18,7 +18,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     kept: list[pytest.Item] = []
     deselected: list[pytest.Item] = []
     for item in items:
-        is_serial = item.nodeid.split("::", 1)[0] == SERIAL_FILE
+        is_serial = item.nodeid.split("::", 1)[0] in SERIAL_FILES
         (kept if is_serial == (lane == "serial") else deselected).append(item)
     items[:] = kept
     config.hook.pytest_deselected(items=deselected)

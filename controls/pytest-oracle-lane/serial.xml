@@ -1,0 +1,1 @@
+<testsuites><testsuite tests="2" failures="0" errors="0" skipped="0"><testcase classname="tests.test_load_harness" name="test_serial"/><testcase classname="tests.test_change_with_regression_568" name="test_fixed_population_discriminates_artifacts"/></testsuite></testsuites>

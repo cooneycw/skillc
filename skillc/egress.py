@@ -33,7 +33,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from functools import cache
+from typing import cast
 
 #: The only hosts a live agent's proxy forwards to, on port 443. Measured
 #: 2026-10-17 (#442): pinned codex 0.157.1 with ChatGPT auth, through a
@@ -190,6 +192,20 @@ def main():
 if __name__ == "__main__":
     main()
 '''
+
+
+@cache
+def _proxy_decide() -> Callable[[str, frozenset[str]], bool]:
+    # Evaluate the shipped, constant source without starting its __main__ server.
+    # The controller and proxy use the very same policy, not two implementations.
+    namespace: dict[str, object] = {"__name__": "skillc_egress_policy"}
+    exec(compile(PROXY_SOURCE, "<skillc-egress-proxy>", "exec"), namespace)  # noqa: S102
+    return cast(Callable[[str, frozenset[str]], bool], namespace["decide"])
+
+
+def target_allowed(target: str) -> bool:
+    """Apply the shipped proxy's exact provider-only CONNECT policy."""
+    return _proxy_decide()(target, frozenset(ALLOWED_HOSTS))
 
 
 #: #460: run INSIDE the proxy container (`docker exec`), so the only peer the
