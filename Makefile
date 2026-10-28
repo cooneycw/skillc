@@ -19,7 +19,7 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 .PHONY: sync selftest test lint typecheck negative-control typecheck-control \
-	leak-check changelog-check readme-drift secret-scan git-tests-control pytest-population-control verify
+	leak-check changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install verify
 
 sync:
 	uv sync --locked --extra dev
@@ -82,6 +82,12 @@ changelog-check:
 	git fetch origin main --quiet
 	python3 ci/changelog_check.py origin/main --require-clean-inputs
 
+clean-install: sync
+	bash ci/clean-install-check.sh
+	CLEAN_INSTALL_CONTROL=neuter-installed-rule bash ci/clean-install-check.sh
+	CLEAN_INSTALL_CONTROL=delete-scratch-controls bash ci/clean-install-check.sh
+	bash ci/clean-install-comparison-control.sh
+
 readme-drift: sync
 	uv run --no-sync python3 ci/readme_drift.py
 
@@ -107,4 +113,4 @@ pytest-population-control: test
 	bash ci/pytest-population-control.sh
 
 verify: selftest test lint typecheck negative-control typecheck-control leak-check \
-	changelog-check readme-drift secret-scan git-tests-control pytest-population-control
+	changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install
