@@ -81,3 +81,43 @@ def test_partial_competitor_launch_reaps_the_owned_prefix(tmp_path: Path, monkey
     with pytest.raises(OSError, match="second competitor"):
         experiment.main()
     assert owned.terminated and owned.waited
+
+
+@pytest.mark.parametrize(("report", "refuses"), [
+    ("proof-serial-good.xml", False), ("missing.xml", True),
+    ("proof-serial-empty.xml", True), ("proof-serial-dropped.xml", True),
+    ("proof-serial-failed.xml", True),
+])
+def test_phased_helper_requires_actual_serial_consumer_passes(
+    tmp_path: Path, monkeypatch, report: str, refuses: bool,
+) -> None:
+    import json
+    import shutil
+
+    from ci import reproduce_oracle_lane as experiment
+
+    (tmp_path / "pytest-lanes.json").write_text(json.dumps({"lanes": [
+        {"lane": "ordinary", "reaped": True, "end_ns": 20},
+        {"lane": "serial", "reaped": True, "start_ns": 30},
+    ]}))
+    (tmp_path / "pytest-ordinary.xml").write_text(
+        '<testsuites><testsuite><testcase><properties>'
+        '<property name="work_reaped_ns" value="10"/>'
+        '</properties></testcase></testsuite></testsuites>')
+    if (FIXTURES / report).exists():
+        shutil.copyfile(FIXTURES / report, tmp_path / "pytest-serial.xml")
+    read_text = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == Path("/sys/fs/cgroup/cpu.max"):
+            return "200000 100000"
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(experiment.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0))
+    monkeypatch.setattr(experiment.sys, "argv", ["experiment", "split", "--report-dir", str(tmp_path)])
+    if refuses:
+        with pytest.raises(ValueError, match="serial qualifier proof"):
+            experiment.main()
+    else:
+        assert experiment.main() == 0
