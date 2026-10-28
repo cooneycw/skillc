@@ -1,4 +1,0 @@
-- **#279's Step-6 campaign declaration is owner-approved** ("Approve 1c1b46ca (Recommended)", 2026-10-23, relayed by the orchestrator). `evals/level3/flow-auto-step6-live/declaration-draft.json` becomes the final declaration at digest `sha256:1c1b46ca…`, with an approval block outside the digest. It authorizes ONE run of 5 attempts with no retry.
-  - **Declaration:** subject CPP `ca3030d`; image `skillc-279-ca3030d:19ca849971d5`; gpt-6-astra at high; caps 900 s per attempt and 5400 s in total. No token cap; expect about 4.6–5.2M tokens.
-  - **Declared deviations:** the checksum shim on four bundled gate copies (#525), and the counted 125 parity.
-  - **Tests:** pin the digest and the approval, and refuse any changed field or a missing stamp.

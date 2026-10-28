@@ -1,1 +1,0 @@
-- Match both authentic offline cache-miss clauses across whitespace in the cold-install diagnostic, preserving strict property failures and unrelated-error rejection. Offline complete-consumer controls cover wrapped output; no new physical container proof is claimed.
