@@ -105,21 +105,23 @@ def load_manifest(path: Path = PROBE_ROOT / "run-manifest.json") -> dict[str, ob
 def plan_selection_probe(
     cases: dict[str, object], manifest: dict[str, object], *,
     treatment_subject_digest: str, baseline_subject_digest: str, image_digest: str, store: Path,
-    experiment_name: str = "selection-probe",
+    experiment_name: str = "selection-probe", grader: verify.GraderDef | None = None,
 ) -> trial.Experiment:
     """Plans BOTH arms of every case as its own trial through the real
     controller - the exact shape `tests/test_selection_probe.py`'s own
     no-run deliverable already proved round-trips through `trial.plan()`
     (issue #26), now the ONE place that shape is built, shared by that test
     and by `run_selection_probe` below, rather than two copies that could
-    drift apart."""
+    drift apart. An explicit grader owns the complete pin; omission keeps the
+    task declared by cases.base_task, now with its content digest."""
     case_list = cases["cases"]
     assert isinstance(case_list, list)
     client = cases["client"]
     assert isinstance(client, dict)
-    repo_root = PROBE_ROOT.parent.parent
-    grader_path = repo_root / str(cases["base_task"]["grader"])  # type: ignore[index]
-    base_grader = json.loads(grader_path.read_text(encoding="utf-8"))
+    if grader is None:
+        grader_path = PROBE_ROOT.parent.parent / str(cases["base_task"]["grader"])  # type: ignore[index]
+        grader = verify.GraderDef.load(grader_path.parent)
+    grader_pin = grader.identity()
     manifest_repeat = manifest["repeat_schedule"]  # type: ignore[index]
     assert isinstance(manifest_repeat, dict)
     attempts_per_trial = manifest_repeat["attempts_per_trial"]
@@ -131,7 +133,7 @@ def plan_selection_probe(
             trials.append({
                 "label": f"{str(case['kind']).replace('-', '_')}_{arm}",
                 "case": {"id": case["id"], "revision": case["revision"], "observes_selection": case["observes_selection"]},
-                "grader": {"id": base_grader["id"], "revision": base_grader["revision"]},
+                "grader": dict(grader_pin),
                 "subject": {"digest": treatment_subject_digest if arm == "treatment" else baseline_subject_digest},
                 "client": {"name": client["name"], "version": client["version"]},
                 "image": {"digest": image_digest},
@@ -329,9 +331,10 @@ def run_selection_probe(
     plans with `plan_selection_probe` first and calls
     `run_planned_selection_probe` directly; this is exactly that, in one
     call, for a runner that does not."""
+    grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
     experiment = plan_selection_probe(
         cases, manifest, treatment_subject_digest=treatment_subject_digest,
-        baseline_subject_digest=baseline_subject_digest, image_digest=image_digest, store=store,
+        baseline_subject_digest=baseline_subject_digest, image_digest=image_digest, store=store, grader=grader,
     )
     return run_planned_selection_probe(
         experiment, cases, runner, base=base, grader=grader, grading_backend=grading_backend,
@@ -357,6 +360,8 @@ def run_planned_selection_probe(
         (`AgentTrialRunner.backend`), or that has network egress.
       - a plan that does not cover every (case, arm) the supplied cases
         declare, including an empty one.
+      - any issued trial whose grader id/revision/digest does not match the
+        execution grader. The whole population is checked before dispatch.
       - no `grading_backend` without `allow_host_grading=True`. With no
         backend, `verify.grade_files` executes the candidate as a HOST
         subprocess - acceptable only for committed, trusted fixture
@@ -402,6 +407,14 @@ def run_planned_selection_probe(
             "never gets egress (collection_conformance.agent_backends' own split)"
         )
     grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
+
+    identity = grader.identity()
+    issued_trials = experiment.ledger["trials"]
+    assert isinstance(issued_trials, list)
+    for issued in issued_trials:
+        pin = issued.get("grader") if isinstance(issued, dict) else None
+        if not isinstance(pin, Mapping) or any(pin.get(key) != value for key, value in identity.items()):
+            raise SelectionProbeRefused("planned grader identity (id, revision, digest) does not match execution")
 
     planned = [(_resolved_trial(experiment, trial_dict), attempt) for trial_dict, attempt in experiment.attempts()]
     planned_ids = {str(attempt["attempt_id"]) for _trial, attempt in planned}

@@ -11,6 +11,7 @@ stop): `trial.plan()` only ever writes a ledger to a throwaway store.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -1509,3 +1510,202 @@ def test_public_selection_preserves_the_existing_unsafe_path_refusal(
     td, attempt = next(experiment.attempts())
     with pytest.raises(BackendUnavailable, match="nonescaping"):
         runner(sp._resolved_trial(experiment, td), attempt)
+
+
+@pytest.mark.parametrize("task", ["default", "nondefault"])
+def test_cli_plans_actual_grader_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: str,
+) -> None:
+    from skillc import cli
+    from skillc import collection_conformance as cc
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    root = sp.GRADER_ROOT if task == "default" else FINISH_CLOSE_REF_ROOT
+    argv = ["selection-probe", "--base", str(tmp_path)]
+    assert cli.main(argv + (["--task", str(root)] if task == "nondefault" else [])) == 0
+    [call] = seen
+    runner = call["runner"]
+    assert isinstance(runner, sp.AgentTrialRunner)
+    assert runner.goal == (root / "goal.md").read_text(encoding="utf-8")
+    assert runner.surface == cc.surface_mapping(cc.task_surface(root / "fixture"))
+    assert runner.treatment_home_files == {} and runner.treatment_home_modes == {}
+    assert call["grading_backend"] is not runner.backend
+    pairs = set()
+    for td, attempt in runner.experiment.attempts():
+        case = td["case"]
+        assert isinstance(case, dict)
+        pairs.add((case["id"], _arm_of(runner.experiment, str(attempt["attempt_id"]))))
+    assert pairs == {(c["id"], arm) for c in CASES["cases"] for arm in _ARMS}
+    expected = verify.GraderDef.load(root).identity()
+    execution_grader = call["grader"]
+    assert isinstance(execution_grader, verify.GraderDef) and execution_grader.identity() == expected
+    trials = runner.experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    pins = [td["grader"] for td in trials]
+    print("identity-red-setup", task, "complete-pairs", len(pairs), "goal/surface/modes/backend OK")
+    assert pins == [expected] * len(pairs)
+
+
+def _identity_plan(tmp_path: Path, grader: verify.GraderDef | None = None,
+                   cases: dict[str, object] | None = None) -> t.Experiment:
+    return sp.plan_selection_probe(
+        CASES if cases is None else cases, MANIFEST, grader=grader,
+        treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST, baseline_subject_digest=_BASELINE_SUBJECT_DIGEST,
+        image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=t.open_store(tmp_path / "store", forbidden=[]),
+    )
+
+
+def _identity_run(experiment: t.Experiment, tmp_path: Path, calls: list[str],
+                  grader: verify.GraderDef | None = None) -> sp.SelectionProbeReport:
+    def runner(td: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript:
+        calls.append(str(attempt["attempt_id"]))
+        return sp.AttemptTranscript("not-run")
+
+    return sp.run_planned_selection_probe(experiment, CASES, runner, base=tmp_path / "grading",
+                                          grader=grader, allow_host_grading=True)
+
+
+@pytest.mark.parametrize("fault", ["id", "revision", "missing", "nonmapping", "wrongtype", "nonhex"])
+def test_identity_gate_checks_the_last_trial_before_any_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    grade_calls: list[bool] = []
+    original_grade = verify.grade_files
+
+    def grade(*args: object, **kwargs: object) -> verify.Graded:
+        grade_calls.append(True)
+        return original_grade(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "grade_files", grade)
+    experiment = _identity_plan(tmp_path)
+    calls: list[str] = []
+    _identity_run(experiment, tmp_path, calls)
+    assert set(calls) == {str(a["attempt_id"]) for _, a in experiment.attempts()} and len(calls) == 6
+    calls.clear()
+    trials = experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    pin = trials[-1]["grader"]
+    if fault == "nonmapping":
+        trials[-1]["grader"] = ["not a pin"]
+    elif fault == "missing":
+        del pin["digest"]
+    else:
+        key = fault if fault in ("id", "revision") else "digest"
+        pin[key] = 17 if fault == "wrongtype" else "wrong"
+    ledger = (experiment.root / "ledger.json").read_bytes()
+    with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+        _identity_run(experiment, tmp_path, calls)
+    assert calls == [] and grade_calls == []
+    assert (experiment.root / "ledger.json").read_bytes() == ledger
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+@pytest.mark.parametrize("part", ["definition", "probe", "inputs", "judge", "optional-policy"])
+def test_identity_gate_refuses_changed_bytes_under_the_same_names(
+    tmp_path: Path, part: str,
+) -> None:
+    root = tmp_path / "grader"
+    shutil.copytree(GRADER.root, root)
+    grader = verify.GraderDef.load(root)
+    experiment = _identity_plan(tmp_path, grader)
+    calls: list[str] = []
+    _identity_run(experiment, tmp_path, calls, grader)
+    assert len(calls) == 6
+    target = root / "grader.json" if part in ("definition", "optional-policy") else getattr(grader, part)
+    if part == "optional-policy":
+        definition = json.loads(target.read_bytes())
+        definition["optional_criteria"] = ["identity-note"]
+        target.write_text(json.dumps(definition), encoding="utf-8")
+    else:
+        target.write_bytes(target.read_bytes() + b"\n")
+    changed = verify.GraderDef.load(root)
+    assert (changed.id, changed.revision) == (grader.id, grader.revision)
+    calls.clear()
+    with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+        _identity_run(experiment, tmp_path, calls, changed)
+    assert calls == []
+    fresh = _identity_plan(tmp_path / "fresh", changed)
+    _identity_run(fresh, tmp_path, calls, changed)
+    assert len(calls) == 6  # the changed definition is usable when honestly planned
+
+
+def test_identity_gate_leaves_a_canonical_digestless_plan_unchanged(tmp_path: Path) -> None:
+    original = _identity_plan(tmp_path)
+    trials = original.ledger["trials"]
+    assert isinstance(trials, list)
+    specs = []
+    for index, td in enumerate(trials):
+        spec = {key: td[key] for key in ("case", "grader", "subject", "client", "image")}
+        spec["label"] = f"legacy-{index}"
+        spec["grader"] = {key: value for key, value in td["grader"].items() if key != "digest"}
+        spec["config"] = sp._resolved_trial(original, td)["config"]
+        spec["attempts"] = 1
+        specs.append(spec)
+    legacy = t.plan({"experiment": "digestless-control", "trials": specs},
+                    t.open_store(tmp_path / "legacy", forbidden=[]))
+    before = (legacy.root / "ledger.json").read_bytes()
+    calls: list[str] = []
+    with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+        _identity_run(legacy, tmp_path, calls)
+    assert calls == [] and (legacy.root / "ledger.json").read_bytes() == before
+    assert t.Experiment.open(legacy.root).ledger == legacy.ledger
+
+
+@pytest.mark.parametrize("form", ["standalone-omitted", "standalone-explicit", "onecall-omitted",
+                                  "onecall-explicit", "twocall-omitted", "twocall-explicit"])
+def test_identity_api_defaults_and_explicit_custom_task(tmp_path: Path, form: str) -> None:
+    custom = verify.GraderDef.load(FINISH_CLOSE_REF_ROOT)
+    cases = {**CASES, "base_task": {"grader": str(FINISH_CLOSE_REF_ROOT / "grader.json")}}
+    if form.startswith("standalone"):
+        expected = custom if form.endswith("omitted") else GRADER
+        experiment = _identity_plan(tmp_path, None if form.endswith("omitted") else GRADER, cases)
+    elif form.startswith("onecall"):
+        expected = GRADER if form.endswith("omitted") else custom
+        seen: list[dict[str, object]] = []
+
+        def runner(td: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript:
+            seen.append(td)
+            return sp.AttemptTranscript("not-run")
+
+        sp.run_selection_probe(
+            cases, MANIFEST, runner, treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST,
+            baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST,
+            store=t.open_store(tmp_path / "store", forbidden=[]), base=tmp_path / "grading",
+            grader=None if form.endswith("omitted") else custom, allow_host_grading=True,
+        )
+        assert len(seen) == 6
+        assert all(td["grader"] == expected.identity() for td in seen)
+        return
+    else:
+        expected = GRADER if form.endswith("omitted") else custom
+        experiment = _identity_plan(tmp_path, expected)
+        calls: list[str] = []
+        _identity_run(experiment, tmp_path, calls, None if form.endswith("omitted") else custom)
+        assert len(calls) == 6
+    trials = experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    assert all(td["grader"] == expected.identity() for td in trials)
+    if expected is custom:
+        calls = []
+        with pytest.raises(sp.SelectionProbeRefused, match="grader identity"):
+            _identity_run(experiment, tmp_path, calls)  # omission never repairs a custom plan
+        assert calls == []
+
+
+def test_cli_resolves_one_grader_for_plan_and_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    loaded: list[verify.GraderDef] = []
+    original = verify.GraderDef.load
+
+    def load(root: Path) -> verify.GraderDef:
+        grader = original(root)
+        loaded.append(grader)
+        return grader
+
+    monkeypatch.setattr(verify.GraderDef, "load", load)
+    assert cli.main(["selection-probe", "--task", str(FINISH_CLOSE_REF_ROOT), "--base", str(tmp_path)]) == 0
+    assert len(loaded) == 1 and seen[0]["grader"] is loaded[0]

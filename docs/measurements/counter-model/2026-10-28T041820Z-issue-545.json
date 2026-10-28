@@ -1,0 +1,31 @@
+{
+  "branch": "issue-545-selection-probe-and-regrade-lag-the-agent-trial-gr",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "d0c26d27ba2abc00a18470caf4d7aab57305fb19",
+  "implementer": "codex/gpt-6.1-sol",
+  "implementer_evidence": {
+    "rollout": "2026/10/27/rollout-2026-10-27T12-58-20-01a17e4c-6d14-72e3-b17d-1974ad91f80b.jsonl",
+    "thread_id": "01a17e4c-6d14-72e3-b17d-1974ad91f80b"
+  },
+  "issue": "545",
+  "local_credentials": "unknown",
+  "network": "unverified",
+  "passes": 1,
+  "recorded_at": "2026-10-28T04:18:20Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 0
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/28/rollout-2026-10-28T00-09-56-01a180b3-4a7b-7d91-b859-606826660f17.jsonl",
+    "thread_id": "01a180b3-4a7b-7d91-b859-606826660f17"
+  },
+  "schema": 1,
+  "scope": "unverified",
+  "status": "ran"
+}
