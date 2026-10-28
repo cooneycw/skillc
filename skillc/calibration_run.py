@@ -66,7 +66,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from . import agent_trial, calibration, completion, demo, gate_state, profile, trial, verify
+from . import agent_trial, calibration, completion, demo, egress, gate_state, profile, trial, verify
 from . import attempt_guard as ag
 from . import collection_conformance as cc
 from . import matched_pilot as mp
@@ -843,9 +843,38 @@ def guard_entry(record: Mapping[str, object], obs: Mapping[str, object], declare
     return out
 
 
+def containment_evidence(record: Mapping[str, object]) -> dict[str, object] | None:
+    """Positive observed containment violations, including historical attempts.
+
+    A violation is not evidence that an old runner stopped its schedule. Only
+    GuardStop writes that decision's separate checkpoint marker.
+    """
+    if record.get("disposition") not in mp.DISPATCHED:
+        return None
+    obs = record.get("observation")
+    if not isinstance(obs, Mapping):
+        return None
+    evidence: dict[str, object] = {}
+    uses = obs.get("server_side_tool_uses")
+    if isinstance(uses, list) and uses:
+        evidence["server_side_tool_uses"] = uses
+    network = obs.get("egress")
+    allowed = network.get("allowed") if isinstance(network, Mapping) else None
+    if isinstance(allowed, Mapping):
+        targets = sorted(target for target, count in allowed.items()
+                         if isinstance(target, str) and type(count) is int and count > 0
+                         and not egress.target_allowed(target))
+        if targets:
+            evidence["off_list_allowed_targets"] = targets
+    return {"trigger": "observed containment violation", "evidence": evidence} if evidence else None
+
+
 def containment_stop(entries: Sequence[Mapping[str, object]]) -> dict[str, object] | None:
-    """#500: the first guarded attempt whose guard report stops the schedule."""
+    """The first recorded native stop, including the original nested guard."""
     for entry in entries:
+        marker = entry.get("schedule_containment_stop")
+        if isinstance(marker, Mapping):
+            return {"at_attempt": entry.get("attempt_id"), **marker}
         nested = entry.get("nested_codex")
         if isinstance(nested, Mapping) and nested.get("stop"):
             return {"at_attempt": entry.get("attempt_id"), "trigger": nested["stop"]}
@@ -865,7 +894,7 @@ def guard_kwargs(client_name: str, model: str) -> dict[str, object]:
 
 @dataclass
 class GuardStop:
-    """#500: the first containment trigger, which skips every later attempt."""
+    """The first containment trigger, which skips every later attempt."""
 
     trigger: str | None = None
     at_attempt: str | None = None
@@ -876,7 +905,13 @@ class GuardStop:
         return trial.finalize(experiment, attempt_id, reason=f"containment stop at {self.at_attempt}: {self.trigger}")
 
     def observe(self, outcome: mp.AttemptOutcome, guarded: bool) -> None:
-        if self.trigger is None and guarded:
+        if self.trigger is not None:
+            return
+        evidence = containment_evidence(outcome.record)
+        if evidence is not None:
+            self.trigger, self.at_attempt = str(evidence["trigger"]), outcome.scheduled.attempt_id
+            outcome.record["schedule_containment_stop"] = evidence
+        elif guarded:
             trigger = ag.containment_trigger(outcome.record)
             if trigger is not None:
                 self.trigger, self.at_attempt = trigger, outcome.scheduled.attempt_id
@@ -1743,6 +1778,15 @@ def build_report(
             "runner_note": outcome.runner_note,
             **guard_entry(record, obs, declared_model),
         })
+        evidence = containment_evidence(record)
+        marker = record.get("schedule_containment_stop")
+        if marker is not None:
+            if marker != evidence:
+                raise CalibrationRefused("schedule containment stop marker differs from observed evidence")
+            entries[-1]["schedule_containment_stop"] = marker
+        if evidence is not None:
+            entries[-1]["containment_violation"] = evidence
+            entries[-1]["model_eligible"] = False
         nested_entry = entries[-1].get("nested_codex")
         if isinstance(nested_entry, Mapping) and any(nested_entry.get(k) for k in ("other_models", "stop", "block")):
             # #500 (counter-model review): an attempt whose containment is not
@@ -1753,7 +1797,8 @@ def build_report(
         "kind": REPORT_KIND,
         "experiment_id": experiment.id,
         "attempts": entries,
-        **({"containment_stop": containment_stop(entries)} if any("nested_codex" in e for e in entries) else {}),
+        **({"containment_stop": containment_stop(entries)}
+           if any("nested_codex" in e or "schedule_containment_stop" in e for e in entries) else {}),
         "arms": summarize_arms(entries),
         **({"outcome_endpoint": endpoint.to_json(),
             "declaration_digest": calibration.declaration_digest(declaration.data),
@@ -1880,6 +1925,9 @@ def paste_back(report: Mapping[str, object]) -> str:
     lines = [f"calibration-run: experiment {report.get('experiment_id')}"]
     if "outcome_endpoint" in report:
         lines.append(f"  outcome_endpoint={report['outcome_endpoint']} declaration={report.get('declaration_digest')}")
+    stop = report.get("containment_stop")
+    if isinstance(stop, Mapping):
+        lines.append(f"  containment stop at {stop.get('at_attempt')}")
     attempts = report.get("attempts")
     for entry in attempts if isinstance(attempts, list) else []:
         primary = entry.get("primary_endpoint") or {}
