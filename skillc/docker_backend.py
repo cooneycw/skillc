@@ -1277,8 +1277,9 @@ class DockerBackend:
         `skillc-a-live-conformance-fbba8d601e10`. So a timed-out call is given
         one further `daemon_timeout` to return. Once it has, the daemon has
         settled whether NAME exists, and the caller's `rm -f` is reliable.
-        `answered` is False when it did not return then either; the CLI is
-        killed, and the caller cannot confirm its cleanup."""
+        `answered` is False when it did not return then either (the CLI is
+        killed), or when something else ended it by a signal; either way the
+        caller cannot confirm its cleanup."""
         proc = subprocess.Popen(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
         )
@@ -1291,7 +1292,9 @@ class DockerBackend:
                     proc.communicate(timeout=self.daemon_timeout)
                 except subprocess.TimeoutExpired:
                     return None, timed_out, False
-                return None, timed_out, True
+                # A CLI ended by a signal never heard the daemon's answer, so
+                # its exit says nothing about whether the create has settled.
+                return None, timed_out, proc.returncode >= 0
             return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr), None, True
         finally:
             if proc.poll() is None:

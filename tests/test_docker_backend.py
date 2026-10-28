@@ -3366,6 +3366,20 @@ def test_a_create_later_than_the_answer_window_is_reported_not_silent(base: Path
         subprocess.run([*_docker_bin(docker_state), "rm", "-f", name], capture_output=True, check=False)
 
 
+@pytest.mark.parametrize(("ending", "answered"), [("os.kill(os.getpid(), signal.SIGKILL)", False), ("sys.exit(1)", True)])
+def test_a_cli_ended_by_a_signal_in_the_answer_window_is_not_an_answer(
+    base: Path, docker_state: Path, ending: str, answered: bool,
+) -> None:
+    """#540 (counter-model review): only a CLI that EXITED heard the daemon.
+    One killed by a signal inside the answer window settles nothing, so the
+    cleanup stays unconfirmed. The ordinary nonzero exit is the control."""
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    script = f"import os, signal, sys, time; time.sleep({_SLOWER_THAN_BOUND}); {ending}"
+    completed, timed_out, got = backend._run_awaiting_answer([sys.executable, "-c", script], os.environ)
+    assert completed is None and timed_out is not None
+    assert got is answered
+
+
 def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     base: Path, docker_state: Path,
 ) -> None:
