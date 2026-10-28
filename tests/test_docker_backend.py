@@ -3314,6 +3314,58 @@ def test_a_cleanup_that_succeeds_adds_no_cleanup_note(base: Path, docker_state: 
     assert "also failed" not in str(caught.value)
 
 
+def _late_create(docker_state: Path, delay: float) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".late-create-run").write_text(str(delay), encoding="utf-8")
+
+
+def _await_late_create(docker_state: Path, name: str, budget: float = 10.0) -> None:
+    """The fake's detached create runs on its own clock; wait until it has
+    landed, so an absence read afterwards is final rather than early."""
+    marker = docker_state / f".late-created-{name}"
+    deadline = time.monotonic() + budget
+    while not marker.exists():
+        assert time.monotonic() < deadline, f"the fake's late create for {name} never landed"
+        time.sleep(0.05)
+
+
+def test_a_timed_out_run_whose_create_lands_late_leaves_no_container(base: Path, docker_state: Path) -> None:
+    """Regression for issue #540: `run -d` passes its bound while the daemon
+    is still creating the container. The pre-fix prepare() killed the CLI and
+    removed the name at once, found "No such container", and returned - and
+    the create landed afterwards, leaving a never-started container (kyle19's
+    `skillc-a-live-conformance-fbba8d601e10`). Fails on the pre-fix code: the
+    `created` record is still there once the late create has landed."""
+    _late_create(docker_state, _SLOWER_THAN_BOUND)
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = "a-540-late-create-01"
+    name = d._container_name(attempt_id)
+    with pytest.raises(BackendUnavailable, match="docker run failed to start"):
+        backend.prepare(attempt_id)
+    _await_late_create(docker_state, name)
+    assert not (docker_state / f"{name}.json").exists(), "the late-created container was left behind"
+
+
+def test_a_create_later_than_the_answer_window_is_reported_not_silent(base: Path, docker_state: Path) -> None:
+    """#540's bounded tail: a daemon that has not answered `run -d` even after
+    the extra window cannot be cleaned up with certainty. That outcome must
+    reach the message, naming the attempt label a sweep can find it by - never
+    a clean-looking failure like the one that hid the kyle19 residue."""
+    _late_create(docker_state, 2 * _PREPARE_BOUND + 2.0)
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = "a-540-late-create-02"
+    name = d._container_name(attempt_id)
+    try:
+        with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+            backend.prepare(attempt_id)
+        message = str(caught.value)
+        assert "did not answer" in message
+        assert f"{d.ATTEMPT_LABEL_KEY}={attempt_id}" in message
+    finally:
+        _await_late_create(docker_state, name)
+        subprocess.run([*_docker_bin(docker_state), "rm", "-f", name], capture_output=True, check=False)
+
+
 def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     base: Path, docker_state: Path,
 ) -> None:
