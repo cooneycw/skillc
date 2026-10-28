@@ -1,0 +1,45 @@
+{
+  "issue_comments": [
+    {
+      "issue": 599,
+      "url": "https://github.com/cooneycw/skillc/issues/599#issuecomment-6466831751"
+    },
+    {
+      "issue": 546,
+      "url": "https://github.com/cooneycw/skillc/issues/546#issuecomment-6466832157"
+    },
+    {
+      "issue": 545,
+      "url": "https://github.com/cooneycw/skillc/issues/545#issuecomment-6466832602"
+    },
+    {
+      "issue": 548,
+      "url": "https://github.com/cooneycw/skillc/issues/548#issuecomment-6466833019"
+    },
+    {
+      "issue": 549,
+      "url": "https://github.com/cooneycw/skillc/issues/549#issuecomment-6466833485"
+    },
+    {
+      "issue": 544,
+      "url": "https://github.com/cooneycw/skillc/issues/544#issuecomment-6466833929"
+    },
+    {
+      "issue": 543,
+      "url": "https://github.com/cooneycw/skillc/issues/543#issuecomment-6466834367"
+    },
+    {
+      "issue": 542,
+      "url": "https://github.com/cooneycw/skillc/issues/542#issuecomment-6466834760"
+    },
+    {
+      "issue": 568,
+      "url": "https://github.com/cooneycw/skillc/issues/568#issuecomment-6466835205"
+    }
+  ],
+  "preserved_remote_refs": [
+    "084c6880a56e5e925dd1c5760bf8a1fc137714b6\trefs/heads/salvage/skillc-update-546-reporting-084c6880",
+    "f183fd52e9d7b93bfcbf1ee87f317908390fdc32\trefs/heads/salvage/skillc-update-599-zero-score-f183fd52",
+    "ce7badffe756abc7ac471700b8e747569dcfb968\trefs/heads/salvage/skillc-update-handoff-20261028"
+  ]
+}

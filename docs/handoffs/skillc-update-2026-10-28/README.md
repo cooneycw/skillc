@@ -53,3 +53,15 @@ Supplemental README tie-policy wording nit (outside #599 patch): https://github.
 2. Lift #546's hold explicitly, preserve old546 deadline/migration WIP, integrate actual new main into reporting checkpoint, perform receipt/full/delivery, check only the reporting item; parent remains open for remaining requirements.
 3. Reassess #545 new-plan baseline plan and the deferred candidates by WSJF. No carryover approval to implement.
 4. Do not silently close broad parents with unchecked acceptance or resume paid/live studies. All active work was parked at owner request.
+
+## Issue parking records
+
+- [#599 parking status](https://github.com/cooneycw/skillc/issues/599#issuecomment-6466831751)
+- [#546 parking status](https://github.com/cooneycw/skillc/issues/546#issuecomment-6466832157)
+- [#545 parking status](https://github.com/cooneycw/skillc/issues/545#issuecomment-6466832602)
+- [#548 parking status](https://github.com/cooneycw/skillc/issues/548#issuecomment-6466833019)
+- [#549 parking status](https://github.com/cooneycw/skillc/issues/549#issuecomment-6466833485)
+- [#544 parking status](https://github.com/cooneycw/skillc/issues/544#issuecomment-6466833929)
+- [#543 parking status](https://github.com/cooneycw/skillc/issues/543#issuecomment-6466834367)
+- [#542 parking status](https://github.com/cooneycw/skillc/issues/542#issuecomment-6466834760)
+- [#568 parking status](https://github.com/cooneycw/skillc/issues/568#issuecomment-6466835205)
