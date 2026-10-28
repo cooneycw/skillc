@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "contract_sources": {
+    "lib/cicd/runner.py": "Gate verdict and silent-success semantics (CPP #1576).",
+    "lib/cicd/steps.py": "Per-step gate configuration contract (CPP #1576).",
+    "lib/cicd/manifest.py": "Gate manifest interpretation (CPP #1576).",
+    "scripts/gate-lib.sh": "Gate helper protocol and verdict handling.",
+    "scripts/counter-model-receipt.py": "Counter-model receipt schema and validation (CPP #1584)."
+  }
+}
