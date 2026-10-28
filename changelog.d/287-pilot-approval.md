@@ -1,1 +1,0 @@
-- **#287's option-1 pilot is owner-approved** (#287). The pre-check run evaluated MET under `auto6_precheck.py`. `auto6-pilot-declaration.json` gains an approval block only, quoting the owner's "Approve 287" and "Yes" as relayed by the orchestrator, and citing the MET pre-check report by sha256 (`f63fe1b1…`). Its digest `sha256:9568c901…` is unchanged by the stamp.
