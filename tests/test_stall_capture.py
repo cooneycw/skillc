@@ -377,6 +377,32 @@ def test_red_a_host_stream_with_no_other_vm_leaves_neighbour_unassessed() -> Non
     assert "busy_neighbours" not in stall["evidence"]
 
 
+def test_red_a_vm_cgroup_without_io_stat_is_recorded_absent_not_refused(tmp_path: Path) -> None:
+    """A hypervisor that does not delegate the io controller to VM cgroups has
+    io.pressure but no io.stat; the first live run was refused on exactly that."""
+    root = _tree(tmp_path)
+    (root / "sys" / "fs" / "cgroup" / "vms" / "vm-ci" / "io.stat").unlink()
+    s = host.sample(root, ["dev-a"], {"vm-ci": "/sys/fs/cgroup/vms/vm-ci"})
+    assert s["vms"]["vm-ci"] == {"io_some_avg10": 4.0, "cpu_some_avg10": 2.0, "io_stat": "absent"}
+
+
+@pytest.mark.parametrize(("neighbour_psi", "busy"), [(60.0, ["vm-a"]), (1.0, [])])
+def test_red_a_neighbour_without_io_stat_is_judged_on_pressure_and_its_rate_unassessed(
+        neighbour_psi: float, busy: list[str]) -> None:
+    g, h = _streams("discard")
+    for record in h:
+        vm_a = record["vms"]["vm-a"]
+        for key in ("rbytes", "wbytes", "rios", "wios", "dbytes", "dios"):
+            vm_a.pop(key, None)
+        vm_a["io_stat"] = "absent"
+        vm_a["io_some_avg10"] = neighbour_psi
+    (stall,) = at.attribute(g, h, self_vm="vm-ci")["stalls"]
+    assert stall["evidence"]["busy_neighbours"] == busy
+    assert ("neighbour" in stall["causes"]) == bool(busy)
+    assert "neighbour_rate" in stall["unassessed"] and "neighbour" not in stall["unassessed"]
+    assert stall["evidence"]["neighbour_rate_unobserved"] == ["vm-a"]
+
+
 def test_red_a_host_interval_overlapping_a_one_tick_stall_is_joined() -> None:
     """Guest stall on the tick ending at +50 (interval 40-50); the host interval
     43-53 overlaps it although it ends after the window."""
