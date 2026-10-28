@@ -3380,6 +3380,46 @@ def test_a_cli_ended_by_a_signal_in_the_answer_window_is_not_an_answer(
     assert got is answered
 
 
+@pytest.mark.parametrize(("ending", "answered"), [("os.kill(os.getpid(), signal.SIGKILL)", False), ("sys.exit(1)", True)])
+def test_a_cli_ended_by_a_signal_inside_the_bound_is_not_an_answer(
+    base: Path, docker_state: Path, ending: str, answered: bool,
+) -> None:
+    """#540 (counter-model review, pass 2): the same rule inside the first
+    bound, where the call returns a completed process rather than a timeout."""
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    script = f"import os, signal, sys; {ending}"
+    completed, timed_out, got = backend._run_awaiting_answer([sys.executable, "-c", script], os.environ)
+    assert timed_out is None and completed is not None and completed.returncode != 0
+    assert got is answered
+
+
+def test_prepare_reports_a_run_cli_ended_by_a_signal_as_unconfirmed(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#540: a `run -d` CLI killed by a signal is read as a failed start, and
+    its cleanup cannot be confirmed - the message names the attempt label. Only
+    `run` dies; every other call reaches the fake CLI unchanged."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    wrapper = tmp_path / "signal_on_run.py"
+    wrapper.write_text(
+        "import os, signal, sys\n"
+        "if 'run' in sys.argv:\n"
+        "    os.kill(os.getpid(), signal.SIGKILL)\n"
+        "os.execv(sys.argv[1], sys.argv[1:])\n",
+        encoding="utf-8",
+    )
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=[sys.executable, str(wrapper), *_docker_bin(docker_state)],
+        daemon_timeout=_PREPARE_BOUND,
+    )
+    attempt_id = "a-540-signal-run-01"
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare(attempt_id)
+    message = str(caught.value)
+    assert f"ended by signal {signal.SIGKILL.value}" in message
+    assert f"{d.ATTEMPT_LABEL_KEY}={attempt_id}" in message
+
+
 def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     base: Path, docker_state: Path,
 ) -> None:

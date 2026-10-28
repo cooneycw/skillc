@@ -882,6 +882,16 @@ class _Handle:
     egress_proxy: str | None = None
 
 
+def _unconfirmed_cleanup_note(reason: str, attempt_id: str) -> str:
+    """#540: the clause a raising prepare() adds when its cleanup ran without
+    the daemon's answer to `run -d`, so a create still in flight may land
+    after it. Names the label a sweep can find that container by."""
+    return (
+        f"; {reason}, so a container it creates after this cleanup is not removed - "
+        f"find it by label {ATTEMPT_LABEL_KEY}={attempt_id}"
+    )
+
+
 @dataclass(frozen=True)
 class DockerBackend:
     """One `ExecutionBackend` per attempt lifecycle. `image` should be pinned
@@ -1126,10 +1136,8 @@ class DockerBackend:
                 channel.close()
             cleanup_note = self._best_effort_rm(name, env)
             if not answered:
-                cleanup_note += (
-                    f"; the daemon did not answer 'docker run -d' within a further {self.daemon_timeout}s, "
-                    f"so a container it creates after this cleanup is not removed - find it by label "
-                    f"{ATTEMPT_LABEL_KEY}={attempt_id}"
+                cleanup_note += _unconfirmed_cleanup_note(
+                    f"the daemon did not answer 'docker run -d' within a further {self.daemon_timeout}s", attempt_id,
                 )
             cleanup_note += self._stop_egress(egress_proxy, egress_network, env)
             raise BackendUnavailable(
@@ -1139,7 +1147,13 @@ class DockerBackend:
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
-            cleanup_note = self._best_effort_rm(name, env) + self._stop_egress(egress_proxy, egress_network, env)
+            cleanup_note = self._best_effort_rm(name, env)
+            if not answered:
+                cleanup_note += _unconfirmed_cleanup_note(
+                    f"the 'docker run -d' CLI was ended by signal {-started.returncode} before the daemon answered",
+                    attempt_id,
+                )
+            cleanup_note += self._stop_egress(egress_proxy, egress_network, env)
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}{cleanup_note}"
             )
@@ -1278,8 +1292,8 @@ class DockerBackend:
         one further `daemon_timeout` to return. Once it has, the daemon has
         settled whether NAME exists, and the caller's `rm -f` is reliable.
         `answered` is False when it did not return then either (the CLI is
-        killed), or when something else ended it by a signal; either way the
-        caller cannot confirm its cleanup."""
+        killed), or when something else ended it by a signal in either window;
+        either way the caller cannot confirm its cleanup."""
         proc = subprocess.Popen(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
         )
@@ -1295,7 +1309,7 @@ class DockerBackend:
                 # A CLI ended by a signal never heard the daemon's answer, so
                 # its exit says nothing about whether the create has settled.
                 return None, timed_out, proc.returncode >= 0
-            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr), None, True
+            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr), None, proc.returncode >= 0
         finally:
             if proc.poll() is None:
                 # Reap without draining: a pipe held open by anything the CLI
