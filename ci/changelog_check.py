@@ -41,6 +41,8 @@ already follows (#63).
 
 from __future__ import annotations
 
+import argparse
+import os
 import re
 import subprocess
 import sys
@@ -169,9 +171,71 @@ def _merge_base(base_ref: str, head_ref: str = "HEAD") -> str | None:
     return sha if result.returncode == 0 and sha else None
 
 
+def _pending_inputs() -> list[str]:
+    """Git's nonignored pending inputs, never filesystem fragment contents.
+
+    No rename collapsing: both ends must remain visible, even across scope.
+    Warnings may mean incomplete enumeration, so they are not a clean result.
+    """
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+         "--no-renames", "--", "skillc", FRAGMENT_DIR], capture_output=True, check=False,
+    )
+    if result.returncode or result.stderr:
+        raise ValueError(f"incomplete git status: {result.stderr!r} (exit {result.returncode})")
+    raw = result.stdout
+    if raw and not raw.endswith(b"\0"):
+        raise ValueError("truncated git status")
+    pending = []
+    for entry in raw.split(b"\0")[:-1]:
+        if (len(entry) < 4 or entry[2:3] != b" " or entry[:2] == b"  "
+                or not re.fullmatch(rb"(?:[ MADTU]{2}|\?\?)", entry[:2])):
+            raise ValueError(f"malformed git status: {entry!r}")
+        path = os.fsdecode(entry[3:])
+        if any(part in ("", ".", "..") for part in path.split("/")):
+            raise ValueError(f"malformed git path: {path!r}")
+        if touches_skillc([path]) or is_fragment(path):
+            pending.append(f"{entry[:2].decode('ascii')} {path!r}")
+    return pending
+
+
+def _clean_input_problem(head: str) -> str | None:
+    try:
+        pending = _pending_inputs()
+        current = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+        if current.returncode or current.stderr or current.stdout.strip() != head:
+            return "HEAD changed or could not be read"
+    except (OSError, ValueError) as exc:
+        return str(exc)
+    return "pending committed-check inputs: " + ", ".join(pending) if pending else None
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
-    base = args[0] if args else "origin/main"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("base", nargs="?", default="origin/main")
+    parser.add_argument("--require-clean-inputs", action="store_true",
+                        help="refuse relevant pending Git inputs; does not evaluate their contents")
+    args = parser.parse_args(argv)
+    base = args.base
+    try:
+        head_sha = _git("rev-parse", "HEAD").strip()
+    except (OSError, SystemExit) as exc:
+        if not args.require_clean_inputs:
+            raise
+        print(f"changelog-check: REFUSED - committed HEAD unavailable: {exc}", file=sys.stderr)
+        return 2
+
+    def refused() -> bool:
+        problem = _clean_input_problem(head_sha)
+        if problem:
+            print(f"changelog-check: REFUSED - {problem}; checkpoint relevant changes first",
+                  file=sys.stderr)
+        return problem is not None
+
+    print(f"changelog-check: source=committed HEAD={head_sha} base={base!r} "
+          f"require-clean-inputs={args.require_clean_inputs}")
+    if args.require_clean_inputs and refused():
+        return 2
 
     merge_base = _merge_base(base)
     if merge_base is None:
@@ -182,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    print(f"changelog-check: merge-base={merge_base}")
 
     changed_files = [
         line for line in _git("diff", "--name-only", merge_base, "HEAD").splitlines() if line
@@ -210,7 +275,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    print("changelog-check: ok")
+    if args.require_clean_inputs and refused():
+        return 2
+    print("changelog-check: ok (committed inputs)")
     return 0
 
 

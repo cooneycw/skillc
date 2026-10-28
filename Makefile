@@ -80,7 +80,7 @@ leak-check: sync
 # comparing against a stale local origin/main if the fetch itself fails.
 changelog-check:
 	git fetch origin main --quiet
-	python3 ci/changelog_check.py origin/main
+	python3 ci/changelog_check.py origin/main --require-clean-inputs
 
 readme-drift: sync
 	uv run --no-sync python3 ci/readme_drift.py

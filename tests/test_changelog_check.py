@@ -283,3 +283,227 @@ def _run_in(repo: Path, args: list[str]) -> int:
         return int(exc.code or 0)
     finally:
         os.chdir(old)
+
+
+# #542: exercise the actual local target, including its selected checker mode.
+def _local_gate_repo(tmp_path: Path) -> Path:
+    repo = _repo(tmp_path, "gate")
+    root = Path(__file__).resolve().parents[1]
+    (repo / "ci").mkdir()
+    for name in ("Makefile", "ci/changelog_check.py"):
+        shutil.copyfile(root / name, repo / name)
+    (repo / "skillc").mkdir()
+    (repo / "skillc/x.py").write_text("x = 1\n")
+    _commit(repo, "base")
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-qb", "feature"], check=True)
+    return repo
+
+
+@needs_git
+@pytest.mark.parametrize("dirty", [False, True], ids=["clean-healthy", "dirty-regression"])
+def test_local_target_refuses_pending_source(tmp_path: Path, dirty: bool) -> None:
+    repo = _local_gate_repo(tmp_path)
+    if dirty:
+        (repo / "skillc/x.py").write_text("x = 2\n")
+    _assert_target(repo, dirty)
+
+
+def _assert_target(repo: Path, dirty: bool) -> None:
+    result = subprocess.run(["make", "--no-print-directory", "changelog-check"],
+                            cwd=repo, capture_output=True, text=True, check=False)
+    assert result.returncode == (2 if dirty else 0), (result.stdout, result.stderr)
+    if dirty:
+        assert "REFUSED" in result.stderr and "skillc/x.py" in result.stderr
+
+
+@needs_git
+def test_default_cli_preserves_dirty_committed_compatibility(tmp_path: Path) -> None:
+    repo = _local_gate_repo(tmp_path)
+    (repo / "skillc/x.py").write_text("x = 2\n")
+    assert _run_in(repo, ["main"]) == 0
+
+
+def _git_in(repo: Path, *args: str, input: str | None = None) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], input=input,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _guard(repo: Path) -> int:
+    return _run_in(repo, ["main", "--require-clean-inputs"])
+
+
+@needs_git
+@pytest.mark.parametrize("kind", [
+    "unstaged", "staged", "untracked", "deleted", "staged-deleted", "typechange",
+    "conflict", "rename-out", "rename-in", "rename-within", "spaces", "newline",
+    "dirty-good-fragment", "fragment-delete", "fragment-rename-out", "fragment-rename-in",
+    "staged-then-deleted", "symlink", "exempt-head", "unrelated", "ignored",
+])
+def test_relevant_pending_inputs_refuse(tmp_path: Path, kind: str) -> None:
+    repo = _local_gate_repo(tmp_path)
+    fragment = repo / FRAGMENT
+    fragment.parent.mkdir()
+    fragment.write_text(GOOD_BULLET)
+    (repo / "outside.py").write_text("x = 1\n")
+    _commit(repo, "fixture inputs")
+    source = repo / "skillc/x.py"
+    if kind in ("unstaged", "staged", "exempt-head"):
+        if kind == "exempt-head":
+            _git_in(repo, "commit", "--allow-empty", "-qm", "exempt\n\nChangelog-exempt: old note")
+        source.write_text("x = 2\n")
+        if kind == "staged":
+            _git_in(repo, "add", "skillc/x.py")
+    elif kind in ("untracked", "spaces", "newline"):
+        (repo / "skillc" / {"untracked": "new.py", "spaces": "a b.py", "newline": "a\nb.py"}[kind]).write_text("x=2\n")
+    elif kind in ("deleted", "staged-deleted", "typechange", "symlink"):
+        source.unlink()
+        if kind == "staged-deleted":
+            _git_in(repo, "add", "-u")
+        elif kind in ("typechange", "symlink"):
+            # A dangling/outside target cannot supply fragment contents.
+            source.symlink_to(tmp_path / "never-read")
+    elif kind == "conflict":
+        blob = _git_in(repo, "rev-parse", "HEAD:skillc/x.py")
+        _git_in(repo, "update-index", "--index-info", input="".join(
+            f"100644 {blob} {stage}\tskillc/x.py\n" for stage in (1, 2, 3)))
+    elif kind.startswith("rename"):
+        old, new = {"rename-out": ("skillc/x.py", "out.py"),
+                    "rename-in": ("outside.py", "skillc/in.py"),
+                    "rename-within": ("skillc/x.py", "skillc/y.py")}[kind]
+        _git_in(repo, "mv", old, new)
+    elif kind == "dirty-good-fragment":
+        fragment.write_text(GOOD_BULLET + "  Another usable line.\n")
+    elif kind == "fragment-delete":
+        fragment.unlink()
+    elif kind in ("fragment-rename-out", "fragment-rename-in"):
+        old, new = (FRAGMENT, "note.md") if kind.endswith("out") else ("outside.py", "changelog.d/99.md")
+        _git_in(repo, "mv", old, new)
+    elif kind == "staged-then-deleted":
+        fragment.write_text(GOOD_BULLET + "  New line.\n")
+        _git_in(repo, "add", FRAGMENT)
+        fragment.unlink()
+    elif kind == "ignored":
+        (repo / ".gitignore").write_text("skillc/generated/\n")
+        (repo / "skillc/generated").mkdir()
+        (repo / "skillc/generated/x.py").write_text("ignored\n")
+    else:
+        for path in ("README.md", "notes.txt", "changelog.d/README.md", "reports/log"):
+            target = repo / path
+            target.parent.mkdir(exist_ok=True)
+            target.write_text("unrelated\n")
+    assert _guard(repo) == (0 if kind in ("unrelated", "ignored") else 2)
+
+
+@needs_git
+def test_pending_guard_discrimination_survives_only_with_real_enumeration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _local_gate_repo(tmp_path)
+    source = repo / "skillc/x.py"
+    assert _guard(repo) == 0
+    source.write_text("x = 2\n")
+    def discriminate() -> None:
+        assert _guard(repo) == 2, "dirty-input control was blinded"
+    discriminate()
+    monkeypatch.setattr(cc, "_pending_inputs", list)
+    with pytest.raises(AssertionError, match="control was blinded"):
+        discriminate()
+
+
+@needs_git
+@pytest.mark.parametrize("stdout,stderr,code", [
+    (b" M skillc/x.py", b"", 0), (b"bad\0", b"", 0),
+    (b"?? ../escape\0", b"", 0), (b"", b"warning: cannot read directory", 0),
+    (b"", b"fatal: status unavailable", 128),
+])
+def test_incomplete_status_is_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                      stdout: bytes, stderr: bytes, code: int) -> None:
+    repo = _local_gate_repo(tmp_path)
+    real = subprocess.run
+    def observed(argv, *args, **kwargs):
+        if argv[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(argv, code, stdout, stderr)
+        return real(argv, *args, **kwargs)
+    monkeypatch.setattr(cc.subprocess, "run", observed)
+    assert _guard(repo) == 2
+
+
+@needs_git
+@pytest.mark.parametrize("changed", ["pending", "head"])
+def test_guard_rechecks_before_green(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str) -> None:
+    repo = _local_gate_repo(tmp_path)
+    real = cc.missing_changelog_entry
+    def during(*args):
+        if changed == "pending":
+            (repo / "skillc/x.py").write_text("x = 2\n")
+        else:
+            _git_in(repo, "commit", "--allow-empty", "-qm", "moved HEAD")
+        return real(*args)
+    monkeypatch.setattr(cc, "missing_changelog_entry", during)
+    assert _guard(repo) == 2
+
+
+@needs_git
+@pytest.mark.parametrize("note", [None, "", GOOD_BULLET, "- Other\n- Invalid\n", "carried", "delete"])
+def test_guard_preserves_committed_policy(tmp_path: Path, note: str | None) -> None:
+    repo = _local_gate_repo(tmp_path)
+    if note in ("carried", "delete"):
+        (repo / FRAGMENT).parent.mkdir()
+        (repo / FRAGMENT).write_text(GOOD_BULLET)
+        _commit(repo, "base fragment")
+        _git_in(repo, "branch", "-f", "main", "HEAD")
+        if note == "delete":
+            (repo / FRAGMENT).unlink()
+    (repo / "skillc/x.py").write_text("x = 2\n")
+    if note is not None and note not in ("carried", "delete"):
+        (repo / FRAGMENT).parent.mkdir()
+        (repo / FRAGMENT).write_text(note)
+    _commit(repo, "changed product")
+    assert _guard(repo) == (0 if note == GOOD_BULLET else 1)
+
+
+@needs_git
+def test_actual_target_wiring_control(tmp_path: Path) -> None:
+    repo = _local_gate_repo(tmp_path)
+    (repo / "skillc/x.py").write_text("x = 2\n")
+    _assert_target(repo, True)
+    makefile = repo / "Makefile"
+    text = makefile.read_text()
+    assert text.count(" --require-clean-inputs") == 1
+    makefile.write_text(text.replace(" --require-clean-inputs", ""))
+    with pytest.raises(AssertionError):
+        _assert_target(repo, True)
+
+
+@needs_git
+def test_pending_fragment_symlink_never_reads_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _local_gate_repo(tmp_path)
+    (repo / FRAGMENT).parent.mkdir()
+    (repo / FRAGMENT).symlink_to(tmp_path / "unreadable-or-absent")
+    def forbidden(*args):
+        pytest.fail("pending fragment content was read")
+    monkeypatch.setattr(cc, "_show", forbidden)
+    assert _guard(repo) == 2
+
+
+@needs_git
+@pytest.mark.parametrize("fault", ["status-launch", "initial-head", "recheck-head", "no-merge-base"])
+def test_guarded_git_failures_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
+    repo = _local_gate_repo(tmp_path)
+    real = subprocess.run
+    heads = 0
+    def observed(argv, *args, **kwargs):
+        nonlocal heads
+        if fault == "status-launch" and argv[:2] == ["git", "status"]:
+            raise OSError("controlled status launch failure")
+        if argv[:2] == ["git", "rev-parse"] and fault in ("initial-head", "recheck-head"):
+            heads += 1
+            if heads == (1 if fault == "initial-head" else 2):
+                return subprocess.CompletedProcess(argv, 128, "", "controlled HEAD refusal")
+        return real(argv, *args, **kwargs)
+    if fault == "no-merge-base":
+        monkeypatch.setattr(cc, "_merge_base", lambda *args: None)
+    else:
+        monkeypatch.setattr(cc.subprocess, "run", observed)
+    assert _guard(repo) == 2
