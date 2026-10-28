@@ -455,6 +455,8 @@ def _stamped_pilot(report_sha: str | None = "sha256:" + "0" * 64) -> dict[str, A
     to its digest, citing a pre-check report. Never written into the repo."""
     from skillc import profile as prof
     data = _json(PILOT)
+    # This new test approval is outside the exact historical budget exception.
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = {
         "by": "TEST ONLY - not an owner approval", "at": "2026-10-20", "source": "test", "scope": "test",
         "attempts_per_arm": data["attempts_per_arm"],

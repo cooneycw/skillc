@@ -57,7 +57,7 @@ def _data(*, n_primary: int = 3, n_secondary: int = 3, approved: bool = True) ->
                    "reasoning_effort": "high", "tools": "defaults", "permissions": "the same for every attempt",
                    "public_requirements": "goal.md plus each case's addendum",
                    "image": {"tag": "skillc-trial:latest", "digest": _IMAGE_DIGEST},
-                   "per_attempt_seconds": 600, "total_seconds": 600 * 2 * (n_primary + n_secondary)},
+                   "per_attempt_seconds": 600, "total_seconds": (600 + 16) * 2 * (n_primary + n_secondary)},
         "cases": cases,
         "test": {"kind": "fisher-exact-one-sided", "direction": "rewritten > published", "alpha": 0.05},
         "arm_order": {"seed": 7, "sequence": [list(x) for x in us.derive_order(7, parsed)]},
@@ -319,6 +319,7 @@ def test_the_committed_declaration_is_authorized() -> None:
 
 def test_red_the_committed_declaration_without_its_approval_is_refused() -> None:
     data = json.loads((ROOT / "evals" / "uptake-study" / "run-manifest.json").read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = None
     with pytest.raises(us.StudyRefused, match="not approved"):
         us.require_approved(us.parse_declaration(data), ROOT)
@@ -405,6 +406,7 @@ def test_the_committed_selective_declaration_is_authorized_and_its_file_matches(
     lines, at = us._description_of((root / "flow-check-SKILL.md").read_bytes())
     assert us._unquote(lines[at].split(":", 1)[1]) == declaration.rewritten_description
     data = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = None
     with pytest.raises(us.StudyRefused, match="not approved"):
         us.require_approved(us.parse_declaration(data), ROOT)
@@ -541,7 +543,7 @@ def _screen_data(variants: Sequence[str] = ("variant-a", "variant-b"), **case_ex
         "task": {"path": "evals/level1/slug-small-fix", "grader_id": grader.id, "grader_revision": grader.revision},
         "arms": arms, "cases": cases, "probe": {"cutoff_seconds": 45},
         "shared": {**_data()["shared"], "per_attempt_seconds": 45,  # type: ignore[dict-item]
-                   "total_seconds": 45 * len(names) * 6},
+                   "total_seconds": (45 + 16) * len(names) * 6},
         "arm_order": {"seed": 3, "sequence": [list(x) for x in us.derive_order(3, parsed, names)]},
     }
 

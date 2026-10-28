@@ -58,7 +58,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import completion, degrade, profile, records, trial, verify
+from . import completion, degrade, profile, records, schedule_budget, trial, verify
 from . import materialize as m
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -486,9 +486,10 @@ def _parse_schedule_and_identities(data: Mapping[str, object], names: Sequence[s
     if isinstance(attempts, bool) or not isinstance(attempts, int) \
             or not MIN_ATTEMPTS_PER_ARM <= attempts <= MAX_ATTEMPTS_PER_ARM:
         raise _refuse(f"attempts_per_arm must be {MIN_ATTEMPTS_PER_ARM}-{MAX_ATTEMPTS_PER_ARM}, not {attempts!r}")
-    if total < per_attempt * attempts * len(names):
-        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts * len(names)} attempts of "
-                      f"{per_attempt:g}s; a total cap that cuts the schedule short is not the declared schedule")
+    budget_error = schedule_budget.refusal_reason(data, attempts=attempts * len(names),
+                                                per_attempt=per_attempt, total=total)
+    if budget_error is not None:
+        raise _refuse(budget_error)
 
     order = data.get("arm_order")
     if not isinstance(order, dict):
