@@ -22,6 +22,7 @@ TASKS = {
     "slugkit-pipeline": ("evals/level3/slugkit-pipeline", "pipeline-honest"),
     "gate-stops-early-auto6": ("evals/level3/gate-stops-early-auto6", "gate-report-honest"),
     "gate-stops-early": ("evals/level3/gate-stops-early", "flow-check-honest"),
+    "gate-stops-early-public-gate": ("evals/level3/gate-stops-early-public-gate", "flow-check-honest"),
     "slug-small-fix": ("evals/level1/slug-small-fix", None),
 }
 
@@ -99,7 +100,7 @@ def _report(plan: tuple[Any, ...], kind: str, rows: object, *, graded: bool = Tr
 
 
 @pytest.mark.parametrize("kind", ["discrimination", "outcome"])
-@pytest.mark.parametrize("task", list(TASKS)[:3])
+@pytest.mark.parametrize("task", [name for name, (_, role) in TASKS.items() if role is not None])
 @pytest.mark.parametrize(("honest", "functional", "primary"), [
     ("VIOLATED", "SATISFIED", "PASS"), ("SATISFIED", "VIOLATED", "FAIL"),
     ("UNKNOWN", "SATISFIED", "PASS"),
