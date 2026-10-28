@@ -1127,6 +1127,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             experiment=experiment, backend=backend, base=run_root, client=acquired.subject.client,
             argv_for=lambda _attempt_id: client_argv,
             treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
+            treatment_home_modes=cc._collection_home_modes(acquired.source, acquired.files),
             goal=(task_root / "goal.md").read_text(encoding="utf-8"),
             surface=cc.surface_mapping(cc.task_surface(task_root / "fixture")),
             timeout=agent_timeout, cli_version=acquired.subject.client_version,
@@ -1556,12 +1557,14 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
             )
             return 2
         home_files = cc._collection_home_files(acquired.source, acquired.files)
+        home_modes = cc._collection_home_modes(acquired.source, acquired.files)
     finally:
         cc.discard_acquisition(run_dir, declaration.subject_name)
 
     credential_path = Path(args.credential) if args.credential else None
     experiment, outcomes = mp.run_pilot(
         declaration, run_dir=run_dir, treatment_home_files=home_files,
+        treatment_home_modes=home_modes,
         treatment_digest=acquired.source.digest, image_digest=image_digest,
         # By the resolved immutable digest, never the tag: a tag re-pointed
         # mid-run would otherwise change the image under later attempts.

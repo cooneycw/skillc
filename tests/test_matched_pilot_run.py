@@ -1067,3 +1067,124 @@ def test_publication_holds_a_per_destination_lock_through_the_replacement(
     finally:
         os.close(after)
     assert not any(p.name.endswith(".lock") for p in tmp_path.rglob("*"))  # nothing left in the tree
+
+
+def test_cli_source_modes_reach_the_pilot_attempt_before_discard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real CLI -> run_pilot -> common adapter -> physical attempt boundary."""
+    import dataclasses
+    import shutil
+
+    from test_selection_probe import (
+        _assert_source_modes,
+        _mode_collection,
+        _ModeBoundary,
+        _record_mode_attempts,
+    )
+
+    from skillc import demo
+
+    acquired = _mode_collection(tmp_path)
+    acquired = dataclasses.replace(acquired, subject=dataclasses.replace(
+        acquired.subject, revision=DECLARED.subject_revision))
+    discarded = []
+
+    def discard(*_args: object) -> None:
+        shutil.rmtree(acquired.source.surface_dir)
+        discarded.append(True)
+
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: acquired)
+    monkeypatch.setattr(cc, "discard_acquisition", discard)
+    monkeypatch.setattr(cc, "agent_backends", lambda **k: (object(), object()))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: DECLARED.image_digest)
+    calls = _record_mode_attempts(monkeypatch)
+    with pytest.raises(_ModeBoundary):
+        cli.cmd_pilot_run(_pilot_run_args(tmp_path))
+    assert discarded == [True] and not acquired.source.surface_dir.exists()
+    _assert_source_modes(calls)
+
+
+@pytest.mark.parametrize("modes", [
+    None, {}, {".codex/skills/modes/runner": "100755"},
+    {".codex/skills/modes/runner": "100755", ".codex/skills/modes/data.sh": "100644"},
+])
+def test_public_pilot_modes_preserve_defaults_and_empty_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, modes: dict[str, str] | None,
+) -> None:
+    from test_selection_probe import _mode_collection, _ModeBoundary, _record_mode_attempts
+
+    acquired = _mode_collection(tmp_path)
+    files = cc._collection_home_files(acquired.source, acquired.files)
+    calls = _record_mode_attempts(monkeypatch)
+    with pytest.raises(_ModeBoundary):
+        mp.run_pilot(
+            DECLARED, run_dir=tmp_path / "run", treatment_home_files=files,
+            treatment_home_modes=modes, treatment_digest=acquired.source.digest,
+            image_digest=DECLARED.image_digest, backends=lambda: (object(), object()),
+            argv_for=lambda _: ["codex", "exec"],
+        )
+    assert len(calls) == 6
+    for call in calls:
+        if call["arm"] == mp.BASELINE:
+            assert call["extra_home_files"] == {} and "extra_home_modes" not in call
+        else:
+            assert call["extra_home_files"] == files
+            if modes is None:
+                assert "extra_home_modes" not in call
+            else:
+                assert call["extra_home_modes"] == modes
+
+
+@pytest.mark.parametrize("modes,reason", [
+    ({".codex/skills/modes/not-delivered": "100755"}, "not delivered"),
+    ({".codex/skills/modes/runner": "120000"}, "unsupported source mode"),
+])
+def test_public_pilot_modes_reach_existing_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, modes: dict[str, str], reason: str,
+) -> None:
+    from typing import Any
+
+    from test_selection_probe import _mode_collection
+
+    from skillc import agent_trial as at
+
+    acquired = _mode_collection(tmp_path)
+    original = at.run_one_attempt
+
+    def validate_treatment(**kwargs: Any) -> dict[str, object]:
+        if kwargs["extra_home_files"]:
+            return original(**kwargs)
+        return trial.finalize(kwargs["experiment"], kwargs["attempt_id"],
+                              disposition="unavailable", reason="empty-baseline control")
+
+    monkeypatch.setattr(at, "run_one_attempt", validate_treatment)
+    _, outcomes = mp.run_pilot(
+        DECLARED, run_dir=tmp_path / "run",
+        treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
+        treatment_home_modes=modes, treatment_digest=acquired.source.digest,
+        image_digest=DECLARED.image_digest, backends=lambda: (object(), object()),
+        argv_for=lambda _: ["codex", "exec"],
+    )
+    treated = [o for o in outcomes if o.scheduled.arm == mp.TREATMENT]
+    assert len(treated) == 3
+    assert all(reason in (o.runner_note or "") for o in treated)
+
+
+def test_public_pilot_preserves_the_existing_unsafe_path_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_selection_probe import _existing_home_path_guard
+
+    from skillc import agent_trial as at
+
+    monkeypatch.setattr(at, "run_one_attempt", _existing_home_path_guard)
+    _, outcomes = mp.run_pilot(
+        DECLARED, run_dir=tmp_path / "run", treatment_home_files={"../escape": b"control"},
+        treatment_home_modes={"../escape": "100755"}, treatment_digest=TREATMENT_DIGEST,
+        image_digest=DECLARED.image_digest, backends=lambda: (object(), object()),
+        argv_for=lambda _: ["codex", "exec"],
+    )
+    treated = [o for o in outcomes if o.scheduled.arm == mp.TREATMENT]
+    assert len(treated) == 3
+    assert all("nonescaping" in (o.runner_note or "") for o in treated)

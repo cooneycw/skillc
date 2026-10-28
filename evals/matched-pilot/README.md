@@ -1,5 +1,14 @@
 # Matched pilot: the predeclared experiment (#12)
 
+Current installation (#538): new CLI runs preserve each acquired skill file's
+source executable classification, using the same population and digest policy as
+collection runs. Executable helpers arrive owner-only at 0700; other files at 0600,
+including non-executable `.sh` files. The baseline receives no treatment files or
+modes. Programmatic callers may supply `treatment_home_modes`; omitted or missing
+entries retain 0600. Invalid modes retain the existing attempt refusal. This note
+describes future runs and does not revise the dated evidence below.
+
+
 **Current declaration: [`run-manifest-2026-09-27-gpt-6-astra.json`](run-manifest-2026-09-27-gpt-6-astra.json)**
 (issue #141). **Current evidence:
 [`evidence-2026-09-27-gpt-6-astra/`](evidence-2026-09-27-gpt-6-astra/README.md)** (#147,

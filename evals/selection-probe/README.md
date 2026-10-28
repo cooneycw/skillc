@@ -1,5 +1,14 @@
 # Selection probe: three predeclared cases (#26)
 
+Current installation (#538): new CLI runs preserve each acquired skill file's
+source executable classification, using the same population and digest policy as
+collection runs. Executable helpers arrive owner-only at 0700; other files at 0600,
+including non-executable `.sh` files. The baseline receives no treatment files or
+modes. Programmatic callers may supply `treatment_home_modes`; omitted or missing
+entries retain 0600. Invalid modes retain the existing attempt refusal. This note
+describes future runs and does not revise the dated evidence below.
+
+
 Probes native skill selection and non-selection - does the maintainer need to
 revise the selected skills' applicability descriptions, or does the current
 selection behavior already work for the tested requests? See
