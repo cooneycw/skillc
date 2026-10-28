@@ -1,0 +1,92 @@
+[
+  {
+    "document": "599-step3.md",
+    "original_sha256": "911120303135719dbd02a02d10b8753f4e45798a901aafe32c6752089696297c",
+    "published_sha256": "911120303135719dbd02a02d10b8753f4e45798a901aafe32c6752089696297c",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "599-tested-implementation.md",
+    "original_sha256": "e663bcb723f6018aa447a05aa5924c9f6269c33f3814f990256e055bc672c477",
+    "published_sha256": "e663bcb723f6018aa447a05aa5924c9f6269c33f3814f990256e055bc672c477",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "599-review-final.md",
+    "original_sha256": "61f0eb63ebbdec4c5ee60ea287bed0b6ca167abe24c658f6810fc5f68a45cf40",
+    "published_sha256": "61f0eb63ebbdec4c5ee60ea287bed0b6ca167abe24c658f6810fc5f68a45cf40",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "546-step3.md",
+    "original_sha256": "2d72b697522d6cfb669f58e978bd7fb4a1672e45c3b14ad6127318ae4ded44e2",
+    "published_sha256": "f8dd975908d85bc77beda1d7419347016918232276e4e492ef781a427cb36a08",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "546-tested-implementation.md",
+    "original_sha256": "1857e232e6917ee30ef0ebf7a35f2046dc5ed0bf797b6602f1994ad569736204",
+    "published_sha256": "a84731f6ee200026fd1582f8a9e0002825a4e5ceb2f5c5dfc14ea0042d1736df",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "546-review.md",
+    "original_sha256": "051fc841451918b6dc1fd08a804158f982fb3338475cab327afd414334d9347a",
+    "published_sha256": "051fc841451918b6dc1fd08a804158f982fb3338475cab327afd414334d9347a",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "546-residual-triage.md",
+    "original_sha256": "19d5f083a9db2974424b158019b0a9f5aae166603f138b88eb8ad20e9ed10231",
+    "published_sha256": "19d5f083a9db2974424b158019b0a9f5aae166603f138b88eb8ad20e9ed10231",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "545-baseline-step3.md",
+    "original_sha256": "5d60280bc01d77d9d0a239bd31cf0057d8c4d9794d88e97d5e54aafab7f84af5",
+    "published_sha256": "5d60280bc01d77d9d0a239bd31cf0057d8c4d9794d88e97d5e54aafab7f84af5",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "545-baseline-assessment.md",
+    "original_sha256": "34250c5a3cb84a0cc83ff647fd2dfa0fb396b3dbb0d11dbb95c98aba53bd8e87",
+    "published_sha256": "34250c5a3cb84a0cc83ff647fd2dfa0fb396b3dbb0d11dbb95c98aba53bd8e87",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "548-runtime-identity-step3.md",
+    "original_sha256": "650c45720cd2c129dae96021ad80727dd20d8e383cf5837930cbad2ea5bad568",
+    "published_sha256": "650c45720cd2c129dae96021ad80727dd20d8e383cf5837930cbad2ea5bad568",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "549-residue-triage.md",
+    "original_sha256": "e87f619133f4e95e78fde1e7fd735a7c0d335b11359050b5ada6bef19372ddff",
+    "published_sha256": "e87f619133f4e95e78fde1e7fd735a7c0d335b11359050b5ada6bef19372ddff",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "542-typing-audit.md",
+    "original_sha256": "a522de7c52d513d892c8c454f5cb3295a2c044b9acdec8d9cbc0c5345bd190b7",
+    "published_sha256": "25d9d65a0e305323cf145543d76568e9cebec1c94c1c2caa6edd714a47e7e71a",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "544-slugkit-step3.md",
+    "original_sha256": "8d22bbc6c64c3ad623d8afd6d658f5d64bfb9b0e771939a93360f6ce6b20ccab",
+    "published_sha256": "8d22bbc6c64c3ad623d8afd6d658f5d64bfb9b0e771939a93360f6ce6b20ccab",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "543-freshness-reconciliation.md",
+    "original_sha256": "7231eb8ce3a5edd68dca4d6d60f233bd4bb0a2628fe18e9b8b8a0e250ccdd6ca",
+    "published_sha256": "7231eb8ce3a5edd68dca4d6d60f233bd4bb0a2628fe18e9b8b8a0e250ccdd6ca",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  },
+  {
+    "document": "543-relative-tracer-assessment.md",
+    "original_sha256": "8fdd7e21785118d521b1bcd16019e39d0f50771d3211239eff7cee78b88849c3",
+    "published_sha256": "cdca665243126095f4982bd86c44fab1c1775827a94881f9fa7d098faee2d38f",
+    "note": "Local home paths redacted; original local evidence retained. Historical report is not a current authority."
+  }
+]
