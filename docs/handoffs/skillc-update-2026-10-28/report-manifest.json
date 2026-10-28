@@ -102,5 +102,12 @@
     "published_sha256": "60c5346305618782b230fc116becda1c4ac4ad06f49d740f5e677c087111696d",
     "archive_manifest_sha256": "cc1a0a244c22a758c7a3a7909c4fcef36dab87ec3d5a47d79ea4654a14088781",
     "note": "Final owner-park acknowledgement; local home paths redacted; original147-entry local archive retained."
+  },
+  {
+    "document": "599-worker03-final-parking-handoff.md",
+    "original_sha256": "15ed8387eeeec6857dec72aecdae9617e3d443ff96889622fa62750fe3ab4983",
+    "published_sha256": "985ef4b9cf714fe5ea2b3f61df747f592e3b99afb9abcc966b9a4ddb8dd0817b",
+    "archive_manifest_sha256": "48b7775504fbd6a9743fae851b3b5f0b2f3a13e098e905df73758b274afa2988",
+    "note": "Final worker03 acknowledgement; local home paths redacted; orchestrator preservation-push distinction added. Original256-member local archive retained."
   }
 ]
