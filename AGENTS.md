@@ -24,7 +24,7 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/spec.py` - the Agent Skills specification as a checkable object; its
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
-- `skillc/records.py` - the evaluation-record contracts (receipt, ledger, manifest, result, attempt lifecycle) and the bundle rules that bind them to a ledger; see [records spec](docs/specs/evaluation-facility/records.md)
+- `skillc/records.py` - the evaluation-record contracts and bundle rules; the authoritative kind table is in the [records spec](docs/specs/evaluation-facility/records.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module
@@ -64,7 +64,7 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `evals/selection-probe/` - three predeclared cases probing native skill selection
   (#26): case identities and allowed choices published before any attempt runs,
   planned through the real controller, and a cost-estimate run manifest computed
-  and asserted equal to the code that produces it - no live attempt has run
+  and asserted equal to the code that produces it; retained live evidence is indexed by its README, while #26 remains open
 - `evals/matched-pilot/` - the first bounded matched pilot's predeclared experiment
   record and cost estimate (#12), reusing `skillc/cost_estimate.py` rather than a
   second estimator, and its live evidence (`evidence/`: 6 attempts, run 2026-09-27)
@@ -84,7 +84,7 @@ specification rejects, and it proves its own rules can fail before reporting the
   arms differing only in what is installed; pins the model via `matched_pilot.pin_model_argv`, enforces
   the caps and reconciles through `matched_pilot`, and reports `primary_endpoint` with readiness beside it.
   Evidence stays private; nothing is exported
-- `evals/calibration-204/` - the two-arm calibration predeclaration (not approved, not run)
+- `evals/calibration-204/` - the approved two-arm calibration and retained 2026-09-30 report (both arms 4/4; REDESIGN)
 - `evals/calibration-203/` - the three-arm B/N/P calibration predeclaration for #203 on `gate-ran-nothing` (approved and run 2026-10-03; report: REDESIGN)
 - `evals/calibration-203-low/` - #203 Q2 step (a): the calibration-203 identities at reasoning effort low, B and N, 3 each (run 2026-10-04: still at ceiling, 6/6)
 - `evals/calibration-203-c3/` - #203 Q2 step (b): B/N/P on `helper-different-question`, 6 each (run 2026-10-04 on task revision 1: floor, 0/18)
@@ -130,7 +130,7 @@ gate ran):
 - `python3 ci/changelog_check.py origin/main --require-clean-inputs`, after fetching it
   (the local `changelog-check` step): a PR touching `skillc/` adds `changelog.d/<issue>.md`
   rather than editing `CHANGELOG.md`'s `[Unreleased]` (#439, `changelog.d/README.md`)
-- `python3 ci/readme_drift.py` (the `readme-drift` step)
+- `python3 ci/readme_drift.py`, including the selftest sample count (the `readme-drift` step)
 - `make clean-install`: wheel installation and three sabotage controls (the `clean-install` step)
 - `gitleaks dir . --config .gitleaks.toml --redact --no-banner`, then
   `ci/secret-scan-control.sh` (the `secret-scan` step) - **skipped locally**,

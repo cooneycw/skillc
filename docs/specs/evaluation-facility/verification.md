@@ -470,12 +470,13 @@ explicitly by passing `backend=None`; this module never chooses that for them.
 lost containment) apply regardless of whether a backend is used - defense in
 depth, never removed. A backend's OWN claims - confidentiality, write
 prevention - are exactly what its `describe()` states, no more; this module
-never asserts them on the backend's behalf. **No concrete backend exists in
-this repository at this commit** (`skillc/docker_backend.py` is not written
-yet), so every claim a real backend WOULD make is OWED TO THE LIVE RUN (issue
-#10 comment 5848522578, lesson E17: "unit tests on a fake backend prove the
-lifecycle, never the boundary") until #10's Docker backend lands and is
-actually run this way, against a real trial, on a real Docker host.
+never asserts them on the backend's behalf. The concrete
+`skillc/docker_backend.py` now ships and collection_conformance uses a separate
+DockerBackend for grading. #10's real-daemon demo and #122's timeout/cancellation
+seeds cover their documented paths; they do not turn fake-Docker coverage into
+proof of every isolation claim. See [support matrix](support-matrix.md) for
+which claims have live evidence. The default bare-subprocess limitations above
+still apply when no backend is supplied.
 
 ## Grading tiers (#69)
 

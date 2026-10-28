@@ -103,7 +103,8 @@ readiness proofs.
   refuses to trust it if that lockfile ever drifts from the one actually
   being installed. It does NOT prove, and does not claim to prove, how a
   live trial container (which needs the network, for the model API)
-  behaves - that remains #237's own path, unchanged by this issue.
+  behaves. #343 tracks the trial-image tool supply (now delivered); this
+  cold-install proof remains narrower than a live attempt.
 - **PyPI resolution is still external to the PROFILE itself.** The offline
   guarantee above comes from the cold-install image's own pre-warmed cache,
   not from anything this profile declares - a caller installing this

@@ -23,8 +23,8 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 
 | Probe | Status |
 |---|---|
-| [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller and a cost estimate is committed (#26); no live attempt has run - `run-manifest.json`'s `execution` stays `"incomplete"` pending an approved budget (ADR 0005) |
-| [Matched pilot](matched-pilot/README.md) | The predeclared experiment record, treatment-vs-baseline plan and cost estimate are committed, reusing #26's estimator (#12); the evidence-report schema (`pilot-report`, #12) is defined and its bundle control is committed - no live attempt has run, `execution` stays `"incomplete"` |
+| [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller (#26); retained runs and current result-storage limits are documented in the probe README. #26 remains open; new runs require ADR 0005 approval |
+| [Matched pilot](matched-pilot/README.md) | Live pilot evidence is retained (#12, closed); the 2026-09-28 pinned-model rerun passed 6/6 and supersedes the first run. See the pilot README for declarations and evidence |
 | [#150 discriminating run](discriminating-run/README.md) | Live run 2026-09-29/30 on `finish-close-ref` with a codex arm: positive control PASS, NORMAL PASS, DEGRADED PASS - **non-discriminating**, nothing exported to CPP (#150) |
 | [#204 calibration](calibration-204/README.md) | Two-arm calibration run 2026-09-30 on `level3/slugkit-pipeline` (full CPP vs baseline, 4 each): both arms 4/4 primary PASS, the CPP arm never opened a skill - **REDESIGN** recommended for #203 ([report](calibration-204/report.md)) |
 
@@ -48,10 +48,12 @@ map onto them. The mapping is informational and changes no declaration.
   **expanded-instruction** study. Those need #274's declaration fields and
   their own ADR 0005 approval.
 
-No behavioral runner is implemented here yet. The former example plugin command
-and YAML were unverified research, not an executable contract. skillc depends on
+The behavioral runner is implemented by `skillc/trial.py` and
+`skillc/docker_backend.py`, with separate grading through `skillc/verify.py`.
+Live pilots and calibration reports above are bounded evidence, not general
+benefit claims. The former example plugin command and YAML were research. skillc depends on
 no external evaluation runtime ([ADR 0003](../docs/decisions/0003-no-external-evaluation-runtime.md));
-its controller is `skillc/trial.py` (#8) and the Docker runner arrives with #10. This directory does not promise
+its controller and Docker backend shipped under #8 and #10. This directory does not promise
 compatibility with a particular CLI.
 
 Static validity, skill invocation and successful delivery are distinct measurements.

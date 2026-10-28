@@ -1,5 +1,13 @@
 # #203 calibration report: B/N/P on `gate-ran-nothing`
 
+**Historical constraint (#393, fixed in PR #396):** these attempts used a
+fixture whose nested directories were installed root-owned. The reference
+fix's `tests/unit/__init__.py` creation path was blocked; rewriting the gate
+was available. Read the solution-path mix under that constraint, rather than
+as unconstrained agent choice. The grader accepts both paths, so the reported
+pass/fail counts are unchanged. Aggregate outcomes alone do not establish
+which fix an unconstrained agent would have chosen.
+
 **Run 2026-10-03, 23:17-23:58Z. Recommendation for #203: REDESIGN.**
 
 Every one of the 18 attempts reached primary-endpoint PASS, in every arm.
