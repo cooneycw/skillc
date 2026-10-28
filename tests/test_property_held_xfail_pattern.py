@@ -723,8 +723,8 @@ def test_actual_cleanup_joins_with_a_bound_even_when_destroy_fails(stuck, destro
     thread.join.assert_called_once_with(timeout=2 + ns["GATE_GRACE"])
 
 
-def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: pytest.Pytester) -> None:
-    source = _live_control_source(
+def _cold_cache_complete_source(text: str, *, raw: bool = False) -> str:
+    return (_live_control_source(
         "test_profile_install_cold_container_live.py", "SKILLC_COLDINSTALL_LIVE_BREAK", ("cold-cache",),
         "test_profile_runs_cold_with_no_operator_mounts", widen=False,
     ) + textwrap.dedent("""
@@ -749,15 +749,64 @@ def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: py
                 '_run': run, '_container_mounts': lambda container: [],
             }), patch.object(ns['gate_path'], 'classify_gate_output', return_value='real-runner'):
                 test(Path(tmp))
-        add_case('test_target', 'cold-cache', lambda ns: observe(ns, 1, "wasn't found in the cache"))
+        add_case('test_permission', 'cold-cache', lambda ns: observe(ns, 1, 'Permission denied'))
+        add_case('test_cache_only', 'cold-cache', lambda ns: observe(ns, 1, "wasn't found in the cache"))
+        add_case('test_network_only', 'cold-cache', lambda ns: observe(ns, 1, 'Network connectivity is disabled'))
+        add_case('test_setup', 'cold-cache', infra)
         add_case('test_intact', 'cold-cache', lambda ns: observe(ns, 0, ''))
         add_case('test_unrelated', 'cold-cache', lambda ns: observe(ns, 127, 'uv not found'))
     """)
-    pytester.makepyfile(source)
-    result = _run_control(pytester, "BAD", "cold-cache-complete", "-v", "--tb=short")
-    result.assert_outcomes(xfailed=1, failed=2)
-    result.stdout.fnmatch_lines(["*test_target XFAIL*", "*test_intact FAILED*", "*test_unrelated FAILED*"])
-    result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+    + textwrap.dedent(f"""
+        if {raw!r}:
+            import inspect
+            ns = MODULES['cold-cache'][0]
+            predicate = ns['_offline_cache_miss']
+            source = inspect.getsource(predicate)
+            normalization = 'flat = " ".join(text.split())'
+            assert source.count(normalization) == 1, 'select exactly the actual normalization'
+            exec(source.replace(normalization, 'flat = text'), predicate.__globals__)
+        add_case('test_target', 'cold-cache', lambda ns: observe(ns, 1, {text!r}))
+    """))
+
+
+def _cold_cache_diagnostic(kind: str) -> str:
+    text = _UV_OFFLINE_CACHE_MISS
+    if kind == "network-wrap":
+        return text.replace("Network connectivity is disabled", "Network connectivity is\n      disabled")
+    if kind == "cache-wrap":
+        return text.replace("wasn't found in the cache", "wasn't found in\n      the cache")
+    if kind == "spaces-tabs":
+        return text.replace("wasn't found in the cache", "wasn't\tfound  in\tthe cache")
+    assert kind == "contiguous"
+    return text
+
+
+def _assert_cold_cache_acceptance(result: pytest.RunResult) -> None:
+    assert any("::test_target XFAIL" in line for line in result.stdout.lines), "cold-cache target must reach narrow XFAIL"
+    result.assert_outcomes(xfailed=1, failed=6)
+    result.stdout.fnmatch_lines(["*test_permission FAILED*", "*test_cache_only FAILED*",
+                               "*test_network_only FAILED*", "*test_setup FAILED*", "*test_intact FAILED*",
+                               "*test_unrelated FAILED*", "*test_target XFAIL*", "*XPASS(strict)*"])
+
+
+@pytest.mark.parametrize("kind", ["contiguous", "network-wrap", "cache-wrap", "spaces-tabs"])
+def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: pytest.Pytester, kind: str) -> None:
+    pytester.makepyfile(_cold_cache_complete_source(_cold_cache_diagnostic(kind)))
+    result = _run_control(pytester, "BAD", "cold-cache-complete-" + kind, "-v", "--tb=short")
+    _assert_cold_cache_acceptance(result)
+
+
+@pytest.mark.parametrize("kind", ["contiguous", "cache-wrap"])
+def test_cold_cache_complete_control_rejects_disabled_normalization(pytester: pytest.Pytester, kind: str) -> None:
+    pytester.makepyfile(_cold_cache_complete_source(_cold_cache_diagnostic(kind), raw=True))
+    result = _run_control(pytester, "BAD", "cold-cache-raw-" + kind, "-v", "--tb=short")
+    if kind == "contiguous":
+        _assert_cold_cache_acceptance(result)
+    else:
+        result.assert_outcomes(failed=7)
+        result.stdout.fnmatch_lines(["*test_target FAILED*"])
+        with pytest.raises(AssertionError, match="cold-cache target must reach narrow XFAIL"):
+            _assert_cold_cache_acceptance(result)
 
 
 def _drive_closure(ns, refusal, monkeypatch, output_fault=None, subject_fault=None) -> None:
