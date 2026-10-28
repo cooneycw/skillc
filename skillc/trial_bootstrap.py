@@ -176,9 +176,11 @@ def probe_image_cli_version(docker_bin: Sequence[str], image_id: str, client: st
         except subprocess.TimeoutExpired:
             # #540: give the create one bounded window to settle, so the
             # removal below cannot run ahead of a container still landing.
-            settled = True
+            # A CLI ended by a signal never heard the daemon's answer, so its
+            # exit says nothing about whether the create has settled.
             try:
                 proc.communicate(timeout=settle)
+                settled = proc.returncode >= 0
             except subprocess.TimeoutExpired:
                 settled = False
             cleanup = _remove_probe_container(docker_bin, name, settle)
@@ -193,6 +195,13 @@ def probe_image_cli_version(docker_bin: Sequence[str], image_id: str, client: st
         out, err = stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
     except UnicodeDecodeError as exc:
         return ClientProbe(None, f"`{binary} --version` printed bytes that are not UTF-8: {exc}")
+    if proc.returncode < 0:
+        # Signalled: `--rm` fires only when the container's process exits,
+        # and the create may still be landing, so remove it and never call
+        # that removal confirmed.
+        cleanup = _remove_probe_container(docker_bin, name, settle)
+        return ClientProbe(None, f"the docker CLI was ended by signal {-proc.returncode}"
+                                 f"{cleanup or '; removal of the probe container is unconfirmed'}")
     if proc.returncode != 0:
         detail = (err or out).strip().splitlines()
         return ClientProbe(None, f"`{binary} --version` exited {proc.returncode}"

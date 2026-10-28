@@ -95,6 +95,11 @@ if mode == "badbytes":
 if mode == "late":
     time.sleep(1)
     sys.exit(0)
+if mode in ("signal", "late-signal"):
+    import os, signal
+    if mode == "late-signal":
+        time.sleep(1)
+    os.kill(os.getpid(), signal.SIGKILL)
 outputs = {"repeated": "codex-cli 0.157.1 (fallback 0.157.1)\\n", "build": "codex-cli 0.157.1+custom\\n",
            "codex": "codex-cli 0.157.1\\n", "claude": "2.1.283 (Claude Code)\\n", "other": "codex-cli 0.150.0\\n",
            "empty": "", "two-lines": "codex-cli 0.157.1\\nupdate available: 0.160.0\\n",
@@ -170,11 +175,22 @@ def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path):
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 
 
+@pytest.mark.parametrize("timeout", [5, 0.3])
+def test_548_probe_removes_and_never_confirms_after_a_signalled_cli(tmp_path, timeout):
+    """A CLI killed by a signal - at once, or inside the settle window - never
+    heard the daemon's answer: remove the container, and say removal is
+    unconfirmed even when `rm -f` finds nothing."""
+    docker_bin, log = _probe_docker(tmp_path, "signal" if timeout == 5 else "late-signal")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=timeout, settle=5)
+    assert probe.version is None and "unconfirmed" in probe.reason
+    assert [call[0] for call in _calls(log)] == ["run", "rm"]
+
+
 @pytest.mark.parametrize(("mode", "reason"), [("sleep-rmfail", "exited 1"), ("sleep-rmhang", "failed")])
 def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, mode, reason):
     docker_bin, _log = _probe_docker(tmp_path, mode)
     probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.5)
-    assert probe.version is None and f"cleanup 'docker rm -f skillc-client-probe-" in probe.reason
+    assert probe.version is None and "cleanup 'docker rm -f skillc-client-probe-" in probe.reason
     assert reason in probe.reason
 
 
