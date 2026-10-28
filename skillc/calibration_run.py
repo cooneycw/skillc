@@ -1770,6 +1770,76 @@ def build_report(
     return report
 
 
+def recover_report(run_dir: Path, declaration: AnyDeclaration | None = None, *,
+                   rehearse: bool = False) -> dict[str, object]:
+    """Rebuild from a checkpoint and verified ledger, without starting a run.
+
+    A legacy calibration ledger has no full declaration snapshot. Its caller
+    must supply the original, especially to recover provided-skill eligibility.
+    A supplied declaration can never replace a launch-bound snapshot.
+    """
+    experiment, outcomes = mp.read_outcomes(run_dir)
+    experiment = trial.Experiment.open(experiment.root)
+    schedule = schedule_from_ledger(experiment)
+    kinds: set[str] = set()
+    for planned, _attempt in experiment.attempts():
+        binding = planned["config"]
+        assert isinstance(binding, dict)
+        config = json.loads(trial._read_object(experiment.root, str(binding["digest"])))
+        if not isinstance(config, dict):
+            raise CalibrationRefused("trial configuration is not an object")
+        kinds.update(key for key in ("calibration_declaration", "discrimination_declaration") if key in config)
+    if len(kinds) > 1:
+        raise CalibrationRefused("mixed calibration and discrimination declaration snapshots")
+    bound: AnyDeclaration | None = (stored_discrimination_declaration(experiment)
+                                   if "discrimination_declaration" in kinds else _report_declaration(experiment))
+    if bound is None and declaration is None:
+        raise CalibrationRefused("legacy calibration has no stored declaration; pass its original --declaration")
+    if bound is not None:
+        if declaration is not None and trial.canonical(declaration.data) != trial.canonical(bound.data):
+            raise CalibrationRefused("supplied declaration differs from the launch-bound declaration")
+        declaration = bound
+    assert declaration is not None
+    model, effort = declared_model(declaration)
+    recorded = mp.read_declared(run_dir)
+    if recorded is None and bound is None:
+        raise CalibrationRefused("legacy checkpoint has no recorded model/effort to check the original declaration")
+    if recorded is not None and (recorded["model"], recorded["reasoning_effort"]) != (model, effort):
+        raise CalibrationRefused("original declaration differs from the recorded model/effort")
+    arm_order = tuple(s.arm for s in schedule)
+    if declaration.arm_order != arm_order:
+        raise CalibrationRefused("original declaration and ledger schedule differ")
+    checkpoint = json.loads((run_dir / OUTCOMES_FILENAME).read_text(encoding="utf-8"))
+    pins = checkpoint.get("declared")
+    if isinstance(pins, dict) and "arm_order" in pins and pins["arm_order"] != list(arm_order):
+        raise CalibrationRefused("recorded arm order differs from the ledger schedule")
+    if bound is None:
+        if not isinstance(declaration, calibration.CalibrationDeclaration) \
+                or calibration.outcome_endpoint(declaration) is not None:
+            raise CalibrationRefused("the ledger has no launch-bound snapshot for this declaration's endpoint")
+        for planned, _attempt in experiment.attempts():
+            grader = planned.get("grader")
+            if planned.get("case") != {"id": declaration.grader_id, "revision": declaration.grader_revision} \
+                    or not isinstance(grader, dict) or grader.get("id") != declaration.grader_id \
+                    or grader.get("revision") != declaration.grader_revision \
+                    or planned.get("client") != declaration.shared["client"] \
+                    or planned.get("image") != {"digest": _shared_str(declaration, "image", "digest")}:
+                raise CalibrationRefused("original declaration differs from the ledger's runtime/grader identities")
+    if isinstance(declaration, calibration.DiscriminationDeclaration):
+        report = build_discrimination_report(experiment, outcomes, declaration, rehearsal=rehearse)
+    else:
+        report = build_report(experiment, outcomes, declared_model=model, declared_effort=effort,
+                              named_skills=named_skills_by_arm(declaration))
+    if rehearse:
+        # An explicit report option, as in calibration-run: no execution mode
+        # is guessed from a checkpoint that never recorded one.
+        report["rehearsal"] = True
+        report["rehearsal_accounting"] = rehearsal_accounting(declaration, reconcile(experiment, outcomes))
+    if "run_store" in declaration.data:
+        report["run_store"] = {"declared": declaration.data["run_store"], "resolved": str(run_dir.resolve().parent)}
+    return report
+
+
 def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[str, object]]:
     """Per-arm counts of the primary endpoint - description, not inference.
     `opened` is the uptake rate's numerator and `observed` its denominator
