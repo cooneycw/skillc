@@ -12,7 +12,7 @@
 # `negative-control`, so a PR could pass `make verify` and still go red on
 # any of the other five steps.
 #
-# Bash with pipefail, not the default POSIX sh: `test`'s `pytest | tee` must
+# Bash with pipefail, not the default POSIX sh: `test`'s pytest runner | tee must
 # fail the target (and so `verify`) on a real pytest failure, not on tee's
 # own near-always-zero exit.
 SHELL := bash
@@ -35,14 +35,14 @@ selftest: sync
 # PYTEST_ARGS narrows what runs (used by
 # tests/test_makefile_pipefail_control.py's negative control, and by anyone
 # who wants a faster local loop); empty by default, so plain `make test`
-# still runs the whole suite.
+# still runs the whole suite. Ordinary workers are reaped before the separate
+# serial load-harness invocation; its exact population is merged back (#462).
 PYTEST_ARGS ?=
 PYTEST_WORKERS ?= auto
 PYTEST_REPORT_DIR ?= reports
 test: sync
 	mkdir -p $(PYTEST_REPORT_DIR)
-	uv run --no-sync pytest --collect-only -q $(PYTEST_ARGS) > $(PYTEST_REPORT_DIR)/pytest-collected.txt
-	uv run --no-sync pytest -n $(PYTEST_WORKERS) --maxprocesses=8 --dist=loadgroup -rA --durations=0 --junit-xml=$(PYTEST_REPORT_DIR)/pytest-report.xml $(PYTEST_ARGS) | tee $(PYTEST_REPORT_DIR)/pytest.log
+	uv run --no-sync python3 ci/run_pytest_lanes.py --workers $(PYTEST_WORKERS) --maxprocesses=8 --dist=loadgroup --durations=0 --report-dir $(PYTEST_REPORT_DIR) -- $(PYTEST_ARGS) | tee $(PYTEST_REPORT_DIR)/pytest.log
 	python3 ci/check_pytest_population.py $(PYTEST_REPORT_DIR)/pytest-collected.txt $(PYTEST_REPORT_DIR)/pytest-report.xml
 
 lint: sync
@@ -111,6 +111,7 @@ git-tests-control: test
 
 pytest-population-control: test
 	bash ci/pytest-population-control.sh
+	bash ci/pytest-lanes-control.sh
 
 verify: selftest test lint typecheck negative-control typecheck-control leak-check \
 	changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install

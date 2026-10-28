@@ -353,7 +353,7 @@ def _at_n(n: int) -> dict[str, object]:
     data["attempts_per_arm"] = n
     data["arm_order"] = {"seed": 20260930, "sequence": calibration.derive_arm_order(20260930, names, n)}
     data["shared"]["per_attempt_seconds"] = 1200  # type: ignore[index]
-    data["shared"]["total_seconds"] = 1200 * n * len(names)  # type: ignore[index]
+    data["shared"]["total_seconds"] = (1200 + 16) * n * len(names)  # type: ignore[index]
     data["approval"]["attempts_per_arm"] = n  # type: ignore[index]
     return stamp_approval(data)
 
@@ -417,7 +417,7 @@ def _three_arm(**provided: object) -> dict[str, object]:
     p_arm.update(provided)
     arms.append({k: v for k, v in p_arm.items() if v is not None})
     data["attempts_per_arm"] = 6
-    data["shared"]["total_seconds"] = 1200 * 18  # type: ignore[index]
+    data["shared"]["total_seconds"] = (1200 + 16) * 18  # type: ignore[index]
     names = [a["name"] for a in arms]
     data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, 6)}
     return data
@@ -493,6 +493,7 @@ def test_the_committed_203_declaration_is_authorized() -> None:
 
 def test_red_the_203_declaration_without_its_approval_is_refused() -> None:
     data = json.loads(MANIFEST_203.read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = None
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
@@ -512,6 +513,7 @@ def test_the_committed_203_low_effort_declaration_is_authorized() -> None:
 
 def test_red_the_203_low_effort_declaration_without_its_approval_is_refused() -> None:
     data = json.loads(MANIFEST_203_LOW.read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["approval"] = None
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
@@ -536,6 +538,7 @@ def test_the_committed_203_candidate_3_declaration_is_pinned_to_the_revision_it_
 
 def test_red_the_203_candidate_3_declaration_without_its_approval_is_refused() -> None:
     data = json.loads(MANIFEST_203_C3.read_text(encoding="utf-8"))
+    data["shared"]["total_seconds"] += 16 * len(data["arm_order"]["sequence"])
     data["task"]["grader_revision"] = "2"  # isolate the approval check from the revision pin
     data["approval"] = None
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
@@ -597,7 +600,7 @@ def _expanded_instruction_declaration(tmp_path: Path, *, e_instruction: str = _S
     new_arms: list[object] = [arms[1], s_arm, e_arm]  # baseline, S, E
     data["arms"] = new_arms
     data["attempts_per_arm"] = 6
-    data["shared"]["total_seconds"] = 1200 * 18  # type: ignore[index]
+    data["shared"]["total_seconds"] = (1200 + 16) * 18  # type: ignore[index]
     names = [a["name"] for a in new_arms if isinstance(a, dict)]
     data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, 6)}
     return data

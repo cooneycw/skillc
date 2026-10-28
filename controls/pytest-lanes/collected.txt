@@ -1,0 +1,4 @@
+tests/test_example.py::test_ordinary
+tests/test_load_harness.py::test_serial
+
+2 tests collected in 0.01s

@@ -44,10 +44,8 @@ steps:
       # a CI run - #134's `make verify` covers that sighting; see AGENTS.md.)
       # --junit-xml (#307): read by the git-tests-control step below, from
       # the shared workspace (steps do not share each other's /tmp).
-      - uv run --no-sync pytest --collect-only -q > pytest-collected.txt
-      # --durations=0 (#412): every test's wall time survives to this log, so
-      # a timing red can be placed against its own deadline from CI alone.
-      - uv run --no-sync pytest -n auto --maxprocesses=8 --dist=loadgroup -rA --durations=0 --junit-xml=pytest-report.xml
+      # One full collection, then ordinary workers followed by isolated load self-tests.
+      - uv run --no-sync python3 ci/run_pytest_lanes.py --workers auto --maxprocesses=8 --dist=loadgroup --durations=0 --report-dir .
       # Match local lint: nested project caches must stay outside frozen fixtures.
       - uv run --no-sync ruff check --cache-dir .ruff_cache .
       - uv run --no-sync mypy
@@ -59,6 +57,7 @@ steps:
     commands:
       - python3 ci/check_pytest_population.py pytest-collected.txt pytest-report.xml
       - bash ci/pytest-population-control.sh
+      - bash ci/pytest-lanes-control.sh
 
   # #307: proves the git-dependent population above actually RAN, not just
   # that `gate` exited 0 - a file whose whole git-gated subset re-skipped

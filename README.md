@@ -109,6 +109,7 @@ skillc collection-run <subject> # #11/#106: one real agent attempt per skill col
 skillc pilot-run               # #12: the predeclared matched pilot, treatment vs baseline (run live: evals/matched-pilot/evidence/)
 skillc selection-probe         # #26: the three selection cases, or --detection-control (run live: evals/selection-probe/evidence/)
 skillc calibration-run <declaration> # #207: run an APPROVED two- or three-arm calibration declaration (#204, #231); evidence stays private
+skillc calibration-report <run_dir> [--declaration <original>] # #546: rebuild the private report after interruption; legacy runs require their original declaration
 skillc level3-campaign --runtime-supply-receipt <receipt> # #375: the frozen Level-3 production-path campaign, scripted subjects, no model; evidence stays private
 skillc level3-live <declaration> --runtime-supply-receipt <receipt> # #434: the model runs flow:auto on the fixture-service task (approved declaration; --rehearse dry|actor spends nothing)
 skillc level3-live <declaration> --preflight-launch-env # #536: check only the current real-client opt-in environment; launch nothing

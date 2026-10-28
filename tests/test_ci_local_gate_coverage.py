@@ -196,35 +196,31 @@ def test_leak_exclude_parsers_are_never_vacuously_empty() -> None:
 def _parallel_contract(ci_text: str, make_text: str) -> bool:
     config = yaml.safe_load(ci_text)
     gate = next(step for step in config["steps"] if step["name"] == "gate")
-    run = next(command for command in gate["commands"] if "--junit-xml=" in command)
-    make_run = next(line for line in make_text.splitlines() if "--junit-xml=" in line and "uv run" in line)
-    make_run = make_run.replace("$(PYTEST_WORKERS)", "auto")
-    def args(command: str) -> list[str]:
-        words = shlex.split(command.replace("$(PYTEST_ARGS)", ""))
-        words = words[words.index("pytest") + 1:]
-        for boundary in ("|", ">"):
-            if boundary in words:
-                words = words[:words.index(boundary)]
-        return ["--junit-xml=REPORT" if word.startswith("--junit-xml=") else word
-                for word in words]
-
-    collect = next((command for command in gate["commands"] if "--collect-only" in command), "")
-    make_collect = next((line for line in make_text.splitlines() if "--collect-only" in line), "")
-    if not collect or not make_collect:
+    run = next((c for c in gate["commands"] if "ci/run_pytest_lanes.py" in c), "")
+    make_run = next((line for line in make_text.splitlines() if "ci/run_pytest_lanes.py" in line), "")
+    if not run or not make_run:
         return False
-    expected = ["-n", "auto", "--maxprocesses=8", "--dist=loadgroup", "-rA", "--durations=0", "--junit-xml=REPORT"]
-    return (args(run) == args(make_run) == expected
+    make_run = make_run.replace("$(PYTEST_WORKERS)", "auto")
+    make_run = make_run.replace("$(PYTEST_REPORT_DIR)", ".")
+    make_run = make_run.replace(" -- $(PYTEST_ARGS)", "")
+    make_run = make_run.split(" |", 1)[0]
+    expected = ["uv", "run", "--no-sync", "python3", "ci/run_pytest_lanes.py",
+                "--workers", "auto", "--maxprocesses=8", "--dist=loadgroup",
+                "--durations=0", "--report-dir", "."]
+    return (shlex.split(run) == shlex.split(make_run) == expected
             and "PYTEST_WORKERS ?= auto" in make_text
             and "PYTEST_ARGS ?=\n" in make_text
-            and args(collect) == args(make_collect) == ["--collect-only", "-q"]
+            and " -- $(PYTEST_ARGS) | tee" in make_text
             and "python3 ci/check_pytest_population.py" in make_text
             and "pytest-population-control: test" in make_text
+            and "\tbash ci/pytest-lanes-control.sh" in make_text
             and "pytest-population-control" in make_text.split("verify:", 1)[1]
             and any(step["name"] == "pytest-population-control"
                     and step["depends_on"] == ["gate"]
                     and "python3 ci/check_pytest_population.py pytest-collected.txt pytest-report.xml"
                     in step["commands"]
                     and "bash ci/pytest-population-control.sh" in step["commands"]
+                    and "bash ci/pytest-lanes-control.sh" in step["commands"]
                     for step in config["steps"]))
 
 
@@ -234,14 +230,14 @@ def test_ci_and_local_parallel_population_contract() -> None:
 
 def test_parallel_contract_rejects_serial_or_missing_control() -> None:
     ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
-    for old, new in (("-n auto", "-n 0"),
-                     ("pytest --collect-only -q", "pytest --version"),
+    for old, new in (("--workers auto", "--workers 0"),
+                     ("ci/run_pytest_lanes.py", "pytest --version"),
                      ("python3 ci/check_pytest_population.py", "true")):
         changed = ci_text.replace(old, new)
         assert changed != ci_text
         assert not _parallel_contract(changed, make_text)
     for old, new in (("PYTEST_WORKERS ?= auto", "PYTEST_WORKERS ?= 0"),
-                     ("pytest --collect-only -q", "pytest --version"),
+                     ("ci/run_pytest_lanes.py", "pytest --version"),
                      ("python3 ci/check_pytest_population.py", "true")):
         changed = make_text.replace(old, new)
         assert changed != make_text
@@ -250,9 +246,8 @@ def test_parallel_contract_rejects_serial_or_missing_control() -> None:
 
 def test_parallel_contract_rejects_ci_only_selection_and_worker_overrides() -> None:
     ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
-    for option in ("--ignore=tests/test_docker_backend.py", "-n 0"):
-        changed = ci_text.replace("pytest --collect-only -q", "pytest --collect-only -q " + option)
-        changed = changed.replace("--junit-xml=pytest-report.xml", "--junit-xml=pytest-report.xml " + option)
+    for option in ("--ignore=tests/test_docker_backend.py", "--workers 0"):
+        changed = ci_text.replace("--report-dir .", "--report-dir . -- " + option)
         assert not _parallel_contract(changed, make_text)
 
 
@@ -290,8 +285,8 @@ def test_gate_host_state_check_rejects_a_missing_trap_or_a_late_start_line() -> 
 
 def test_parallel_contract_rejects_dropping_durations_from_either_side() -> None:
     ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
-    assert not _parallel_contract(ci_text.replace("-rA --durations=0", "-rA", 1), make_text)
-    assert not _parallel_contract(ci_text, make_text.replace("-rA --durations=0", "-rA", 1))
+    assert not _parallel_contract(ci_text.replace("--durations=0 ", "", 1), make_text)
+    assert not _parallel_contract(ci_text, make_text.replace("--durations=0 ", "", 1))
 
 
 def test_generated_collection_is_excluded_from_both_leak_scans() -> None:

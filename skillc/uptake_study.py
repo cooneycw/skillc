@@ -59,7 +59,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import calibration, trial, verify
+from . import calibration, schedule_budget, trial, verify
 from . import calibration_run as cr
 from . import collection_conformance as cc
 from . import matched_pilot as mp
@@ -229,8 +229,9 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
     if not tested and {c.expect for c in cases} != set(EXPECTS):
         raise _refuse("a screen needs at least one 'select' case and one 'abstain' case to score selectivity")
     attempts = sum(len(arm_names) * c.attempts_per_arm for c in cases)
-    if total < per_attempt * attempts:
-        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts} attempts of {per_attempt:g}s")
+    budget_error = schedule_budget.refusal_reason(data, attempts=attempts, per_attempt=per_attempt, total=total)
+    if budget_error is not None:
+        raise _refuse(budget_error)
 
     test = data.get("test")
     alpha: object = 0.0
