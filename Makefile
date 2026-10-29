@@ -115,3 +115,8 @@ pytest-population-control: test
 
 verify: selftest test lint typecheck negative-control typecheck-control leak-check \
 	changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install
+
+# Explicit advisory network reading; posting requires the operator's POST=1.
+.PHONY: cpp-pin-watch
+cpp-pin-watch: sync
+	uv run --no-sync python3 -m ci.cpp_pin_watch $(if $(filter 1,$(POST)),--post,)

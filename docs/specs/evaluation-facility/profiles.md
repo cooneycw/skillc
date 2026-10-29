@@ -470,3 +470,73 @@ subject-specific constants in core code. Family is a bounded safe identifier;
 state_path is exactly one safe directory immediately below .git. Both are
 mandatory and included in immutable protocol identity. Wire family and fixture
 state paths must exactly match that declaration; there is no implicit default.
+
+
+## CPP pin watch
+
+The evergreen [CPP pin watch (#384)](https://github.com/cooneycw/skillc/issues/384)
+records changes in drift kind. [#383](https://github.com/cooneycw/skillc/issues/383)
+tracks the classifier and the separate approval checkpoint; this classifier does
+not repin a profile or establish installation/readiness.
+
+Run `make cpp-pin-watch` for an explicit advisory reading. It clones/fetches CPP
+from GitHub, resolves main once to a full commit, verifies the base and extra
+runtime-policy profiles against their immutable pins, and prints JSON plus the
+would-post transition body. Drift is a successful comparison (exit 0); unavailable
+or invalid inputs give `unknown` and exit 2. This network command is outside
+`make verify`; committed offline controls run in the ordinary test suite.
+
+Default execution never posts. Only an operator's `make cpp-pin-watch POST=1`
+(or `uv run python3 -m ci.cpp_pin_watch --post`) writes to #384. Posting compares
+against the last machine-tagged reading by the repository owner, including after
+a lost acknowledgement. Unchanged classifications/flags do not post again merely
+because CPP main advanced. An unknown transition is distinct from none and does
+not erase the earlier evidence. Public bodies pass identity/private-path checks
+before remote posting, with committed seeded controls.
+
+Use one posting stream and its exclusive local lock (default
+`reports/cpp-pin-watch/post.lock`). Concurrent independent posters, such as
+separate clones/hosts with different locks, are unsupported and can duplicate a
+comment: GitHub comment creation has no compare-and-swap or idempotency key.
+A failed request does not advance local state; the next run rereads remote state.
+The initial automatic reading establishes the machine-tagged baseline; prior
+hand readings remain evidence and are not rewritten.
+
+For an explicit historical profile/replay, use:
+
+```bash
+uv run python3 -m ci.cpp_pin_watch --cpp-repo /path/to/cpp-clone \
+  --profile evals/subjects/cpp-codex-flow-auto-87ecb097 \
+  --target 63e069853c728c48388ca3b5867db8e843e3121d --output reports/cpp-replay.json
+```
+
+Explicit profiles/replays cannot use `--post`. Immutable object reads in a
+partial clone can still fetch missing blobs; replay does not mean no network.
+For the committed historical `86641e8` to `63e0698` input, run
+`uv run python3 -m ci.cpp_pin_watch --cpp-repo /path/to/cpp-clone --historical-control`.
+It checks the full expected changed/removed/added path lists and classifications,
+refusing missing objects or any mismatch; it never posts. Tiny offline Git
+fixtures independently exercise the same classifier in `make verify`.
+
+Only explicit `--profile` readings may re-derive a missing inventory with the
+normal closure validator, labelled `derived`; this supports the historical
+87ecb097 declaration. Missing default-policy inventories and malformed existing
+evidence are refused as unknown. Every committed inventory must
+match the re-derived closure, and every pinned source blob, digest and mode is
+verified. Duplicate installations count once per consistent source; synthetic
+markers and runtime tools are outside source-path counts. Additions are counted
+only inside selected skill roots, not as certification of undeclared future
+helper dependencies.
+
+The report retains separate flags, with primary severity `contract`, `structural`,
+`library-only`, then `none`. Contract includes selected SKILL.md/reference.md,
+all declared gate entrypoint sources, and the explicitly versioned gate-verdict
+and receipt paths in `ci/cpp-pin-watch-policy.json`. The latter deliberately
+covers the runner/step/manifest silent-success contract (CPP #1576) and receipt
+schema/adapters (CPP #1584); an unrelated library edit remains library-only.
+This is conservative content drift, not semantic equivalence analysis. Removed
+contract files carry both contract and structural flags. A missing file/object,
+unreadable inventory, failed fetch or empty/ambiguous population cannot mean none.
+
+Study-approval receipt binding remains the separate #383 checkpoint. This command
+alone does not change existing approval authorization.
