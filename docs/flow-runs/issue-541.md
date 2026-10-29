@@ -19,7 +19,7 @@ section; nothing earlier is edited, and every check reads only its own run.
 - Recorded at:       2026-10-29T11:58:30Z
 
 ### Section B evidence
-Live probe 2026-10-29 11:55Z: evals26 NTPSynchronized=no, server 192.168.4.1, packet count 0;
+Live probe 2026-10-29 11:55Z: evals26 NTPSynchronized=no, server = LAN gateway, packet count 0;
 126.fw unchanged from the issue text; VM clock -9.24s vs kyle19 (both kyle19 and proxmox32 NTP-synced),
 up from <1s on 2026-10-23. Commits since 2026-10-24: 30 on main (75636b9 .. 1d129f9), none touch
 host time/firewall config. Merged PRs since filing matching evals26/ntp/firewall: none.

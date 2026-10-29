@@ -7,9 +7,9 @@ stay synchronized. This records how it is synchronized and why
 
 ## Why the default does not work
 
-DHCP hands the VM 192.168.4.1 as its NTP server. VM 126's Proxmox firewall
+DHCP hands the VM the LAN gateway as its NTP server. VM 126's Proxmox firewall
 (`/etc/pve/firewall/126.fw` on ThreadripperPro32) admits outbound traffic to
-192.168.4.1 only on ports 53 and 67, then drops everything else to
+the gateway only on ports 53 and 67, then drops everything else to
 192.168.0.0/16, so `systemd-timesyncd` never received a packet. By 2026-10-29
 the clock was 9.24 s behind kyle19, up from under 1 s on 2026-10-23.
 
@@ -67,7 +67,7 @@ ssh evals26 'timedatectl show -p NTPSynchronized; timedatectl timesync-status'
 
 Healthy is `NTPSynchronized=yes`, server `ntp.ubuntu.com`, a non-zero
 `Packet count` and an offset in milliseconds. The failing reading this check
-gave before the fix was `NTPSynchronized=no`, server `192.168.4.1`,
+gave before the fix was `NTPSynchronized=no`, server = the LAN gateway,
 `Packet count: 0`.
 
 ## Revert
@@ -77,5 +77,5 @@ ssh evals26 'sudo rm /etc/systemd/timesyncd.conf.d/skillc-ntp.conf && sudo syste
 ```
 
 That returns the VM to the unreachable DHCP server. The other route is to admit
-NTP to the gateway in 126.fw (`OUT ACCEPT -dest 192.168.4.1 -p udp -dport 123`,
+NTP to the gateway in 126.fw (`OUT ACCEPT -dest <gateway> -p udp -dport 123`,
 above the 192.168.0.0/16 DROP), which widens the VM's LAN access.
