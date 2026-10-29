@@ -84,3 +84,42 @@ def test_preflight_checks_the_same_pinned_argv_and_runtime_rechecks(
     # experiment or limits. This is a later call, not a cached preflight verdict.
     with pytest.raises(lifecycle.RealAgentBlocked):
         lifecycle.run_through_backend(None, None, "unused", checked[0], {}, None, tmp_path)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("measured", ["0.0.1", None])
+def test_548_live_refuses_an_image_whose_client_is_not_the_declared_one(
+        measured: str | None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        tmp_path: Path) -> None:
+    """#548: tag, ID and receipt bind (C3) and the checkout pin agrees, but the
+    codex binary inside the image answers another version, or none: refused
+    before any run store exists."""
+    from skillc import trial_bootstrap
+
+    declaration = fl.load_declaration(DECLARATION)
+    shared = declaration.shared
+    real_run = subprocess.run
+
+    def clean_git(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if argv[:1] == ["git"]:
+            return subprocess.CompletedProcess(argv, 0, "" if "status" in argv else "0" * 40 + "\n", "")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", clean_git)
+    monkeypatch.setattr(fl, "require_approved", lambda *a, **k: None)
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: str(shared["client"]["version"]))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: str(shared["image"]["digest"]))
+    monkeypatch.setattr(cr, "require_image_binding", lambda *a, **k: b"receipt")
+    probes: list[str] = []
+
+    def probe(_docker: object, image_id: str, client: str, **_k: object) -> trial_bootstrap.ClientProbe:
+        probes.append(f"{client}@{image_id}")
+        return trial_bootstrap.ClientProbe(measured, "measured" if measured else "`codex --version` exited 125")
+
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version", probe)
+    monkeypatch.setattr(cr, "private_root", _forbidden)
+    monkeypatch.setattr(cc, "acquire_collection", _forbidden)
+    assert cli.main(["level3-live", str(DECLARATION), "--rehearse", "actor",
+                     "--private-dir", str(tmp_path / "private")]) == 2
+    assert probes == [f"{fl.CLIENT}@{shared['image']['digest']}"]
+    err = capsys.readouterr().err
+    assert ("reports 0.0.1" if measured else "could not measure the codex client") in err

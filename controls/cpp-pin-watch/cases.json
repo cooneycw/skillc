@@ -1,0 +1,93 @@
+[
+  {
+    "name": "self",
+    "edit": null,
+    "classification": "none",
+    "flags": []
+  },
+  {
+    "name": "reference",
+    "edit": "pack/skills/gate-check/reference.md",
+    "classification": "contract",
+    "flags": [
+      "contract"
+    ]
+  },
+  {
+    "name": "gate",
+    "edit": "tools/run-gate.sh",
+    "classification": "contract",
+    "flags": [
+      "contract"
+    ]
+  },
+  {
+    "name": "library",
+    "edit": "lib/core/deep.py",
+    "classification": "library-only",
+    "flags": [
+      "library-only"
+    ]
+  },
+  {
+    "name": "silent-success-runner",
+    "edit": "lib/cicd/runner.py",
+    "classification": "contract",
+    "flags": [
+      "contract"
+    ],
+    "content": "silent_success = \"explicit-intent-required\"\n"
+  },
+  {
+    "name": "silent-success-steps",
+    "edit": "lib/cicd/steps.py",
+    "classification": "contract",
+    "flags": [
+      "contract"
+    ],
+    "content": "silent_success = \"explicit-intent-required\"\n"
+  },
+  {
+    "name": "silent-success-manifest",
+    "edit": "lib/cicd/manifest.py",
+    "classification": "contract",
+    "flags": [
+      "contract"
+    ],
+    "content": "silent_success = \"explicit-intent-required\"\n"
+  },
+  {
+    "name": "receipt-schema",
+    "edit": "tools/counter-model-receipt.py",
+    "classification": "contract",
+    "flags": [
+      "contract"
+    ],
+    "content": "SCHEMA_ADAPTERS = 5\n"
+  },
+  {
+    "name": "removed-library",
+    "remove": "lib/core/deep.py",
+    "classification": "structural",
+    "flags": [
+      "structural"
+    ]
+  },
+  {
+    "name": "removed-contract",
+    "remove": "pack/skills/gate-check/reference.md",
+    "classification": "contract",
+    "flags": [
+      "contract",
+      "structural"
+    ]
+  },
+  {
+    "name": "new-skill-file",
+    "add": "pack/skills/gate-check/new-contract.txt",
+    "classification": "structural",
+    "flags": [
+      "structural"
+    ]
+  }
+]

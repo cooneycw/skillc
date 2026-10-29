@@ -1,0 +1,26 @@
+{
+  "images": [
+    {
+      "Id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "RepoTags": [
+        "skillc-trial:unlabelled"
+      ],
+      "Config": {
+        "Labels": null
+      },
+      "Size": 512
+    },
+    {
+      "Id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "RepoTags": [
+        "unrelated-sentinel:keep"
+      ],
+      "Config": {
+        "Labels": null
+      },
+      "Size": 512
+    }
+  ],
+  "containers": [],
+  "networks": []
+}

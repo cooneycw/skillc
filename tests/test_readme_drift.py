@@ -229,5 +229,33 @@ def test_the_real_readme_passes_every_check() -> None:
     )["project"]["version"]
     assert pyproject_version == __version__
     assert rd.command_drift(readme_text, rd.real_commands(build_parser())) == []
+    from skillc.checks import ALL_RULES
+    assert rd.selftest_drift(readme_text, len(ALL_RULES)) == []
     assert rd.version_drift(readme_text, __version__) == []
     assert rd.status_drift(readme_text, milestones_data) == []
+
+
+def test_selftest_count_matches_registered_rules() -> None:
+    from skillc.checks import ALL_RULES
+    assert rd.selftest_drift("skillc selftest: 23/23 rule(s) discriminate", len(ALL_RULES))
+    assert rd.selftest_drift(f"skillc selftest: {len(ALL_RULES)}/{len(ALL_RULES)} rule(s) discriminate", len(ALL_RULES)) == []
+    assert rd.selftest_drift("no sample", len(ALL_RULES))
+
+
+def test_stale_selftest_sample_fails_the_actual_cli(tmp_path, capsys) -> None:
+    import re
+    import shutil
+
+    from skillc.checks import ALL_RULES
+
+    (tmp_path / "docs").mkdir()
+    for name in ("pyproject.toml", "docs/milestones.json"):
+        shutil.copyfile(rd.ROOT / name, tmp_path / name)
+    text = (rd.ROOT / "README.md").read_text()
+    bad_count = len(ALL_RULES) + 1
+    stale, count = re.subn(r"skillc selftest: \d+/\d+ rule\(s\) discriminate",
+                          f"skillc selftest: {bad_count}/{bad_count} rule(s) discriminate", text)
+    assert count == 1 and stale != text
+    (tmp_path / "README.md").write_text(stale)
+    assert rd.main([str(tmp_path)]) == 1
+    assert "selftest sample differs" in capsys.readouterr().err

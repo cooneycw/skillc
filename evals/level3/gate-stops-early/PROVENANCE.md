@@ -53,6 +53,12 @@ DISTINCT ways a step can end up neither PASS nor FAIL:
    rest, and the runner records them `status=NOT_RUN` with a reason
    ("`<prerequisite>` failed"), distinct from SKIPPED.
 
+**Historical correction (#376):** the `check` plan actually records later
+steps as `pending` after the first failure; NOT_RUN applies to aggregate
+deferral in the `verify` finish plan. See the measured **Revision 5** section
+below. The paragraph above preserves the original expectation, not the
+measured `check` result.
+
 `reference.md`'s own Step 6 report table defines exactly three symbols
 (PASS/FAIL/SKIP) and gives **no instruction anywhere** for what an agent
 should do with a NOT_RUN step - confirmed by reading the whole file, not

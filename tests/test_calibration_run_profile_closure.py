@@ -412,6 +412,8 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
     assert isinstance(shared, dict)
     monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda key: shared["client"]["version"])
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *args: shared["image"]["digest"])
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version",
+                        lambda *a, **k: trial_bootstrap.ClientProbe(shared["client"]["version"], "measured"))
     acquisition_paths: list[Path] = []
 
     def acquire_fixture(name: str, run_dir: Path) -> cc.AcquiredCollection:

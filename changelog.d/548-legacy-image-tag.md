@@ -1,1 +1,0 @@
-- Require legacy calibration runs to use the declared image tag as well as its resolved image ID; keep rehearsal and receipt-backed image checks unchanged.

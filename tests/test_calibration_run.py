@@ -493,7 +493,7 @@ def test_a_treatment_that_installs_nothing_is_refused() -> None:
         cr.build_treatment(acquired)
 
 
-@pytest.mark.parametrize("case", ["alias", "declared", "default", "wrong-id", "rehearsal"])
+@pytest.mark.parametrize("case", ["alias", "declared", "default", "wrong-id", "rehearsal", "wrong-client"])
 def test_548_legacy_cli_binds_the_effective_tag_and_id_before_run_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], case: str,
 ) -> None:
@@ -519,6 +519,14 @@ def test_548_legacy_cli_binds_the_effective_tag_and_id_before_run_artifacts(
         raise NextStage
 
     monkeypatch.setattr(demo, "resolve_image_digest", resolve)
+    probes: list[str] = []
+
+    def probe(_docker: object, image_id: str, *_a: object, **_k: object) -> trial_bootstrap.ClientProbe:
+        probes.append(image_id)  # #548: the binary inside the resolved image, by its ID
+        return trial_bootstrap.ClientProbe("0.0.1" if case == "wrong-client" else cr.declared_client(declaration)[1],
+                                           "measured")
+
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version", probe)
     monkeypatch.setattr(cr, "private_root", stop_before_directory)
     monkeypatch.setattr(cc, "acquire_collection", lambda *_: pytest.fail("acquisition before image refusal"))
     private = tmp_path / "private"
@@ -532,7 +540,8 @@ def test_548_legacy_cli_binds_the_effective_tag_and_id_before_run_artifacts(
     except NextStage:
         code = None
     assert not private.exists()
-    assert (code, bool(entered)) == ((2, False) if case in {"alias", "wrong-id"} else (None, True))
+    assert (code, bool(entered)) == ((2, False) if case in {"alias", "wrong-id", "wrong-client"} else (None, True))
+    assert probes == ([digest] if case in {"declared", "default", "wrong-client"} else [])
     assert resolutions == ([] if case == "rehearsal" else ["alternate:1" if case == "alias" else tag])
     error = capsys.readouterr().err
     if case == "alias":
@@ -541,6 +550,8 @@ def test_548_legacy_cli_binds_the_effective_tag_and_id_before_run_artifacts(
         assert "refusing a run on an image other than the declared one" in error
     elif case == "rehearsal":
         assert "REHEARSAL - no container, client or model" in error
+    elif case == "wrong-client":
+        assert "binary inside image" in error and "reports 0.0.1" in error
 
 
 @pytest.mark.parametrize("tag", ["missing", None, "", " ", {}, 42])

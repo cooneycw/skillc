@@ -1,0 +1,27 @@
+{
+  "branch": "issue-548-frozen-identity-checks-verify-the-declaration-not",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "7366be89dfd681f2773cf7901a72e5b0a25da9b2",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "548",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-28T23:25:52Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "rollout": "2026/10/28/rollout-2026-10-28T19-15-24-01a184cc-0177-7583-abc6-da4840997b98.jsonl",
+    "thread_id": "01a184cc-0177-7583-abc6-da4840997b98"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

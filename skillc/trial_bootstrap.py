@@ -44,13 +44,15 @@ per-client adapter, not delivered here - the same kind of gap
 itself ("skillc will ship its own Docker-backed implementation... it does
 not exist at this commit").
 
-Stdlib only (AGENTS.md): `json`, `re`, `secrets`, `dataclasses`, `pathlib`.
+Stdlib only (AGENTS.md): `json`, `re`, `secrets`, `subprocess`, `dataclasses`, `pathlib`.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import secrets
+import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -85,6 +87,126 @@ def pinned_cli_version(client: str, manifest_path: Path | None = None) -> str:
     if not isinstance(entry, dict) or not entry.get("version"):
         raise PinnedVersionError(f"{path} has no pinned version recorded for client '{client}'")
     return str(entry["version"])
+
+
+# --------------------------------------------------------------------------
+# The client binary inside the resolved image (issue #548). `pinned_cli_version`
+# reads the checkout's BUILD recipe, and the image-ID check proves which image
+# runs; neither says which client that image actually carries - a declaration
+# can name version X beside the ID of an image built from an older recipe, and
+# both checks pass. `probe_image_cli_version` asks the binary itself, inside the
+# image by its immutable ID, and anything short of one clean answer is UNKNOWN.
+#
+# Scope, stated so a pass is not read as more: this measures the default
+# client binary of the IMAGE, not the final task container after overlays,
+# the guard and PATH composition, and not a custom `--client-argv` chain.
+# Matching text is not attestation - the image-ID pin is what makes the
+# image's bytes, and so its answer, the declared ones.
+# --------------------------------------------------------------------------
+
+#: Client name (either spelling a declaration uses) -> the binary in the image.
+CLIENT_BINARIES: Mapping[str, str] = {"codex": "codex", "claude": "claude", "claude_code": "claude"}
+
+#: One container start of the trial image measured ~1s; this bounds a wedge.
+CLIENT_PROBE_TIMEOUT = 60.0
+#: After a timeout, how long the killed-at-bound create is given to settle
+#: before its cleanup (#540: an `rm -f` sent before the daemon answers can
+#: find "No such container" and the create lands afterwards).
+CLIENT_PROBE_SETTLE = 10.0
+
+# A complete version token, prerelease and build metadata included, so
+# "0.157.1+custom" is the version "0.157.1+custom" - never "0.157.1".
+_VERSION_TOKEN = re.compile(r"(?<![\w.+-])\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?![\w.+-])")
+
+
+@dataclass(frozen=True)
+class ClientProbe:
+    """`version` is the measured version, or None - UNKNOWN - with `reason`."""
+
+    version: str | None
+    reason: str
+
+
+def parse_cli_version_output(output: str) -> ClientProbe:
+    """The version in one `<client> --version` answer: exactly one non-blank
+    line carrying exactly one version token ("codex-cli 0.157.1",
+    "2.1.283 (Claude Code)"). Empty, multi-line or multi-version output - a
+    repeated identical token included - is UNKNOWN, never a best guess."""
+    lines = [line for line in output.splitlines() if line.strip()]
+    if not lines:
+        return ClientProbe(None, "the client printed no version")
+    if len(lines) != 1:
+        return ClientProbe(None, f"the client printed {len(lines)} lines, not one version line")
+    tokens = _VERSION_TOKEN.findall(lines[0])
+    if len(tokens) != 1:
+        return ClientProbe(None, f"{len(tokens)} version strings in {lines[0][:120]!r}, not exactly one")
+    return ClientProbe(tokens[0], "measured")
+
+
+def _remove_probe_container(docker_bin: Sequence[str], name: str, timeout: float) -> str:
+    """"" when `name` is confirmed gone, else a clause saying cleanup is unconfirmed."""
+    try:
+        removed = subprocess.run([*docker_bin, "rm", "-f", name], capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"; cleanup 'docker rm -f {name}' failed: {exc}"
+    if removed.returncode != 0 and b"No such container" not in removed.stderr:
+        return f"; cleanup 'docker rm -f {name}' exited {removed.returncode}"
+    return ""
+
+
+def probe_image_cli_version(docker_bin: Sequence[str], image_id: str, client: str, *,
+                            timeout: float = CLIENT_PROBE_TIMEOUT,
+                            settle: float = CLIENT_PROBE_SETTLE) -> ClientProbe:
+    """Run `<binary> --version` in a throwaway, network-less container of
+    `image_id` (never a tag, never pulled) and parse the answer. Never
+    raises for an unmeasurable answer: every failure is UNKNOWN."""
+    binary = CLIENT_BINARIES.get(client)
+    if binary is None:
+        return ClientProbe(None, f"no known binary for client {client!r}")
+    name = f"skillc-client-probe-{secrets.token_hex(4)}"
+    argv = [*docker_bin, "run", "--rm", "--name", name, "--network", "none", "--pull", "never",
+            "--entrypoint", binary, image_id, "--version"]
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        return ClientProbe(None, f"could not start the probe: {exc}")
+    try:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # #540: give the create one bounded window to settle, so the
+            # removal below cannot run ahead of a container still landing.
+            # A CLI ended by a signal never heard the daemon's answer, so its
+            # exit says nothing about whether the create has settled.
+            try:
+                proc.communicate(timeout=settle)
+                settled = proc.returncode >= 0
+            except subprocess.TimeoutExpired:
+                settled = False
+            cleanup = _remove_probe_container(docker_bin, name, settle)
+            if not settled:
+                cleanup = cleanup or f"; the create had not settled after {settle:g}s, so removal is unconfirmed"
+            return ClientProbe(None, f"`{binary} --version` did not answer within {timeout:g}s{cleanup}")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    try:
+        out, err = stdout.decode("utf-8"), stderr.decode("utf-8", errors="replace")
+    except UnicodeDecodeError as exc:
+        return ClientProbe(None, f"`{binary} --version` printed bytes that are not UTF-8: {exc}")
+    if proc.returncode < 0:
+        # Signalled: `--rm` fires only when the container's process exits,
+        # and the create may still be landing, so remove it and never call
+        # that removal confirmed.
+        cleanup = _remove_probe_container(docker_bin, name, settle)
+        return ClientProbe(None, f"the docker CLI was ended by signal {-proc.returncode}"
+                                 f"{cleanup or '; removal of the probe container is unconfirmed'}")
+    if proc.returncode != 0:
+        detail = (err or out).strip().splitlines()
+        return ClientProbe(None, f"`{binary} --version` exited {proc.returncode}"
+                                 + (f": {detail[-1][:200]}" if detail else ""))
+    return parse_cli_version_output(out)
 
 
 # --------------------------------------------------------------------------

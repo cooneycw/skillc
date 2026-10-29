@@ -1,0 +1,49 @@
+{
+  "profile": "evals/subjects/cpp-codex-flow-check-86641e8",
+  "pin": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+  "target": "63e069853c728c48388ca3b5867db8e843e3121d",
+  "classification": "contract",
+  "flags": [
+    "contract",
+    "structural",
+    "library-only"
+  ],
+  "unique_sources": 95,
+  "changed": [
+    "codex/skills/flow-check/SKILL.md",
+    "codex/skills/flow-check/lib/cicd/evidence.py",
+    "codex/skills/flow-check/reference.md",
+    "lib/cicd/evidence.py"
+  ],
+  "removed": [
+    "codex/skills/flow-check/lib/cicd/__main__.py",
+    "codex/skills/flow-check/lib/cicd/bootstrap.py",
+    "codex/skills/flow-check/lib/cicd/cli.py",
+    "codex/skills/flow-check/lib/cicd/config.py",
+    "codex/skills/flow-check/lib/cicd/container.py",
+    "codex/skills/flow-check/lib/cicd/coverage.py",
+    "codex/skills/flow-check/lib/cicd/deploy/__init__.py",
+    "codex/skills/flow-check/lib/cicd/deploy/docker_compose.py",
+    "codex/skills/flow-check/lib/cicd/deploy/guardrails.py",
+    "codex/skills/flow-check/lib/cicd/deploy/strategy.py",
+    "codex/skills/flow-check/lib/cicd/detector.py",
+    "codex/skills/flow-check/lib/cicd/failure_patterns.py",
+    "codex/skills/flow-check/lib/cicd/health.py",
+    "codex/skills/flow-check/lib/cicd/infrastructure.py",
+    "codex/skills/flow-check/lib/cicd/makefile.py",
+    "codex/skills/flow-check/lib/cicd/makefile_declaration.py",
+    "codex/skills/flow-check/lib/cicd/manifest.py",
+    "codex/skills/flow-check/lib/cicd/manifest_path.py",
+    "codex/skills/flow-check/lib/cicd/models.py",
+    "codex/skills/flow-check/lib/cicd/mypy_scope.py",
+    "codex/skills/flow-check/lib/cicd/outcomes.py",
+    "codex/skills/flow-check/lib/cicd/pipeline.py",
+    "codex/skills/flow-check/lib/cicd/runner.py",
+    "codex/skills/flow-check/lib/cicd/smoke.py",
+    "codex/skills/flow-check/lib/cicd/steps.py",
+    "codex/skills/flow-check/lib/cicd/verify.py"
+  ],
+  "added": [
+    "codex/skills/flow-check/PROVENANCE.md"
+  ]
+}

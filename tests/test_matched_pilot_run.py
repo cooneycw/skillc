@@ -538,6 +538,33 @@ def _pilot_run_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
+def _measure_client(monkeypatch: pytest.MonkeyPatch, version: str | None, reason: str = "measured") -> None:
+    """The client binary inside the resolved image answers `version` (#548)."""
+    from skillc import trial_bootstrap
+
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version",
+                        lambda *a, **k: trial_bootstrap.ClientProbe(version, reason))
+
+
+@pytest.mark.parametrize("measured", ["0.0.1", None])
+def test_548_pilot_run_refuses_an_image_whose_client_is_not_the_declared_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, measured: str | None,
+) -> None:
+    """#548: the declared version matches the checkout pin and the image ID
+    matches the declaration, but the binary INSIDE that image answers another
+    version - or cannot be measured. Both refuse before any run directory."""
+    from skillc import demo
+
+    declaration = mp.load_declaration()
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: declaration.image_digest)
+    _measure_client(monkeypatch, measured, "measured" if measured else "`codex --version` exited 125")
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: pytest.fail("acquisition before the client probe"))
+    assert cli.cmd_pilot_run(_pilot_run_args(tmp_path)) == 2
+    err = capsys.readouterr().err
+    assert ("reports 0.0.1" if measured else "could not measure the codex client") in err
+    assert not (tmp_path / "private").exists()
+
+
 def test_pilot_run_refuses_an_image_other_than_the_declared_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -558,6 +585,7 @@ def test_pilot_run_accepts_the_declared_image_and_proceeds(
 
     declared = mp.load_declaration().image_digest
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: declared)
+    _measure_client(monkeypatch, mp.load_declaration().client_version)
 
     def refuse(*_a: object, **_k: object) -> None:
         raise demo.SubjectRefused("stopped here by the test")
@@ -1098,6 +1126,7 @@ def test_cli_source_modes_reach_the_pilot_attempt_before_discard(
     monkeypatch.setattr(cc, "discard_acquisition", discard)
     monkeypatch.setattr(cc, "agent_backends", lambda **k: (object(), object()))
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: DECLARED.image_digest)
+    _measure_client(monkeypatch, DECLARED.client_version)
     calls = _record_mode_attempts(monkeypatch)
     with pytest.raises(_ModeBoundary):
         cli.cmd_pilot_run(_pilot_run_args(tmp_path))

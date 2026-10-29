@@ -202,6 +202,36 @@ shared completion deadline. A bare client measured elsewhere cannot certify a
 wrapper, scripted actor or separate discovery client. No such measurement or
 qualification is supplied by the transcript-version diagnostics.
 
+## The client binary inside the declared image (#548)
+
+`pilot-run`, `calibration-run`, `level3-live` and `uptake-study` compare the
+declared client version with the checkout's `pinned-versions.json`, which is
+the image's build recipe, not the image. Once the image ID binds, each now
+also asks the client binary itself:
+`trial_bootstrap.probe_image_cli_version` runs `<client> --version` in a
+throwaway container of that image by its ID (`--rm`, `--network none`,
+`--pull never`, a 60 s bound; a timed-out create is given a further bounded
+window to settle before it is removed by name, and a removal that cannot be
+confirmed is said so, #540). The
+run is refused before any private run directory exists unless the answer is
+exactly one line carrying exactly one version, equal to the declared one.
+Anything else is UNKNOWN, and UNKNOWN refuses: empty, multi-line or
+multi-version output (a repeated token included; build metadata such as
+`+custom` is part of the version), non-UTF-8 output, a nonzero exit, a
+timeout, no docker. Rehearsals that
+start no container (`calibration-run --rehearse`, `level3-live --rehearse
+dry`) skip the probe as they already skip the image check, and say so.
+
+This measures the image's default client binary. It does not measure the
+final attempt container after its overlays, guard and PATH composition, a
+custom `--client-argv` chain, or a scripted actor, so it is not the runtime
+qualification described above. Matching text is not attestation: the image-ID
+pin is what makes the image's bytes, and so its answer, the declared ones.
+Level-3 campaigns (`level3_campaign.check_frozen`) are deliberately not
+probed: they run a scripted actor and fake client pinned by `harness_digest`,
+never the codex binary, so measuring it would certify a program the campaign
+does not execute.
+
 ## Controls (committed)
 
 All in `tests/test_trial_bootstrap.py`:
@@ -230,6 +260,11 @@ All in `tests/test_trial_bootstrap.py`:
   platform-package layout - no Docker needed) refuses a missing sidecar, a
   directory posing as one, a non-executable file, and an absent platform
   package.
+- An image whose client binary answers a version other than the declared
+  one is refused by every probed entry point even though the checkout pin
+  agrees; so is an unmeasurable answer (empty, two lines, two versions,
+  nonzero exit, timeout, no docker). The shared fake daemon answers the pin
+  by default and its `.client-version` sentinel names the known-bad image.
 
 ## Evidence rule
 

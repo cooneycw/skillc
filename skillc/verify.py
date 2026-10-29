@@ -53,13 +53,12 @@ it needs no container.
 Confidentiality and prevention become the BACKEND's claims (`describe()`'s
 `isolation`/`unobserved`), never this module's own - this module still performs
 its detection-based checks regardless, as defense in depth, but a real
-prevention claim is the backend's to make. No concrete backend ships in this
-repository at this commit (`skillc/docker_backend.py` does not exist yet), so
-every such claim is OWED TO THE LIVE RUN (issue #10 comment 5848522578, lesson
-E17: "unit tests on a fake backend prove the lifecycle, never the boundary")
-until one exists and is actually run this way -
-`tests/test_verify.py::test_an_ancestors_environment_is_NOT_hidden` stays
-exactly as documented; it cannot flip without that live run.
+prevention claim is the backend's to make. `skillc/docker_backend.py` supplies
+the concrete DockerBackend, used for separate grading by collection_conformance.
+#10's live demo and #122's timeout/cancellation seeds establish their documented
+paths only; fake-backend tests do not establish a real isolation boundary.
+The bare-subprocess ancestor-environment test remains applicable to that default
+path, independently of the Docker backend's claims.
 
 Stdlib only (AGENTS.md). Linux only: the bare-subprocess sweep needs `prctl` and
 `/proc`. Anywhere else it fails closed, to INCONCLUSIVE.

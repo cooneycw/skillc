@@ -20,6 +20,7 @@ import re
 import signal
 import sys
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1484,6 +1485,26 @@ def _print_pilot_summary(report: dict[str, object]) -> int:
     return 0
 
 
+def _client_probe_refusal(docker_bin: Sequence[str], image_digest: str, client: str, version: str) -> bool:
+    """True - after saying why - unless the client binary inside the resolved
+    image answers exactly the declared version (issue #548). The checkout pin
+    compared above is the build recipe, not the image; an UNKNOWN answer
+    refuses too, because a probe that could not measure certifies nothing."""
+    from . import trial_bootstrap
+
+    probe = trial_bootstrap.probe_image_cli_version(docker_bin, image_digest, client)
+    if probe.version is None:
+        print(f"skillc: could not measure the {client} client inside image {image_digest}: {probe.reason}; "
+              "a run never starts on an unmeasured client", file=sys.stderr)
+        return True
+    if probe.version != version:
+        print(f"skillc: the declaration names {client} {version}, but the {client} binary inside image "
+              f"{image_digest} reports {probe.version}; refusing a run of a client other than the declared one",
+              file=sys.stderr)
+        return True
+    return False
+
+
 def cmd_pilot_run(args: argparse.Namespace) -> int:
     """Issue #12: run the predeclared matched pilot (the current declaration,
     `matched_pilot.CURRENT_MANIFEST_PATH`) end to end and export its
@@ -1536,6 +1557,8 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
             f"{declaration.image_digest}; refusing a run on an image other than the declared one",
             file=sys.stderr,
         )
+        return 2
+    if _client_probe_refusal(docker_bin, image_digest, declaration.client_name, declaration.client_version):
         return 2
 
     private_root = Path(args.private_dir).expanduser() if args.private_dir else mp.DEFAULT_PRIVATE_ROOT
@@ -1828,6 +1851,8 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
                 print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
                       f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
                 return 2
+        if _client_probe_refusal(docker_bin, str(image_digest), client_name, client_version):
+            return 2
 
     try:
         private_root = cr.private_root(declaration, args.private_dir)  # #287 P3 (C5): the declared run store
@@ -2230,6 +2255,8 @@ def _cmd_level3_live_run(args: argparse.Namespace) -> int:
         except cr.CalibrationRefused as exc:
             print(f"skillc: {exc}", file=sys.stderr)
             return 2
+        if _client_probe_refusal(docker_bin, str(image_digest), fl.CLIENT, client_version):
+            return 2
     try:
         private_root = cr.private_root(declaration, args.private_dir)  # type: ignore[arg-type]  # C5
     except cr.CalibrationRefused as exc:
@@ -2365,6 +2392,8 @@ def cmd_uptake_study(args: argparse.Namespace) -> int:
     if image_digest != declared_digest:
         print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
               f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
+        return 2
+    if _client_probe_refusal(docker_bin, declared_digest, client_name, client_version):
         return 2
 
     private_root = Path(args.private_dir).expanduser() if args.private_dir else us.DEFAULT_PRIVATE_ROOT
