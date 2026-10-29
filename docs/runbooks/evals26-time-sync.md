@@ -34,11 +34,24 @@ hold the timer for the restart:
 
 ```bash
 sudo systemctl stop skillc-real-docker.timer
-# wait until no runner job remains; stopping the timer does not stop a run in flight
-while systemctl is-active --quiet skillc-real-docker.service || pgrep -x run-real-docker >/dev/null; do sleep 10; done
+# Wait until no runner job remains; stopping the timer does not stop a run in
+# flight. The service is Type=oneshot, so it reads `activating` (not `active`)
+# while it runs - `is-active --quiet` alone would miss it.
+while [ "$(systemctl show -p ActiveState --value skillc-real-docker.service)" != inactive ] \
+      || pgrep -x run-real-docker >/dev/null; do sleep 10; done
 sudo systemctl restart systemd-timesyncd
-sudo systemctl start skillc-real-docker.timer
+# Resume the timer only after a fresh exchange, so the step lands before the
+# next run. NTPSynchronized is a kernel flag that survives the restart; the
+# packet count restarts at 0, so it is the signal for "synced since restart".
+pkts() { timedatectl timesync-status | awk '/Packet count/{print $3}'; }
+for i in $(seq 1 30); do [ "$(pkts)" -ge 1 ] 2>/dev/null && break; sleep 2; done
+[ "$(pkts)" -ge 1 ] 2>/dev/null \
+  && sudo systemctl start skillc-real-docker.timer \
+  || echo "NOT SYNCED - timer left stopped; investigate before restarting it"
 ```
+
+A `failed` service state also holds the loop, deliberately: look at it before
+resuming the runner.
 
 Never stop the service to make room: its in-flight run is a certification.
 `pgrep -x pytest` is not a runner check, because it also matches unrelated
