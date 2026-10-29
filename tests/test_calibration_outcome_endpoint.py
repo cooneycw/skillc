@@ -458,6 +458,8 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
                                                       client=data["shared"]["client"]["name"]))
     monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: data["shared"]["client"]["version"])
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *_: data["shared"]["image"]["digest"])
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version",
+                        lambda *_a, **_k: trial_bootstrap.ClientProbe(data["shared"]["client"]["version"], "measured"))
     monkeypatch.setattr(cc, "acquire_collection", lambda *_: acquired)
     monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
     monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
@@ -566,6 +568,8 @@ def test_cli_runs_with_the_receipt_bytes_it_checked_not_a_second_read(
     seen: list[object] = []
     monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: data["shared"]["client"]["version"])
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *_: image_id)
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version",
+                        lambda *_a, **_k: trial_bootstrap.ClientProbe(data["shared"]["client"]["version"], "measured"))
     monkeypatch.setattr(cc, "acquire_collection", acquire)
     monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
     monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))

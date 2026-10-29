@@ -808,3 +808,36 @@ def test_not_run_partition_reaches_public_text_consumer() -> None:
     report = us.build_report(_Experiment(), outcomes, us.parse_declaration(_probe_data()))  # type: ignore[arg-type]
     assert "undecided=1" in us.paste_back(report)
     assert "not_run=1" in us.paste_back(report)
+
+
+@pytest.mark.parametrize("measured", ["0.0.1", None])
+def test_548_uptake_cli_refuses_an_image_whose_client_is_not_the_declared_one(
+    measured: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#548: the declared image ID resolves and the checkout pin agrees, but
+    the client binary inside that image answers another version, or none:
+    refused before any private run directory."""
+    from skillc import cli, trial_bootstrap
+
+    manifest = ROOT / "evals" / "uptake-study" / "run-manifest.json"
+    declaration = us.load_declaration(manifest)
+    client = declaration.shared["client"]
+    image = declaration.shared["image"]
+    assert isinstance(client, dict) and isinstance(image, dict)
+    monkeypatch.setattr(us, "require_approved", lambda *a, **k: None)
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: str(client["version"]))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a: str(image["digest"]))
+    probes: list[tuple[str, str]] = []
+
+    def probe(_docker: object, image_id: str, name: str, **_k: object) -> trial_bootstrap.ClientProbe:
+        probes.append((name, image_id))
+        return trial_bootstrap.ClientProbe(measured, "measured" if measured else "no answer")
+
+    monkeypatch.setattr(trial_bootstrap, "probe_image_cli_version", probe)
+    monkeypatch.setattr(cc, "acquire_collection", lambda *a: pytest.fail("acquisition before the client probe"))
+    private = tmp_path / "private"
+    assert cli.main(["uptake-study", str(manifest), "--rewritten", str(tmp_path / "unused"),
+                     "--private-dir", str(private)]) == 2
+    assert probes == [(str(client["name"]), str(image["digest"]))]
+    assert ("reports 0.0.1" if measured else f"could not measure the {client['name']} client") in capsys.readouterr().err
+    assert not private.exists()
