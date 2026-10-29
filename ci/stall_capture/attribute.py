@@ -161,7 +161,10 @@ def _host_tick(prev: dict[str, Any], cur: dict[str, Any], self_vm: str | None) -
             continue
         p = prev["vms"].get(vm, c)
         dt = float(cur["t"]) - float(prev["t"])
-        mbps = (c["rbytes"] + c["wbytes"] - p["rbytes"] - p["wbytes"]) / dt / 1e6 if dt > 0 else 0.0
+        # No io.stat at either end (host.py records it absent): no rate, never 0.
+        mbps: float | None = None
+        if "rbytes" in c and "rbytes" in p:
+            mbps = (c["rbytes"] + c["wbytes"] - p["rbytes"] - p["wbytes"]) / dt / 1e6 if dt > 0 else 0.0
         neighbours[vm] = {"io_psi": c["io_some_avg10"], "mbps": mbps}
     # A host rate covers the interval (prev, cur], so it keeps both ends: the
     # time join is an interval overlap, not a test on the end timestamp.
@@ -260,8 +263,14 @@ def _judge(window: list[dict[str, Any]], lead: dict[str, Any] | None, host: list
                 unassessed.append("neighbour")
             else:
                 busy = sorted({vm for h in inside for vm, n in h["neighbours"].items()
-                               if n["io_psi"] >= th.neighbour_io_psi or n["mbps"] >= th.neighbour_mbps})
+                               if n["io_psi"] >= th.neighbour_io_psi
+                               or (n["mbps"] is not None and n["mbps"] >= th.neighbour_mbps)})
                 evidence["monitored_neighbours"], evidence["busy_neighbours"] = monitored, busy
+                # Pressure was judged; the MB/s half was not, for these VMs.
+                no_rate = sorted({vm for h in inside for vm, n in h["neighbours"].items() if n["mbps"] is None})
+                if no_rate:
+                    unassessed.append("neighbour_rate")
+                    evidence["neighbour_rate_unobserved"] = no_rate
                 if busy:
                     causes.append("neighbour")
     if "cpu" in kind:

@@ -61,3 +61,42 @@ window per CI agent over a few full-suite runs, on owner GO).
 Scope: ~1,330 lines already written; new edits likely <30 lines.
 Risks: current-main tree-scanning / no-subject-name tests may trip on the new ci/ and fixture files; skillc CI
 hold needs lock 2; landing does not close #484.
+
+<!-- flow-run n=2 id=90bd5049e4734c149a60d39bf873e2d2 -->
+## Run 2
+
+- Run-id:            90bd5049e4734c149a60d39bf873e2d2
+- Run-start:         e6160e9ee187ffa84ae6e88acd8aa7f7ce899ed1
+
+- Issue:             #484
+- Base SHA:          192a7fd
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          owner (cooneycw), interactive reply "approved" in this session (live read-only sampling GO, restarts, N=5)
+- Recorded at:       2026-10-28T15:35:00Z
+
+### Section B evidence
+Since filing (2026-10-20): e6160e9 / PR #605 (replay-only monitor, run 1). Unrelated on main: 1930207, 0e6711e,
+3dda159, 12db690, 16c6b4b, 46898ac, 000753d, and the 8 merged at Step 4 (7a4c0fd..192a7fd, #603 #606-#614).
+Open PRs #603/#606/#607 at analysis time unrelated. Dup/superseding: none (#462 separate family; #390/#412/#148
+closed, different). No sibling worktree for #484. Pipelines 1170-1178 all green; last stall-like red 1111
+(2026-10-25, psi_io10 30-45). Owner migrated VM disks 2026-10-22 (likely fix, item 2). Remaining: live
+measurement (item 1) and N clean runs (item 3).
+
+### Section C - the approved plan
+Live, read-only measurement. No I/O load generator, no discard A/B (C2/C4 stand). Run output stays out of the
+repo (C3). Closing #484 is the owner's call; this run uses Refs.
+
+Not files: guest.py on both CI agents and host.py on the hypervisor at 10 s over one window; 5 full-suite runs by
+restarting the latest skillc PR pipeline serially under lock 2, recording which agent ran each; live negative
+control (guest device counters must advance during CI before any zero is trusted); attribute.py per agent; a
+placeholder-only findings comment on #484.
+
+1. `ci/stall_capture/guest.py` - only if the live run exposes a defect; fix + regression test red on pre-fix code
+2. `ci/stall_capture/host.py` - only if the live run exposes a defect; fix + regression test
+3. `ci/stall_capture/attribute.py` - only if the live run exposes a defect; fix + regression test
+4. `ci/stall_capture/procfs.py` - only if the live run exposes a defect; fix + regression test
+5. `tests/test_stall_capture.py` - regression tests for any fix above
+
+Scope: ~2-2.5 h wall clock; 0-~50 code lines. Risks: 5 clean runs cannot exclude a ~1-in-80 rare stall (no
+self-close); lock 2 held ~1.5 h blocks kyle main merges; first live run may need sampler fixes.

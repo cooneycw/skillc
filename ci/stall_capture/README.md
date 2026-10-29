@@ -30,7 +30,7 @@ agent it ran on, and a full window means one run per agent.
 | Script | Runs on | Reads | Writes |
 |---|---|---|---|
 | `guest.py` | the CI VM | `/proc/pressure/{io,cpu,memory}`, `/proc/diskstats` (one named device, including discard columns), `/proc/stat` (steal), each container cgroup's `cpu.stat`, `cpu.max` and `io.pressure` | its own `--out` JSONL only |
-| `host.py` | the hypervisor | `/proc/diskstats` (named backing devices), each named VM cgroup's `io.pressure`, `cpu.pressure` and `io.stat` | its own `--out` JSONL only |
+| `host.py` | the hypervisor | `/proc/diskstats` (named backing devices), each named VM cgroup's `io.pressure`, `cpu.pressure` and, where the io controller is delegated, `io.stat` | its own `--out` JSONL only |
 | `attribute.py` | anywhere | the two JSONL streams | its `--out` report |
 
 Both samplers are read-only by construction, and `tests/test_stall_capture.py`
@@ -70,7 +70,11 @@ The verdict is the one cause that held, `ambiguous` if several held, and
 `UNATTRIBUTED` if none did. A rule with nothing observed behind it is listed
 as **unassessed**, never counted as quiet: `device` and `neighbour` when no host
 interval overlaps the window, `neighbour` when the host stream names no VM but
-the guest, `throttle` when no container was seen in two consecutive samples,
+the guest, `neighbour_rate` when a neighbour VM has no `io.stat` (a hypervisor
+that does not delegate the io controller to VM cgroups, which the first live
+run met: `host.py` then records `io_stat: absent`, and the neighbour rule is
+judged on pressure alone), `throttle` when no container was seen in two
+consecutive samples,
 and any rate on the very first sample. So a guest-only `discard` verdict names
 the alternatives nobody checked. Host rates are joined to a window by interval
 overlap, and `host_intervals.partial` counts those reaching outside it.
