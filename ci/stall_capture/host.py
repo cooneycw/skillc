@@ -35,11 +35,20 @@ def sample(root: Path, devices: list[str], vms: dict[str, str]) -> dict[str, Any
     out: dict[str, Any] = {"devices": pf.parse_diskstats(pf.read(root, "/proc/diskstats"), devices), "vms": {}}
     for label, cgroup in vms.items():
         base = "/" + cgroup.strip("/")
-        out["vms"][label] = {
+        vm: dict[str, Any] = {
             "io_some_avg10": pf.parse_psi(pf.read(root, f"{base}/io.pressure"))["some"]["avg10"],
             "cpu_some_avg10": pf.parse_psi(pf.read(root, f"{base}/cpu.pressure"))["some"]["avg10"],
-            **pf.parse_io_stat(pf.read(root, f"{base}/io.stat")),
         }
+        # A hypervisor that does not delegate the io controller to its VM
+        # cgroups has io.pressure (PSI is always there) but no io.stat - the
+        # first live run met exactly that. Its byte counters are then absent,
+        # recorded as such and never zeroed, so attribute.py can say the rate
+        # half of the neighbour rule was unassessed.
+        if (root / base.lstrip("/") / "io.stat").exists():
+            vm.update(pf.parse_io_stat(pf.read(root, f"{base}/io.stat")))
+        else:
+            vm["io_stat"] = "absent"
+        out["vms"][label] = vm
     return out
 
 
