@@ -25,10 +25,24 @@ NTP=ntp.ubuntu.com
 ```
 
 A drop-in rather than an edit of `/etc/systemd/timesyncd.conf`, so a package
-upgrade does not overwrite it. Applied 2026-10-29 between runner timer ticks:
-the first sync steps the clock (it stepped +9.42 s), so check that no runner job
-is active before restarting timesyncd (`pgrep -x run-real-docker`,
-`pgrep -x pytest`, `systemctl is-active skillc-real-docker.service`).
+upgrade does not overwrite it. Applied 2026-10-29 between runner timer ticks.
+
+A sync after drift steps the clock (it stepped +9.42 s), which a running job
+would see as a jump in its timeouts. Checking that the runner is idle is not
+enough on its own, because the timer can start a job right after the check. So
+hold the timer for the restart:
+
+```bash
+sudo systemctl stop skillc-real-docker.timer
+# wait until no runner job remains; stopping the timer does not stop a run in flight
+while systemctl is-active --quiet skillc-real-docker.service || pgrep -x run-real-docker >/dev/null; do sleep 10; done
+sudo systemctl restart systemd-timesyncd
+sudo systemctl start skillc-real-docker.timer
+```
+
+Never stop the service to make room: its in-flight run is a certification.
+`pgrep -x pytest` is not a runner check, because it also matches unrelated
+test sessions on the VM.
 
 ## Verify
 
