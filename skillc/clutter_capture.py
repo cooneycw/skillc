@@ -49,9 +49,31 @@ class BoundedTree(gs.SafeTree):
             raise gs.Unreadable('aggregate inventory enumeration bound exceeded')
         return rows
 
+    def symlink(self, rel: str) -> tuple[str, int]:
+        """Read the link itself under a pinned no-follow parent, never its target."""
+        parts = self._parts(rel)
+        fd = self._open_dir(parts[:-1])
+        try:
+            before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISLNK(before.st_mode):
+                raise gs.Unreadable('inventory encountered an unsupported special file')
+            target = os.readlink(parts[-1], dir_fd=fd)
+            after = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+            if (before.st_dev, before.st_ino, before.st_mode, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_mode, after.st_ctime_ns):
+                raise gs.Unreadable('symlink identity changed during observation')
+            self.bytes_read += len(os.fsencode(target))
+            if len(os.fsencode(target)) > 4096 or self.bytes_read > MAX_BYTES:
+                raise gs.Unreadable('symlink observation byte bound exceeded')
+            return target, stat.S_IMODE(before.st_mode)
+        except OSError as exc:
+            raise gs.Unreadable('symlink observation unavailable') from exc
+        finally:
+            os.close(fd)
+
 
 class Reader:
-    def __init__(self, tree: gs.SafeTree) -> None:
+    def __init__(self, tree: BoundedTree) -> None:
         self.tree = tree
         self.count = 0
 
@@ -99,7 +121,7 @@ class Reader:
                 end = matches[index + 1].start() if index + 1 < len(matches) else len(data)
                 self.put(items, 'message:' + path + '#' + match[1].decode('ascii'), data[match.start():end].hex())
 
-    def files(self, roots: list[str], *, family: str = '') -> Surface:
+    def files(self, roots: list[str], *, family: str = '', allowed_subtrees: frozenset[str] = frozenset()) -> Surface:
         items: dict[str, str] = {}
 
         def walk(path: str, depth: int = 0) -> None:
@@ -109,6 +131,8 @@ class Reader:
             if kind == 'missing':
                 return  # A genuinely absent optional CPP/temp path is observable empty state.
             if kind == 'dir':
+                if '/' + path in allowed_subtrees:
+                    return  # Explicit declaration-bound blind spot, named in every report.
                 self.put(items, 'directory:/' + path, 'directory')
                 for name, _ in self.tree.listdir(path):
                     # Repository metadata is inventoried as Git, not counted
@@ -123,7 +147,8 @@ class Reader:
                 if family in ('registry', 'mailboxes', 'shared'):
                     self.structured(items, '/' + path, data, family)
             else:
-                raise gs.Unreadable('inventory encountered an unsupported link or special file')
+                target, mode = self.tree.symlink(path)
+                self.put(items, 'symlink:/' + path, {'target': target, 'mode': mode})
         try:
             for path in roots:
                 walk(path.lstrip('/'))
@@ -270,7 +295,8 @@ def capture_role(policy: Policy, role: str, root: Path, *, proc_root: Path = Pat
     try:
         reader = Reader(BoundedTree(root))
         rows = reader.git(scope, namespace_root)
-        rows['workspace'] = reader.files([scope['checkout']], family='workspace')
+        rows['workspace'] = reader.files([scope['checkout']], family='workspace',
+                                         allowed_subtrees=policy.allowed_subtrees(role + '/workspace'))
         for family in CPP_KINDS:
             rows['cpp-' + family] = reader.files(scope['cpp'][family], family=family)
         rows['temp'] = reader.files(scope['temp_roots'])

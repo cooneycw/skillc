@@ -22,3 +22,12 @@ stash reflogs, ignored files, state files/entries, kernel process identities and
 deleted/recreated cwd. Daemon transport is fake in local qualification; missing,
 partial, duplicate and foreign inspection populations remain UNKNOWN. Physical
 multi-container qualification and live workflows are separate from these controls.
+
+`realistic.json` is an illustrative, common-arm subtree declaration, not approval
+of an actual study list (#639). Its positive twin carries a venv symlink and a
+generated cache, explicitly reports excluded contents as not inspected, and
+still delivers its result. The outside-residue twin fails. A registered worktree
+under the excluded venv, an extra branch, and shared wave state independently
+fail; overlapping protected state roots and non-workspace exclusions are refused.
+The tests also prove that excluded directories are not walked. A separate dangling
+symlink control retains readable coverage and delivered-product rows.

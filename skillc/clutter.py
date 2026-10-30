@@ -80,12 +80,17 @@ class Policy:
     def selected(self, category: str) -> frozenset[tuple[str, str]]:
         return frozenset((row['surface'], row['key']) for row in self.data[category])
 
+    def allowed_subtrees(self, surface: str) -> frozenset[str]:
+        return frozenset(row['path'] for row in self.data.get('allowed_subtrees', []) if row['surface'] == surface)
+
 
 def parse_policy(raw: object) -> Policy:
-    if not isinstance(raw, dict) or set(raw) != {
+    fields = {
         'schema_version', 'roles', 'shared_roots', 'settle_point', 'settle_seconds',
         'delivered', 'declared_allowed', 'daemon_scope',
-    } or type(raw.get('schema_version')) is not int or raw['schema_version'] != SCHEMA_VERSION:
+    }
+    if (not isinstance(raw, dict) or not fields <= set(raw) <= fields | {'allowed_subtrees'}
+            or type(raw.get('schema_version')) is not int or raw['schema_version'] != SCHEMA_VERSION):
         raise Refused('clutter must follow the closed inventory schema version 1')
     if raw['settle_point'] != SETTLE_POINT:
         raise Refused('clutter settle point must follow completion and precede teardown')
@@ -145,6 +150,34 @@ def parse_policy(raw: object) -> Policy:
         selections.append(seen)
     if selections[0] & selections[1]:
         raise Refused('delivered and declared-allowed products must be disjoint')
+    subtrees = policy.data.get('allowed_subtrees', [])
+    if not isinstance(subtrees, list) or len(subtrees) > 64:
+        raise Refused('allowed subtrees must be a bounded list')
+    seen_subtrees: set[tuple[str, str]] = set()
+    for row in subtrees:
+        if (not isinstance(row, dict) or set(row) != {'surface', 'path'}
+                or not isinstance(row['surface'], str)
+                or row['surface'] not in {role + '/workspace' for role in policy.roles}):
+            raise Refused('allowed subtrees apply only to declared workspace surfaces')
+        path = _path(row['path'])
+        surface = row['surface']
+        scope = policy.data['roles'][surface.removesuffix('/workspace')]
+        if not path.startswith(scope['checkout'] + '/'):
+            raise Refused('allowed subtrees must be strict checkout descendants')
+        protected = [scope['gitdir'], *scope['remotes'].values(), *scope['temp_roots'],
+                     *policy.data['shared_roots'], *(p for roots in scope['cpp'].values() for p in roots)]
+        def overlaps(left: str, right: str) -> bool:
+            return left == right or left.startswith(right + '/') or right.startswith(left + '/')
+        if any(overlaps(path, root) for root in protected):
+            raise Refused('allowed subtrees must not overlap Git, CPP, shared or temporary scope')
+        if any(surface == other and overlaps(path, previous) for other, previous in seen_subtrees):
+            raise Refused('allowed subtrees must be distinct and non-overlapping')
+        # An exclusion cannot silently swallow a separately declared product.
+        for selected in selections:
+            for selected_surface, product_key in selected:
+                if selected_surface == surface and ':' in product_key and overlaps(path, product_key.split(':', 1)[1]):
+                    raise Refused('allowed subtrees must not overlap declared products')
+        seen_subtrees.add((surface, path))
     return policy
 
 
@@ -228,7 +261,11 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot) -> dict[str, Any
             'status': status, 'clean': False if status == 'NOT_CLEAN' else None if status == 'UNKNOWN' else True,
             'counts': {key: len(items) for key, items in bins.items()}, 'additions': bins,
             'preservation': preservation, 'unknown': unknown,
+            'not_inspected': [{'surface': row['surface'], 'path': row['path'],
+                               'reason': 'Declared allowed subtree; contents are not inspected.'}
+                              for row in policy.data.get('allowed_subtrees', [])],
             'blind_spots': ['Final snapshots cannot see state created and removed between observations.',
+                           'Declared allowed workspace subtree contents are not inspected; see not_inspected.',
                            'Process evidence covers only the declared, controller-visible namespaces.',
                            ('A surviving controller-started process is also an added clutter candidate; '
                             'only the observer itself is excluded. Docker process collection has only fake qualification.'),

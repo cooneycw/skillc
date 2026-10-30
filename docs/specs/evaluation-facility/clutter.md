@@ -71,7 +71,11 @@ Example policy shape (illustrative fixture paths, not a live approval):
   },
   "shared_roots": [],
   "delivered": [{"surface": "agent/workspace", "key": "file:/work/work/result.txt"}],
-  "declared_allowed": [{"surface": "agent/workspace", "key": "file:/work/work/friction.log"}]
+  "declared_allowed": [{"surface": "agent/workspace", "key": "file:/work/work/friction.log"}],
+  "allowed_subtrees": [
+    {"surface": "agent/workspace", "path": "/work/work/.venv"},
+    {"surface": "agent/workspace", "path": "/work/work/__pycache__"}
+  ]
 }
 ```
 
@@ -81,6 +85,23 @@ An actually absent optional CPP path is an observed empty surface, not a missing
 observation. An omitted family or role cannot establish clean coverage. The
 single-attempt bridge has one role, `agent`; waves declare every role and at least
 one shared-volume root. The shared-volume root must remain observable.
+
+`allowed_subtrees` is optional (default: none), with at most 64 exact, distinct,
+non-overlapping paths strictly beneath a declared workspace checkout. Directory
+contents at those roots are not walked. Every report names them under
+`not_inspected` and states that their contents were not inspected. `CLEAN` means
+zero observed clutter outside these explicit blind spots, not inspection of
+their contents. A file or symlink at an allowed directory path is still recorded
+as an item; targets are never followed. There are no default cache exclusions.
+The example list above is illustrative only; the actual study list requires
+owner approval in the frozen declaration (#639), equally for both arms.
+
+Allowances cannot name the whole checkout, another surface, a declared product,
+or overlap declared Git metadata, fixture remotes, CPP roots, shared wave state or
+temporary scope. They affect only workspace enumeration. Independent worktree,
+ref, CPP and shared-state collectors still run: a registered worktree beneath
+an allowed environment directory remains visible and an extra branch remains
+clutter. Putting a shared wave-state root beneath an allowance is refused.
 
 The controller must designate an isolated daemon namespace before using
 `daemon_scope: controller-isolated`. The declaration alone does not establish
@@ -102,6 +123,10 @@ There are also required shared-state, container and network surfaces.
   tracking, tag and other ref namespaces as well as branches.
 - Workspace enumeration includes files even when Git ignores them. It does not
   emulate ignore-pattern semantics or discard a file because it is ignored.
+  Only explicit `allowed_subtrees` stop enumeration. Symlinks are items containing
+  a target and mode fingerprint, read under a pinned no-follow parent; neither a
+  dangling target nor a target outside the checkout is followed. Unreadable or
+  changing links remain unknown. Git metadata must still support raw Git reads.
 - Files, directories and structured state entries are distinct logical items.
   JSON object/array nodes and revision-framed CPP mailbox messages are observed
   separately from their storage file: appending a registry entry or message to a
@@ -155,6 +180,11 @@ state, and prove both worktree-first and stash-first cleanup orders clean. Other
 controls cover unknown/partial/malformed observations, missing roles, daemon
 binding drift, mutable baseline aliasing, PID reuse, deleted/recreated cwd,
 controller-object corruption, duplicate journal entries and checkpoint tampering.
+`realistic.json` supplies environment/cache roots and independent worktree,
+branch and wave-state controls. The realistic positive twin delivers its product
+with a venv symlink and cache; outside residue fails while inside contents are
+explicitly not inspected. A symlink outside allowances stays observable as an
+item without discarding the delivered-product rows.
 
 Local qualification is model-free: trusted fixture repositories, fixed sleeping
 processes, fake Docker transport and a trusted read-only collector packet. It is

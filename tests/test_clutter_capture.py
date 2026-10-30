@@ -285,14 +285,14 @@ def test_export_reads_do_not_run_subject_git_configuration(namespace: tuple[Path
     assert 'refs/heads/main' in rows['agent/local-branches'].items
 
 
-def test_unreadable_scope_symlink_and_read_budget_never_certify(namespace: tuple[Path, c.Policy, Path],
+def test_unreadable_scope_special_file_and_read_budget_never_certify(namespace: tuple[Path, c.Policy, Path],
                                                              monkeypatch: pytest.MonkeyPatch) -> None:
     root, policy, proc = namespace
     reader = inventory(root, policy, proc)
     assert all(row.complete for row in reader.capture('before').surfaces.values())
     source = root / 'state/registry.json'
     source.unlink()
-    source.symlink_to(root / 'work/repo/base.txt')
+    os.mkfifo(source)
     report = c.classify(policy, reader.capture('before'), reader.capture('after'))
     assert report['status'] == 'UNKNOWN'
     source.unlink()

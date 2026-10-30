@@ -45,6 +45,23 @@ def test_common_inventory_policy_and_approval_digest_bind_allowed_state() -> Non
         calibration._require_whole_declaration_approval(parsed.data, parsed.approval)
 
 
+def test_subtree_allowance_changes_require_a_new_whole_declaration_approval() -> None:
+    raw = _declaration_data(attempts=1)
+    policy = declaration()
+    policy['allowed_subtrees'] = [{'surface': 'agent/workspace', 'path': '/work/repo/.venv'}]
+    raw['clutter_inventory'] = policy
+    approved = calibration.parse_declaration(stamp_approval(raw))
+    assert approved.approval is not None
+    calibration._require_whole_declaration_approval(approved.data, approved.approval)
+    changed: dict[str, Any] = copy.deepcopy(dict(approved.data))
+    changed['clutter_inventory']['allowed_subtrees'].append(
+        {'surface': 'agent/workspace', 'path': '/work/repo/node_modules'})
+    parsed = calibration.parse_declaration(changed)
+    assert parsed.approval is not None
+    with pytest.raises(calibration.DeclarationRefused, match='digest'):
+        calibration._require_whole_declaration_approval(parsed.data, parsed.approval)
+
+
 @pytest.mark.parametrize('fault', ['schema', 'empty-roles', 'omit-cpp', 'empty-cpp', 'empty-temp',
                                   'unsafe-path', 'wrong-settle', 'overlap', 'per-arm'])
 def test_invalid_inventory_declarations_are_refused_before_dispatch(fault: str) -> None:
