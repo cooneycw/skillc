@@ -194,5 +194,10 @@
     "name": "fabricated-pass-unavailable",
     "mutation": "fabricated_unavailable",
     "expected_verdict": "FAIL"
+  },
+  {
+    "name": "goalie-in-F4-population",
+    "mutation": "extra_goalie_f4",
+    "expected_verdict": "FAIL"
   }
 ]

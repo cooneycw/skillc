@@ -80,6 +80,7 @@ class GameOracle:
         self.players: dict[tuple[int, int], Json] = {}
         self.box_rosters: dict[int, set[int] | None] = {}
         self.pbp_rosters: dict[int, set[int] | None] = {}
+        self.box_roles: dict[tuple[int, int], str] = {}
         self.roles: dict[tuple[int, int], str] = {}
         self._read_players()
         self.plays, self.play_conflict = _unique(self.pbp.get("plays"), "eventId")
@@ -159,6 +160,7 @@ class GameOracle:
                                          team_id=team, player_id=player)
                         self.players[key] = row
                         self.roles[key] = "goalie" if group == "goalies" else "skater"
+                        self.box_roles[key] = self.roles[key]
                         roster.add(player)
             self.box_rosters[team] = roster if valid else None
         roster_rows, conflict = _unique(self.pbp.get("rosterSpots"), "playerId")
@@ -324,7 +326,7 @@ class GameOracle:
         if self.box_rosters[team] is None:
             return None
         rows = [p for key, p in self.players.items()
-                if key[0] == team and (role is None or self.roles.get(key) == role)]
+                if key[0] == team and (role is None or self.box_roles.get(key) == role)]
         values = []
         for row in rows:
             value = integer(row.get(field))
@@ -413,14 +415,15 @@ class GameOracle:
                     self.anomaly("event-attribution", f"{kind}: unreadable {actor}",
                                  ("play_by_play",), pointer=self.event_pointer(event), event_id=event["eventId"])
         for (team, player), row in sorted(self.players.items()):
-            role = self.roles.get((team, player))
-            for comparison, (kind, actor) in event_fields.items():
-                events = self._events(kind)
-                detail = (sum(_object(e.get("details")).get(actor) == player for e in events)
-                          if events is not None and all(type(_object(e.get("details")).get(actor)) is int for e in events) else None)
-                field = "blockedShots" if comparison == "blocked_shots" else comparison
-                self.emit("F4", comparison, integer(row.get(field)), detail, "events",
-                          ("boxscore", "play_by_play"), team_id=team, player_id=player)
+            role = self.box_roles.get((team, player))
+            if role == "skater":
+                for comparison, (kind, actor) in event_fields.items():
+                    events = self._events(kind)
+                    detail = (sum(_object(e.get("details")).get(actor) == player for e in events)
+                              if events is not None and all(type(_object(e.get("details")).get(actor)) is int for e in events) else None)
+                    field = "blockedShots" if comparison == "blocked_shots" else comparison
+                    self.emit("F4", comparison, integer(row.get(field)), detail, "events",
+                              ("boxscore", "play_by_play"), team_id=team, player_id=player)
             duration = (_sum(self.raw_shift_durations.get((team, player), []))
                         if self.records is not None and not self.shift_conflict else None)
             self.emit("F5", "toi_seconds", seconds(row.get("toi")), duration, "seconds",

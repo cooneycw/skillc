@@ -69,7 +69,15 @@ def test_committed_negative_controls(case: dict[str, Any], tmp_path: Path) -> No
     expected = game.reconcile()
     candidate = copy.deepcopy(expected)
     mutation = case["mutation"]
-    if mutation == "fabricated_unavailable":
+    if mutation == "extra_goalie_f4":
+        family = next(f for f in candidate["families"] if f["family_id"] == "F4")
+        check = copy.deepcopy(family["checks"][0])
+        check["scope"]["player_id"] = 102
+        check.update(check_id="F4/hits/10/102/null/null/null", status="UNAVAILABLE", summary_value=None, detail_value=0)
+        family["checks"].append(check)
+        family["status"] = "UNAVAILABLE"
+        result = oracle.compare(expected, candidate, fresh=True)
+    elif mutation == "fabricated_unavailable":
         data = fixture()
         data["boxscore"]["playerByGameStats"]["awayTeam"]["forwards"][0].pop("hits")
         partial = make_game(data).reconcile()
@@ -404,3 +412,12 @@ def test_qualifier_rejects_variant_that_excuses_fabricated_unavailable(monkeypat
     monkeypatch.setattr(oracle, "compare", blind_missing)
     with pytest.raises(snapshot.ReferenceError, match="blind/noisy: fabricated-pass-unavailable"):
         qualify(CONTROLS)
+
+
+def test_role_populations_match_real_goalie_fields() -> None:
+    report = make_game().reconcile()
+    assert {c["scope"]["player_id"] for c in checks(report, "F4")} == {101, 201}
+    assert all(c["status"] == "PASS" for c in checks(report, "F4"))
+    assert {c["scope"]["player_id"] for c in checks(report, "F5") if c["comparison"] == "toi_seconds"} == {101, 102, 201, 202}
+    assert {c["scope"]["player_id"] for c in checks(report, "F5") if c["comparison"] == "shift_count"} == {101, 201}
+    assert {c["scope"]["player_id"] for c in checks(report, "F8") if c["comparison"] == "participation"} == {101, 102, 201, 202}

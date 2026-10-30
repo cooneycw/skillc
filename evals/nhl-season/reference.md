@@ -17,7 +17,10 @@ host produces a verified private season copy and measured census.
 The five light live source requests during #632 all returned HTTP 403 from the
 worker container. The worker has no newly fetched NHL response. The controller separately verified
 goalie field names from three completed 2025-26 boxscores on 2026-10-30; the
-synthetic goalies follow that shape. The
+synthetic goalies follow that shape. Under the
+[owner ruling](https://github.com/cooneycw/skillc/issues/632#issuecomment-6527303250),
+F4 checks skaters only; goalies remain in TOI/participation and never receive
+reported shift-count checks. The
 adapter recognizes the gamecenter source fields named in the implementation and
 shift-chart types 517 (shift) / 505 (goal); unfamiliar required fields, missing
 sources, conflicting identities and incomplete chart populations remain

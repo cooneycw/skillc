@@ -9,12 +9,13 @@ event counts, both teams, skaters and goalies. Goalie rows intentionally lack
 the four skater event fields and a reported shift count, matching the controller
 verification of three completed 2025-26 boxscores. The fixture names its expected
 family statuses explicitly; an honest unavailable check is a correct report. `bad/cases.json` commits the
-negative mutations and their explicit expected verdicts. There are 24 cases:
+negative mutations and their explicit expected verdicts. There are 25 cases:
 eight wrong delivered family values (FAIL), eight source discrepancies
 (DISCREPANCY), missing family/check and wrong membership (FAIL), changed live
 bytes (UNKNOWN), an empty schedule population (REFUSED), two partial-reference
 unsupported-output cases (FAIL), and fabricated 0/0 PASS over missing input
-(FAIL). Honest UNAVAILABLE reporting is graded directly; missing is never zero.
+(FAIL), plus a goalie incorrectly added to the F4 population (FAIL).
+Honest UNAVAILABLE reporting is graded directly; missing is never zero.
 
 Run `uv run python -m skillc.nhl_reference selftest`. It executes the actual
 oracle/comparators/re-check, requires the complete case population, and refuses

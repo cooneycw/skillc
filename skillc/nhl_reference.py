@@ -148,7 +148,8 @@ def qualify(controls: Path) -> Json:
     names = [c.get("name") for c in cases]
     required = {*(f"wrong-{f}" for f in oracle.FAMILIES), *(f"source-{f}" for f in oracle.FAMILIES),
                 "missing-family", "missing-check", "wrong-on-ice-player", "changed-live-bytes", "empty-season",
-                "partial-reference-complete-candidate", "partial-reference-known-wrong", "fabricated-pass-unavailable"}
+                "partial-reference-complete-candidate", "partial-reference-known-wrong", "fabricated-pass-unavailable",
+                "goalie-in-F4-population"}
     if len(names) != len(required) or set(names) != required:
         raise ReferenceError("qualification control population incomplete or duplicated")
     identity = data["game"]["id"]
@@ -176,7 +177,16 @@ def qualify(controls: Path) -> Json:
     for case in cases:
         candidate = copy.deepcopy(expected)
         mutation = case["mutation"]
-        if mutation == "fabricated_unavailable":
+        if mutation == "extra_goalie_f4":
+            family = next(f for f in candidate["families"] if f["family_id"] == "F4")
+            check = copy.deepcopy(family["checks"][0])
+            check["scope"]["player_id"] = 102
+            check.update(check_id="F4/hits/10/102/null/null/null", status="UNAVAILABLE",
+                         summary_value=None, detail_value=0)
+            family["checks"].append(check)
+            family["status"] = "UNAVAILABLE"
+            actual = oracle.compare(expected, candidate, fresh=True)["status"]
+        elif mutation == "fabricated_unavailable":
             missing = copy.deepcopy(data)
             missing["boxscore"]["playerByGameStats"]["awayTeam"]["forwards"][0].pop("hits")
             missing_sources = {name: (sources[name][0], missing[name]) for name in snapshot.SOURCE_IDS}
