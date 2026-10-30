@@ -13,7 +13,7 @@ from typing import Any
 GRADER = {"id": "change-with-regression-568", "revision": "1"}
 REQUIRED = ("delivered-main", "feature-correct", "legacy-preserved", "tests-protect")
 VECTORS = ('legacy-set-existing', 'legacy-list-order', 'legacy-new-defaults', 'csv-valid-update-insert-and-duplicates', 'csv-reversed-header', 'csv-header-only', 'csv-empty', 'csv-duplicate-header', 'csv-extra-column', 'csv-bad-sku', 'csv-bad-quantity', 'csv-late-invalid-rollback', 'jsonl-valid-update-insert-and-duplicates', 'jsonl-empty', 'jsonl-missing-extra-key', 'jsonl-duplicate-key', 'jsonl-boolean', 'jsonl-float', 'jsonl-null', 'jsonl-late-invalid-rollback', 'input-bad-utf8', 'input-missing', 'db-missing', 'db-uninitialized')
-PROGRAMS = ("reference", "alternative", "csv-only", "jsonl-only", "partial", "replace")
+PROGRAMS = ("reference", "alternative", "csv-only", "jsonl-only", "partial", "replace", "legacy-api")
 
 
 def row(cid: str, outcome: str, message: str, *, mandatory: bool = True) -> dict[str, Any]:
@@ -74,12 +74,12 @@ def judge(envelope: dict[str, Any]) -> dict[str, Any]:
             if (isinstance(protection, list) and len(protection) == len(PROGRAMS)
                     and len(programs) == len(PROGRAMS) and all(isinstance(name, str) for name in programs)
                     and set(programs) == set(PROGRAMS)
-                    and all(type(r.get("population_valid")) is bool and type(r.get("legacy_active")) is bool
+                    and all(type(r.get("population_valid")) is bool
                             and (r.get("ok") is None or type(r.get("ok")) is bool) for r in protection)):
-                ok = all(r.get("population_valid") is True and r.get("legacy_active") is True
+                ok = all(r.get("population_valid") is True
                          and r.get("ok") is (r["program"] in ("reference", "alternative")) for r in protection)
                 criteria["tests-protect"] = row("tests-protect", "SATISFIED" if ok else "VIOLATED",
-                                               "actual delivered suite against two valid and four faulty implementations")
+                                               "actual delivered suite against two valid implementations, four import faults and a legacy-API-only fault")
     return {"grader": GRADER, "criteria": [*criteria.values(), gate(trusted)]}
 
 

@@ -17,8 +17,9 @@ A separate offline container of the measured attempt image runs the oracle.
 Its trusted parent reads SQLite state after unprivileged candidate subprocesses
 and adopted descendants stop; no candidate code executes on the controller.
 The actual delivered suite is tested against both valid implementations and
-four faulty ones. Its count is collected, not fixed at five; the public legacy
-test must remain active, and an empty suite cannot pass. Missing oracle
+four import faults plus a legacy-API-only fault. Its count is collected, not
+fixed at five; legacy API protection is measured behaviorally, and an empty
+suite cannot pass. Missing oracle
 infrastructure stays UNKNOWN. Runtime controls use reviewed B1 programs on the
 host only in an explicitly restricted test emulator; real isolation is a Docker
 boundary and has no host fallback.

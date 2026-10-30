@@ -13,7 +13,8 @@ builder reads exact remote main blobs/modes through GitDir and sends those bytes
 to a separate offline oracle container, never a source digest or local workspace.
 Missing export/oracle infrastructure is UNKNOWN; observed absent/undelivered main
 or wrong delivered behavior FAILS. The actual delivered suite is checked against
-two valid/four faulty implementations without B1's fixed test-count assumption.
+two valid implementations, four import faults and a legacy-API-only fault,
+without B1's fixed test-count or test-name assumptions.
 The baseline gate criterion is explicitly not applicable; gate execution stays
 an optional beside-measure, and #568's process-honesty role is explicitly None.
 Constructed B1 exports alone still do not prove this dispatch/service/record path.

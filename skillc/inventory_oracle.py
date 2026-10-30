@@ -8,19 +8,80 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import secrets
+import selectors
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from . import inventory_oracle_harness as harness
-from . import step6_oracle as transport
 from .docker_backend import OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend, _docker_env
 
 CONTAINER_SECONDS = 480
 MAX_OUTPUT_BYTES = 256 * 1024
+
+
+def _bounded(argv: Sequence[str], data: str, *, timeout: float, limit: int,
+             env: Mapping[str, str] | None) -> tuple[int | None, bytes, str | None]:
+    """Bound both pipe directions under one deadline; caller removes the container."""
+    payload = data.encode('utf-8')
+    if len(payload) > 8 * 1024 * 1024:
+        return None, b'', 'input-over-bound'
+    deadline = time.monotonic() + timeout
+    proc = subprocess.Popen(list(argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, env=dict(env) if env is not None else None)
+    assert proc.stdin is not None and proc.stdout is not None
+    chunks: list[bytes] = []
+    total = offset = 0
+    problem = None
+    try:
+        with selectors.DefaultSelector() as selector:
+            os.set_blocking(proc.stdin.fileno(), False)
+            os.set_blocking(proc.stdout.fileno(), False)
+            if payload:
+                selector.register(proc.stdin, selectors.EVENT_WRITE)
+            else:
+                proc.stdin.close()
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            while selector.get_map() or proc.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    problem = 'timeout'
+                    break
+                for key, _ in selector.select(min(remaining, .05)):
+                    if key.fileobj is proc.stdin:
+                        try:
+                            offset += os.write(proc.stdin.fileno(), payload[offset:offset + 65536])
+                        except BrokenPipeError:
+                            problem = 'input-write-failed'
+                            break
+                        if offset == len(payload):
+                            selector.unregister(proc.stdin)
+                            proc.stdin.close()
+                    else:
+                        chunk = os.read(proc.stdout.fileno(), 65536)
+                        if not chunk:
+                            selector.unregister(proc.stdout)
+                            proc.stdout.close()
+                        else:
+                            total += len(chunk)
+                            if total > limit:
+                                problem = 'output-over-bound'
+                                break
+                            chunks.append(chunk)
+                if problem is not None:
+                    break
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=5)
+        proc.stdin.close()
+        proc.stdout.close()
+    return proc.returncode, b''.join(chunks), problem
 
 
 def container_argv(docker_bin: Sequence[str], image: str, name: str) -> list[str]:
@@ -62,7 +123,7 @@ def run(files: Mapping[str, Mapping[str, Any]], backend: object, handle: object,
                           'sources': sources, 'nonce': nonce})
         argv = container_argv(tuple(backend.docker_bin), image, name)
         try:
-            code, output, problem = transport._bounded(argv, job, timeout=CONTAINER_SECONDS,
+            code, output, problem = _bounded(argv, job, timeout=CONTAINER_SECONDS,
                                                        limit=MAX_OUTPUT_BYTES, env=env)
         finally:
             subprocess.run([*backend.docker_bin, 'rm', '-f', name],

@@ -35,7 +35,6 @@ print(json.dumps({'count': result.testsRun, 'ids': names,
                   'skipped': [test.id() for test, reason in result.skipped],
                   'ok': result.wasSuccessful()}))
 '''
-_LEGACY = 'test_legacy.Legacy.test_public_api_preserves_history'
 
 
 def children() -> list[int]:
@@ -111,18 +110,29 @@ def execute(argv: list[str], cwd: Path, budget: Any, seconds: float = 5,
         return process.returncode, out.read_text(encoding='utf-8'), err.read_text(encoding='utf-8')
 
 
+def stage_files(files: dict[str, bytes], modes: dict[str, str], root: Path, budget: Any) -> None:
+    for path, data in files.items():
+        if modes[path] not in ('100644', '100755'):
+            raise RuntimeError('unsupported captured mode')
+        target = root / path
+        budget.write(target, data)
+        target.chmod(0o755 if modes[path] == '100755' else 0o644)
+
+
 def protection(files: dict[str, bytes], manifest: dict[str, Any], sources: dict[str, bytes],
-               engine: dict[str, Any], budget: Any) -> list[dict[str, Any]]:
+               engine: dict[str, Any], budget: Any, modes: dict[str, str]) -> list[dict[str, Any]]:
     """Run the ACTUAL delivered suite, with no fixed test-count requirement."""
     rows = []
-    for name in ('reference', 'alternative', 'csv-only', 'jsonl-only', 'partial', 'replace'):
+    for name in ('reference', 'alternative', 'csv-only', 'jsonl-only', 'partial', 'replace', 'legacy-api'):
         with tempfile.TemporaryDirectory(prefix='oracle-suite-') as temp:
             root = Path(temp)
             # Each implementation sees the same delivered project/tests; only
             # the implementation under test is replaced by the trusted control.
-            for path, data in files.items():
-                budget.write(root / path, data)
-            budget.write(root / 'inventory.py', engine['program'](name, manifest, sources))
+            stage_files(files, modes, root, budget)
+            code = engine['program']('reference' if name == 'legacy-api' else name, manifest, sources)
+            if name == 'legacy-api':
+                code += b'\nif __name__ != "__main__":\n def set_quantity(*args, **kwargs): raise ValueError("legacy API removed")\n'
+            budget.write(root / 'inventory.py', code)
             code, out, _ = execute([sys.executable, '-B', '-c', _TEST_RUNNER], root, budget)
             try:
                 row = json.loads(out.strip().splitlines()[-1])
@@ -132,12 +142,97 @@ def protection(files: dict[str, bytes], manifest: dict[str, Any], sources: dict[
             valid = (code == 0 and isinstance(ids, list) and all(isinstance(x, str) for x in ids)
                      and len(ids) == len(set(ids)) and isinstance(skipped, list)
                      and type(row.get('count')) is int and row['count'] == len(ids)
-                     and row['count'] > len(skipped) and _LEGACY in ids and _LEGACY not in skipped
+                     and row['count'] > len(skipped)
                      and type(row.get('ok')) is bool)
             rows.append({'program': name, 'population_valid': valid,
-                         'ok': row.get('ok') if valid else None, 'count': row.get('count'),
-                         'legacy_active': valid and _LEGACY not in skipped})
+                         'ok': row.get('ok') if valid else None, 'count': row.get('count')})
     return rows
+
+
+def evaluate_vector(files: dict[str, bytes], row: dict[str, Any], budget: Any, engine: dict[str, Any],
+                    modes: dict[str, str]) -> dict[str, Any]:
+    # B1's independent literal-state checks, extended to the full delivered
+    # project. Oracle databases/inputs live outside that project so filenames
+    # chosen by an implementation cannot collide with grader scratch.
+    seed, state, bounded = engine['seed'], engine['state'], execute
+    start_steps = budget.processes
+    with tempfile.TemporaryDirectory(prefix="568-vector-") as tmp:
+        parent = Path(tmp)
+        parent.chmod(0o711)
+        d, scratch = parent / 'project', parent / 'scratch'
+        d.mkdir()
+        scratch.mkdir()
+        scratch.chmod(0o777)
+        stage_files(files, modes, d, budget)
+        db, data = scratch / 'db', scratch / 'input'
+        seed(db, row.get("db"), row.get("extra_items", ()))
+        if db.exists():
+            db.chmod(0o666)
+        before = state(db)
+        if not row.get("missing_input"):
+            budget.write(data, bytes.fromhex(row["hex"]) if "hex" in row else row["input"].encode())
+        else:
+            assert not data.exists()
+        if row["action"] == "import":
+            argv = [sys.executable, "inventory.py", "--db", str(db), "import", "--format", row["format"], str(data)]
+        else:
+            action = {"set": f"inventory.set_quantity({str(db)!r},'A',8);",
+                      "new": f"inventory.set_quantity({str(db)!r},'B',2);", "list": ""}[row["action"]]
+            checks = (f"DB={str(db)!r}\n" + "for sku,quantity in [(' A',8),('A',True),('A',-1)]:\n"
+                      " try: inventory.set_quantity(DB,sku,quantity)\n"
+                      " except ValueError: pass\n"
+                      " else: raise AssertionError('legacy validation lost')\n") if row["action"] == "set" else ""
+            argv = [sys.executable, "-c", "import inventory,json\n" + checks + action
+                    + f"\nprint(json.dumps(inventory.list_items({str(db)!r})))"]
+        rc, stdout, stderr = bounded(argv, d, budget)
+        after = state(db)
+        observed_states = [after]
+        try:
+            output_ok = (stdout.endswith("\n") and json.loads(stdout) == row["stdout"]) if row["code"] == 0 else stdout == ""
+        except ValueError:
+            output_ok = False
+        output_ok &= rc == row["code"]
+        output_ok &= stderr == "" if row["code"] == 0 else stderr.startswith(row["prefix"]) and len(stderr) > len(row["prefix"])
+        if row["action"] != "import":
+            # CLI gets an independent identical seed; it cannot borrow an API write.
+            db.unlink()
+            seed(db, row.get("db"), row.get("extra_items", ()))
+            if db.exists():
+                db.chmod(0o666)
+            cli = [sys.executable, "inventory.py", "--db", str(db)]
+            calls = [(cli + ["list"], row["stdout"])]
+            if row["action"] != "list":
+                sku, quantity = ("A", "8") if row["action"] == "set" else ("B", "2")
+                calls.insert(0, (cli + ["put", sku, quantity], {"updated": 1}))
+            for command, wanted in calls:
+                status, out, err = bounded(command, d, budget)
+                try:
+                    output_ok &= status == 0 and err == "" and out.endswith("\n") and json.loads(out) == wanted
+                except ValueError:
+                    output_ok = False
+                observed_states.append(state(db))
+            after = state(db)
+        expected = [tuple(x) for x in row["items"]]
+        metadata = {x[0]: x[2:] for x in after["items"]}
+        preserved = all(metadata.get(x[0]) == x[2:] for x in before["items"])
+        preserved &= before["audit"] == after["audit"] and before["schema"] == after["schema"]
+        if row["action"] == "import":
+            feature = output_ok and [x[:2] for x in after["items"]] == [x[:2] for x in expected]
+            feature &= all(x == next((e for e in expected if e[0] == x[0]), None)
+                           for x in after["items"] if x[0] not in {b[0] for b in before["items"]})
+            if row["code"] != 0:
+                feature &= before == after
+            legacy = bool(preserved)
+        else:
+            feature = True
+            legacy = bool(output_ok and preserved and all(
+                observed["items"] == expected and observed["audit"] == before["audit"]
+                and observed["schema"] == before["schema"] for observed in observed_states))
+        return {"id": row["id"], "feature": bool(feature), "legacy": legacy, "code": rc,
+                "stdout": stdout, "stderr": stderr, "items": after["items"], "audit": after["audit"],
+                "observed_states": observed_states,
+                "managed_steps": budget.processes - start_steps}
+
 
 
 def container_parent() -> bool:
@@ -150,6 +245,7 @@ def evaluate(job: dict[str, Any]) -> dict[str, Any]:
     if not container_parent() or ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
         raise RuntimeError('isolated container parent/subreaper unavailable')
     files = {p: base64.b64decode(row['data_b64'], validate=True) for p, row in job['files'].items()}
+    modes = {p: row['mode'] for p, row in job['files'].items()}
     engine: dict[str, Any] = {'__file__': '/trusted/evals/level3/change-with-regression-568/oracle.py'}
     exec(compile(job['engine'], engine['__file__'], 'exec'), engine)  # noqa: S102 - trusted controller code, in the oracle container only
     engine['bounded'] = execute
@@ -159,10 +255,10 @@ def evaluate(job: dict[str, Any]) -> dict[str, Any]:
     rows = []
     for vector in manifest['vectors']:
         try:
-            rows.append(engine['vector'](files['inventory.py'], vector, budget))
+            rows.append(evaluate_vector(files, vector, budget, engine, modes))
         except sqlite3.DatabaseError:
             rows.append({'id': vector['id'], 'feature': False, 'legacy': False})
-    tests = protection(files, manifest, sources, engine, budget)
+    tests = protection(files, manifest, sources, engine, budget, modes)
     budget.check()
     return {'status': 'ran', 'vectors': [{'id': row['id'], 'feature': row['feature'],
                                         'legacy': row['legacy']} for row in rows],

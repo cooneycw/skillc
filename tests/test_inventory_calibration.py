@@ -150,7 +150,7 @@ def test_paired_runtime_grades_only_captured_main(
                 return subprocess.CompletedProcess(argv, 1, stdout='', stderr='Error: No such object: ' + argv[-1])
         return real_run(argv, *args, **kwargs)
 
-    monkeypatch.setattr(io.transport, '_bounded', oracle)
+    monkeypatch.setattr(io, '_bounded', oracle)
     monkeypatch.setattr(subprocess, 'run', remove_or_run)
 
     class Backend(VirtualMountBackend):

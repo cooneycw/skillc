@@ -46,7 +46,7 @@ def judge() -> Any:
 
 def oracle_good(judge: Any) -> dict[str, Any]:
     return {'status': 'ran', 'vectors': [{'id': name, 'feature': True, 'legacy': True} for name in judge.VECTORS],
-            'protection': [{'program': p, 'population_valid': True, 'legacy_active': True,
+            'protection': [{'program': p, 'population_valid': True,
                             'count': 5, 'ok': p in ('reference', 'alternative')} for p in judge.PROGRAMS]}
 
 
@@ -88,7 +88,7 @@ def test_judge_discriminates_wrong_and_unavailable_artifacts(judge: Any, fault: 
     elif fault == 'empty-protection':
         oracle['protection'] = []
     elif fault == 'malformed-protection':
-        oracle['protection'][0].pop('legacy_active')
+        oracle['protection'][0].pop('population_valid')
     else:
         oracle = {'status': fault}
     rows = outcomes(judge, envelope(oracle))
@@ -179,7 +179,7 @@ def test_oracle_transport_refuses_incomplete_results_and_always_removes_containe
         return subprocess.CompletedProcess(argv, int(problem in ('removal-failed', 'auto-removed')),
                                            stdout='', stderr='No such container')
 
-    monkeypatch.setattr(io.transport, '_bounded', bounded)
+    monkeypatch.setattr(io, '_bounded', bounded)
     monkeypatch.setattr(io.subprocess, 'run', remove)
     files = {'inventory.py': {'mode': '100644', 'data_b64': base64.b64encode(b'reviewed transport bytes').decode()}}
     result = io.run(files, backend, object(), task_root=TASK)
@@ -188,20 +188,34 @@ def test_oracle_transport_refuses_incomplete_results_and_always_removes_containe
     assert 'sha256:' + 'a' * 64 in seen[0] and 'tag' not in seen[0]
 
 
-def reviewed_oracle(program: str, *, extra_test: bool = False, empty_tests: bool = False) -> dict[str, Any]:
+def reviewed_oracle(program: str, *, extra_test: bool = False, empty_tests: bool = False,
+                    renamed_legacy: bool = False, no_legacy: bool = False) -> dict[str, Any]:
     """Host test emulator accepts named committed B1 programs only, never an
     arbitrary candidate path or bytes. Production io.run has no such route."""
     engine = load(TASK / 'oracle.py')
     sources = engine.load_sources()
     manifest = json.loads(sources['controls.json'])
-    assert program in ('reference', 'alternative', 'fixture', 'replace')
-    files = {'inventory.py': engine.program(program, manifest, sources)}
+    assert program in ('reference', 'alternative', 'fixture', 'replace', 'delegated', 'executable')
+    files = {'inventory.py': engine.program('reference' if program in ('delegated', 'executable') else program, manifest, sources)}
+    if program in ('delegated', 'executable'):
+        files['implementation.py'] = files['inventory.py']
+        files['inventory.py'] = b'from implementation import *\nif __name__ == "__main__": raise SystemExit(main())\n'
+    if program == 'executable':
+        files['helper_cli'] = b'#!/usr/bin/env python3\n' + files['implementation.py']
+        files['inventory.py'] = (b'from implementation import *\n'
+                                 b'if __name__ == "__main__":\n'
+                                 b' import subprocess,sys; raise SystemExit(subprocess.call(["./helper_cli", *sys.argv[1:]]))\n')
     if not empty_tests:
         files.update({'tests/test_legacy.py': sources['fixture/tests/test_legacy.py'],
                       'tests/test_import.py': sources['candidates/test_import.py']})
+    if renamed_legacy:
+        files['tests/test_existing_api.py'] = files.pop('tests/test_legacy.py')
+    if no_legacy:
+        files.pop('tests/test_legacy.py')
     if extra_test:
         files['tests/test_extra.py'] = b'import unittest\nclass Extra(unittest.TestCase):\n def test_extra(self): self.assertEqual(1,1)\n'
-    job = {'files': {p: {'data_b64': base64.b64encode(data).decode()} for p, data in files.items()},
+    job = {'files': {p: {'data_b64': base64.b64encode(data).decode(), 'mode': '100755' if p == 'helper_cli' else '100644'}
+                     for p, data in files.items()},
            'engine': (TASK / 'oracle.py').read_text(), 'manifest': manifest,
            'sources': {p: base64.b64encode(data).decode() for p, data in sources.items() if p.endswith('.py')},
            'nonce': 'reviewed-fixtures-only'}
@@ -226,7 +240,7 @@ m.main()
     return json.loads(proc.stdout.splitlines()[-1][len(job['nonce']):])
 
 
-@pytest.mark.parametrize('program', ['reference', 'alternative', 'fixture', 'replace'])
+@pytest.mark.parametrize('program', ['reference', 'alternative', 'fixture', 'replace', 'delegated', 'executable'])
 def test_actual_semantics_and_delivered_protection_on_reviewed_controls(program: str, judge: Any) -> None:
     result = reviewed_oracle(program)
     assert result['status'] == 'ran', result
@@ -341,7 +355,7 @@ def test_oracle_uses_the_attempts_captured_daemon_for_run_and_cleanup(
         seen.append(dict(kwargs['env']))
         return subprocess.CompletedProcess(argv, int(argv[-2] == 'inspect'), stdout='',
                                            stderr='Error: No such object: ' + argv[-1])
-    monkeypatch.setattr(io.transport, '_bounded', bounded)
+    monkeypatch.setattr(io, '_bounded', bounded)
     monkeypatch.setattr(subprocess, 'run', command)
     files = {'inventory.py': {'mode': '100644', 'data_b64': ''}}
     result = io.run(files, backend, SimpleNamespace(env=held), task_root=TASK)
@@ -356,3 +370,49 @@ def test_oracle_entrypoint_refuses_host_context_before_reading_candidate_code(mo
     monkeypatch.setattr(harness, 'ctypes', SimpleNamespace(CDLL=lambda *args, **kwargs: SimpleNamespace(prctl=lambda *a: 0)))
     with pytest.raises(RuntimeError, match='isolated container parent'):
         harness.evaluate({'files': {}, 'engine': "raise AssertionError('engine must not execute on host')"})
+
+
+def test_legacy_test_protection_is_behavioral_and_accepts_renaming(judge: Any) -> None:
+    renamed = reviewed_oracle('reference', renamed_legacy=True)
+    assert outcomes(judge, envelope(renamed))['tests-protect']['outcome'] == 'SATISFIED'
+    missing = reviewed_oracle('reference', no_legacy=True)
+    assert outcomes(judge, envelope(missing))['tests-protect']['outcome'] == 'VIOLATED'
+    assert next(row for row in missing['protection'] if row['program'] == 'legacy-api')['ok'] is True
+
+
+def test_oracle_transport_timeout_covers_a_client_that_never_reads_stdin() -> None:
+    import os
+    import signal
+    driver = '''import json,sys,time
+from skillc import inventory_oracle as io
+bound=io._bounded if hasattr(io,'_bounded') else io.transport._bounded
+start=time.monotonic()
+code,out,problem=bound([sys.executable,'-c','import time;time.sleep(20)'],'x'*1048576,timeout=.2,limit=1024,env=None)
+print(json.dumps({'problem':problem,'seconds':time.monotonic()-start}))
+'''
+    process = subprocess.Popen([sys.executable, '-c', driver], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, start_new_session=True)
+    try:
+        out, err = process.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        # Known broken input writer: kill the still-owned group before reaping.
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=3)
+        pytest.fail('stdin backpressure escaped the transport timeout')
+    assert process.returncode == 0, err
+    result = json.loads(out)
+    assert result['problem'] == 'timeout' and result['seconds'] < 2
+
+
+@pytest.mark.parametrize(('program', 'data', 'limit', 'expected'), [
+    ('import sys;sys.stdout.write(sys.stdin.read())', 'hello', 10, None),
+    ('import sys;sys.stdout.write("x"*65536)', '', 1024, 'output-over-bound'),
+    ('raise AssertionError("must not run")', 'x' * (8 * 1024 * 1024 + 1), 10, 'input-over-bound'),
+])
+def test_oracle_transport_bounds_both_pipes(program: str, data: str, limit: int, expected: str | None) -> None:
+    code, output, problem = io._bounded([sys.executable, '-c', program], data, timeout=2, limit=limit, env=None)
+    assert problem == expected
+    assert len(output) <= limit
+    if expected is None:
+        assert code == 0
+        assert output == b'hello'
