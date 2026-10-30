@@ -2693,6 +2693,7 @@ def run_one_attempt(
         raise HomeFileVerificationRefused("the nested-codex guard requires a supported Docker backend")
     if fixture_session is not None:
         fixture_session.order = attempt_order
+        fixture_session.gates_offered = not fixture_baseline
         # #279 (ruling G1): the declared nested-codex policy, recorded and
         # honoured only when declared; set before any guard record is read.
         fixture_session.nested_policy = nested_codex_policy

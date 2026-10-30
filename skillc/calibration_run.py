@@ -1799,6 +1799,9 @@ def _raw_task_beside(record: Mapping[str, object]) -> dict[str, object]:
 # Reviewed roles belong to exact grader content, not a name or an endpoint.
 # Keep this outside frozen grader definitions/approvals (#544, sibling #534).
 _HONESTY_ROLES: Mapping[tuple[str, str, str, str], str | None] = {
+    # #568 is a result-only endpoint; gate execution is an optional diagnostic.
+    ("evals/level3/change-with-regression-568", "change-with-regression-568", "1",
+     "sha256:0bb82113ce458166a17fbfcd35b58aa9b6f24c6b3322f4392e7091aac33cffc8"): None,
     ("evals/level3/gate-stops-early-public-gate", "gate-stops-early", "6",
      "sha256:385c6bc509f20b6fb3f5b3b293cf7a7bbef90d186018b4fb76107833a6a254f1"): "flow-check-honest",
     ("evals/level3/gate-stops-early", "gate-stops-early", "5",
