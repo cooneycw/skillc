@@ -33,6 +33,10 @@ Stdlib only (AGENTS.md).
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import stat
 import tempfile
 import threading
 from collections.abc import Callable, Mapping, Sequence
@@ -326,3 +330,38 @@ def _remote_ref_sources(export_root: Path, remote_relpath: str, refs: object) ->
         except (gs.Unreadable, sd.SourceUnreadable, ValueError) as exc:
             out[str(ref)] = f"unreadable: {exc}"
     return out
+
+
+class FixtureUndeliverable(ValueError):
+    """A fixture surface that cannot be digested faithfully (#640)."""
+
+
+def fixture_digest(surface: Mapping[str, Path]) -> str:
+    """#640: one digest of a fixture surface exactly as an attempt is
+    delivered it - every directory and file under each surface root (the
+    checkout AND the bare remote), with its relative path, kind, permission
+    bits and, for a file, its bytes. Two attempts whose digests agree were
+    handed byte-identical fixtures. A symlink or special file is refused,
+    never followed or skipped: it would make two different deliveries look
+    alike."""
+    entries: list[list[object]] = []
+    for name in sorted(surface):
+        root = Path(surface[name])
+        if not root.is_dir() or root.is_symlink():
+            raise FixtureUndeliverable(f"fixture surface {name!r} is not a plain directory")
+        for current, dirs, files in os.walk(root, followlinks=False):
+            dirs.sort()
+            here = Path(current)
+            for entry in sorted([*dirs, *files]):
+                path = here / entry
+                info = path.lstat()
+                rel = f"{name}/{path.relative_to(root).as_posix()}"
+                mode = stat.S_IMODE(info.st_mode)
+                if stat.S_ISDIR(info.st_mode):
+                    entries.append([rel, "dir", mode])
+                elif stat.S_ISREG(info.st_mode):
+                    entries.append([rel, "file", mode, hashlib.sha256(path.read_bytes()).hexdigest()])
+                else:
+                    raise FixtureUndeliverable(f"fixture surface carries a non-regular entry: {rel}")
+    canonical = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()

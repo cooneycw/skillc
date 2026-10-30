@@ -103,6 +103,7 @@ from . import (
 from . import egress as eg
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
+from .fixture_attempt import AttemptFixture
 from .runtime_supply import RuntimeSupply
 
 #: `_fixture_surface`'s own src-only convention (#267's deprecated shim below).
@@ -716,6 +717,8 @@ def run_level1_agent_attempt(
     project_gate: object = FROM_TASK,
     completion_deadline: completion.CompletionDeadline | None = None,
     recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
+    fixture: AttemptFixture | None = None,
+    fixture_baseline: bool = False,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -742,7 +745,13 @@ def run_level1_agent_attempt(
 
     `codex_guard`/`nested_codex_policy`/`declared_model` (#500): the
     nested-codex guard on a calibration attempt, forwarded only when the guard
-    is on, so every other caller's call is unchanged."""
+    is on, so every other caller's call is unchanged.
+
+    `fixture`/`fixture_baseline` (#640): a fixture-service task's per-attempt
+    fixture, and whether this attempt is the declared baseline route onto it
+    (`agent_trial.run_one_attempt`). Forwarded only when a fixture is given;
+    the caller supplies the fixture's own `surface`. A fixture attempt carries
+    no project gate (its gate map is the fixture's), so one is refused here."""
     guard_kwargs: dict[str, object] = (
         {"codex_guard": True, "nested_codex_policy": nested_codex_policy, "declared_model": declared_model}
         if codex_guard else {})
@@ -754,8 +763,18 @@ def run_level1_agent_attempt(
         # #505: each installed file's source mode, forwarded only when known,
         # so every other caller's call is unchanged.
         guard_kwargs["extra_home_modes"] = extra_home_modes
+    if fixture is not None:
+        if surface is None:
+            raise ValueError("a fixture attempt is delivered the fixture's own surface; none was given")
+        guard_kwargs["fixture"] = fixture
+        if fixture_baseline:
+            guard_kwargs["fixture_baseline"] = True
+    elif fixture_baseline:
+        raise ValueError("the baseline fixture route (#640) needs a fixture")
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     gate = project_gate_of(resolved_task_root) if project_gate is FROM_TASK else project_gate
+    if gate is not None and fixture is not None:
+        raise ValueError("a fixture attempt uses the fixture's gate map; the task's project gate cannot also apply")
     if gate is not None:
         # #508: the task's own project gate, witnessed in EVERY arm alike (the
         # baseline included), so the arms stay symmetric. A task without one

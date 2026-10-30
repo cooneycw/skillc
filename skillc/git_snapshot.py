@@ -253,6 +253,7 @@ def _ascii(data: bytes, what: str) -> str:
 class _Budget:
     commits: int = 0
     tree_entries: int = 0
+    blob_bytes: int = 0
 
 
 @dataclass
@@ -442,6 +443,27 @@ class GitDir:
             else:
                 raise Unreadable(f"tree {tree[:10]} has an unknown mode {mode!r}")
         return files
+
+    def commit_files(self, commit: str) -> dict[str, tuple[str, bytes]]:
+        """#640: a commit's delivered files as {path: (MODE, bytes)} - the
+        exact blob bytes the commit names, read from loose objects under the
+        shared tree budgets and a total blob-byte budget. This is what a
+        grader of "what landed on main" reads; a workspace or a source digest
+        never stands in for it. A gitlink names a commit in ANOTHER
+        repository, so it has no bytes here: Unreadable, never omitted."""
+        out: dict[str, tuple[str, bytes]] = {}
+        for path, entry in sorted(self.tree_files(self.tree_of(commit)).items()):
+            mode, _, sha = entry.partition(" ")
+            if mode == "160000":
+                raise Unreadable(f"{path} is a gitlink; its bytes are not in {self.path}")
+            kind, payload = self.object(sha)
+            if kind != "blob":
+                raise Unreadable(f"{path} names a {kind}, not a blob")
+            self._budget.blob_bytes += len(payload)
+            if self._budget.blob_bytes > MAX_FS_BYTES:
+                raise Unreadable("the commit's files exceed the blob-byte budget")
+            out[path] = (mode, payload)
+        return out
 
     def reachable(self, starts: list[str]) -> set[str]:
         seen: set[str] = set()
