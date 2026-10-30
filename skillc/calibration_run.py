@@ -79,7 +79,19 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from . import agent_trial, calibration, completion, demo, egress, gate_state, profile, trial, verify
+from . import (
+    agent_trial,
+    calibration,
+    clutter,
+    clutter_controller,
+    completion,
+    demo,
+    egress,
+    gate_state,
+    profile,
+    trial,
+    verify,
+)
 from . import attempt_guard as ag
 from . import collection_conformance as cc
 from . import fixture_attempt as fa
@@ -684,6 +696,10 @@ def plan_calibration(
         content = snapshot["task_content"]
         if grader_identity["digest"] != content["grader_digest"]:
             raise CalibrationRefused("planned grader differs from approved task_content")
+    inventory_policy = calibration.clutter_policy(declaration.data)
+    inventory_binding = ({'policy': inventory_policy.data,
+                          'declaration_digest': calibration.declaration_digest(declaration.data)}
+                         if inventory_policy is not None else None)
     trials: list[dict[str, object]] = []
     counts: dict[str, int] = {}
     for position, arm in enumerate(declaration.arm_order, start=1):
@@ -699,6 +715,7 @@ def plan_calibration(
             "image": {"digest": image_digest or UNKNOWN},
             "config": {"arm": arm, "repeat": counts[arm], "position": position,
                        **({"calibration_declaration": snapshot} if snapshot is not None else {}),
+                       **({"clutter_inventory": inventory_binding} if inventory_binding is not None else {}),
                        **({"fixture": fixture.planned(FIXTURE_ROUTE_BASELINE if arm == calibration.BASELINE_ARM
                                                       else FIXTURE_ROUTE_GATED)} if fixture is not None else {})},
             "attempts": 1,
@@ -876,6 +893,8 @@ def run_calibration(
             fixture_kwargs = {"fixture": built.fixture, "fixture_baseline": not treated}
         agent_backend, grading_backend = backends()
         try:
+            clutter_kwargs = ({"clutter_policy": calibration.clutter_policy(declaration.data)}
+                              if "clutter_inventory" in declaration.data else {})
             record = cc.run_level1_agent_attempt(
                 experiment=experiment, attempt_id=scheduled.attempt_id,
                 completion_deadline=deadline, recorded_attempt_ids=owned,
@@ -899,6 +918,7 @@ def run_calibration(
                 checkout_gate_entrypoints=treatment.checkout_gate_entrypoints if treated else {},
                 # #505: the installed files' source modes, for a treated arm only.
                 extra_home_modes=dict(treatment.home_modes) if treated and treatment.home_modes else None,
+                **clutter_kwargs,  # type: ignore[arg-type]
                 **fixture_kwargs,  # type: ignore[arg-type]
                 **guarded,  # type: ignore[arg-type]
             )
@@ -1133,6 +1153,40 @@ def egress_eligibility(record: Mapping[str, object], declared_digest: str) -> tu
         return False, (f"the proxy recorded allowlist {summary.get('allowlist_digest')!r}, not the declared "
                        f"{declared_digest}")
     return True, None
+
+
+
+def _apply_bound_clutter(report: dict[str, object], experiment: trial.Experiment) -> None:
+    bindings: list[object] = []
+    for planned, _attempt in experiment.attempts():
+        config_binding = planned.get('config')
+        if not isinstance(config_binding, dict) or not isinstance(config_binding.get('digest'), str):
+            raise CalibrationRefused('clutter configuration binding unavailable')
+        config = json.loads(trial.read_object(experiment, config_binding['digest']))
+        bindings.append(config.get('clutter_inventory') if isinstance(config, dict) else None)
+    if not any(value is not None for value in bindings):
+        return
+    binding = bindings[0]
+    if (not isinstance(binding, dict) or set(binding) != {'policy', 'declaration_digest'}
+            or not isinstance(binding['declaration_digest'], str)
+            or any(trial.canonical(value) != trial.canonical(binding) for value in bindings)):
+        raise CalibrationRefused('partial or mixed clutter policy bindings across arms')
+    try:
+        policy = clutter.parse_policy(binding['policy'])
+    except clutter.Refused as exc:
+        raise CalibrationRefused(str(exc)) from exc
+    report['clutter_inventory'] = {'schema_version': policy.data['schema_version'],
+                                   'policy_digest': policy.identity,
+                                   'declaration_digest': binding['declaration_digest']}
+    entries = report.get('attempts')
+    if not isinstance(entries, list):
+        raise CalibrationRefused('clutter report attempt population missing')
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get('attempt_id'), str):
+            raise CalibrationRefused('clutter report attempt identity malformed')
+        attempt_id = entry['attempt_id']
+        entry['clutter'] = clutter_controller.report_from_events(
+            policy, list(experiment.events(attempt_id)), lambda value: trial.read_object(experiment, value))
 
 
 def _apply_egress(report: dict[str, object], outcomes: Sequence[mp.AttemptOutcome], declared_digest: str) -> None:
@@ -1419,6 +1473,10 @@ def plan_discrimination(
     client_name, client_version = declared_client(declaration)
     grader_identity = verify.GraderDef.load(root / declaration.task_path).identity()
     snapshot = json.loads(trial.canonical(declaration.data))
+    inventory_policy = calibration.clutter_policy(declaration.data)
+    inventory_binding = ({'policy': inventory_policy.data,
+                          'declaration_digest': calibration.declaration_digest(declaration.data)}
+                         if inventory_policy is not None else None)
     trials: list[dict[str, object]] = []
     counts: dict[str, int] = {}
     for position, arm in enumerate(declaration.arm_order, start=1):
@@ -1431,7 +1489,8 @@ def plan_discrimination(
             "client": {"name": client_name, "version": client_version},
             "image": {"digest": image_digest or UNKNOWN},
             "config": {"arm": arm, "repeat": counts[arm], "position": position,
-                       "discrimination_declaration": snapshot},
+                       "discrimination_declaration": snapshot,
+                       **({"clutter_inventory": inventory_binding} if inventory_binding is not None else {})},
             "attempts": 1,
             "skill_digests": [dict(pin) for pin in treatments[arm].skill_digests],
         })
@@ -1523,6 +1582,8 @@ def run_discrimination(
             return skipped
         chosen = treatments[scheduled.arm]
         agent_backend, grading_backend = backends()
+        clutter_kwargs = ({"clutter_policy": calibration.clutter_policy(declaration.data)}
+                          if "clutter_inventory" in declaration.data else {})
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
             completion_deadline=deadline, recorded_attempt_ids=owned,
@@ -1535,6 +1596,7 @@ def run_discrimination(
             gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,
             bundled_gate_entrypoints=chosen.bundled_gate_entrypoints,
             checkout_gate_entrypoints=chosen.checkout_gate_entrypoints, extra_home_modes=dict(chosen.home_modes) if chosen.home_modes else None,
+            **clutter_kwargs,  # type: ignore[arg-type]
             **guarded,  # type: ignore[arg-type]
         )
 
@@ -2039,6 +2101,7 @@ def build_report(
             "task_content": declaration.data["task_content"]}
            if endpoint is not None and declaration is not None else {}),
     }
+    _apply_bound_clutter(report, experiment)
     if declaration is not None:
         # #287 P3: the launch-bound declaration's tolerance (C2) and egress (C4).
         allowlist = declared_allowlist_digest(declaration)

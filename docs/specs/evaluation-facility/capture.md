@@ -303,3 +303,13 @@ Ideas distinctive to [Coder Eval](https://github.com/UiPath/coder_eval/tree/d960
 Refusing unknown fields and writing atomically with `O_EXCL | O_NOFOLLOW` are
 common engineering practice (lessons 1 and 5) and need no credit under the owner's
 rule.
+
+## Optional clutter inventory (#619)
+
+The declaration-bound [clutter instrument](clutter.md) records controller-owned
+before/after state for every declared role and shared surface. Its after view is
+captured at the declared settle point **before stop**, so process teardown cannot
+hide orphaned workflow helpers. Hashed snapshot/report objects and dedicated
+journal events preserve the observations for reclassification. Missing coverage
+remains UNKNOWN. This endpoint is separate from #278 preservation and #549's
+harness-resource cleanup.

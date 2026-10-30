@@ -1,0 +1,1 @@
+- Add an optional controller-owned, declaration-bound clutter inventory for calibration and wave controllers, with before/after coverage, separate preservation observations, common-arm classification, durable replay, symlink items, explicit uninspected workspace subtree allowances, and committed residue/unknown controls (#619).

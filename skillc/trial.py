@@ -489,6 +489,7 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: picked up as the workspace record and crash with KeyError (confirmed) or, for a
 #: path/nonce-shaped forgery, silently misdirect cleanup.
 _DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
+                  "clutter-before", "clutter-after",
                   "controller-turn", "transcript-retained", "gate-witness-retained",
                   "prompt-inputs", "prompt-input", "prompt-inputs-ended",
                   "completion-opt-in", "completion-qualified", "owned-attempt", "owned-attempt-cleanup", "launch-suppressed")
