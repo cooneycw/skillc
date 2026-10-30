@@ -194,7 +194,8 @@
         "details": {
           "eventOwnerTeamId": 20,
           "blockingPlayerId": 101,
-          "shootingPlayerId": 201
+          "shootingPlayerId": 201,
+          "reason": "blocked"
         }
       },
       {
@@ -238,6 +239,22 @@
           "eventOwnerTeamId": 10,
           "committedByPlayerId": 101,
           "duration": 2
+        }
+      },
+      {
+        "eventId": 88,
+        "typeDescKey": "blocked-shot",
+        "timeInPeriod": "01:04",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 20,
+          "blockingPlayerId": 201,
+          "shootingPlayerId": 201,
+          "reason": "teammate-blocked"
         }
       }
     ]

@@ -44,3 +44,15 @@ new declaration digest; it does not retroactively change any attempt.
 The controller verified three completed 2025-26 boxscores for this clarification:
 goalie rows lack hits, blockedShots, giveaways, takeaways and shifts; skater
 rows carry these fields. No downloaded response data is committed.
+
+## Blocked-shot population clarification
+
+The [controller measurement on #633](https://github.com/cooneycw/skillc/issues/633#issuecomment-6530830277)
+compared three completed 2025-26 games. Excluding `details.reason` equal to
+`teammate-blocked` matches boxscore blockedShots for all 108 skaters; counting
+those events matches only 97. The goal and F4 oracle therefore exclude that
+exact reason, while ordinary opposing-team blocks still count. Teammate-blocked
+plays remain retained and remain in F7 strength-state checks. The synthetic
+good source contains an authored case of each kind; no fetched NHL data is
+committed. This clarification changes the goal bytes and eventual declaration
+digest, without changing an already-run attempt.
