@@ -230,7 +230,7 @@ def test_empty_net_bench_pim_and_unused_backup() -> None:
     data["play_by_play"]["plays"][0]["details"].pop("goalieInNetId")
     data["play_by_play"]["plays"][0]["situationCode"] = "1110"
     data["boxscore"]["playerByGameStats"]["homeTeam"]["goalies"][0]["shotsAgainst"] = 1
-    penalty = copy.deepcopy(data["play_by_play"]["plays"][-1])
+    penalty = copy.deepcopy(next(e for e in data["play_by_play"]["plays"] if e["typeDescKey"] == "penalty"))
     penalty["eventId"] = 99
     penalty["details"].pop("committedByPlayerId")
     penalty["details"]["descKey"] = "bench-minor"
@@ -384,7 +384,7 @@ def test_fabricating_zero_pass_over_unavailable_input_is_a_failure() -> None:
 
 def test_unreadable_penalty_and_event_attribution_name_raw_records() -> None:
     data = fixture()
-    data["play_by_play"]["plays"][-1]["details"]["duration"] = "unknown"
+    next(e for e in data["play_by_play"]["plays"] if e["typeDescKey"] == "penalty")["details"]["duration"] = "unknown"
     data["play_by_play"]["plays"][2]["details"].pop("hittingPlayerId")
     report = make_game(data).reconcile()
     for code, identity, pointer in (("penalty-duration", 7, "/plays/6"), ("event-attribution", 3, "/plays/2")):
@@ -440,3 +440,25 @@ def test_unknown_actor_team_does_not_excuse_missing_attribution() -> None:
     event["details"].pop("eventOwnerTeamId")
     report = make_game(data).reconcile()
     assert all(c["status"] == "UNAVAILABLE" for c in checks(report, "F4") if c["comparison"] == "hits")
+
+
+def test_teammate_block_is_excluded_and_opponent_block_still_counts() -> None:
+    report = make_game().reconcile()
+    blocked = {c["scope"]["player_id"]: c for c in checks(report, "F4") if c["comparison"] == "blocked_shots"}
+    assert blocked[101]["detail_value"] == 1  # Authored opposing-team block.
+    assert blocked[201]["detail_value"] == 0  # Authored teammate block (event 88).
+    assert all(c["status"] == "PASS" for c in blocked.values())
+    assert any(c["scope"]["event_id"] == 88 and c["status"] == "PASS" for c in checks(report, "F7"))
+
+
+def test_excluded_teammate_block_needs_no_blocker_attribution_and_uses_details_reason() -> None:
+    data = fixture()
+    teammate = next(e for e in data["play_by_play"]["plays"] if e["eventId"] == 88)
+    teammate["details"].pop("blockingPlayerId")
+    teammate["reason"] = "blocked"  # Unrelated added field cannot override details.reason.
+    opponent = data["play_by_play"]["plays"][3]
+    opponent["reason"] = "teammate-blocked"
+    report = make_game(data).reconcile()
+    assert all(c["status"] == "PASS" for c in checks(report, "F4"))
+    assert not any(a["code"] == "event-attribution" and a["scope"]["event_id"] == 88 for a in report["anomalies"])
+    assert any(c["scope"]["event_id"] == 88 for c in checks(report, "F7"))

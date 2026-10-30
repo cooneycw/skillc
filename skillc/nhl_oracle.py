@@ -317,6 +317,14 @@ class GameOracle:
         return [e for e in self.plays if e.get("typeDescKey") == kind
                 and _object(e.get("periodDescriptor")).get("periodType") != "SO"]
 
+    def _f4_events(self, kind: str) -> list[Json] | None:
+        events = self._events(kind)
+        if events is None or kind != "blocked-shot":
+            return events
+        # Boxscore blockedShots excludes teammate blocks. Keep the original
+        # play population intact for F7 and retained-source inspection.
+        return [e for e in events if _object(e.get("details")).get("reason") != "teammate-blocked"]
+
     def actor_team(self, event: Json, kind: str) -> int | None:
         owner = _object(event.get("details")).get("eventOwnerTeamId")
         if owner not in self.teams:
@@ -418,7 +426,7 @@ class GameOracle:
         event_fields = {"hits": ("hit", "hittingPlayerId"), "blocked_shots": ("blocked-shot", "blockingPlayerId"),
                         "giveaways": ("giveaway", "playerId"), "takeaways": ("takeaway", "playerId")}
         for kind, actor in event_fields.values():
-            for event in self._events(kind) or []:
+            for event in self._f4_events(kind) or []:
                 if type(_object(event.get("details")).get(actor)) is not int:
                     self.anomaly("event-attribution", f"{kind}: unreadable {actor}",
                                  ("play_by_play",), pointer=self.event_pointer(event),
@@ -427,7 +435,7 @@ class GameOracle:
             role = self.box_roles.get((team, player))
             if role == "skater":
                 for comparison, (kind, actor) in event_fields.items():
-                    events = self._events(kind)
+                    events = self._f4_events(kind)
                     detail = (sum(_object(e.get("details")).get(actor) == player for e in events)
                               if events is not None and all(type(_object(e.get("details")).get(actor)) is int
                                   or self.actor_team(e, kind) not in (None, team) for e in events) else None)
