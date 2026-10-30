@@ -230,6 +230,8 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot) -> dict[str, Any
             'preservation': preservation, 'unknown': unknown,
             'blind_spots': ['Final snapshots cannot see state created and removed between observations.',
                            'Process evidence covers only the declared, controller-visible namespaces.',
+                           ('A surviving controller-started process is also an added clutter candidate; '
+                            'only the observer itself is excluded. Docker process collection has only fake qualification.'),
                            'Only declared roots are covered; captures across surfaces are not atomic.',
                            'Daemon attribution requires the declared isolated controller namespace.',
                            'Preservation observations are separate from the clutter verdict; see #278.']}

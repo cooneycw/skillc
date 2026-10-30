@@ -164,7 +164,11 @@ built and no live model is called by these controls.
 A final snapshot cannot see something created and deleted between observations.
 Captures across surfaces are not an atomic transaction. Processes are visible
 only within the controller's declared namespaces. Daemon attribution requires the
-controller's isolated namespace. Skillc's own harness cleanup is #549; sibling
+controller's isolated namespace. The in-container process census has only fake
+Docker qualification here. It excludes the observer itself, but has no separate
+controller-ownership attribution: a controller-owned process started mid-attempt
+and still present at the final snapshot is an added clutter candidate unless
+explicitly declared allowed. Skillc's own harness cleanup is #549; sibling
 preservation is #278. Declare the actual subject/project roots rather than
 silently treating either workstream as permission to leave subject residue.
 

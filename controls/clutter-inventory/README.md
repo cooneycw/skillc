@@ -5,6 +5,8 @@ The instrument must return `NOT_CLEAN`, `clean: false`, and a nonzero clutter
 count for each one. Their declaration, baseline and unrelated surfaces remain
 identical to the positive twin. A no-CPP baseline is not required to have CPP
 state, but added undeclared CPP state receives the same clutter verdict.
+Process keys are `PID:starttime`, with kernel start time measured in clock ticks
+since boot; the second component is not a UID.
 
 Both clean orders must return `CLEAN`: the actual Git fixture exercises removing
 the worktree before dropping its stash, and dropping the stash before removing
