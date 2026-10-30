@@ -1477,7 +1477,8 @@ def run_discrimination(
     completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
                            else completion_deadline.child(declared_total))
     calibration.require_approved_discrimination(declaration, root)
-    if (root / declaration.task_path).joinpath(*FIXTURE_BUILDER).exists():
+    builder = (root / declaration.task_path).joinpath(*FIXTURE_BUILDER)
+    if builder.exists() or builder.is_symlink():
         # #640: its declared fixture would be the BUILDER, delivered as a plain
         # surface - never the fixture it builds. Refused rather than mis-run.
         raise CalibrationRefused("fixture dispatch (#640) is calibration-only; a discrimination run of a "
@@ -1888,7 +1889,7 @@ def _fixture_entry(experiment: trial.Experiment, attempt_id: str,
     and whether the gate was offered (the controller's own record)."""
     binding = experiment.trial_of(attempt_id).get("config")
     digest = binding.get("digest") if isinstance(binding, Mapping) else None
-    config = json.loads(trial._read_object(experiment.root, digest)) if isinstance(digest, str) else None
+    config = json.loads(trial.read_object(experiment, digest)) if isinstance(digest, str) else None
     planned = config.get("fixture") if isinstance(config, Mapping) else None
     if not isinstance(planned, Mapping):
         return None
@@ -1901,7 +1902,9 @@ def _fixture_entry(experiment: trial.Experiment, attempt_id: str,
 def fixture_symmetry(entries: Sequence[Mapping[str, object]]) -> dict[str, object] | None:
     """#640: whether every arm was planned the SAME built case and every
     dispatched attempt was handed exactly it. A non-start was handed nothing,
-    so it never counts toward symmetric - it is reported, not excused."""
+    so it never counts toward symmetric - it is reported, not excused. Every
+    planned arm must have dispatch evidence; an entirely absent arm cannot
+    establish a paired comparison."""
     fixtures = [(e, f) for e in entries if isinstance(f := e.get("fixture"), Mapping)]
     if not fixtures:
         return None
@@ -1909,10 +1912,16 @@ def fixture_symmetry(entries: Sequence[Mapping[str, object]]) -> dict[str, objec
     planned_identical = len(fixtures) == len(entries) and len(planned) == 1
     dispatched = [f for e, f in fixtures if e.get("accounting") != NON_START]
     case, digest = next(iter(planned)) if len(planned) == 1 else (None, None)
+    dispatched_by_arm = dict.fromkeys(sorted({str(e.get("arm")) for e, _ in fixtures}), 0)
+    for entry, _ in fixtures:
+        if entry.get("accounting") != NON_START:
+            dispatched_by_arm[str(entry.get("arm"))] += 1
     handed = bool(dispatched) and all(f.get("delivered_digest") == digest for f in dispatched)
+    every_arm_dispatched = all(count > 0 for count in dispatched_by_arm.values())
     return {"case": case, "digest": digest, "planned_identical": planned_identical,
-            "dispatched": len(dispatched), "dispatched_handed_planned": handed,
-            "symmetric": planned_identical and digest is not None and handed}
+            "dispatched": len(dispatched), "dispatched_by_arm": dispatched_by_arm,
+            "dispatched_handed_planned": handed,
+            "symmetric": planned_identical and digest is not None and handed and every_arm_dispatched}
 
 
 def build_report(

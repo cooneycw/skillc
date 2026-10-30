@@ -68,3 +68,15 @@ def test_symmetry_refuses_an_attempt_missing_its_fixture_plan() -> None:
     ])
     assert report is not None
     assert report["symmetric"] is False
+
+
+@pytest.mark.parametrize("baseline", ["success", "non-start"])
+def test_symmetry_needs_dispatch_evidence_from_every_planned_arm(baseline: str) -> None:
+    fixture = {"case": "clean", "digest": "sha256:built", "delivered_digest": "sha256:built"}
+    report = cr.fixture_symmetry([
+        {"arm": "treated", "accounting": "success", "fixture": fixture},
+        {"arm": "baseline", "accounting": baseline, "fixture": fixture},
+    ])
+    assert report is not None
+    assert report["symmetric"] is (baseline == "success")
+    assert report["dispatched_by_arm"] == {"treated": 1, "baseline": int(baseline == "success")}

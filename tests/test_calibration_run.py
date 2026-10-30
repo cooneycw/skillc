@@ -1410,7 +1410,8 @@ def test_red_640_an_attempt_copy_that_differs_from_the_built_case_is_refused(
     assert refused["disposition"] == "unavailable" and refused["accounting"] == "non-start"
     assert "differs from the built case" in str(refused["disposition_reason"])
     assert len(seen) == 1 and made == [1], "the differing copy was never dispatched"
-    assert report["fixture"]["symmetric"] is True, "the one dispatched attempt was handed the built case"
+    assert report["fixture"]["symmetric"] is False, "one entire arm received no fixture"
+    assert sorted(report["fixture"]["dispatched_by_arm"].values()) == [0, 1]
     assert report["fixture"]["dispatched"] == 1
 
 
