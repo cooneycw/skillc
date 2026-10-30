@@ -428,7 +428,7 @@ def _validated_subject_profile(subject: Mapping[str, object], where: str) -> str
     """skillc#334: a treated arm's subject may OPT IN to having a
     validated profile's dependency closure installed, by naming it here -
     a repo-relative path to its `profile.json`, e.g.
-    'evals/subjects/cpp-codex-flow-check-ea6dbfa'. Absent (every
+    'evals/subjects/coordination-codex-flow-check-ea6dbfa'. Absent (every
     declaration before #334) means "install the selected skill files
     only" - today's behavior, never inferred (orchestrator ruling: a
     silent `profile.validate` attempt where `Refused`
