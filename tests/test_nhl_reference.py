@@ -421,3 +421,22 @@ def test_role_populations_match_real_goalie_fields() -> None:
     assert {c["scope"]["player_id"] for c in checks(report, "F5") if c["comparison"] == "toi_seconds"} == {101, 102, 201, 202}
     assert {c["scope"]["player_id"] for c in checks(report, "F5") if c["comparison"] == "shift_count"} == {101, 201}
     assert {c["scope"]["player_id"] for c in checks(report, "F8") if c["comparison"] == "participation"} == {101, 102, 201, 202}
+
+
+@pytest.mark.parametrize("index,actor,comparison", [(2, "hittingPlayerId", "hits"), (3, "blockingPlayerId", "blocked_shots")])
+def test_missing_actor_unavailability_is_limited_to_the_affected_team(index: int, actor: str, comparison: str) -> None:
+    data = fixture()
+    data["play_by_play"]["plays"][index]["details"].pop(actor)
+    report = make_game(data).reconcile()
+    hits = {c["scope"]["team_id"]: c for c in checks(report, "F4") if c["comparison"] == comparison}
+    assert hits[10]["status"] == "UNAVAILABLE"
+    assert hits[20]["status"] == "PASS"
+
+
+def test_unknown_actor_team_does_not_excuse_missing_attribution() -> None:
+    data = fixture()
+    event = data["play_by_play"]["plays"][2]
+    event["details"].pop("hittingPlayerId")
+    event["details"].pop("eventOwnerTeamId")
+    report = make_game(data).reconcile()
+    assert all(c["status"] == "UNAVAILABLE" for c in checks(report, "F4") if c["comparison"] == "hits")

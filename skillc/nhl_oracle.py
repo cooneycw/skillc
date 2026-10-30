@@ -317,6 +317,14 @@ class GameOracle:
         return [e for e in self.plays if e.get("typeDescKey") == kind
                 and _object(e.get("periodDescriptor")).get("periodType") != "SO"]
 
+    def actor_team(self, event: Json, kind: str) -> int | None:
+        owner = _object(event.get("details")).get("eventOwnerTeamId")
+        if owner not in self.teams:
+            return None
+        if kind == "blocked-shot":
+            return self.teams[1] if owner == self.teams[0] else self.teams[0]
+        return owner
+
     def _team_summary(self, team: int, field: str) -> int | None:
         side = "awayTeam" if team == self.teams[0] else "homeTeam"
         data = self.box.get(side, {})
@@ -413,14 +421,16 @@ class GameOracle:
             for event in self._events(kind) or []:
                 if type(_object(event.get("details")).get(actor)) is not int:
                     self.anomaly("event-attribution", f"{kind}: unreadable {actor}",
-                                 ("play_by_play",), pointer=self.event_pointer(event), event_id=event["eventId"])
+                                 ("play_by_play",), pointer=self.event_pointer(event),
+                                 team_id=self.actor_team(event, kind), event_id=event["eventId"])
         for (team, player), row in sorted(self.players.items()):
             role = self.box_roles.get((team, player))
             if role == "skater":
                 for comparison, (kind, actor) in event_fields.items():
                     events = self._events(kind)
                     detail = (sum(_object(e.get("details")).get(actor) == player for e in events)
-                              if events is not None and all(type(_object(e.get("details")).get(actor)) is int for e in events) else None)
+                              if events is not None and all(type(_object(e.get("details")).get(actor)) is int
+                                  or self.actor_team(e, kind) not in (None, team) for e in events) else None)
                     field = "blockedShots" if comparison == "blocked_shots" else comparison
                     self.emit("F4", comparison, integer(row.get(field)), detail, "events",
                               ("boxscore", "play_by_play"), team_id=team, player_id=player)
