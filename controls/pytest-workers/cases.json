@@ -1,0 +1,19 @@
+[
+  {"name": "two-cpu-quota", "cpu_max": "200000 100000\n", "workers": "auto", "maxprocesses": 8, "expected": 4},
+  {"name": "fractional-quota", "cpu_max": "75000 100000\n", "workers": "auto", "maxprocesses": 8, "expected": 1},
+  {"name": "fractional-above-one", "cpu_max": "175000 100000\n", "workers": "auto", "maxprocesses": 8, "expected": 3},
+  {"name": "smaller-existing-cap", "cpu_max": "200000 100000\n", "workers": "auto", "maxprocesses": 2, "expected": 2},
+  {"name": "unlimited-existing-cap", "cpu_max": "200000 100000\n", "workers": "auto", "maxprocesses": 0, "expected": 4},
+  {"name": "larger-quota", "cpu_max": "800000 100000\n", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "logical-auto", "cpu_max": "200000 100000\n", "workers": "logical", "maxprocesses": 8, "expected": 4},
+  {"name": "explicit-workers", "cpu_max": "200000 100000\n", "workers": "6", "maxprocesses": 8, "expected": 8},
+  {"name": "explicit-serial", "cpu_max": "200000 100000\n", "workers": "0", "maxprocesses": 8, "expected": 8},
+  {"name": "unlimited-quota", "cpu_max": "max 100000\n", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "missing-quota", "cpu_max": null, "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "malformed-quota", "cpu_max": "invalid quota", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "zero-period", "cpu_max": "200000 0", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "negative-quota", "cpu_max": "-1 100000", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "zero-quota", "cpu_max": "0 100000", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "extra-field", "cpu_max": "200000 100000 extra", "workers": "auto", "maxprocesses": 8, "expected": 8},
+  {"name": "empty-quota", "cpu_max": "", "workers": "auto", "maxprocesses": 8, "expected": 8}
+]

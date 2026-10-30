@@ -37,6 +37,8 @@ selftest: sync
 # who wants a faster local loop); empty by default, so plain `make test`
 # still runs the whole suite. Ordinary workers are reaped before the separate
 # serial load-harness invocation; its exact population is merged back (#462).
+# Automatic sizing also caps workers at twice a readable cgroup v2 CPU quota
+# (#643); explicit PYTEST_WORKERS counts keep the caller's requested sizing.
 PYTEST_ARGS ?=
 PYTEST_WORKERS ?= auto
 PYTEST_REPORT_DIR ?= reports
