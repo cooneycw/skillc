@@ -13,6 +13,12 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 | [slugkit pipeline](level3/slugkit-pipeline/README.md) | 3 - Installed path + local pipeline | Grader certified by `qualify.py`, plus a pipeline-validity gate: planted defects proven and rejected by the step that should catch them, a benign control accepted, malformed/unproven/crashed/timed-out/unlaunchable cases UNKNOWN (#204); no model trial run |
 | [cicd pipeline](level3/cicd-pipeline/README.md) | 3 - Installed path + executed CI | Grader certified by `qualify.py` through the cicd project runtime: CPP's real `/project:init` output (two declared CPP fixes; the unpatched output is the known-bad control), generated pipelines EXECUTED locally, planted lint/test/type faults rejected by their own stage, unknown commands UNKNOWN; full 26/26 under run-real-docker, a declared subset elsewhere (#281); no model trial run |
 
+## Public task contracts
+
+- [NHL season project](nhl-season/README.md): public goal with F1-F8, on-ice
+  conventions, report exports and viewer hook (#632); no certified grader or
+  approved live run.
+
 ## Subjects
 
 | Subject | Surface | Status |
