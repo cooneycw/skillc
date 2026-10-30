@@ -76,11 +76,7 @@
             "position": "G",
             "toi": "60:00",
             "shotsAgainst": 0,
-            "pim": 0,
-            "hits": 0,
-            "blockedShots": 0,
-            "giveaways": 0,
-            "takeaways": 0
+            "pim": 0
           }
         ]
       },
@@ -107,11 +103,7 @@
             "position": "G",
             "toi": "60:00",
             "shotsAgainst": 2,
-            "pim": 0,
-            "hits": 0,
-            "blockedShots": 0,
-            "giveaways": 0,
-            "takeaways": 0
+            "pim": 0
           }
         ]
       }
@@ -413,5 +405,15 @@
         "duration": null
       }
     ]
+  },
+  "expected_family_statuses": {
+    "F1": "PASS",
+    "F2": "PASS",
+    "F3": "PASS",
+    "F4": "UNAVAILABLE",
+    "F5": "PASS",
+    "F6": "PASS",
+    "F7": "PASS",
+    "F8": "PASS"
   }
 }

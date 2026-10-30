@@ -5,7 +5,10 @@ The IDs and compact roster/shift patterns are illustrative. No real player's
 name or downloaded season data is included.
 
 `good/sources.json` describes one three-period game with deliberately nonzero
-event counts, both teams, skaters and goalies. `bad/cases.json` commits the
+event counts, both teams, skaters and goalies. Goalie rows intentionally lack
+the four skater event fields and a reported shift count, matching the controller
+verification of three completed 2025-26 boxscores. The fixture names its expected
+family statuses explicitly; an honest unavailable check is a correct report. `bad/cases.json` commits the
 negative mutations and their explicit expected verdicts. There are 24 cases:
 eight wrong delivered family values (FAIL), eight source discrepancies
 (DISCREPANCY), missing family/check and wrong membership (FAIL), changed live

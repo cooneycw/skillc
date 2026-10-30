@@ -15,7 +15,9 @@ stays open until an authorized declaration-time acquisition on the designated
 host produces a verified private season copy and measured census.
 
 The five light live source requests during #632 all returned HTTP 403 from the
-worker container. No live NHL response shapes were newly validated here. The
+worker container. The worker has no newly fetched NHL response. The controller separately verified
+goalie field names from three completed 2025-26 boxscores on 2026-10-30; the
+synthetic goalies follow that shape. The
 adapter recognizes the gamecenter source fields named in the implementation and
 shift-chart types 517 (shift) / 505 (goal); unfamiliar required fields, missing
 sources, conflicting identities and incomplete chart populations remain

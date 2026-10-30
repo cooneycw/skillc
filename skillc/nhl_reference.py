@@ -155,7 +155,8 @@ def qualify(controls: Path) -> Json:
                       data[name]) for name in snapshot.SOURCE_IDS}
     model = oracle.GameOracle(data["game"], sources)
     expected = model.reconcile()
-    if len(expected["families"]) != 8 or any(f["status"] != "PASS" for f in expected["families"]):
+    states = {f["family_id"]: f["status"] for f in expected["families"]}
+    if len(expected["families"]) != 8 or states != data["expected_family_statuses"]:
         raise ReferenceError("qualification good source failed reconciliation")
     if oracle.compare(expected, copy.deepcopy(expected), fresh=True)["status"] != "PASS":
         raise ReferenceError("qualification comparator rejected good case")
@@ -172,8 +173,9 @@ def qualify(controls: Path) -> Json:
             reference = oracle.GameOracle(missing["game"], missing_sources).reconcile()
             candidate = copy.deepcopy(reference)
             family = next(f for f in candidate["families"] if f["family_id"] == "F4")
-            check = next(c for c in family["checks"] if c["summary_value"] is None)
-            check.update(summary_value=0, detail_value=0, status="PASS")
+            for check in family["checks"]:
+                if check["status"] == "UNAVAILABLE":
+                    check.update(summary_value=0, detail_value=0, status="PASS")
             family["status"] = "PASS"
             actual = oracle.compare(reference, candidate, fresh=True)["status"]
         elif mutation in ("partial_reference", "partial_reference_wrong"):

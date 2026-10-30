@@ -50,7 +50,7 @@ def test_good_case_all_families_and_sparse_stream() -> None:
     game = make_game()
     report = game.reconcile()
     assert len(report["families"]) == 8
-    assert all(f["status"] == "PASS" for f in report["families"])
+    assert {f["family_id"]: f["status"] for f in report["families"]} == fixture()["expected_family_statuses"]
     assert len({c["check_id"] for f in report["families"] for c in f["checks"]}) == sum(len(f["checks"]) for f in report["families"])
     rows = list(game.on_ice())
     assert len(rows) == 14400
@@ -75,8 +75,9 @@ def test_committed_negative_controls(case: dict[str, Any], tmp_path: Path) -> No
         partial = make_game(data).reconcile()
         candidate = copy.deepcopy(partial)
         family = next(f for f in candidate["families"] if f["family_id"] == "F4")
-        check = next(c for c in family["checks"] if c["summary_value"] is None)
-        check.update(summary_value=0, detail_value=0, status="PASS")
+        for check in family["checks"]:
+            if check["status"] == "UNAVAILABLE":
+                check.update(summary_value=0, detail_value=0, status="PASS")
         family["status"] = "PASS"
         result = oracle.compare(partial, candidate, fresh=True)
     elif mutation in ("partial_reference", "partial_reference_wrong"):
@@ -354,8 +355,9 @@ def test_fabricating_zero_pass_over_unavailable_input_is_a_failure() -> None:
     data["boxscore"]["playerByGameStats"]["awayTeam"]["forwards"][0].pop("hits")
     expected = make_game(data).reconcile()
     candidate = copy.deepcopy(expected)
-    unavailable = next(c for c in checks(candidate, "F4") if c["summary_value"] is None)
-    unavailable.update(summary_value=0, detail_value=0, status="PASS")
+    for unavailable in checks(candidate, "F4"):
+        if unavailable["status"] == "UNAVAILABLE":
+            unavailable.update(summary_value=0, detail_value=0, status="PASS")
     next(f for f in candidate["families"] if f["family_id"] == "F4")["status"] = "PASS"
     assert oracle.compare(expected, candidate, fresh=True)["status"] == "FAIL"
 
@@ -369,3 +371,24 @@ def test_unreadable_penalty_and_event_attribution_name_raw_records() -> None:
         anomaly = next(a for a in report["anomalies"] if a["code"] == code)
         assert anomaly["scope"]["event_id"] == identity
         assert anomaly["sources"][0]["record_pointer"] == pointer
+
+
+def test_qualifier_rejects_variant_that_excuses_fabricated_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from skillc.nhl_reference import qualify
+
+    real_compare = oracle.compare
+
+    def blind_missing(expected: dict[str, Any], candidate: dict[str, Any], *, fresh: bool) -> dict[str, Any]:
+        repaired = copy.deepcopy(candidate)
+        wanted = {c["check_id"]: c for f in expected["families"] for c in f["checks"]}
+        for family in repaired["families"]:
+            for index, check in enumerate(family["checks"]):
+                reference = wanted.get(check["check_id"])
+                if reference is not None and reference["status"] == "UNAVAILABLE":
+                    family["checks"][index] = copy.deepcopy(reference)
+            family["status"] = oracle.family_status(family["checks"])
+        return real_compare(expected, repaired, fresh=fresh)
+
+    monkeypatch.setattr(oracle, "compare", blind_missing)
+    with pytest.raises(snapshot.ReferenceError, match="blind/noisy: fabricated-pass-unavailable"):
+        qualify(CONTROLS)
