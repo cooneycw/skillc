@@ -1,0 +1,203 @@
+[
+  {
+    "name": "wrong-F1",
+    "family_id": "F1",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F2",
+    "family_id": "F2",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F3",
+    "family_id": "F3",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F4",
+    "family_id": "F4",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F5",
+    "family_id": "F5",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F6",
+    "family_id": "F6",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F7",
+    "family_id": "F7",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-F8",
+    "family_id": "F8",
+    "mutation": "increment_detail",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "missing-family",
+    "mutation": "drop_family",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "missing-check",
+    "mutation": "drop_check",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "wrong-on-ice-player",
+    "mutation": "change_player",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "changed-live-bytes",
+    "mutation": "append_json_field",
+    "expected_verdict": "UNKNOWN"
+  },
+  {
+    "name": "empty-season",
+    "mutation": "empty_schedule",
+    "expected_verdict": "REFUSED"
+  },
+  {
+    "name": "source-F1",
+    "mutation": "source_mismatch",
+    "family_id": "F1",
+    "path": [
+      "boxscore",
+      "awayTeam",
+      "score"
+    ],
+    "value": 2,
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F2",
+    "mutation": "source_mismatch",
+    "family_id": "F2",
+    "path": [
+      "boxscore",
+      "awayTeam",
+      "sog"
+    ],
+    "value": 3,
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F3",
+    "mutation": "source_mismatch",
+    "family_id": "F3",
+    "path": [
+      "boxscore",
+      "playerByGameStats",
+      "awayTeam",
+      "forwards",
+      0,
+      "pim"
+    ],
+    "value": 4,
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F4",
+    "mutation": "source_mismatch",
+    "family_id": "F4",
+    "path": [
+      "boxscore",
+      "playerByGameStats",
+      "awayTeam",
+      "forwards",
+      0,
+      "hits"
+    ],
+    "value": 2,
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F5",
+    "mutation": "source_mismatch",
+    "family_id": "F5",
+    "path": [
+      "boxscore",
+      "playerByGameStats",
+      "awayTeam",
+      "forwards",
+      0,
+      "toi"
+    ],
+    "value": "59:59",
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F6",
+    "mutation": "source_mismatch",
+    "family_id": "F6",
+    "path": [
+      "shifts",
+      "data",
+      12,
+      "startTime"
+    ],
+    "value": "00:11",
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F7",
+    "mutation": "source_mismatch",
+    "family_id": "F7",
+    "path": [
+      "play_by_play",
+      "plays",
+      0,
+      "situationCode"
+    ],
+    "value": "1511",
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "source-F8",
+    "mutation": "source_mismatch",
+    "family_id": "F8",
+    "path": [
+      "play_by_play",
+      "rosterSpots",
+      0,
+      "playerId"
+    ],
+    "value": 999,
+    "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "partial-reference-complete-candidate",
+    "mutation": "partial_reference",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "partial-reference-known-wrong",
+    "mutation": "partial_reference_wrong",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "fabricated-pass-unavailable",
+    "mutation": "fabricated_unavailable",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "goalie-in-F4-population",
+    "mutation": "extra_goalie_f4",
+    "expected_verdict": "FAIL"
+  }
+]

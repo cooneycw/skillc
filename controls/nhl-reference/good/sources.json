@@ -1,0 +1,419 @@
+{
+  "synthetic": true,
+  "game": {
+    "id": 2025020999,
+    "season": 20252026,
+    "gameType": 2,
+    "gameState": "OFF",
+    "awayTeam": {
+      "id": 10
+    },
+    "homeTeam": {
+      "id": 20
+    }
+  },
+  "schedule": {
+    "gameWeek": [
+      {
+        "date": "2025-10-07",
+        "games": [
+          {
+            "id": 2025020999,
+            "season": 20252026,
+            "gameType": 2,
+            "gameState": "OFF",
+            "awayTeam": {
+              "id": 10
+            },
+            "homeTeam": {
+              "id": 20
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "boxscore": {
+    "id": 2025020999,
+    "periodDescriptor": {
+      "number": 3,
+      "periodType": "REG"
+    },
+    "gameOutcome": {
+      "lastPeriodType": "REG"
+    },
+    "awayTeam": {
+      "id": 10,
+      "score": 1,
+      "sog": 2
+    },
+    "homeTeam": {
+      "id": 20,
+      "score": 0,
+      "sog": 0
+    },
+    "playerByGameStats": {
+      "awayTeam": {
+        "forwards": [
+          {
+            "playerId": 101,
+            "position": "C",
+            "toi": "60:00",
+            "shifts": 3,
+            "goals": 1,
+            "sog": 2,
+            "hits": 1,
+            "blockedShots": 1,
+            "giveaways": 1,
+            "takeaways": 1,
+            "pim": 2
+          }
+        ],
+        "defense": [],
+        "goalies": [
+          {
+            "playerId": 102,
+            "position": "G",
+            "toi": "60:00",
+            "shotsAgainst": 0,
+            "pim": 0
+          }
+        ]
+      },
+      "homeTeam": {
+        "forwards": [
+          {
+            "playerId": 201,
+            "position": "C",
+            "toi": "60:00",
+            "shifts": 3,
+            "goals": 0,
+            "sog": 0,
+            "hits": 0,
+            "blockedShots": 0,
+            "giveaways": 0,
+            "takeaways": 0,
+            "pim": 0
+          }
+        ],
+        "defense": [],
+        "goalies": [
+          {
+            "playerId": 202,
+            "position": "G",
+            "toi": "60:00",
+            "shotsAgainst": 2,
+            "pim": 0
+          }
+        ]
+      }
+    }
+  },
+  "play_by_play": {
+    "id": 2025020999,
+    "periodDescriptor": {
+      "number": 3,
+      "periodType": "REG"
+    },
+    "rosterSpots": [
+      {
+        "teamId": 10,
+        "playerId": 101,
+        "positionCode": "C"
+      },
+      {
+        "teamId": 10,
+        "playerId": 102,
+        "positionCode": "G"
+      },
+      {
+        "teamId": 20,
+        "playerId": 201,
+        "positionCode": "C"
+      },
+      {
+        "teamId": 20,
+        "playerId": 202,
+        "positionCode": "G"
+      }
+    ],
+    "plays": [
+      {
+        "eventId": 1,
+        "typeDescKey": "goal",
+        "timeInPeriod": "00:10",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 10,
+          "scoringPlayerId": 101,
+          "goalieInNetId": 202
+        }
+      },
+      {
+        "eventId": 2,
+        "typeDescKey": "shot-on-goal",
+        "timeInPeriod": "01:02",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 10,
+          "shootingPlayerId": 101,
+          "goalieInNetId": 202
+        }
+      },
+      {
+        "eventId": 3,
+        "typeDescKey": "hit",
+        "timeInPeriod": "01:03",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 10,
+          "hittingPlayerId": 101
+        }
+      },
+      {
+        "eventId": 4,
+        "typeDescKey": "blocked-shot",
+        "timeInPeriod": "01:04",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 20,
+          "blockingPlayerId": 101,
+          "shootingPlayerId": 201
+        }
+      },
+      {
+        "eventId": 5,
+        "typeDescKey": "giveaway",
+        "timeInPeriod": "01:05",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 10,
+          "playerId": 101
+        }
+      },
+      {
+        "eventId": 6,
+        "typeDescKey": "takeaway",
+        "timeInPeriod": "01:06",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 10,
+          "playerId": 101
+        }
+      },
+      {
+        "eventId": 7,
+        "typeDescKey": "penalty",
+        "timeInPeriod": "01:07",
+        "periodDescriptor": {
+          "number": 1,
+          "periodType": "REG"
+        },
+        "situationCode": "1111",
+        "details": {
+          "eventOwnerTeamId": 10,
+          "committedByPlayerId": 101,
+          "duration": 2
+        }
+      }
+    ]
+  },
+  "landing": {
+    "gameOutcome": {
+      "lastPeriodType": "REG"
+    }
+  },
+  "shifts": {
+    "data": [
+      {
+        "id": 1,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 101,
+        "period": 1,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 1
+      },
+      {
+        "id": 2,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 102,
+        "period": 1,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 1
+      },
+      {
+        "id": 3,
+        "gameId": 2025020999,
+        "teamId": 20,
+        "playerId": 201,
+        "period": 1,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 1
+      },
+      {
+        "id": 4,
+        "gameId": 2025020999,
+        "teamId": 20,
+        "playerId": 202,
+        "period": 1,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 1
+      },
+      {
+        "id": 5,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 101,
+        "period": 2,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 2
+      },
+      {
+        "id": 6,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 102,
+        "period": 2,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 2
+      },
+      {
+        "id": 7,
+        "gameId": 2025020999,
+        "teamId": 20,
+        "playerId": 201,
+        "period": 2,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 2
+      },
+      {
+        "id": 8,
+        "gameId": 2025020999,
+        "teamId": 20,
+        "playerId": 202,
+        "period": 2,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 2
+      },
+      {
+        "id": 9,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 101,
+        "period": 3,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 3
+      },
+      {
+        "id": 10,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 102,
+        "period": 3,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 3
+      },
+      {
+        "id": 11,
+        "gameId": 2025020999,
+        "teamId": 20,
+        "playerId": 201,
+        "period": 3,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 3
+      },
+      {
+        "id": 12,
+        "gameId": 2025020999,
+        "teamId": 20,
+        "playerId": 202,
+        "period": 3,
+        "typeCode": 517,
+        "startTime": "00:00",
+        "endTime": "20:00",
+        "duration": "20:00",
+        "shiftNumber": 3
+      },
+      {
+        "id": 13,
+        "gameId": 2025020999,
+        "teamId": 10,
+        "playerId": 101,
+        "period": 1,
+        "typeCode": 505,
+        "startTime": "00:10",
+        "endTime": "00:10",
+        "duration": null
+      }
+    ]
+  },
+  "expected_family_statuses": {
+    "F1": "PASS",
+    "F2": "PASS",
+    "F3": "PASS",
+    "F4": "PASS",
+    "F5": "PASS",
+    "F6": "PASS",
+    "F7": "PASS",
+    "F8": "PASS"
+  }
+}
