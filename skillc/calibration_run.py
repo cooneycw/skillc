@@ -554,7 +554,12 @@ def build_fixture(task_root: Path, case: str, where: Path) -> BuiltFixture:
     from . import fixture_campaign as fc  # fixture_campaign imports this module
     try:
         surface, fixture = fc.build_case(task_root, case, where)
-        return BuiltFixture(case, dict(surface), fixture, fa.fixture_digest(surface))
+        paths: dict[str, Path] = {}
+        for name, path in surface.items():
+            if not isinstance(path, Path):
+                raise fa.FixtureUndeliverable(f"fixture surface {name!r} is not a directory path")
+            paths[name] = path
+        return BuiltFixture(case, paths, fixture, fa.fixture_digest(paths))
     except Exception as exc:  # noqa: BLE001 - any build failure is a non-start, with its reason
         return BuiltFixture(case, None, None, None, f"{type(exc).__name__}: {exc}")
 
@@ -1897,17 +1902,17 @@ def fixture_symmetry(entries: Sequence[Mapping[str, object]]) -> dict[str, objec
     """#640: whether every arm was planned the SAME built case and every
     dispatched attempt was handed exactly it. A non-start was handed nothing,
     so it never counts toward symmetric - it is reported, not excused."""
-    fixtures = [e.get("fixture") for e in entries if isinstance(e.get("fixture"), Mapping)]
+    fixtures = [(e, f) for e in entries if isinstance(f := e.get("fixture"), Mapping)]
     if not fixtures:
         return None
-    planned = {(f.get("case"), f.get("digest")) for f in fixtures if isinstance(f, Mapping)}
-    dispatched = [f for e, f in zip(entries, fixtures, strict=False)
-                  if isinstance(f, Mapping) and e.get("accounting") != NON_START]
+    planned = {(f.get("case"), f.get("digest")) for _, f in fixtures}
+    planned_identical = len(fixtures) == len(entries) and len(planned) == 1
+    dispatched = [f for e, f in fixtures if e.get("accounting") != NON_START]
     case, digest = next(iter(planned)) if len(planned) == 1 else (None, None)
-    handed = all(f.get("delivered_digest") == digest for f in dispatched)
-    return {"case": case, "digest": digest, "planned_identical": len(planned) == 1,
+    handed = bool(dispatched) and all(f.get("delivered_digest") == digest for f in dispatched)
+    return {"case": case, "digest": digest, "planned_identical": planned_identical,
             "dispatched": len(dispatched), "dispatched_handed_planned": handed,
-            "symmetric": len(planned) == 1 and digest is not None and handed}
+            "symmetric": planned_identical and digest is not None and handed}
 
 
 def build_report(
@@ -1987,7 +1992,8 @@ def build_report(
             "runner_note": outcome.runner_note,
             **guard_entry(record, obs, declared_model),
         })
-        entries[-1]["accounting"] = accounting_class(record, entries[-1]["primary_endpoint"].get("status"))  # type: ignore[union-attr]
+        primary = entries[-1]["primary_endpoint"]
+        entries[-1]["accounting"] = accounting_class(record, primary.get("status") if isinstance(primary, Mapping) else None)
         entries[-1]["disposition_reason"] = record.get("reason")  # #640: why a non-start or failure did not run
         fixture_entry = _fixture_entry(experiment, outcome.scheduled.attempt_id, record)
         if fixture_entry is not None:

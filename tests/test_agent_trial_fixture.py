@@ -179,10 +179,10 @@ def run_fixture_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, case: s
             surface=surface, limits=Limits(timeout=TIMEOUT), base=base,
             credential_explicit_path=_fresh_credential(tmp_path, "codex"),
             grader=verify.GraderDef.load(TASK), grading_backend=grading, fixture=fixture,
-            **({"extra_home_files": {}, "fixture_baseline": True} if baseline else {
-                "extra_home_files": {GATE_ENTRY: GATE_SCRIPT},
-                "verify_home_files": {GATE_ENTRY: "sha256:" + hashlib.sha256(GATE_SCRIPT).hexdigest()},
-                "gate_entrypoint": GATE_ENTRY}),
+            extra_home_files={} if baseline else {GATE_ENTRY: GATE_SCRIPT},
+            fixture_baseline=baseline,
+            verify_home_files=None if baseline else {GATE_ENTRY: "sha256:" + hashlib.sha256(GATE_SCRIPT).hexdigest()},
+            gate_entrypoint=None if baseline else GATE_ENTRY,
         )
     assert placed == ["gh", "codex"], ("both overlays are placed, gh first, before the agent starts",
                                        result.get("disposition"), result.get("reason"))

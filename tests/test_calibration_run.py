@@ -1240,7 +1240,7 @@ def _fixture_declaration_data(case: str = "clean", **task: object) -> dict[str, 
     return stamp_approval(data)
 
 
-def _fixture_declaration(case: str = "clean", **task: object) -> calibration.CalibrationDeclaration:
+def _fixture_declaration(case: str = "clean", **task: Any) -> calibration.CalibrationDeclaration:
     return calibration.parse_declaration(_fixture_declaration_data(case, **task))  # type: ignore[arg-type]
 
 
@@ -1328,7 +1328,7 @@ def test_640_both_arms_are_dispatched_with_byte_identical_fixtures_through_the_r
     candidates = {TREATMENT_ARM: "pass/clean-cites-commit-only",
                   calibration.BASELINE_ARM: "fail/clean-wrong-verdict"}
     experiment, outcomes, seen, made = _run_fixture(tmp_path, monkeypatch, candidates=candidates)
-    report = _report(experiment, outcomes)
+    report: dict[str, Any] = _report(experiment, outcomes)
     arms = _by_arm(report)
     symmetry = report["fixture"]
     assert symmetry["case"] == "clean" and symmetry["symmetric"] is True and symmetry["dispatched"] == 2
@@ -1375,7 +1375,7 @@ def test_640_a_fixture_that_fails_to_build_is_a_non_start_for_every_attempt(
     experiment, outcomes, seen, made = _run_fixture(
         tmp_path, monkeypatch, candidates={TREATMENT_ARM: "pass/clean-cites-commit-only",
                                            calibration.BASELINE_ARM: "pass/clean-cites-commit-only"})
-    report = _report(experiment, outcomes)
+    report: dict[str, Any] = _report(experiment, outcomes)
     assert seen == [] and made == [0]
     for entry in report["attempts"]:
         assert entry["disposition"] == "unavailable" and entry["accounting"] == "non-start"
@@ -1405,7 +1405,7 @@ def test_red_640_an_attempt_copy_that_differs_from_the_built_case_is_refused(
     experiment, outcomes, seen, made = _run_fixture(
         tmp_path, monkeypatch, candidates={TREATMENT_ARM: "pass/clean-cites-commit-only",
                                            calibration.BASELINE_ARM: "pass/clean-cites-commit-only"})
-    report = _report(experiment, outcomes)
+    report: dict[str, Any] = _report(experiment, outcomes)
     [refused] = [e for e in report["attempts"] if e["attempt_id"] == tampered[0]]
     assert refused["disposition"] == "unavailable" and refused["accounting"] == "non-start"
     assert "differs from the built case" in str(refused["disposition_reason"])
@@ -1432,7 +1432,7 @@ def test_red_640_a_treated_fixture_arm_without_a_gate_entrypoint_is_refused_befo
     ({"fixture_case": "no-such-case"}, "not one of the builder's cases"),
 ])
 def test_red_640_a_fixture_task_declaration_that_does_not_name_its_fixture_is_refused(
-        task: dict[str, object], match: str) -> None:
+        task: dict[str, Any], match: str) -> None:
     with pytest.raises(cr.CalibrationRefused, match=match):
         cr.fixture_case_of(_fixture_declaration(**task), ROOT)
 

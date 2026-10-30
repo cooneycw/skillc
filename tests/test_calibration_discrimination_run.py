@@ -389,3 +389,19 @@ def test_a_report_over_a_ledger_with_another_image_is_refused(tmp_path: Path) ->
                 for s in schedule]
     with pytest.raises(cr.CalibrationRefused, match="runtime identity disagree"):
         cr.build_discrimination_report(experiment, outcomes, declaration)
+
+
+def test_640_discrimination_refuses_a_fixture_builder_before_any_store(tmp_path: Path) -> None:
+    data = _approved(tmp_path, attempts=1)
+    data["task"].update({"path": "evals/level3/flow-auto-necessity", "grader_id": "flow-auto-necessity",
+                         "grader_revision": "5", "fixture": "builder", "fixture_case": "clean"})
+    data["approval"]["task_fixture"] = "builder"
+    declaration = _parse(stamp_approval(data))
+    # Establish that approval itself passes, so the refusal exercises dispatch.
+    calibration.require_approved_discrimination(declaration, ROOT)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(cr.CalibrationRefused, match="fixture dispatch.*calibration-only"):
+        cr.run_discrimination(declaration, run_dir=run_dir, intact=_intact(), image_digest="sha256:" + "d" * 64,
+                              backends=lambda: pytest.fail("no backend"), argv_for=lambda _: pytest.fail("no argv"))
+    assert not (run_dir / "store").exists()

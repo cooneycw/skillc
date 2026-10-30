@@ -344,12 +344,19 @@ def fixture_digest(surface: Mapping[str, Path]) -> str:
     handed byte-identical fixtures. A symlink or special file is refused,
     never followed or skipped: it would make two different deliveries look
     alike."""
+    if not surface:
+        raise FixtureUndeliverable("fixture surface is empty")
+
+    def unreadable(error: OSError) -> None:
+        raise error
+
     entries: list[list[object]] = []
     for name in sorted(surface):
         root = Path(surface[name])
         if not root.is_dir() or root.is_symlink():
             raise FixtureUndeliverable(f"fixture surface {name!r} is not a plain directory")
-        for current, dirs, files in os.walk(root, followlinks=False):
+        entries.append([name, "dir", stat.S_IMODE(root.stat().st_mode)])
+        for current, dirs, files in os.walk(root, followlinks=False, onerror=unreadable):
             dirs.sort()
             here = Path(current)
             for entry in sorted([*dirs, *files]):
