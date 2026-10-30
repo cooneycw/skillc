@@ -84,6 +84,8 @@ class AttemptFixture:
     #: flow-check-route task's `report-honest`). Off keeps every earlier
     #: fixture's record byte-identical.
     launch_evidence: bool = False
+    #: #640: opt in to a controller-owned gate-offer diagnostic for grading.
+    gate_offer_evidence: bool = False
     #: #530: gate name -> runner plan whose stage outcomes a run of it carries
     #: (`stage_capture`). Empty keeps every earlier fixture stage-less.
     stage_plans: Mapping[str, str] = field(default_factory=dict)
@@ -130,6 +132,7 @@ class FixtureSession:
     #: #279: the first turn plus each delivered controller turn; the guard's
     #: nested verdict is judged against it. Set by `run_one_attempt`.
     expected_top_level: int = 1
+    gates_offered: bool = True
     #: #279: the declaration's nested-codex policy (`codex_guard.NESTED_POLICIES`),
     #: or None; recorded beside the counts only when declared.
     nested_policy: str | None = None
@@ -282,6 +285,8 @@ class FixtureSession:
             "git_unreadable": self.git_unreadable, "final_report": final_report,
             "codex_guard": self.guard_record(), "credential_steward": self.steward_record(),
             "finalization": dict(self.finalization)}
+        if self.fixture.gate_offer_evidence:
+            extras["gates_offered"] = self.gates_offered
         if self.order is not None:
             # #279 PR-2a: the turns as the controller recorded them, ordered.
             extras["controller_turns"] = list(self.turn_records or [])

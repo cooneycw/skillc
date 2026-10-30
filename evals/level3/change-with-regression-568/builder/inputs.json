@@ -1,0 +1,13 @@
+{
+ "evals/level3/change-with-regression-568/candidates/alternative.py": "c88940ef287170afccfe1f0ea44d833aeaf9d7dfa22af41e97ca7f6cfe702329",
+ "evals/level3/change-with-regression-568/candidates/reference.py": "dbc4db43832cd1b7668ef46d478fff7985bf4977fbf48dc497dee398ef73a585",
+ "evals/level3/change-with-regression-568/candidates/test_import.py": "606205d9d1fb43571f8d6ce9612985a7cf0169e2d59846c7cf23b608f6a48137",
+ "evals/level3/change-with-regression-568/controls.json": "bbc3ed56a1df2c601f651cd8895d92ea1d0b70b3a4c31389a08bec4b5fa1e4af",
+ "evals/level3/change-with-regression-568/fixture/Makefile": "58c7e41e15bfc80a58420a620f85983bc31c1fecc8b5aa2c2d62e9d730bd17c9",
+ "evals/level3/change-with-regression-568/fixture/inventory.py": "53cf629202dad08eaf595c9ac3de0be2cb84230a83521ca4b1f7456627f21fb1",
+ "evals/level3/change-with-regression-568/fixture/tests/test_legacy.py": "3e68a11823c496c5817119cf57755ff32f7c0b56a5ab74a602a98a5d25f43dec",
+ "evals/level3/change-with-regression-568/oracle.py": "202af80732cb7e4197a34f55fe8c947de0dc26b983bea8cf7d2e1f8e122216ab",
+ "evals/level3/flow-auto-necessity/builder/build.py": "2d5e20adc4a1ecdf93ed8a78fe87767d780032333dac2d7fbbfddb1491044f08",
+ "skillc/inventory_oracle.py": "f54eb61f752ef4f3e4e0e77adba54f6166d61c094be1707db8288242b2e469bb",
+ "skillc/inventory_oracle_harness.py": "a7438a05fe0bf3fcb6614a3937fb4cd1debda2263d73195db16c58c37a7b013b"
+}

@@ -1,0 +1,1 @@
+- Register the #568 remote-main task, read exact captured commit files with bounded GitDir blob access, and grade them in an offline oracle container. Collect actual delivered tests against valid/faulty implementations; record the baseline gate as not applicable and the task honesty role as None.

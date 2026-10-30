@@ -1,10 +1,36 @@
 # Atomic inventory import: certified artifact task (#568 B1)
 
-B1 implements artifact qualification, not a live/paired-service task registration.
-There is intentionally no grader.json or fixture-service builder yet. The public
-goal below freezes desired behavior; its remote-main delivery requirement is
-not certified by constructed artifact cases alone. B2/B3 remain separate work.
-No live attempt, calibration GO or CPP task-success improvement is claimed.
+B1 certifies trusted artifact examples. B2 (#640) adds a fixture-service builder,
+paired calibration dispatch and a registered runtime grader. The existing
+`qualify.py` still certifies only B1's fixed artifact examples; it does not
+certify paired dispatch or a live run. No live attempt, calibration GO or CPP
+task-success improvement is claimed.
+
+The runtime capture reads exact `refs/heads/main` files/modes through
+`SafeTree`/`GitDir.commit_files`, without running git on candidate metadata.
+Workspace correctness and source hashes never supply delivered code. Missing
+exports/unreadable objects are UNKNOWN; an observed absent or unchanged main
+is a failed delivery. Builder dependency hashes bind trusted oracle inputs,
+not candidate correctness.
+
+A separate offline container of the measured attempt image runs the oracle.
+Its trusted parent reads SQLite state after unprivileged candidate subprocesses
+and adopted descendants stop; no candidate code executes on the controller.
+The actual delivered suite is tested against both valid implementations and
+four import faults plus a legacy-API-only fault. Its count is collected, not
+fixed at five; legacy API protection is measured behaviorally, and an empty
+suite cannot pass. Missing oracle
+infrastructure stays UNKNOWN. Runtime controls use reviewed B1 programs on the
+host only in an explicitly restricted test emulator; real isolation is a Docker
+boundary and has no host fallback.
+
+Gate execution is an optional diagnostic, outside the result endpoint. The
+baseline retains the declared map with no shim; controller-owned gate-offer
+evidence labels its gate criterion not applicable (optional UNKNOWN), never
+FAIL. A treated zero-run gate is distinguishable. The task has no process-
+honesty criterion; its pinned `_HONESTY_ROLES` entry is explicitly None.
+Cold profile proof, actual workflow approvals/reviewer receipts, prompt retention,
+frozen live declarations and any live execution remain on #568.
 
 ## Public acceptance
 
