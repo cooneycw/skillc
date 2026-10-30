@@ -2263,7 +2263,7 @@ class DockerBackend:
             # downstream (gate_witness.py's `_NOT_STARTED_REASONS`).
             #
             # Deliberately `reachable and (...)`, NOT `not reachable or
-            # (...)` (both execution entry guards use this distinction):
+            # (...)`:
             # `reachable=False` means `_inspect()` itself could not get an
             # answer (unreachable daemon, missing binary) - a DIFFERENT,
             # unconfirmed fact, not a positive "not running". Folding it in
@@ -2591,8 +2591,10 @@ class DockerBackend:
         already stopped, or the container is simply gone - `reason=
         "attempt-not-running"`, `exit_code=None`, checked via the SAME
         `_inspect()` `confirm_stopped()` already uses. An unreachable
-        daemon leaves that state unknown, so the real exec is attempted
-        and reports its own outcome. This is a REFUSAL, not a
+        daemon leaves that state unknown and returns `launch-failed`,
+        with no exec attempted. Otherwise a rejected Docker CLI call could
+        read as an exited gate even though the gate never started.
+        This is a REFUSAL, not a
         guessed result - the orchestrator ruling this was built to satisfy
         is explicit that a "container not running" exec must never be
         folded into a normal exit code (#183's own channel already proved
@@ -2725,7 +2727,12 @@ class DockerBackend:
         condition)."""
         assert isinstance(handle, _Handle)
         reachable, absent, status = self._inspect(handle)
-        if reachable and (absent or status != "running"):
+        if not reachable:
+            return ExecuteResult(
+                reason="launch-failed", exit_code=None,
+                error="attempt state unknown: Docker inspect unreachable",
+            )
+        if absent or status != "running":
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
         marker_root = CONTAINER_HOME if self.witness_io else CONTAINER_WORKSPACE

@@ -1991,16 +1991,37 @@ def test_exec_in_attempt_refuses_a_confirmed_nonrunning_container(
         backend.destroy(handle)
 
 
-def test_exec_in_attempt_can_run_after_an_unreachable_inspect(
+def test_exec_in_attempt_refuses_to_launch_after_an_unreachable_inspect(
     base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed preflight does not establish that the real exec will fail."""
-    backend, handle = _ready(base, docker_state, "a-exec-550-recovered")
+    """Unknown state must never turn a daemon rejection into gate coverage."""
+    backend, handle = _ready(base, docker_state, "a-exec-550-unknown")
+
+    def unexpected_launch(*args: object, **kwargs: object) -> None:
+        pytest.fail("an unknown container state must be refused before launch")
+
     try:
         monkeypatch.setattr(d.DockerBackend, "_inspect", lambda *_: (False, False, None))
-        result = backend.exec_in_attempt(handle, ["sh", "-c", "printf recovered"], Limits(timeout=5))
-        assert (result.reason, result.exit_code, result.stdout) == ("exited", 0, b"recovered")
+        monkeypatch.setattr(d.DockerBackend, "_launch_and_wait", unexpected_launch)
+        result = backend.exec_in_attempt(handle, ["true"], Limits(timeout=5))
+        assert (result.reason, result.exit_code) == ("launch-failed", None)
+        assert result.error is not None and "unknown" in result.error
     finally:
+        backend.destroy(handle)
+
+
+def test_exec_in_attempt_reports_not_started_when_the_daemon_is_down(
+    base: Path, docker_state: Path,
+) -> None:
+    """#644 review control: a running CLI can fail before any gate starts."""
+    backend, handle = _ready(base, docker_state, "a-exec-550-daemon-down")
+    _sentinel(docker_state, ".down")
+    try:
+        result = backend.exec_in_attempt(handle, ["true"], Limits(timeout=5))
+        assert (result.reason, result.exit_code) == ("launch-failed", None)
+        assert result.error is not None and "unknown" in result.error
+    finally:
+        (docker_state / ".down").unlink()
         backend.destroy(handle)
 
 
