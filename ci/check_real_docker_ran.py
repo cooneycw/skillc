@@ -70,6 +70,8 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_codex_guard_live",
     # #279 PR-3: the Step-6 S4 oracle's containment and its outcome table.
     "tests.test_step6_oracle_live",
+    # #640: captured inventory grading and actual parent containment.
+    "tests.test_inventory_oracle_live",
 )
 
 ERROR = "ERROR"
