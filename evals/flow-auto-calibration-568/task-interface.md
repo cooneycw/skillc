@@ -53,3 +53,20 @@ part of these interfaces. Equal prompts/tools/budgets and review costs, selectio
 capture, cost sizing, deterministic rehearsal, held-out custody, exact unapproved
 calibration declaration and later live approval remain. Parent #568 stays open;
 this work provides no task-success uplift, latency or efficacy evidence.
+
+### Clutter and forbidden side effects (#619)
+
+A declaration claiming "no forbidden side effect" must bind the common
+`clutter_inventory` policy described in
+[`clutter.md`](../../docs/specs/evaluation-facility/clutter.md). The controller
+captures setup and settled state before role teardown, and classifies only added
+surviving items as delivered, declared-allowed or clutter. The baseline uses the
+same instrument and is not penalized for absent CPP bookkeeping.
+
+Use `no_forbidden_side_effect` with an independently established #278 preservation
+outcome: zero clutter alone does not establish preservation. Missing coverage or
+preservation evidence is UNKNOWN; known clutter, a deleted live cwd, or a violated
+preservation criterion cannot pass. The current inventory task's four functional
+criteria do not by themselves establish this additional condition. Its inclusion
+in #568's frozen declaration/grader remains approval-bound task preparation, not
+an authorization for a live run.

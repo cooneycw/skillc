@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "not_clean": [
+    {"name": "leftover-worktree", "surface": "agent/worktrees", "key": "/work/leftover"},
+    {"name": "stale-local-branch", "surface": "agent/local-branches", "key": "refs/heads/task-leftover"},
+    {"name": "stale-remote-branch", "surface": "agent/remote-branches", "key": "fixture:refs/heads/task-leftover"},
+    {"name": "leftover-stash", "surface": "agent/stashes", "key": "stash-identity#1"},
+    {"name": "orphaned-watch", "surface": "agent/processes", "key": "71:84001357"},
+    {"name": "orphaned-supervise", "surface": "agent/processes", "key": "72:84001593"},
+    {"name": "stale-lock", "surface": "agent/coordination-locks", "key": "file:/state/locks/stale.lock"},
+    {"name": "unretired-registry-entry", "surface": "agent/coordination-registry", "key": "entry:/state/registry.json/waves/task"},
+    {"name": "unretired-mailbox", "surface": "agent/coordination-mailboxes", "key": "message:/state/mailboxes/inbox.md#1"},
+    {"name": "stale-cursor", "surface": "agent/coordination-cursors", "key": "file:/state/cursors/last"},
+    {"name": "stale-heartbeat", "surface": "agent/coordination-heartbeats", "key": "file:/state/heartbeats/watch"},
+    {"name": "stale-claim", "surface": "agent/coordination-claims", "key": "file:/state/claims/task"},
+    {"name": "ignored-file", "surface": "agent/workspace", "key": "file:/work/repo/ignored.log"},
+    {"name": "shared-wave-state", "surface": "shared", "key": "file:/shared/wave/task"},
+    {"name": "temporary-directory", "surface": "agent/temp", "key": "directory:/tmp/task-leftover"},
+    {"name": "leftover-container", "surface": "containers", "key": "container-identity"},
+    {"name": "leftover-network", "surface": "networks", "key": "network-identity"}
+  ],
+  "clean": ["cleaned-run", "alternative-cleanup-order"]
+}

@@ -1,0 +1,7 @@
+{
+  "allowed_subtrees": [
+    {"surface": "agent/workspace", "path": "/work/repo/.venv"},
+    {"surface": "agent/workspace", "path": "/work/repo/__pycache__"}
+  ],
+  "not_hideable": ["worktree", "branch", "wave-state"]
+}

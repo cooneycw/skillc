@@ -92,8 +92,9 @@ from types import MappingProxyType
 from typing import Any
 
 from . import attempt_guard as ag
-from . import codex_guard as cg
 from . import (
+    clutter,
+    clutter_controller,
     completion,
     credential,
     demo,
@@ -109,6 +110,7 @@ from . import (
     verify,
     witness_capture,
 )
+from . import codex_guard as cg
 from . import controller_turns as ct
 from . import credential_steward as cs
 from . import egress as eg
@@ -2561,6 +2563,7 @@ def run_one_attempt(
     completion_deadline: completion.CompletionDeadline | None = None,
     recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
     fixture_baseline: bool = False,
+    clutter_policy: clutter.Policy | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2666,6 +2669,10 @@ def run_one_attempt(
     refused as before, and with it any gate declaration is refused."""
     if recorded_attempt_ids is not None and not recorded_attempt_ids.bound_to(experiment, attempt_id):
         raise trial.Refused("owned IDs belong to a different experiment or parent")
+    clutter_observer = (clutter_controller.AttemptInventory(
+        clutter_policy, lambda data: trial.put_object(experiment, data),
+        lambda event, **detail: experiment.record(attempt_id, event, **detail))
+        if clutter_policy is not None else None)
     completion_marker = None
     if completion_deadline is not None:
         completion_marker = completion.mark(experiment, attempt_id, completion_deadline)
@@ -3054,11 +3061,32 @@ def run_one_attempt(
                 imports.append(trial.Import(path, stream, "client-reported", trial.sha256_bytes(evidence.data)))
         return imports
 
+    if clutter_observer is not None:
+        install_before_inventory = before_execute
+
+        def before_execute(ready_backend: ExecutionBackend, handle: object) -> None:
+            install_before_inventory(ready_backend, handle)
+            assert clutter_observer is not None
+            clutter_observer.setup(ready_backend, handle)  # type: ignore[arg-type]
+
+    def inventory_next_turn(ready_backend: ExecutionBackend, handle: object, index: int,
+                            executed: ExecuteResult) -> Sequence[str] | None:
+        following = next_turn(ready_backend, handle, index, executed) if declared_turns else None
+        if following is None and clutter_observer is not None:
+            # The turn driver invokes this only after a normal successful
+            # client exit. Timeouts/non-starts never witness completion.
+            clutter_observer.completion()
+        return following
+
     stewarded = [h for h in (fixture_session, attempt_guard) if h is not None]
 
     def before_stop(stopping_backend: ExecutionBackend, handle: object) -> None:
         """#518: the steward reports `stopped` and its vault is read while the
         container still runs; `finish()`, after the stop, cannot reach it."""
+        if clutter_observer is not None:
+            clutter_observer.finish()
+            if fixture_session is not None:
+                fixture_session.clutter_record = clutter_observer.report
         for holder in stewarded:
             if holder.steward_driver is not None:
                 holder.steward_driver.stop(stopping_backend, handle)  # type: ignore[arg-type]
@@ -3066,10 +3094,10 @@ def run_one_attempt(
     record = run_through_backend(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
-        before_stop=before_stop if stewarded else None,
+        before_stop=before_stop if stewarded or clutter_observer is not None else None,
         transcript_for_capture=transcript_for_capture,
         imports_for_capture=imports_for_capture,
-        next_turn=next_turn if declared_turns else None,
+        next_turn=inventory_next_turn if clutter_observer is not None else next_turn if declared_turns else None,
         order=attempt_order, completion_deadline=completion_deadline,
     )
     try:
@@ -3209,6 +3237,8 @@ def run_one_attempt(
         **record, "graded": graded, "grading_blocked_reason": grading_blocked_reason,
         "grading_seconds": grading_seconds,
     }
+    if clutter_observer is not None:
+        result['clutter'] = clutter_observer.summary()
     if retained_transcript:
         result["retained_transcript"] = retained_transcript
     if fixture_session is not None:

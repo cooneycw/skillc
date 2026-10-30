@@ -1,0 +1,33 @@
+# Clutter inventory controls (#619)
+
+Every `not_clean` case is a planted surviving addition on a required surface.
+The instrument must return `NOT_CLEAN`, `clean: false`, and a nonzero clutter
+count for each one. Their declaration, baseline and unrelated surfaces remain
+identical to the positive twin. A no-CPP baseline is not required to have CPP
+state, but added undeclared CPP state receives the same clutter verdict.
+Process keys are `PID:starttime`, with kernel start time measured in clock ticks
+since boot; the second component is not a UID.
+
+Both clean orders must return `CLEAN`: the actual Git fixture exercises removing
+the worktree before dropping its stash, and dropping the stash before removing
+the worktree. The resulting delivered product is the same. These are different
+cleanup sequences, not merely reordered JSON fields.
+
+`missing-controls.json` is the qualification-population negative control. It is
+refused, so deleting the planted-input population cannot quietly turn the
+instrument's tests into an empty success.
+
+The targeted tests also exercise real fixture refs, worktree registrations,
+stash reflogs, ignored files, state files/entries, kernel process identities and
+deleted/recreated cwd. Daemon transport is fake in local qualification; missing,
+partial, duplicate and foreign inspection populations remain UNKNOWN. Physical
+multi-container qualification and live workflows are separate from these controls.
+
+`realistic.json` is an illustrative, common-arm subtree declaration, not approval
+of an actual study list (#639). Its positive twin carries a venv symlink and a
+generated cache, explicitly reports excluded contents as not inspected, and
+still delivers its result. The outside-residue twin fails. A registered worktree
+under the excluded venv, an extra branch, and shared wave state independently
+fail; overlapping protected state roots and non-workspace exclusions are refused.
+The tests also prove that excluded directories are not walked. A separate dangling
+symlink control retains readable coverage and delivered-product rows.

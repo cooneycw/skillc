@@ -58,7 +58,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import completion, degrade, profile, records, schedule_budget, trial, verify
+from . import clutter, completion, degrade, profile, records, schedule_budget, trial, verify
 from . import materialize as m
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -536,6 +536,20 @@ def _parse_schedule_and_identities(data: Mapping[str, object], names: Sequence[s
     )
 
 
+
+def clutter_policy(data: Mapping[str, object]) -> clutter.Policy | None:
+    """Optional common-arm inventory; the whole-declaration digest binds it."""
+    if 'clutter_inventory' not in data:
+        return None
+    try:
+        policy = clutter.parse_policy(data['clutter_inventory'])
+    except clutter.Refused as exc:
+        raise _refuse(str(exc)) from exc
+    if policy.roles != ('agent',):
+        raise _refuse('a calibration attempt has exactly the agent role; waves inventory all roles together')
+    return policy
+
+
 def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     """Validate a declaration's shape. See the module docstring for what it
     requires and why; every refusal names the field. Shape only - no file is
@@ -546,6 +560,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    clutter_policy(data)
     _outcome_endpoint(data)
     _discrimination_endpoint(data)  # refused on this kind
     lane = data.get("lane", DEFAULT_LANE)
@@ -902,6 +917,7 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
+    clutter_policy(data)
     if data.get("kind") != DISCRIMINATION_KIND:
         raise _refuse(f"kind is {data.get('kind')!r}, not {DISCRIMINATION_KIND!r}")
     if {"outcome_endpoint", "task_content"} & data.keys():
