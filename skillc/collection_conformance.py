@@ -89,6 +89,7 @@ from pathlib import Path
 
 from . import (
     agent_trial,
+    clutter,
     completion,
     credential,
     degrade,
@@ -719,6 +720,7 @@ def run_level1_agent_attempt(
     recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
     fixture: AttemptFixture | None = None,
     fixture_baseline: bool = False,
+    clutter_policy: clutter.Policy | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -780,6 +782,8 @@ def run_level1_agent_attempt(
         # baseline included), so the arms stay symmetric. A task without one
         # is unchanged.
         guard_kwargs["project_gate"] = gate
+    if clutter_policy is not None:
+        guard_kwargs["clutter_policy"] = clutter_policy
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
     grader = verify.GraderDef.load(resolved_task_root)

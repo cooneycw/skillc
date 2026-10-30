@@ -133,6 +133,7 @@ class FixtureSession:
     #: nested verdict is judged against it. Set by `run_one_attempt`.
     expected_top_level: int = 1
     gates_offered: bool = True
+    clutter_record: Mapping[str, object] | None = None
     #: #279: the declaration's nested-codex policy (`codex_guard.NESTED_POLICIES`),
     #: or None; recorded beside the counts only when declared.
     nested_policy: str | None = None
@@ -285,6 +286,8 @@ class FixtureSession:
             "git_unreadable": self.git_unreadable, "final_report": final_report,
             "codex_guard": self.guard_record(), "credential_steward": self.steward_record(),
             "finalization": dict(self.finalization)}
+        if self.clutter_record is not None:
+            extras['clutter'] = dict(self.clutter_record)
         if self.fixture.gate_offer_evidence:
             extras["gates_offered"] = self.gates_offered
         if self.order is not None:
