@@ -20,7 +20,7 @@ from typing import Any
 
 from . import git_snapshot as gs
 from .clutter import (
-    CPP_KINDS,
+    COORDINATION_KINDS,
     MAX_BYTES,
     MAX_DEPTH,
     MAX_ITEMS,
@@ -31,7 +31,6 @@ from .clutter import (
 )
 
 _SHA = re.compile(r'[0-9a-f]{40}')
-_MAIL = re.compile(rb'^<!-- cc-flow-wave-msg rev=([1-9][0-9]*) [^\r\n]*-->$', re.MULTILINE)
 
 
 class BoundedTree(gs.SafeTree):
@@ -73,9 +72,12 @@ class BoundedTree(gs.SafeTree):
 
 
 class Reader:
-    def __init__(self, tree: BoundedTree) -> None:
+    def __init__(self, tree: BoundedTree, mailbox_marker: str | None = None) -> None:
         self.tree = tree
         self.count = 0
+        self.mail_pattern = (re.compile(rb'^<!-- ' + re.escape(mailbox_marker.encode('ascii'))
+                                       + rb' rev=([1-9][0-9]*) [^\r\n]*-->$', re.MULTILINE)
+                             if mailbox_marker is not None else None)
 
     def put(self, items: dict[str, str], key: str, value: object) -> None:
         if key in items:
@@ -114,7 +116,9 @@ class Reader:
             except (ValueError, TypeError, RecursionError) as exc:
                 raise gs.Unreadable('structured state cannot be read faithfully') from exc
         elif family == 'mailboxes' and path.endswith('.md'):
-            matches = list(_MAIL.finditer(data))
+            if self.mail_pattern is None:
+                raise gs.Unreadable('mailbox framing is not declared')
+            matches = list(self.mail_pattern.finditer(data))
             if data.strip() and not matches:
                 raise gs.Unreadable('mailbox has no supported revision framing')
             for index, match in enumerate(matches):
@@ -293,17 +297,17 @@ def capture_role(policy: Policy, role: str, root: Path, *, proc_root: Path = Pat
         raise ValueError('undeclared inventory role')
     scope = policy.data['roles'][role]
     try:
-        reader = Reader(BoundedTree(root))
+        reader = Reader(BoundedTree(root), scope['mailbox_marker'])
         rows = reader.git(scope, namespace_root)
         rows['workspace'] = reader.files([scope['checkout']], family='workspace',
                                          allowed_subtrees=policy.allowed_subtrees(role + '/workspace'))
-        for family in CPP_KINDS:
-            rows['cpp-' + family] = reader.files(scope['cpp'][family], family=family)
+        for family in COORDINATION_KINDS:
+            rows['coordination-' + family] = reader.files(scope['coordination'][family], family=family)
         rows['temp'] = reader.files(scope['temp_roots'])
     except gs.Unreadable as exc:
         rows = {kind: Surface({}, False, str(exc)) for kind in (
             'worktrees', 'local-branches', 'remote-branches', 'stashes', 'workspace',
-            *(f'cpp-{family}' for family in CPP_KINDS), 'temp')}
+            *(f'coordination-{family}' for family in COORDINATION_KINDS), 'temp')}
     rows['processes'] = processes(proc_root, observer_pid=observer_pid)
     return {role + '/' + kind: row for kind, row in rows.items()}
 

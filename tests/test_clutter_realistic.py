@@ -125,8 +125,8 @@ def test_allowances_cannot_exclude_independent_state_scopes(namespace: tuple[Pat
         scope['gitdir'] = path + '/metadata'
     elif protected == 'remote':
         scope['remotes']['fixture'] = path + '/fixture.git'
-    elif protected == 'cpp':
-        scope['cpp']['registry'] = [path + '/wave-state.json']
+    elif protected == 'coordination':
+        scope['coordination']['registry'] = [path + '/wave-state.json']
     elif protected == 'shared':
         raw['shared_roots'] = [path + '/shared']
     else:
@@ -135,7 +135,7 @@ def test_allowances_cannot_exclude_independent_state_scopes(namespace: tuple[Pat
         c.parse_policy(raw)
 
 
-@pytest.mark.parametrize('fault', ['whole-workspace', 'cpp-surface', 'git-surface', 'duplicate', 'overlapping', 'product'])
+@pytest.mark.parametrize('fault', ['whole-workspace', 'coordination-surface', 'git-surface', 'duplicate', 'overlapping', 'product'])
 def test_subtree_selector_is_bounded_and_cannot_be_a_general_clutter_exemption(
         namespace: tuple[Path, c.Policy, Path], fault: str) -> None:
     _, original, _ = namespace
@@ -144,8 +144,8 @@ def test_subtree_selector_is_bounded_and_cannot_be_a_general_clutter_exemption(
     raw['allowed_subtrees'] = rows
     if fault == 'whole-workspace':
         rows[0]['path'] = '/work/repo'
-    elif fault in ('cpp-surface', 'git-surface'):
-        rows[0]['surface'] = 'agent/cpp-registry' if fault == 'cpp-surface' else 'agent/worktrees'
+    elif fault in ('coordination-surface', 'git-surface'):
+        rows[0]['surface'] = 'agent/coordination-registry' if fault == 'coordination-surface' else 'agent/worktrees'
     elif fault == 'product':
         rows[0]['path'] = '/work/repo/result.txt'
     else:

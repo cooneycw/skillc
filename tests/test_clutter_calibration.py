@@ -63,7 +63,7 @@ def test_subtree_allowance_changes_require_a_new_whole_declaration_approval() ->
 
 
 @pytest.mark.parametrize('fault', ['schema', 'empty-roles', 'omit-cpp', 'empty-cpp', 'empty-temp',
-                                  'unsafe-path', 'wrong-settle', 'overlap', 'per-arm'])
+                                  'unsafe-path', 'wrong-settle', 'overlap', 'per-arm', 'mailbox-marker'])
 def test_invalid_inventory_declarations_are_refused_before_dispatch(fault: str) -> None:
     raw: dict[str, Any] = copy.deepcopy(dict(declared().data))
     policy = raw['clutter_inventory']
@@ -72,9 +72,9 @@ def test_invalid_inventory_declarations_are_refused_before_dispatch(fault: str) 
     elif fault == 'empty-roles':
         policy['roles'] = {}
     elif fault == 'omit-cpp':
-        del policy['roles']['agent']['cpp']['locks']
+        del policy['roles']['agent']['coordination']['locks']
     elif fault == 'empty-cpp':
-        policy['roles']['agent']['cpp']['locks'] = []
+        policy['roles']['agent']['coordination']['locks'] = []
     elif fault == 'empty-temp':
         policy['roles']['agent']['temp_roots'] = []
     elif fault == 'unsafe-path':
@@ -83,6 +83,8 @@ def test_invalid_inventory_declarations_are_refused_before_dispatch(fault: str) 
         policy['settle_point'] = 'after-teardown'
     elif fault == 'overlap':
         policy['declared_allowed'] = copy.deepcopy(policy['delivered'])
+    elif fault == 'mailbox-marker':
+        policy['roles']['agent']['mailbox_marker'] = 'not a bounded marker'
     else:
         raw['arms'][0]['clutter_inventory'] = policy
     with pytest.raises(calibration.DeclarationRefused):

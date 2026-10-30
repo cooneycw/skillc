@@ -58,7 +58,8 @@ Example policy shape (illustrative fixture paths, not a live approval):
       "checkout": "/work/work",
       "gitdir": "/work/work/.git",
       "remotes": {"fixture": "/work/.remote/widget.git"},
-      "cpp": {
+      "mailbox_marker": "cc-flow-wave-msg",
+      "coordination": {
         "registry": ["/state/registry.json"],
         "mailboxes": ["/state/mailboxes"],
         "cursors": ["/state/cursors"],
@@ -81,6 +82,11 @@ Example policy shape (illustrative fixture paths, not a live approval):
 
 Use the actual paths of the pinned fixture and subject profile. Every CPP family
 and a temporary-directory scope must be named, including for a no-CPP baseline.
+The generic `coordination` families carry the declared subject's registry,
+mailboxes, cursors, heartbeats, locks and claims. `mailbox_marker` explicitly names
+the revision-framed Markdown marker; the example uses the CPP convention as
+declaration data. Core collection has no implicit subject marker. Other framing
+is unavailable rather than guessed or treated as an empty mailbox.
 An actually absent optional CPP path is an observed empty surface, not a missing
 observation. An omitted family or role cannot establish clean coverage. The
 single-attempt bridge has one role, `agent`; waves declare every role and at least

@@ -18,8 +18,9 @@ CASES = json.loads((ROOT / 'controls/clutter-inventory/cases.json').read_text())
 def declaration(roles: tuple[str, ...] = ('agent',)) -> dict[str, Any]:
     scope = {'checkout': '/work/repo', 'gitdir': '/work/repo/.git',
              'remotes': {'fixture': '/work/fixture.git'},
-             'cpp': {kind: ['/state/' + kind] for kind in c.CPP_KINDS}, 'temp_roots': ['/tmp']}
-    scope['cpp']['registry'] = ['/state/registry.json']  # type: ignore[index]
+             'coordination': {kind: ['/state/' + kind] for kind in c.COORDINATION_KINDS},
+             'mailbox_marker': 'cc-flow-wave-msg', 'temp_roots': ['/tmp']}
+    scope['coordination']['registry'] = ['/state/registry.json']  # type: ignore[index]
     return {'schema_version': 1, 'daemon_scope': 'controller-isolated', 'roles': {role: copy.deepcopy(scope) for role in roles},
             'shared_roots': ['/shared'], 'settle_point': c.SETTLE_POINT, 'settle_seconds': 0,
             'delivered': [{'surface': roles[0] + '/workspace', 'key': 'file:/work/repo/result.txt'}],
@@ -68,7 +69,7 @@ def test_baseline_absence_of_cpp_is_not_a_failure_or_an_exemption_for_added_stat
     after = c.Snapshot('scope', 'after', policy.identity, empty)
     assert c.classify(policy, before, after)['status'] == 'CLEAN'
     rows = dict(empty)
-    rows['agent/cpp-registry'] = c.Surface({'new-entry': 'state'})
+    rows['agent/coordination-registry'] = c.Surface({'new-entry': 'state'})
     assert c.classify(policy, before, c.Snapshot('scope', 'after', policy.identity, rows))['status'] == 'NOT_CLEAN'
 
 

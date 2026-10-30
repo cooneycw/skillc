@@ -16,9 +16,9 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 SETTLE_POINT = 'after-completion-before-teardown'
-CPP_KINDS = ('registry', 'mailboxes', 'cursors', 'heartbeats', 'locks', 'claims')
+COORDINATION_KINDS = ('registry', 'mailboxes', 'cursors', 'heartbeats', 'locks', 'claims')
 ROLE_KINDS = ('worktrees', 'local-branches', 'remote-branches', 'stashes', 'workspace',
-              *(f'cpp-{kind}' for kind in CPP_KINDS), 'processes', 'temp')
+              *(f'coordination-{kind}' for kind in COORDINATION_KINDS), 'processes', 'temp')
 MAX_ITEMS = 20_000
 MAX_BYTES = 32 * 1024 * 1024
 MAX_DEPTH = 64
@@ -104,21 +104,23 @@ def parse_policy(raw: object) -> Policy:
         raise Refused('clutter must declare every role; an empty role population cannot certify')
     for role, scope in roles.items():
         _name(role)
-        if not isinstance(scope, dict) or set(scope) != {'checkout', 'gitdir', 'remotes', 'cpp', 'temp_roots'}:
-            raise Refused('each role needs checkout, gitdir, fixture remotes, all CPP roots and temp roots')
+        if not isinstance(scope, dict) or set(scope) != {
+                'checkout', 'gitdir', 'remotes', 'coordination', 'mailbox_marker', 'temp_roots'}:
+            raise Refused('each role needs checkout, gitdir, fixture remotes, coordination roots, mailbox marker and temp roots')
         _path(scope['checkout'])
         _path(scope['gitdir'])
+        _name(scope['mailbox_marker'])
         if not isinstance(scope['remotes'], dict) or not scope['remotes'] or len(scope['remotes']) > 32:
             raise Refused('fixture remote scope must be explicit and nonempty')
         for name, path in scope['remotes'].items():
             _name(name)
             _path(path)
-        if not isinstance(scope['cpp'], dict) or set(scope['cpp']) != set(CPP_KINDS):
-            raise Refused('all CPP state families must be declared, including on a baseline')
-        for roots in scope['cpp'].values():
+        if not isinstance(scope['coordination'], dict) or set(scope['coordination']) != set(COORDINATION_KINDS):
+            raise Refused('all coordination state families must be declared, including on a baseline')
+        for roots in scope['coordination'].values():
             _paths(roots)
             if not roots:
-                raise Refused('CPP roots are explicit even when the baseline contains no CPP state')
+                raise Refused('coordination roots are explicit even when the baseline contains no coordination state')
         _paths(scope['temp_roots'])
         if not scope['temp_roots']:
             raise Refused('temporary directory scope must not be empty')
@@ -165,11 +167,11 @@ def parse_policy(raw: object) -> Policy:
         if not path.startswith(scope['checkout'] + '/'):
             raise Refused('allowed subtrees must be strict checkout descendants')
         protected = [scope['gitdir'], *scope['remotes'].values(), *scope['temp_roots'],
-                     *policy.data['shared_roots'], *(p for roots in scope['cpp'].values() for p in roots)]
+                     *policy.data['shared_roots'], *(p for roots in scope['coordination'].values() for p in roots)]
         def overlaps(left: str, right: str) -> bool:
             return left == right or left.startswith(right + '/') or right.startswith(left + '/')
         if any(overlaps(path, root) for root in protected):
-            raise Refused('allowed subtrees must not overlap Git, CPP, shared or temporary scope')
+            raise Refused('allowed subtrees must not overlap Git, coordination, shared or temporary scope')
         if any(surface == other and overlaps(path, previous) for other, previous in seen_subtrees):
             raise Refused('allowed subtrees must be distinct and non-overlapping')
         # An exclusion cannot silently swallow a separately declared product.

@@ -35,7 +35,7 @@ def test_controller_root_packet_executes_only_the_pinned_readers(namespace: tupl
     for field in ('checkout', 'gitdir'):
         role[field] = str(root) + role[field]
     role['remotes'] = {key: str(root) + path for key, path in role['remotes'].items()}
-    role['cpp'] = {key: [str(root) + path for path in paths] for key, paths in role['cpp'].items()}
+    role['coordination'] = {key: [str(root) + path for path in paths] for key, paths in role['coordination'].items()}
     role['temp_roots'] = [str(root) + path for path in role['temp_roots']]
     raw['shared_roots'] = [str(root) + path for path in raw['shared_roots']]
     policy = c.parse_policy(raw)
@@ -194,7 +194,7 @@ def test_all_wave_roles_and_shared_volume_are_required(monkeypatch: pytest.Monke
 
     def role(_policy: c.Policy, name: str, *_args: Any, shared: bool) -> dict[str, c.Surface]:
         seen.append((name, shared))
-        rows = {f'{name}/{kind}': c.Surface(state[name] if kind == 'cpp-locks' else {}) for kind in c.ROLE_KINDS}
+        rows = {f'{name}/{kind}': c.Surface(state[name] if kind == 'coordination-locks' else {}) for kind in c.ROLE_KINDS}
         return {**rows, **({'shared': c.Surface({})} if shared else {})}
     monkeypatch.setattr(controller, 'docker_role', role)
     monkeypatch.setattr(controller, 'daemon_surfaces', lambda *_args: {'containers': c.Surface({}), 'networks': c.Surface({})})
@@ -208,7 +208,7 @@ def test_all_wave_roles_and_shared_volume_are_required(monkeypatch: pytest.Monke
         session.completion(name)
     report = session.finish()
     assert report['status'] == 'NOT_CLEAN'
-    assert report['additions']['clutter'][0]['surface'] == 'worker-b/cpp-locks'
+    assert report['additions']['clutter'][0]['surface'] == 'worker-b/coordination-locks'
     assert seen == [(name, name == 'orchestrator') for name in policy.roles] * 2
     del sources['worker-b']
     missing = controller.Session(controller.docker_inventory(policy, sources, shared_role='orchestrator'))

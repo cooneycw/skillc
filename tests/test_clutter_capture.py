@@ -81,7 +81,7 @@ def namespace(tmp_path: Path) -> tuple[Path, c.Policy, Path]:
     git(repo, 'commit', '-qm', 'initial')
     git(repo, 'clone', '-q', '--bare', str(repo), str(root / 'work/fixture.git'))
     raw = declaration()
-    for kind in c.CPP_KINDS:
+    for kind in c.COORDINATION_KINDS:
         if kind != 'registry':
             (root / 'state' / kind).mkdir(parents=True)
     (root / 'state/registry.json').write_text('{"waves": {}}\n')
@@ -311,3 +311,21 @@ def test_missing_shared_volume_is_unknown_not_an_empty_volume(namespace: tuple[P
     report = c.classify(policy, before, reader.capture('after'))
     assert report['status'] == 'UNKNOWN'
     assert any(row['surface'] == 'shared' for row in report['unknown'])
+
+
+@pytest.mark.parametrize('matches', [False, True])
+def test_mailbox_framing_comes_from_the_declaration(namespace: tuple[Path, c.Policy, Path], matches: bool) -> None:
+    root, original, proc = namespace
+    raw = dict(original.data)
+    raw['roles'] = {'agent': {**original.data['roles']['agent'], 'mailbox_marker': 'fixture-message'}}
+    policy = c.parse_policy(raw)
+    observer = inventory(root, policy, proc)
+    before = observer.capture('before')
+    marker = 'fixture-message' if matches else 'undeclared-message'
+    (root / 'state/mailboxes/inbox.md').write_text(f'<!-- {marker} rev=1 from=sender to=receiver -->\nstate\n')
+    report = c.classify(policy, before, observer.capture('after'))
+    assert report['status'] == ('NOT_CLEAN' if matches else 'UNKNOWN'), report
+    if matches:
+        assert any(row['key'] == 'message:/state/mailboxes/inbox.md#1' for row in report['additions']['clutter'])
+    else:
+        assert any(row['surface'] == 'agent/coordination-mailboxes' for row in report['unknown'])
