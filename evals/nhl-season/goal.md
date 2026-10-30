@@ -153,24 +153,86 @@ not permission to fill a goalie in.
 
 ## Machine-readable output
 
-Provide a documented command that exports the active database into UTF-8 files:
+Provide a documented command that exports the active database into UTF-8 files.
+All IDs below are NHL integers, all times/durations are integer seconds unless
+explicitly named UTC, all UTC timestamps are RFC 3339 strings, and all SHA-256
+hashes are lowercase hexadecimal. Additional fields are allowed; the following
+keys, types and comparison identifiers are the shared machine-readable interface.
 
-- `games.json`: an object with `schema_version: 1`, `season_id: 20252026`,
-  `retrieval_cutoff_utc`, `schedule_coverage`, and `games`, an array containing
-  every included game's `game_id`, `game_type`, `home_team_id`, `away_team_id`,
-  completion state, played duration and source availability/provenance.
-- `reconciliation.json`: an object with `schema_version: 1` and `games`, an array
-  with one object per included `game_id`. Each contains `families`, exactly one
-  entry for each ID F1-F8, with `family_id`, `status` and `checks`. Each check has
-  a stable `check_id`, `status`, scope (team/player/event IDs as applicable),
-  `summary_value`, `detail_value`, `sources` and `reason`. Missing values are
-  JSON `null`, not zero. Sources identify endpoint, field/record, retrieval time
-  and retained payload hash. Differing values and their units must be explicit.
-  Include a per-game `anomalies` array for time/identity/source problems not
-  expressible as a pair of values; each anomaly identifies its scope and source.
-- `on_ice.jsonl`: one JSON object per present-player second with integer
-  `game_id`, `game_elapsed_second`, `team_id`, `player_id`, and `role` as above.
-  Sort by that composite key; no duplicate keys. No rows represent shootouts.
+`games.json` is an object with `schema_version: 1`, `season_id: 20252026`,
+`retrieval_cutoff_utc`, `schedule_coverage` and `games`. `schedule_coverage` is an
+array of objects with `start_date`, `end_date` (inclusive ISO dates), and
+`sources` (the source objects defined below). Each member of `games` has:
+
+- `game_id`, `game_type`, `home_team_id`, `away_team_id` (integers);
+- `game_state` (`OFF` or `FINAL`), `played_duration_seconds` (integer or null
+  if unavailable), and `periods` (array of objects with `period`, `phase`
+  (`REG` or `OT`), `start_second`, `played_duration_seconds`); the numeric
+  period fields are integers, or null when the required timing is unavailable.
+  Use an empty `periods` array if no period population can be recovered;
+- `sources`, an array of source objects covering schedule, boxscore,
+  play-by-play, landing and shifts, including unavailable sources.
+
+A source object has `source_id` (`schedule`, `boxscore`, `play_by_play`,
+`landing` or `shifts`), `endpoint` (URL), `retrieved_at_utc` (string or null
+when no response was received), `payload_sha256` (string or null when no
+payload was retained), `availability` (`AVAILABLE` or `UNAVAILABLE`),
+`record_pointer` (RFC 6901 JSON Pointer into the retained payload, empty string
+for the whole response), and `reason` (string). A nonempty reason explains
+unavailability. A check may have several source objects/pointers to identify
+all contributing records. Pointers identify the actual source fields used.
+
+`reconciliation.json` is an object with `schema_version: 1` and `games`, an
+array with one object per included `game_id`. Each game object contains
+`game_id`, `families` and `anomalies`. `families` has exactly one object for
+each F1-F8, with `family_id`, `status` and `checks`. Each check has:
+
+- `comparison`, one of the identifiers in the table below;
+- `scope`, an object with `team_id`, `player_id`, `event_id`, `period` and
+  `game_elapsed_second`, each an integer or null when not applicable;
+- `check_id`, the stable string
+  `{family_id}/{comparison}/{team_id}/{player_id}/{event_id}/{period}/{game_elapsed_second}`,
+  substituting the literal `null` for each null scope component;
+- `status`, `summary_value`, `detail_value`, `unit`, `sources` (array of source
+  objects), and `reason` (string, nonempty for discrepancy/unavailability).
+
+Emit one check for every applicable comparison/scope below. Check IDs are unique
+within a game and do not change across reruns of the same records. In the table,
+set the named scope keys and leave all others null. A whole-source failure may
+use the same comparison with all-null scope when its population cannot be
+identified; it must not invent a passing empty population.
+
+| Family | `comparison` identifiers | Scope and values |
+|---|---|---|
+| F1 | `team_score`, `skater_goals_sum` | `team_id`; integer goals. For `team_score`, detail includes the stated shootout adjustment. |
+| F2 | `team_sog`, `skater_sog_sum`, `opposing_goalie_shots_against` | `team_id` is the shooting team; integer shots with the empty-net rule above. |
+| F3 | `player_pim_sum` | `team_id`; integer assessed minutes. |
+| F4 | `hits`, `blocked_shots`, `giveaways`, `takeaways` | `team_id`, `player_id`; integer events. |
+| F5 | `toi_seconds`, `shift_count` | `team_id`, `player_id`; integer seconds or shifts respectively. |
+| F6 | `goal_records` | All scope keys null; arrays of `{team_id, period, period_elapsed_second}` objects sorted by those keys, retaining duplicates. Shift-chart array is summary, play-by-play array is detail. |
+| F7 | `strength_counts` | `event_id`, `period`, `game_elapsed_second` (mapped sample second); objects with integer `away_goalies`, `away_skaters`, `home_skaters`, `home_goalies`. Code counts are summary, table counts are detail. |
+| F8 | `roster_sets` | `team_id`; sorted player-ID arrays, boxscore as summary and play-by-play roster as detail; compare equality. |
+| F8 | `shift_roster_boxscore`, `shift_roster_play_by_play` | `team_id`, `player_id` for every player/team pair with shifts; boolean membership in the respective roster as summary, `true` as detail. A conflicting assigned team fails membership for the shift's team. |
+| F8 | `participation` | `team_id`, `player_id` for each boxscore player; boolean (reported TOI is positive) as summary, boolean (at least one actual shift exists) as detail. Only summary true/detail false is a discrepancy; summary false permits either detail value. |
+
+`unit` is `goals` for F1, `shots` for F2, `minutes` for F3, `events` for F4,
+`seconds` or `shifts` for F5, `goal_records` for F6, `players` for F7 and
+`player_ids` or `boolean` for F8. `reason` explains the relationship used when
+it is not simple equality. Missing/unresolvable values are JSON null, not zero;
+retain any available side even when the other is null. A missing-TOI F8
+participation check is unavailable. Family aggregation is defined below.
+
+`anomalies` is an array of objects with `code` (a stable implementation-defined
+string), `scope` (the same five explicit keys as checks), `reason` (nonempty
+string) and `sources` (array of source objects). Use it for the time, identity,
+source and coverage problems required above. Explain anomaly codes in the
+README; graders read scope/reason/sources and may not demand an unstated code
+vocabulary. Use a second-specific scope for on-ice count/coverage anomalies.
+
+`on_ice.jsonl` contains one JSON object per present-player second with integer
+`game_id`, `game_elapsed_second`, `team_id`, `player_id`, and `role` (`skater`
+or `goalie`). Sort by that composite key; no duplicate keys. No rows represent
+shootouts.
 
 Check and family statuses are exactly `PASS`, `DISCREPANCY` or `UNAVAILABLE`.
 A check passes only when all required inputs are available and the stated
@@ -198,15 +260,25 @@ Expose `window.nhlViewer` on the viewer page with these callable methods:
 - `await window.nhlViewer.seek(gameId, gameElapsedSecond)` selects the game,
   pauses playback, seeks to that second and resolves after the displayed state
   has updated. Accept every valid played second; reject invalid game IDs/times
-  visibly and without fabricating a state.
+  by rejecting the returned promise and showing an error; leave the rendered
+  state and `getState()` result unchanged.
 - `window.nhlViewer.getState()` returns a JSON-serializable object describing
   the state actually rendered: `game_id`, `game_elapsed_second`, `period`,
   `phase` (`REG`, `OT` or `SO`), `playing` (boolean), `teams` (two objects with
   `team_id`, `skater_ids`, `goalie_ids`) and `availability` (`AVAILABLE` or
   `UNAVAILABLE`, with a `reason` for the latter). Player ID arrays contain the
-  displayed league IDs without duplicates. Return unavailable before a game
-  has been selected. This hook must read the same state the graph renders,
-  rather than calculating an independent answer only for evaluation.
+  displayed league IDs without duplicates. Include `reason` as a string (empty
+  when available). Before selection, return `game_id`, `game_elapsed_second`,
+  `period` and `phase` all null, `playing: false`, `teams: []`,
+  `availability: "UNAVAILABLE"` and a nonempty `reason`. During shootouts,
+  `game_id` is selected, `phase` is `SO`, `game_elapsed_second` and `period`
+  are null, `teams` contains the selected teams with empty player arrays,
+  `playing` reflects playback, and `availability` is `UNAVAILABLE` with a
+  reason explaining that shootouts have no on-ice seconds. During REG/OT,
+  game/time/period/phase are non-null; unavailable source coverage keeps those
+  coordinates and the two teams but returns empty arrays and a nonempty reason.
+  This hook must read the same state the graph renders, rather than calculating
+  an independent answer only for evaluation.
 
 Document how to open a shootout phase when present; no integer seek second
 represents a shootout attempt. Playback must advance the displayed game clock
