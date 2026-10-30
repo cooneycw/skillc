@@ -1,6 +1,7 @@
 """The isolated load-harness invocation cannot disappear from either gate (#462)."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,37 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "controls/pytest-lanes"
+WORKER_CASES = json.loads((ROOT / "controls/pytest-workers/cases.json").read_text())
+
+
+@pytest.mark.parametrize("case", WORKER_CASES, ids=[case["name"] for case in WORKER_CASES])
+def test_automatic_worker_cap_respects_committed_cpu_quota_cases(
+    case: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ci import run_pytest_lanes as runner
+
+    cpu_max = tmp_path / "cpu.max"
+    if case["cpu_max"] is not None:
+        cpu_max.write_text(case["cpu_max"])
+    # Patch the platform input, leaving the command builder and cap wired together.
+    monkeypatch.setattr(runner, "CPU_MAX", cpu_max, raising=False)
+    command = runner.pytest_command([], "ordinary", Path("report.xml"), workers=case["workers"],
+                                    maxprocesses=case["maxprocesses"], dist="loadgroup", durations=0)
+    assert f"--maxprocesses={case['expected']}" in command
+    assert command[command.index("-n") + 1] == case["workers"]
+
+
+def test_cpu_quota_never_adds_workers_to_the_serial_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ci import run_pytest_lanes as runner
+
+    cpu_max = tmp_path / "cpu.max"
+    cpu_max.write_text("200000 100000")
+    monkeypatch.setattr(runner, "CPU_MAX", cpu_max, raising=False)
+    command = runner.pytest_command([], "serial", Path("report.xml"), workers="auto",
+                                    maxprocesses=8, dist="loadgroup", durations=0)
+    assert command[command.index("-n") + 1] == "0"
 
 
 def test_both_gates_use_the_split_runner() -> None:
