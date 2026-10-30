@@ -137,7 +137,8 @@ def qualify(controls: Path) -> Json:
         raise ReferenceError("qualification requires nonempty synthetic controls")
     names = [c.get("name") for c in cases]
     required = {*(f"wrong-{f}" for f in oracle.FAMILIES), *(f"source-{f}" for f in oracle.FAMILIES),
-                "missing-family", "missing-check", "wrong-on-ice-player", "changed-live-bytes", "empty-season"}
+                "missing-family", "missing-check", "wrong-on-ice-player", "changed-live-bytes", "empty-season",
+                "partial-reference-complete-candidate", "partial-reference-known-wrong", "fabricated-pass-unavailable"}
     if len(names) != len(required) or set(names) != required:
         raise ReferenceError("qualification control population incomplete or duplicated")
     identity = data["game"]["id"]
@@ -164,7 +165,27 @@ def qualify(controls: Path) -> Json:
     for case in cases:
         candidate = copy.deepcopy(expected)
         mutation = case["mutation"]
-        if mutation == "source_mismatch":
+        if mutation == "fabricated_unavailable":
+            missing = copy.deepcopy(data)
+            missing["boxscore"]["playerByGameStats"]["awayTeam"]["forwards"][0].pop("hits")
+            missing_sources = {name: (sources[name][0], missing[name]) for name in snapshot.SOURCE_IDS}
+            reference = oracle.GameOracle(missing["game"], missing_sources).reconcile()
+            candidate = copy.deepcopy(reference)
+            family = next(f for f in candidate["families"] if f["family_id"] == "F4")
+            check = next(c for c in family["checks"] if c["summary_value"] is None)
+            check.update(summary_value=0, detail_value=0, status="PASS")
+            family["status"] = "PASS"
+            actual = oracle.compare(reference, candidate, fresh=True)["status"]
+        elif mutation in ("partial_reference", "partial_reference_wrong"):
+            incomplete = copy.deepcopy(data)
+            incomplete["boxscore"] = {}
+            partial_sources = {name: (sources[name][0], incomplete[name]) for name in snapshot.SOURCE_IDS}
+            partial = oracle.GameOracle(incomplete["game"], partial_sources).reconcile()
+            if mutation == "partial_reference_wrong":
+                family = next(f for f in candidate["families"] if f["family_id"] == "F6")
+                family["checks"][0]["detail_value"] = []
+            actual = oracle.compare(partial, candidate, fresh=True)["status"]
+        elif mutation == "source_mismatch":
             planted = copy.deepcopy(data)
             value = planted
             for key in case["path"][:-1]:

@@ -106,10 +106,19 @@ class GameOracle:
                           "availability", "reason")} | {"record_pointer": pointer}
                 for name in names]
 
-    def anomaly(self, code: str, reason: str, names: tuple[str, ...], **scope: Any) -> None:
+    def anomaly(self, code: str, reason: str, names: tuple[str, ...], *,
+                pointer: str = "", **scope: Any) -> None:
         self.anomalies.append({"code": code, "reason": reason,
                                "scope": {k: scope.get(k) for k in SCOPE_KEYS},
-                               "sources": self.refs(*names)})
+                               "sources": self.refs(*names, pointer=pointer)})
+
+    def event_pointer(self, event: Json) -> str:
+        rows = self.pbp.get("plays", [])
+        if isinstance(rows, list):
+            for index, row in enumerate(rows):
+                if isinstance(row, dict) and row.get("eventId") == event.get("eventId"):
+                    return f"/plays/{index}"
+        return ""
 
     def emit(self, family: str, comparison: str, summary: Any, detail: Any, unit: str,
              names: tuple[str, ...], *, reason: str = "", agrees: bool | None = None,
@@ -371,6 +380,10 @@ class GameOracle:
                 if details.get("eventOwnerTeamId") != team:
                     continue
                 duration = integer(details.get("duration"))
+                if duration is None:
+                    self.anomaly("penalty-duration", "assessed penalty duration is unreadable",
+                                 ("play_by_play",), pointer=self.event_pointer(event),
+                                 team_id=team, event_id=event["eventId"])
                 if type(details.get("committedByPlayerId")) is not int:
                     if details.get("descKey") not in ("bench-minor", "bench", "too-many-men-on-the-ice"):
                         minutes.append(None)
@@ -385,6 +398,11 @@ class GameOracle:
                       _sum(minutes) if penalties is not None else None, "minutes", ("boxscore", "play_by_play"), team_id=team)
         event_fields = {"hits": ("hit", "hittingPlayerId"), "blocked_shots": ("blocked-shot", "blockingPlayerId"),
                         "giveaways": ("giveaway", "playerId"), "takeaways": ("takeaway", "playerId")}
+        for kind, actor in event_fields.values():
+            for event in self._events(kind) or []:
+                if type(_object(event.get("details")).get(actor)) is not int:
+                    self.anomaly("event-attribution", f"{kind}: unreadable {actor}",
+                                 ("play_by_play",), pointer=self.event_pointer(event), event_id=event["eventId"])
         for (team, player), row in sorted(self.players.items()):
             role = self.roles.get((team, player))
             for comparison, (kind, actor) in event_fields.items():
@@ -462,8 +480,14 @@ class GameOracle:
                       team_id=team, player_id=player)
         for family in FAMILIES:
             if not self.checks[family]:
-                comparison = {"F4": "hits", "F5": "toi_seconds"}.get(family, "unavailable")
-                self.emit(family, comparison, None, None, "events" if family == "F4" else "seconds", tuple(self.sources))
+                fallbacks = {"F1": [("team_score", "goals")], "F2": [("team_sog", "shots")],
+                             "F3": [("player_pim_sum", "minutes")],
+                             "F4": [(c, "events") for c in event_fields],
+                             "F5": [("toi_seconds", "seconds"), ("shift_count", "shifts")],
+                             "F6": [("goal_records", "goal_records")],
+                             "F7": [("strength_counts", "players")], "F8": [("roster_sets", "player_ids")]}
+                for comparison, unit in fallbacks[family]:
+                    self.emit(family, comparison, None, None, unit, tuple(self.sources))
         if self.play_conflict or self.shift_conflict:
             self.anomaly("conflicting-record", "conflicting repeated event/shift identity", ("play_by_play", "shifts"))
         for second in range(max((s + n for s, n in self.periods.values()), default=0)):
@@ -490,7 +514,7 @@ def compare(expected: Json, candidate: Json, *, fresh: bool) -> Json:
     if not fresh:
         return {"game_id": expected["game_id"], "status": "UNKNOWN", "reason": "live source not confirmed unchanged"}
     failures: list[str] = []
-    unknown: list[str] = []
+    unavailable: list[str] = []
     try:
         families = candidate["families"]
         if candidate["game_id"] != expected["game_id"] or not isinstance(families, list):
@@ -503,16 +527,15 @@ def compare(expected: Json, candidate: Json, *, fresh: bool) -> Json:
             checks = actual["checks"]
             by_id = {c["check_id"]: c for c in checks}
             required = {c["check_id"] for c in family["checks"]}
-            if len(by_id) != len(checks) or set(by_id) != required:
+            if not checks or len(by_id) != len(checks) or set(by_id) != required:
                 failures.append(f"{family['family_id']}: check population mismatch")
                 continue
             if actual["status"] != family_status(checks):
                 failures.append(f"{family['family_id']}: dishonest family status")
             for wanted in family["checks"]:
-                observed = by_id[wanted["check_id"]]
                 if wanted["status"] == "UNAVAILABLE":
-                    unknown.append(wanted["check_id"])
-                    continue
+                    unavailable.append(wanted["check_id"])
+                observed = by_id[wanted["check_id"]]
                 keys = ("comparison", "scope", "summary_value", "detail_value", "unit", "status")
                 # JSON booleans and integers must not compare equal (True == 1).
                 import json
@@ -520,8 +543,8 @@ def compare(expected: Json, candidate: Json, *, fresh: bool) -> Json:
                     failures.append(wanted["check_id"])
     except (KeyError, TypeError, ValueError, AttributeError):
         failures.append("malformed candidate reconciliation")
-    return {"game_id": expected["game_id"], "status": "FAIL" if failures else "UNKNOWN" if unknown else "PASS",
-            "failures": failures, "unavailable_reference_checks": unknown}
+    return {"game_id": expected["game_id"], "status": "FAIL" if failures else "PASS",
+            "failures": failures, "unavailable_reference_checks": unavailable}
 
 
 def census(reports: list[Json]) -> Json:

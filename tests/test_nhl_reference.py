@@ -69,7 +69,24 @@ def test_committed_negative_controls(case: dict[str, Any], tmp_path: Path) -> No
     expected = game.reconcile()
     candidate = copy.deepcopy(expected)
     mutation = case["mutation"]
-    if mutation == "source_mismatch":
+    if mutation == "fabricated_unavailable":
+        data = fixture()
+        data["boxscore"]["playerByGameStats"]["awayTeam"]["forwards"][0].pop("hits")
+        partial = make_game(data).reconcile()
+        candidate = copy.deepcopy(partial)
+        family = next(f for f in candidate["families"] if f["family_id"] == "F4")
+        check = next(c for c in family["checks"] if c["summary_value"] is None)
+        check.update(summary_value=0, detail_value=0, status="PASS")
+        family["status"] = "PASS"
+        result = oracle.compare(partial, candidate, fresh=True)
+    elif mutation in ("partial_reference", "partial_reference_wrong"):
+        data = fixture()
+        data["boxscore"] = {}
+        partial = make_game(data).reconcile()
+        if mutation == "partial_reference_wrong":
+            checks(candidate, "F6")[0]["detail_value"] = []
+        result = oracle.compare(partial, candidate, fresh=True)
+    elif mutation == "source_mismatch":
         data = fixture()
         value = data
         for key in case["path"][:-1]:
@@ -321,3 +338,34 @@ def test_transport_refuses_unapproved_host_and_redirect_without_network() -> Non
             snapshot.fetch_public(url)
     with pytest.raises(snapshot.ReferenceError, match="redirect"):
         snapshot._NoRedirect().redirect_request(None, None, 302, "redirect", None, "https://other.invalid/")
+
+
+def test_reference_missing_data_rejects_unsupported_complete_candidate() -> None:
+    data = fixture()
+    data["boxscore"] = {}
+    partial = make_game(data).reconcile()
+    complete = make_game().reconcile()
+    assert oracle.compare(partial, complete, fresh=True)["status"] == "FAIL"
+    assert oracle.compare(partial, copy.deepcopy(partial), fresh=True)["status"] == "PASS"
+
+
+def test_fabricating_zero_pass_over_unavailable_input_is_a_failure() -> None:
+    data = fixture()
+    data["boxscore"]["playerByGameStats"]["awayTeam"]["forwards"][0].pop("hits")
+    expected = make_game(data).reconcile()
+    candidate = copy.deepcopy(expected)
+    unavailable = next(c for c in checks(candidate, "F4") if c["summary_value"] is None)
+    unavailable.update(summary_value=0, detail_value=0, status="PASS")
+    next(f for f in candidate["families"] if f["family_id"] == "F4")["status"] = "PASS"
+    assert oracle.compare(expected, candidate, fresh=True)["status"] == "FAIL"
+
+
+def test_unreadable_penalty_and_event_attribution_name_raw_records() -> None:
+    data = fixture()
+    data["play_by_play"]["plays"][-1]["details"]["duration"] = "unknown"
+    data["play_by_play"]["plays"][2]["details"].pop("hittingPlayerId")
+    report = make_game(data).reconcile()
+    for code, identity, pointer in (("penalty-duration", 7, "/plays/6"), ("event-attribution", 3, "/plays/2")):
+        anomaly = next(a for a in report["anomalies"] if a["code"] == code)
+        assert anomaly["scope"]["event_id"] == identity
+        assert anomaly["sources"][0]["record_pointer"] == pointer

@@ -179,5 +179,20 @@
     ],
     "value": 999,
     "expected_verdict": "DISCREPANCY"
+  },
+  {
+    "name": "partial-reference-complete-candidate",
+    "mutation": "partial_reference",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "partial-reference-known-wrong",
+    "mutation": "partial_reference_wrong",
+    "expected_verdict": "FAIL"
+  },
+  {
+    "name": "fabricated-pass-unavailable",
+    "mutation": "fabricated_unavailable",
+    "expected_verdict": "FAIL"
   }
 ]

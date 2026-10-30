@@ -106,7 +106,9 @@ Only a controller-owned live report is valid evidence of a real fetch.
 
 Reconciliation comparison checks every named comparison/scope, values, units and
 status, and refuses missing/duplicate/extra family or check populations. Expected
-UNAVAILABLE checks remain ungraded. Membership comparison streams the exact
+UNAVAILABLE checks must retain UNAVAILABLE status and the matching null/value
+sides; fabricated PASS or DISCREPANCY is a failure. Honest UNAVAILABLE reporting
+is graded directly and does not by itself turn reconciliation UNKNOWN. Membership comparison streams the exact
 rows, detecting missing, duplicated, extra, reordered or wrong player/role rows.
 Comparison exit codes are 0 PASS, 1 FAIL and 2 UNKNOWN. This seam does not execute
 candidate code or grade the whole project: source-provenance validity, anomaly
