@@ -77,6 +77,7 @@ MAX_TREE_DEPTH = 64
 MAX_FS_DEPTH = 64
 MAX_FS_ENTRIES = 200_000
 MAX_FS_BYTES = 512 * 1024 * 1024
+MAX_COMMIT_BYTES = 64 * 1024 * 1024
 _SHA = re.compile(r"[0-9a-f]{40}")
 #: Extended index flags (index v3): intent-to-add and skip-worktree; any
 #: other extended bit is refused rather than ignored.
@@ -253,6 +254,7 @@ def _ascii(data: bytes, what: str) -> str:
 class _Budget:
     commits: int = 0
     tree_entries: int = 0
+    blob_bytes: int = 0
 
 
 @dataclass
@@ -442,6 +444,27 @@ class GitDir:
             else:
                 raise Unreadable(f"tree {tree[:10]} has an unknown mode {mode!r}")
         return files
+
+    def commit_files(self, commit: str) -> dict[str, tuple[str, bytes]]:
+        """Read the exact paths, modes and blob bytes named by this commit.
+
+        No checkout or git process supplies content. Repeated blobs count at
+        each delivered path against the shared expansion budget. Gitlinks
+        name another repository's objects and cannot supply bytes here.
+        """
+        out: dict[str, tuple[str, bytes]] = {}
+        for path, entry in sorted(self.tree_files(self.tree_of(commit)).items()):
+            mode, sha = entry.split()
+            if mode == "160000":
+                raise Unreadable(f"{path} is a gitlink; its bytes are not in this repository")
+            kind, payload = self.object(sha)
+            if kind != "blob":
+                raise Unreadable(f"{path} names a {kind}, not a blob")
+            self._budget.blob_bytes += len(payload)
+            if self._budget.blob_bytes > MAX_COMMIT_BYTES:
+                raise Unreadable("the commit's files exceed the blob-byte budget")
+            out[path] = mode, payload
+        return out
 
     def reachable(self, starts: list[str]) -> set[str]:
         seen: set[str] = set()

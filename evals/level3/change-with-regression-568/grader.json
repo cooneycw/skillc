@@ -1,0 +1,28 @@
+{
+ "id": "change-with-regression-568",
+ "revision": "1",
+ "criteria": [
+  "delivered-main",
+  "feature-correct",
+  "legacy-preserved",
+  "tests-protect"
+ ],
+ "optional_criteria": [
+  "gate-ran"
+ ],
+ "dimensions": {
+  "delivered-main": "functional",
+  "feature-correct": "functional",
+  "legacy-preserved": "functional",
+  "tests-protect": "functional"
+ },
+ "probe": {
+  "file": "probe.py",
+  "inputs": "inputs.json",
+  "timeout": 30
+ },
+ "judge": {
+  "file": "grade_inventory.py",
+  "timeout": 30
+ }
+}
