@@ -129,7 +129,10 @@ def _actor(path: Path, socket_path: str, transcript: Path, requests: list[Any], 
 
 def run_fixture_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, case: str,
                      requests: list[Any], report: str,
-                     experiments: list[trial.Experiment] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+                     experiments: list[trial.Experiment] | None = None,
+                     baseline: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """`baseline` (#640): the same attempt on the DECLARED baseline route -
+    no CPP gate installed or witnessed, everything else identical."""
     base = tmp_path / "work"
     base.mkdir()
     experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
@@ -175,12 +178,14 @@ def run_fixture_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, case: s
             base_argv=[sys.executable, str(actor), *fake[1:]], prompt="flow:auto issue #1", skill_name=None,
             surface=surface, limits=Limits(timeout=TIMEOUT), base=base,
             credential_explicit_path=_fresh_credential(tmp_path, "codex"),
-            extra_home_files={GATE_ENTRY: GATE_SCRIPT},
-            verify_home_files={GATE_ENTRY: "sha256:" + hashlib.sha256(GATE_SCRIPT).hexdigest()},
-            gate_entrypoint=GATE_ENTRY, grader=verify.GraderDef.load(TASK), grading_backend=grading,
-            fixture=fixture,
+            grader=verify.GraderDef.load(TASK), grading_backend=grading, fixture=fixture,
+            extra_home_files={} if baseline else {GATE_ENTRY: GATE_SCRIPT},
+            fixture_baseline=baseline,
+            verify_home_files=None if baseline else {GATE_ENTRY: "sha256:" + hashlib.sha256(GATE_SCRIPT).hexdigest()},
+            gate_entrypoint=None if baseline else GATE_ENTRY,
         )
-    assert placed == ["gh", "codex"], "both overlays are placed, gh first, before the agent starts"
+    assert placed == ["gh", "codex"], ("both overlays are placed, gh first, before the agent starts",
+                                       result.get("disposition"), result.get("reason"))
     return result, trusted
 
 
@@ -266,6 +271,8 @@ def test_the_credit_gate_blocks_a_nested_or_unknown_codex_count(
 
 
 def test_a_fixture_attempt_without_a_gate_entrypoint_is_refused(tmp_path: Path) -> None:
+    """The original red, unchanged: a missing gate_entrypoint alone is never
+    read as the baseline route (#640) - that route must be declared."""
     fixture, surface = _fixture(tmp_path / "fixture", "clean")
     experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
     backend = d.DockerBackend(image="fake-image:1", base_dir=tmp_path, docker_bin=_docker_bin(tmp_path / "s"))
@@ -273,6 +280,73 @@ def test_a_fixture_attempt_without_a_gate_entrypoint_is_refused(tmp_path: Path) 
         at.run_one_attempt(backend=backend, experiment=experiment, attempt_id=attempt, client="codex",
                            base_argv=["codex"], prompt="p", skill_name=None, surface=surface,
                            limits=Limits(timeout=5), base=tmp_path, fixture=fixture)
+
+
+@pytest.mark.parametrize("extra", [
+    {"gate_entrypoint": GATE_ENTRY},
+    {"gate_witness": "flow-check"},
+    {"bundled_gate_entrypoints": (GATE_ENTRY,)},
+    {"checkout_gate_entrypoints": {"repo": GATE_ENTRY}},
+])
+def test_red_640_a_declared_baseline_fixture_attempt_that_carries_a_gate_is_refused(
+        tmp_path: Path, extra: dict[str, Any]) -> None:
+    """#640: the baseline route witnesses NO gate. An attempt that declares
+    one and also claims the baseline route is a contradiction, refused before
+    any container exists - never resolved by dropping either half."""
+    fixture, surface = _fixture(tmp_path / "fixture", "clean")
+    experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=tmp_path, docker_bin=_docker_bin(tmp_path / "s"))
+    with pytest.raises(at.HomeFileVerificationRefused, match="baseline fixture attempt"):
+        at.run_one_attempt(backend=backend, experiment=experiment, attempt_id=attempt, client="codex",
+                           base_argv=["codex"], prompt="p", skill_name=None, surface=surface,
+                           limits=Limits(timeout=5), base=tmp_path, fixture=fixture, fixture_baseline=True,
+                           **extra)
+    assert not (tmp_path / "s").exists() or not list((tmp_path / "s").glob("*.json"))
+
+
+def test_red_640_the_baseline_route_without_a_fixture_is_refused(tmp_path: Path) -> None:
+    experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=tmp_path, docker_bin=_docker_bin(tmp_path / "s"))
+    with pytest.raises(at.HomeFileVerificationRefused, match="needs a fixture"):
+        at.run_one_attempt(backend=backend, experiment=experiment, attempt_id=attempt, client="codex",
+                           base_argv=["codex"], prompt="p", skill_name=None, surface={},
+                           limits=Limits(timeout=5), base=tmp_path, fixture_baseline=True)
+
+
+def test_640_a_declared_baseline_fixture_attempt_gets_the_same_fixture_evidence(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#640: the baseline route runs the SAME fixture wiring - both overlays
+    placed, the service over the in-attempt remote, the post-stop snapshot -
+    under a witness over the fixture's own gate map with no gate shim placed,
+    and grades exactly as the gated route does for a candidate that never runs
+    the gate."""
+    name = "pass/clean-cites-commit-only"
+    candidate = TASK / "candidates" / name
+    actions = json.loads((candidate / "actions.json").read_text())
+    requests: list[Any] = [TOP_LEVEL, *(_gh(argv) for argv in actions["gh"])]
+    outcomes = {}
+    records: dict[bool, dict[str, Any]] = {}
+    for baseline in (False, True):
+        experiments: list[trial.Experiment] = []
+        (tmp_path / f"baseline-{baseline}").mkdir()
+        result, trusted = run_fixture_case(tmp_path / f"baseline-{baseline}", monkeypatch, case=actions["case"],
+                                           requests=requests, report=(candidate / "report.md").read_text(),
+                                           experiments=experiments, baseline=baseline)
+        outcomes[baseline] = _outcome(result)
+        [envelope] = trusted
+        assert envelope["service"]["events"] and [e["argv"] for e in envelope["service"]["events"]] == actions["gh"]
+        assert envelope["git"] is not None and envelope["git"]["remote_refs"]
+        [event] = [e for e in experiments[0].events(str(result["attempt_id"]))
+                   if e["event"] == "gate-witness-retained"]
+        witness = json.loads(trial.read_object(experiments[0], str(event["digest"])))
+        assert witness["declared_gates"] == ["flow-auto-finish"]
+        assert witness["gates"]["flow-auto-finish"]["runs"] == []
+        records[baseline] = result
+    assert outcomes[True] == outcomes[False]
+    # Red (#640, orchestrator condition): the same zero-run witness on a gated
+    # and on a baseline attempt must be told apart from the record alone.
+    assert records[False]["fixture"]["gates_offered"] is True
+    assert records[True]["fixture"]["gates_offered"] is False
 
 
 def test_a_fixture_attempt_with_a_widened_egress_allowlist_is_refused(tmp_path: Path) -> None:

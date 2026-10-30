@@ -51,6 +51,18 @@ run_one_attempt` itself), `outcomes.json` and the report. Nothing is exported
 for committing here; publishing the run's evidence belongs to the calibration
 report (#204), which needs its own record kind.
 
+A FIXTURE TASK (#640). A task with `builder/build.py` (a fixture-service
+task, #434) is dispatched with its fixture in EVERY arm. The declaration names
+`task.fixture: "builder"` (so the builder's bytes are the approved fixture
+identity) and `task.fixture_case`. The case is built ONCE by the controller,
+its digest bound into every planned trial, and each attempt gets its own fresh
+copy, digest-checked before dispatch. The treated arm runs the treatment's
+gate on the fixture route; the baseline runs agent_trial's DECLARED baseline
+route (`fixture_baseline`), whose record says the gate was not offered. A
+fixture that does not build, or a copy that differs, is a non-start. Every
+attempt is classed in `accounting` (success, task failure, timeout,
+infrastructure failure, non-start, unknown).
+
 Nothing here names or branches on a particular subject: the subject, task,
 client and model all come from the declaration.
 
@@ -61,6 +73,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -69,6 +82,7 @@ from pathlib import Path, PurePosixPath
 from . import agent_trial, calibration, completion, demo, egress, gate_state, profile, trial, verify
 from . import attempt_guard as ag
 from . import collection_conformance as cc
+from . import fixture_attempt as fa
 from . import matched_pilot as mp
 from . import materialize as m
 from .spec import FrontmatterError
@@ -478,6 +492,89 @@ def _outcome_task_inputs(
     return goal.decode("utf-8"), cc.surface_mapping(files)
 
 
+#: #640: a fixture-service task's builder, beside its grader (#434).
+FIXTURE_BUILDER = ("builder", "build.py")
+#: The declared `task.fixture` of a fixture-builder task: its builder IS its fixture.
+FIXTURE_BUILDER_DIR = "builder"
+FIXTURE_ROUTE_GATED = "gated"
+FIXTURE_ROUTE_BASELINE = "baseline"
+NON_START = "non-start"
+
+
+def fixture_case_of(declaration: calibration.CalibrationDeclaration, root: Path) -> str | None:
+    """#640: the declared fixture case of a fixture-builder task, or None for
+    a task without a builder. Both fields are approval-bound like the rest of
+    the declaration (D-P2a), so the case cannot change after approval. A
+    builder-less task naming a case, or a builder task not naming one, is
+    refused - never run as if the other were meant."""
+    task_root = root / declaration.task_path
+    builder = task_root.joinpath(*FIXTURE_BUILDER)
+    task = declaration.data.get("task")
+    case = task.get("fixture_case") if isinstance(task, dict) else None
+    if builder.is_symlink() or (builder.exists() and not builder.is_file()):
+        raise CalibrationRefused(f"{declaration.task_path}: builder/build.py is not a regular file")
+    if not builder.is_file():
+        if case is not None:
+            raise CalibrationRefused("task.fixture_case names a case, but the task has no fixture builder")
+        return None
+    if declaration.task_fixture != FIXTURE_BUILDER_DIR:
+        raise CalibrationRefused(f"a fixture-builder task declares task.fixture {FIXTURE_BUILDER_DIR!r}, so its "
+                                 f"builder's bytes are the approved fixture identity, not {declaration.task_fixture!r}")
+    if not isinstance(case, str) or not case:
+        raise CalibrationRefused("a fixture-builder task must declare task.fixture_case")
+    from . import fixture_campaign as fc  # fixture_campaign imports this module
+    cases = getattr(fc._builder(task_root), "CASES", None)
+    if not isinstance(cases, tuple) or case not in cases:
+        raise CalibrationRefused(f"task.fixture_case {case!r} is not one of the builder's cases {cases!r}")
+    return case
+
+
+@dataclass(frozen=True)
+class BuiltFixture:
+    """#640: the ONE controller build of a run's fixture case. `surface` is
+    the built tree every attempt is copied from; `fixture` is the case's
+    controller-held facts, shared by every attempt. A build that failed keeps
+    only its reason, and every attempt is then a non-start."""
+
+    case: str
+    surface: Mapping[str, Path] | None
+    fixture: fa.AttemptFixture | None
+    digest: str | None
+    build_error: str | None = None
+
+    def planned(self, route: str) -> dict[str, object]:
+        """What the ledger binds for one trial: the case, the digest every
+        attempt must be delivered, and the route (gated or baseline)."""
+        return {"case": self.case, "digest": self.digest, "route": route,
+                **({"build_error": self.build_error} if self.build_error is not None else {})}
+
+
+def build_fixture(task_root: Path, case: str, where: Path) -> BuiltFixture:
+    """Build `case` once, under `where`. A failure is recorded, not raised."""
+    from . import fixture_campaign as fc  # fixture_campaign imports this module
+    try:
+        surface, fixture = fc.build_case(task_root, case, where)
+        paths: dict[str, Path] = {}
+        for name, path in surface.items():
+            if not isinstance(path, Path):
+                raise fa.FixtureUndeliverable(f"fixture surface {name!r} is not a directory path")
+            paths[name] = path
+        return BuiltFixture(case, paths, fixture, fa.fixture_digest(paths))
+    except Exception as exc:  # noqa: BLE001 - any build failure is a non-start, with its reason
+        return BuiltFixture(case, None, None, None, f"{type(exc).__name__}: {exc}")
+
+
+def deliver_fixture(built: BuiltFixture, where: Path) -> tuple[dict[str, Path], str]:
+    """A FRESH copy of the built case for one attempt (no remote or
+    workspace is shared between attempts), and the copy's own digest. Raises
+    `fixture_attempt.FixtureUndeliverable` (or an OSError) when it cannot."""
+    if built.surface is None:
+        raise fa.FixtureUndeliverable(f"the fixture did not build: {built.build_error}")
+    where.mkdir(parents=True)
+    copied = {name: shutil.copytree(src, where / name, symlinks=True) for name, src in sorted(built.surface.items())}
+    return {name: Path(path) for name, path in copied.items()}, fa.fixture_digest(copied)
+
+
 def base_prompt(declaration: calibration.CalibrationDeclaration, arm: str, goal: str) -> str:
     """Exact pre-bootstrap prompt; canary and later controller turns are separate."""
     instruction = calibration.arm_spec(declaration, arm).get("instruction")
@@ -556,9 +653,12 @@ def plan_calibration(
     root: Path, treatment_digest: str, image_digest: str | None,
     skill_digests: Sequence[Mapping[str, str]] = (),
     treatment: Treatment | None = None,
+    fixture: BuiltFixture | None = None,
 ) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
     """Plan one trial per attempt through the real controller, in
     `arm_order.sequence`. `repeat` is the arm's own 1-based attempt count.
+    A fixture task's trials (#640) each bind the built case's digest and the
+    arm's route, so what every attempt must be delivered is in the ledger.
 
     Every treated trial declares `skill_digests` (#424), so #354's
     `ledger-binding` refuses stale or unpinned skill-evidence for it. A
@@ -598,7 +698,9 @@ def plan_calibration(
             "client": {"name": client_name, "version": client_version},
             "image": {"digest": image_digest or UNKNOWN},
             "config": {"arm": arm, "repeat": counts[arm], "position": position,
-                       **({"calibration_declaration": snapshot} if snapshot is not None else {})},
+                       **({"calibration_declaration": snapshot} if snapshot is not None else {}),
+                       **({"fixture": fixture.planned(FIXTURE_ROUTE_BASELINE if arm == calibration.BASELINE_ARM
+                                                      else FIXTURE_ROUTE_GATED)} if fixture is not None else {})},
             "attempts": 1,
             **({} if arm == calibration.BASELINE_ARM else {"skill_digests": [dict(pin) for pin in skill_digests]}),
         })
@@ -702,6 +804,14 @@ def run_calibration(
     #: #508: the task's project gate, resolved ONCE for the whole run and
     #: handed to every arm, so the arms cannot see different declarations.
     resolved_gate = cc.project_gate_of(task_root)
+    #: #640: a fixture task's case; every arm is dispatched with its fixture.
+    case = fixture_case_of(declaration, root)
+    if case is not None:
+        if resolved_gate is not None:
+            raise CalibrationRefused("a fixture task uses its fixture's gate map; it cannot also declare a project gate")
+        if any(arm != calibration.BASELINE_ARM for arm in declaration.arm_order) and treatment.gate_entrypoint is None:
+            raise CalibrationRefused("a treated arm on a fixture task witnesses the treatment's gate; this treatment "
+                                     "declares no gate_entrypoint (only the baseline route carries none)")
     try:
         if calibration.outcome_endpoint(declaration) is not None:
             goal, surface = _outcome_task_inputs(declaration, root)
@@ -710,6 +820,8 @@ def run_calibration(
             goal = (task_root / "goal.md").read_text(encoding="utf-8")
     except demo.SubjectRefused as exc:
         raise CalibrationRefused(str(exc)) from exc
+    if case is not None:
+        surface = {}  # the builder is the fixture's identity, never its delivered surface
     per_attempt = float(str(declaration.shared["per_attempt_seconds"]))
     total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
 
@@ -722,10 +834,12 @@ def run_calibration(
             raise CalibrationRefused(f"arm {arm!r} names {absent}, which the treatment does not install")
 
     store = trial.open_store(run_dir / "store", forbidden=[])
+    fixtures_dir = run_dir / "fixtures"
+    built = build_fixture(task_root, case, fixtures_dir / "built") if case is not None else None
     experiment, schedule = plan_calibration(
         declaration, store, root=root, treatment_digest=treatment.digest, image_digest=image_digest,
         skill_digests=treatment.skill_digests,
-        treatment=treatment,
+        treatment=treatment, fixture=built,
     )
     outcomes: list[mp.AttemptOutcome] = []
     write_outcomes(run_dir, experiment, outcomes, declaration)
@@ -742,31 +856,60 @@ def run_calibration(
             return skipped
         treated = scheduled.arm != calibration.BASELINE_ARM
         prompt = base_prompt(declaration, scheduled.arm, goal)
+        attempt_surface: Mapping[str, object] = surface
+        fixture_kwargs: dict[str, object] = {}
+        delivered: str | None = None
+        attempt_dir = fixtures_dir / scheduled.attempt_id
+        if built is not None:
+            try:
+                copied, delivered = deliver_fixture(built, attempt_dir)
+            except (fa.FixtureUndeliverable, OSError) as exc:
+                shutil.rmtree(attempt_dir, ignore_errors=True)
+                return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable",
+                                      reason=f"{NON_START}: {exc}")
+            if delivered != built.digest:
+                shutil.rmtree(attempt_dir, ignore_errors=True)
+                return trial.finalize(experiment, scheduled.attempt_id, disposition="unavailable",
+                                      reason=f"{NON_START}: the attempt's fixture copy {delivered} differs from the "
+                                             f"built case {built.digest}")
+            attempt_surface = copied
+            fixture_kwargs = {"fixture": built.fixture, "fixture_baseline": not treated}
         agent_backend, grading_backend = backends()
-        return cc.run_level1_agent_attempt(
-            experiment=experiment, attempt_id=scheduled.attempt_id,
-            completion_deadline=deadline, recorded_attempt_ids=owned,
-            backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
-            base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
-            extra_home_files=treatment.home_files if treated else {},
-            client=client_name, cli_version=client_version, task_root=task_root, surface=surface, prompt=prompt,
-            project_gate=resolved_gate,
-            timeout=budget, credential_explicit_path=credential_explicit_path,
-            receipt_context=treatment.receipt_context if treated else None,
-            # #334: the profile-closure fields reach a real
-            # calibration attempt - for a TREATED arm only; the baseline
-            # stays exactly as empty as `extra_home_files`/`receipt_context`
-            # already do above, never partially profile-opted.
-            verify_home_files=treatment.verify_home_files if treated else None,
-            preflight_tools=treatment.preflight_tools if treated else None,
-            gate_entrypoint=treatment.gate_entrypoint if treated else None,
-            gate_witness=treatment.gate_witness if treated else None,
-            bundled_gate_entrypoints=treatment.bundled_gate_entrypoints if treated else (),
-            checkout_gate_entrypoints=treatment.checkout_gate_entrypoints if treated else {},
-            # #505: the installed files' source modes, for a treated arm only.
-            extra_home_modes=dict(treatment.home_modes) if treated and treatment.home_modes else None,
-            **guarded,  # type: ignore[arg-type]
-        )
+        try:
+            record = cc.run_level1_agent_attempt(
+                experiment=experiment, attempt_id=scheduled.attempt_id,
+                completion_deadline=deadline, recorded_attempt_ids=owned,
+                backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
+                base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
+                extra_home_files=treatment.home_files if treated else {},
+                client=client_name, cli_version=client_version, task_root=task_root, surface=attempt_surface,
+                prompt=prompt,
+                project_gate=resolved_gate,
+                timeout=budget, credential_explicit_path=credential_explicit_path,
+                receipt_context=treatment.receipt_context if treated else None,
+                # #334: the profile-closure fields reach a real
+                # calibration attempt - for a TREATED arm only; the baseline
+                # stays exactly as empty as `extra_home_files`/`receipt_context`
+                # already do above, never partially profile-opted.
+                verify_home_files=treatment.verify_home_files if treated else None,
+                preflight_tools=treatment.preflight_tools if treated else None,
+                gate_entrypoint=treatment.gate_entrypoint if treated else None,
+                gate_witness=treatment.gate_witness if treated else None,
+                bundled_gate_entrypoints=treatment.bundled_gate_entrypoints if treated else (),
+                checkout_gate_entrypoints=treatment.checkout_gate_entrypoints if treated else {},
+                # #505: the installed files' source modes, for a treated arm only.
+                extra_home_modes=dict(treatment.home_modes) if treated and treatment.home_modes else None,
+                **fixture_kwargs,  # type: ignore[arg-type]
+                **guarded,  # type: ignore[arg-type]
+            )
+        finally:
+            if built is not None:
+                shutil.rmtree(attempt_dir, ignore_errors=True)
+        if delivered is not None:
+            # #640: the copy this attempt was handed, checked equal to the
+            # planned digest before dispatch; the report reads it beside it.
+            record = {**record, "fixture_delivered_digest": delivered}
+        return record
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:
         outcomes.append(outcome)
@@ -1334,6 +1477,12 @@ def run_discrimination(
     completion_deadline = (completion.CompletionDeadline.after(declared_total, clock) if completion_deadline is None
                            else completion_deadline.child(declared_total))
     calibration.require_approved_discrimination(declaration, root)
+    builder = (root / declaration.task_path).joinpath(*FIXTURE_BUILDER)
+    if builder.exists() or builder.is_symlink():
+        # #640: its declared fixture would be the BUILDER, delivered as a plain
+        # surface - never the fixture it builds. Refused rather than mis-run.
+        raise CalibrationRefused("fixture dispatch (#640) is calibration-only; a discrimination run of a "
+                                 "fixture-builder task is not supported")
     require_precondition(declaration, precondition_report, root, rehearse=rehearse)  # #287 option 1, ruling (A)
     if image_digest != _shared_str(declaration, "image", "digest"):
         raise CalibrationRefused("the run's image digest differs from the approved declaration's")
@@ -1701,6 +1850,80 @@ def _honesty_beside(record: Mapping[str, object], *, task_path: str, grader: obj
     return {"status": rows[0]["outcome"], "criteria": rows, "reason": None}
 
 
+#: #640: every scheduled attempt lands in exactly one of these. `unknown` is a
+#: captured attempt whose primary endpoint is neither PASS nor FAIL (UNKNOWN,
+#: or not graded) - never folded into success or task failure.
+ACCOUNTING_CLASSES = ("success", "task-failure", "timeout", "infrastructure-failure", NON_START, "unknown")
+
+
+def accounting_class(record: Mapping[str, object], primary_status: object) -> str:
+    """One attempt's accounting class, from its finalized record. A never-
+    dispatched attempt (not run, or a fixture that did not build or copy) is
+    a non-start; a timed-out stop is a timeout whatever was graded after it;
+    any other uncaptured attempt is an infrastructure failure."""
+    stop = record.get("stop")
+    stop_reason = stop.get("reason") if isinstance(stop, Mapping) else None
+    disposition = record.get("disposition")
+    if disposition == "not-run" or stop_reason == "never-started":
+        return NON_START
+    if stop_reason == "timeout":
+        return "timeout"
+    if disposition != "captured":
+        return "infrastructure-failure"
+    return {"PASS": "success", "FAIL": "task-failure"}.get(str(primary_status), "unknown")
+
+
+def accounting_by_arm(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[str, int]]:
+    """Per-arm counts of every class, zeros included, so an absent class
+    reads 0 rather than missing."""
+    out: dict[str, dict[str, int]] = {}
+    for entry in entries:
+        counts = out.setdefault(str(entry.get("arm")), dict.fromkeys(ACCOUNTING_CLASSES, 0))
+        counts[str(entry.get("accounting"))] += 1
+    return out
+
+
+def _fixture_entry(experiment: trial.Experiment, attempt_id: str,
+                   record: Mapping[str, object]) -> dict[str, object] | None:
+    """#640: the attempt's planned fixture (ledger) beside what it was handed
+    and whether the gate was offered (the controller's own record)."""
+    binding = experiment.trial_of(attempt_id).get("config")
+    digest = binding.get("digest") if isinstance(binding, Mapping) else None
+    config = json.loads(trial.read_object(experiment, digest)) if isinstance(digest, str) else None
+    planned = config.get("fixture") if isinstance(config, Mapping) else None
+    if not isinstance(planned, Mapping):
+        return None
+    summary = record.get("fixture")
+    offered = summary.get("gates_offered") if isinstance(summary, Mapping) else None
+    return {**dict(planned), "delivered_digest": record.get("fixture_delivered_digest", UNKNOWN),
+            "gates_offered": offered if isinstance(offered, bool) else UNKNOWN}
+
+
+def fixture_symmetry(entries: Sequence[Mapping[str, object]]) -> dict[str, object] | None:
+    """#640: whether every arm was planned the SAME built case and every
+    dispatched attempt was handed exactly it. A non-start was handed nothing,
+    so it never counts toward symmetric - it is reported, not excused. Every
+    planned arm must have dispatch evidence; an entirely absent arm cannot
+    establish a paired comparison."""
+    fixtures = [(e, f) for e in entries if isinstance(f := e.get("fixture"), Mapping)]
+    if not fixtures:
+        return None
+    planned = {(f.get("case"), f.get("digest")) for _, f in fixtures}
+    planned_identical = len(fixtures) == len(entries) and len(planned) == 1
+    dispatched = [f for e, f in fixtures if e.get("accounting") != NON_START]
+    case, digest = next(iter(planned)) if len(planned) == 1 else (None, None)
+    dispatched_by_arm = dict.fromkeys(sorted({str(e.get("arm")) for e, _ in fixtures}), 0)
+    for entry, _ in fixtures:
+        if entry.get("accounting") != NON_START:
+            dispatched_by_arm[str(entry.get("arm"))] += 1
+    handed = bool(dispatched) and all(f.get("delivered_digest") == digest for f in dispatched)
+    every_arm_dispatched = all(count > 0 for count in dispatched_by_arm.values())
+    return {"case": case, "digest": digest, "planned_identical": planned_identical,
+            "dispatched": len(dispatched), "dispatched_by_arm": dispatched_by_arm,
+            "dispatched_handed_planned": handed,
+            "symmetric": planned_identical and digest is not None and handed and every_arm_dispatched}
+
+
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome], *,
     declared_model: str, declared_effort: str, named_skills: Mapping[str, Sequence[str]] | None = None,
@@ -1778,6 +2001,12 @@ def build_report(
             "runner_note": outcome.runner_note,
             **guard_entry(record, obs, declared_model),
         })
+        primary = entries[-1]["primary_endpoint"]
+        entries[-1]["accounting"] = accounting_class(record, primary.get("status") if isinstance(primary, Mapping) else None)
+        entries[-1]["disposition_reason"] = record.get("reason")  # #640: why a non-start or failure did not run
+        fixture_entry = _fixture_entry(experiment, outcome.scheduled.attempt_id, record)
+        if fixture_entry is not None:
+            entries[-1]["fixture"] = fixture_entry
         evidence = containment_evidence(record)
         marker = record.get("schedule_containment_stop")
         if marker is not None:
@@ -1800,6 +2029,8 @@ def build_report(
         **({"containment_stop": containment_stop(entries)}
            if any("nested_codex" in e or "schedule_containment_stop" in e for e in entries) else {}),
         "arms": summarize_arms(entries),
+        "accounting": accounting_by_arm(entries),
+        **({"fixture": symmetry} if (symmetry := fixture_symmetry(entries)) is not None else {}),
         **({"outcome_endpoint": endpoint.to_json(),
             "declaration_digest": calibration.declaration_digest(declaration.data),
             "task_content": declaration.data["task_content"]}

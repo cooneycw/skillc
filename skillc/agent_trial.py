@@ -2560,6 +2560,7 @@ def run_one_attempt(
     gate_state_protocol: gate_state.Protocol | None = None,
     completion_deadline: completion.CompletionDeadline | None = None,
     recorded_attempt_ids: trial.OwnedAttemptIds | None = None,
+    fixture_baseline: bool = False,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -2650,7 +2651,19 @@ def run_one_attempt(
     fixture's own reasons (a failed binding or finalization, a missing service
     record, a nested-codex count that is not zero), and grading receives the
     controller-held evidence as `verify`'s `trusted_extras`. `None` (the
-    default) changes nothing for any other caller."""
+    default) changes nothing for any other caller.
+
+    `fixture_baseline` (#640): the DECLARED baseline route onto a fixture -
+    a calibration baseline arm, which installs no CPP gate. Its attempt gets
+    the identical service, shims, guard, remote and post-stop snapshot, and a
+    witness over the fixture's OWN gate map, so grading receives the same
+    envelope. No gate shim is placed (there is no `gate_entrypoint` to place
+    it at), so the record shows those gates declared and never run. It is not
+    an empty map: `GateWitness` refuses one, because a witness declaring
+    nothing cannot tell a bypassed attempt from one never asked to run
+    anything. The route is an explicit declaration, never inferred from a
+    missing `gate_entrypoint`: without it a fixture attempt with no gate is
+    refused as before, and with it any gate declaration is refused."""
     if recorded_attempt_ids is not None and not recorded_attempt_ids.bound_to(experiment, attempt_id):
         raise trial.Refused("owned IDs belong to a different experiment or parent")
     completion_marker = None
@@ -2683,9 +2696,18 @@ def run_one_attempt(
         # #279 (ruling G1): the declared nested-codex policy, recorded and
         # honoured only when declared; set before any guard record is read.
         fixture_session.nested_policy = nested_codex_policy
+    if fixture_baseline:
+        if fixture is None:
+            raise HomeFileVerificationRefused("the baseline fixture route (#640) needs a fixture")
+        if (gate_entrypoint is not None or gate_witness is not None or gate_state_protocol is not None
+                or bundled_gate_entrypoints or checkout_gate_entrypoints):
+            raise HomeFileVerificationRefused("a baseline fixture attempt (#640) witnesses no gate; it cannot also "
+                                              "declare a gate_entrypoint, gate_witness, gate-state protocol or "
+                                              "bundled/checkout gate")
     if fixture is not None:
-        if gate_entrypoint is None:
-            raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required")
+        if gate_entrypoint is None and not fixture_baseline:
+            raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required "
+                                              "(only a declared baseline route, #640, carries none)")
         if isinstance(backend, DockerBackend) and backend.egress and tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS:
             raise ServerSideChannelRefused(
                 "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
@@ -2714,7 +2736,7 @@ def run_one_attempt(
             gate_args = {}  # #508: the project gate alone, no CPP gate declared
     witness_session = (_WitnessSession(attempt_id, limits, gate_args=gate_args, stage_plans=stage_plans,
                                        project_gate=project_gate)
-                       if gate_entrypoint is not None or project_gate is not None else None)
+                       if gate_entrypoint is not None or project_gate is not None or fixture_baseline else None)
     #: #508: the agent's own exec PATH (shim directory first), filled in once
     #: the runtime env is measured; a launch before then is refused.
     agent_env: dict[str, str] = {}
@@ -3193,7 +3215,10 @@ def run_one_attempt(
                              "git_unreadable": fixture_session.git_unreadable,
                              "codex_guard": fixture_session.guard_record()["nested"],
                              "credential_steward": fixture_session.steward_record(),
-                             "evidence_digest": fixture_evidence}
+                             "evidence_digest": fixture_evidence,
+                             # #640: set by the controller, never inferred from a zero-run witness -
+                             # a baseline's declared, never-run gate was NOT OFFERED to it.
+                             "gates_offered": not fixture_baseline}
     if attempt_guard is not None:
         result["codex_guard"] = attempt_guard.report(observation, declared_model)
     if witness_session is not None and fixture_session is not None:

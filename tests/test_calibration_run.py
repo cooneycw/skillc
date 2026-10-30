@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import base64
 import dataclasses
+import hashlib
 import json
 import shutil
 import sys
+import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -27,6 +29,7 @@ from skillc import calibration, checks, cli, demo, materialize, records, trial, 
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import docker_backend as d
+from skillc import fixture_attempt as fa
 from skillc import matched_pilot as mp
 
 #: #424: the planners refuse a treated arm planned unpinned; a fixed, well-formed pin.
@@ -1211,3 +1214,273 @@ def test_red_the_delivered_mode_is_the_one_the_source_digest_pins(
     modes = cc._collection_home_modes(acquired.source, acquired.files)
     assert (modes[".codex/skills/tdd/scripts/run.sh"] == "100755") is pinned_executable
     assert pinned_executable is as_root and not helper.stat().st_mode & st.S_IXUSR
+
+
+# ------------------------------------- #640: symmetric paired fixture dispatch
+
+FIXTURE_TASK = ROOT / "evals" / "level3" / "flow-auto-necessity"
+_PILOT_287 = ROOT / "evals" / "calibration-287" / "pilot-improvement-declaration.json"
+
+
+def _fixture_declaration_data(case: str = "clean", **task: object) -> dict[str, object]:
+    """The committed #204 declaration re-pointed at a fixture-builder task
+    (#640): `task.fixture` is the builder, `task.fixture_case` the case,
+    and the approval re-bound to exactly that (D-P2a)."""
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    data["shared"]["image"]["digest"] = _IMAGE_DIGEST
+    data["shared"]["image"]["tag"] = _IMAGE
+    names = [a["name"] for a in data["arms"]]
+    data["attempts_per_arm"] = 1
+    data["arm_order"]["sequence"] = calibration.derive_arm_order(data["arm_order"]["seed"], names, 1)
+    data["approval"]["attempts_per_arm"] = 1
+    data["task"].update({"path": "evals/level3/flow-auto-necessity", "grader_id": "flow-auto-necessity",
+                         "grader_revision": "5", "fixture": "builder", "fixture_case": case, **task})
+    data["task"] = {k: v for k, v in data["task"].items() if v is not None}
+    data["approval"]["task_fixture"] = data["task"].get("fixture", "fixture")
+    return stamp_approval(data)
+
+
+def _fixture_declaration(case: str = "clean", **task: Any) -> calibration.CalibrationDeclaration:
+    return calibration.parse_declaration(_fixture_declaration_data(case, **task))  # type: ignore[arg-type]
+
+
+def _run_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, candidates: Mapping[str, str],
+                 declaration: calibration.CalibrationDeclaration | None = None,
+                 treatment: cr.Treatment | None = None,
+                 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome], list[dict[str, Any]], list[int]]:
+    """Run a fixture-task calibration end to end through the REAL dispatch
+    path - `run_calibration` -> `run_level1_agent_attempt` ->
+    `agent_trial.run_one_attempt(fixture=...)` - on the fake docker CLI. Each
+    arm's scripted agent replays one committed flow-auto-necessity candidate
+    (`candidates[arm]`) over the composed socket. Returns the spied
+    `run_level1_agent_attempt` kwargs and how many backends were made."""
+    from test_agent_trial import _fake_argv, _mapped_home
+    from test_agent_trial_fixture import GATE_ENTRY, GATE_SCRIPT, TOP_LEVEL, _actor, _gh
+    from test_agent_trial_gate_witness import VirtualMountBackend
+
+    from skillc import agent_trial as at
+    from skillc import fixture_overlay as fo
+
+    declaration = declaration or _fixture_declaration()
+    if treatment is None:
+        treatment = _treatment(tmp_path, monkeypatch)
+        treatment = dataclasses.replace(
+            treatment, home_files={**treatment.home_files, GATE_ENTRY: GATE_SCRIPT},
+            verify_home_files={GATE_ENTRY: "sha256:" + hashlib.sha256(GATE_SCRIPT).hexdigest()},
+            gate_entrypoint=GATE_ENTRY)
+    monkeypatch.setattr(cr, "guard_kwargs", lambda client_name, model: {})
+    monkeypatch.setattr(at, "_FLOW_CHECK_GATE_HARNESS_ROOT", "/home/candidate/.protected-harness")
+    monkeypatch.setattr(fo, "install_gh_shim", lambda backend, handle, env: fo.PlacedFile(fo.GH_PATH, "-"))
+    monkeypatch.setattr(fo, "install_codex_guard", lambda backend, handle, env: {})
+    seen: list[dict[str, Any]] = []
+    real = cc.run_level1_agent_attempt
+
+    def spy(**kwargs: Any) -> dict[str, object]:
+        surface = kwargs.get("surface") or {}
+        seen.append({**kwargs, "surface_digest": fa.fixture_digest(surface) if kwargs.get("fixture") else None})
+        return real(**kwargs)
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", spy)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    state = tmp_path / "docker-state"
+    made = [0]
+    channel = Path(tempfile.mkdtemp(prefix="sk-cal-fixture-"))
+    try:
+        def backends() -> tuple[object, object]:
+            made[0] += 1
+            agent = VirtualMountBackend(image=_IMAGE, base_dir=run_dir, docker_bin=_docker_bin(state),
+                                        daemon_timeout=_FAKE_DAEMON_TIMEOUT, trigger_socket_dir=channel)
+            grading = d.DockerBackend(image=_IMAGE, base_dir=run_dir, docker_bin=_docker_bin(state),
+                                      daemon_timeout=_FAKE_DAEMON_TIMEOUT)
+            return agent, grading
+
+        def argv_for(scheduled: mp.ScheduledAttempt) -> list[str]:
+            candidate = FIXTURE_TASK / "candidates" / candidates[scheduled.arm]
+            actions = json.loads((candidate / "actions.json").read_text())
+            home = _mapped_home(state, scheduled.attempt_id)
+            relpath = f".codex/sessions/2026/01/01/rollout-{scheduled.attempt_id}.jsonl"
+            socket_path = str(d.trigger_socket_host_path_for(channel, d._container_name(scheduled.attempt_id)))
+            actor = tmp_path / f"actor-{scheduled.attempt_id}.py"
+            _actor(actor, socket_path, home / relpath, [TOP_LEVEL, *(_gh(a) for a in actions["gh"])],
+                   (candidate / "report.md").read_text())
+            return [sys.executable, str(actor), *_fake_argv(fmt="codex-fake", home=home, transcript_relpath=relpath)[1:]]
+
+        experiment, outcomes = cr.run_calibration(
+            declaration, run_dir=run_dir, treatment=treatment, image_digest=_IMAGE_DIGEST,
+            backends=backends, argv_for=argv_for, credential_explicit_path=_fresh_codex_credential(tmp_path))
+    finally:
+        shutil.rmtree(channel, ignore_errors=True)
+    return experiment, outcomes, seen, made
+
+
+def _by_arm(report: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    return {str(e["arm"]): e for e in report["attempts"]}
+
+
+def test_640_both_arms_are_dispatched_with_byte_identical_fixtures_through_the_real_path(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#640's central control. Before #640 the baseline was dispatched with
+    NO fixture (calibration_run never passed one); now both arms get the same
+    built case, each its own fresh copy, the treated arm on the gated route
+    and the baseline on the declared baseline route - and the report can tell
+    the baseline's never-offered gate from a skipped one."""
+    candidates = {TREATMENT_ARM: "pass/clean-cites-commit-only",
+                  calibration.BASELINE_ARM: "fail/clean-wrong-verdict"}
+    experiment, outcomes, seen, made = _run_fixture(tmp_path, monkeypatch, candidates=candidates)
+    report: dict[str, Any] = _report(experiment, outcomes)
+    arms = _by_arm(report)
+    symmetry = report["fixture"]
+    assert symmetry["case"] == "clean" and symmetry["symmetric"] is True and symmetry["dispatched"] == 2
+
+    # Both arms were handed the SAME fixture object and byte-identical copies,
+    # at different paths (a fresh copy each, nothing shared).
+    assert len(seen) == 2 and made == [2]
+    assert seen[0]["fixture"] is seen[1]["fixture"]
+    assert seen[0]["surface_digest"] == seen[1]["surface_digest"] == symmetry["digest"]
+    paths = [{str(p) for p in call["surface"].values()} for call in seen]
+    assert not paths[0] & paths[1]
+    for call in seen:
+        for path in call["surface"].values():
+            assert not Path(path).exists(), "each attempt's copy is removed after its attempt"
+    by_call = {str(c["attempt_id"]): c for c in seen}
+    treated, baseline = arms[TREATMENT_ARM], arms[calibration.BASELINE_ARM]
+    assert by_call[str(treated["attempt_id"])].get("fixture_baseline") is False
+    assert by_call[str(treated["attempt_id"])]["gate_entrypoint"] is not None
+    assert by_call[str(baseline["attempt_id"])].get("fixture_baseline") is True
+    assert by_call[str(baseline["attempt_id"])]["gate_entrypoint"] is None
+
+    # The ledger binds the plan; the record says what was handed and offered.
+    assert treated["fixture"] == {"case": "clean", "digest": symmetry["digest"], "route": "gated",
+                                  "delivered_digest": symmetry["digest"], "gates_offered": True}
+    assert baseline["fixture"] == {"case": "clean", "digest": symmetry["digest"], "route": "baseline",
+                                   "delivered_digest": symmetry["digest"], "gates_offered": False}
+    # Graded from the fixture's captured remote: one PASS, one FAIL, both counted.
+    assert treated["primary_endpoint"]["status"] == "PASS" and treated["accounting"] == "success"
+    assert baseline["primary_endpoint"]["status"] == "FAIL" and baseline["accounting"] == "task-failure"
+    assert report["accounting"][TREATMENT_ARM]["success"] == 1
+    assert report["accounting"][calibration.BASELINE_ARM]["task-failure"] == 1
+
+
+def test_640_a_fixture_that_fails_to_build_is_a_non_start_for_every_attempt(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A build failure is a NON-START, never a task failure: nothing was
+    dispatched, no backend was made, and the report says so per attempt."""
+    from skillc import fixture_campaign as fc
+
+    def broken(task_root: Path, case: str, where: Path) -> object:
+        raise RuntimeError("builder exploded")
+
+    monkeypatch.setattr(fc, "build_case", broken)
+    experiment, outcomes, seen, made = _run_fixture(
+        tmp_path, monkeypatch, candidates={TREATMENT_ARM: "pass/clean-cites-commit-only",
+                                           calibration.BASELINE_ARM: "pass/clean-cites-commit-only"})
+    report: dict[str, Any] = _report(experiment, outcomes)
+    assert seen == [] and made == [0]
+    for entry in report["attempts"]:
+        assert entry["disposition"] == "unavailable" and entry["accounting"] == "non-start"
+        assert entry["primary_endpoint"]["status"] == calibration.UNKNOWN  # ungraded, never FAIL
+        assert entry["fixture"]["digest"] is None and "builder exploded" in entry["fixture"]["build_error"]
+        assert str(entry["disposition_reason"]).startswith("non-start: the fixture did not build")
+    assert report["fixture"]["symmetric"] is False
+    assert report["accounting"][TREATMENT_ARM]["non-start"] == report["accounting"][calibration.BASELINE_ARM]["non-start"] == 1
+
+
+def test_red_640_an_attempt_copy_that_differs_from_the_built_case_is_refused(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-attempt digest check is a gate: a copy that is not the built
+    case is never dispatched. Here the baseline's copy gains one byte."""
+    real = cr.deliver_fixture
+    tampered: list[str] = []
+
+    def deliver(built: cr.BuiltFixture, where: Path) -> tuple[dict[str, Path], str]:
+        copied, digest = real(built, where)
+        if not tampered:
+            (copied["repo"] / "widget" / "extra.txt").write_text("x")
+            tampered.append(where.name)
+            return copied, fa.fixture_digest(copied)
+        return copied, digest
+
+    monkeypatch.setattr(cr, "deliver_fixture", deliver)
+    experiment, outcomes, seen, made = _run_fixture(
+        tmp_path, monkeypatch, candidates={TREATMENT_ARM: "pass/clean-cites-commit-only",
+                                           calibration.BASELINE_ARM: "pass/clean-cites-commit-only"})
+    report: dict[str, Any] = _report(experiment, outcomes)
+    [refused] = [e for e in report["attempts"] if e["attempt_id"] == tampered[0]]
+    assert refused["disposition"] == "unavailable" and refused["accounting"] == "non-start"
+    assert "differs from the built case" in str(refused["disposition_reason"])
+    assert len(seen) == 1 and made == [1], "the differing copy was never dispatched"
+    assert report["fixture"]["symmetric"] is False, "one entire arm received no fixture"
+    assert sorted(report["fixture"]["dispatched_by_arm"].values()) == [0, 1]
+    assert report["fixture"]["dispatched"] == 1
+
+
+def test_red_640_a_treated_fixture_arm_without_a_gate_entrypoint_is_refused_before_any_store(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    treatment = _treatment(tmp_path, monkeypatch)
+    assert treatment.gate_entrypoint is None
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(cr.CalibrationRefused, match="treated arm on a fixture task"):
+        cr.run_calibration(_fixture_declaration(), run_dir=run_dir, treatment=treatment, image_digest=_IMAGE_DIGEST,
+                           backends=lambda: pytest.fail("no backend"), argv_for=lambda s: pytest.fail("no argv"))
+    assert not (run_dir / "store").exists()
+
+
+@pytest.mark.parametrize("task, match", [
+    ({"fixture": "fixture"}, "declares task.fixture 'builder'"),
+    ({"fixture_case": None}, "must declare task.fixture_case"),
+    ({"fixture_case": "no-such-case"}, "not one of the builder's cases"),
+])
+def test_red_640_a_fixture_task_declaration_that_does_not_name_its_fixture_is_refused(
+        task: dict[str, Any], match: str) -> None:
+    with pytest.raises(cr.CalibrationRefused, match=match):
+        cr.fixture_case_of(_fixture_declaration(**task), ROOT)
+
+
+def test_red_640_a_builder_less_task_naming_a_fixture_case_is_refused() -> None:
+    data = _declaration_data(attempts=1)
+    data["task"]["fixture_case"] = "clean"  # type: ignore[index]
+    with pytest.raises(cr.CalibrationRefused, match="has no fixture builder"):
+        cr.fixture_case_of(calibration.parse_declaration(stamp_approval(data)), ROOT)
+
+
+def test_640_a_builder_less_task_is_unchanged_its_identity_byte_identical() -> None:
+    """Every builder-less task's identity is exactly what it was: the
+    committed #287 pilot declaration's approved task_content re-measures
+    equal, and the task resolves no fixture case."""
+    data = json.loads(_PILOT_287.read_text(encoding="utf-8"))
+    task = ROOT / data["task"]["path"]
+    measured = cr.task_content_identity((task / "goal.md").read_bytes(), verify.GraderDef.load(task),
+                                        cc.task_surface(task / data["task"]["fixture"]), cc.project_gate_bytes(task))
+    assert measured == data["task_content"]
+    assert cr.fixture_case_of(calibration.parse_declaration(data), ROOT) is None
+    assert cr.fixture_case_of(_declaration(attempts=1), ROOT) is None
+
+
+@pytest.mark.parametrize("record, status, expected", [
+    ({"disposition": "captured", "stop": {"reason": "exited", "confirmed": True}}, "PASS", "success"),
+    ({"disposition": "captured", "stop": {"reason": "exited", "confirmed": True}}, "FAIL", "task-failure"),
+    ({"disposition": "captured", "stop": {"reason": "timeout", "confirmed": True}}, "PASS", "timeout"),
+    ({"disposition": "inconclusive", "stop": {"reason": "unobserved", "confirmed": False}}, "NOT_GRADED",
+     "infrastructure-failure"),
+    ({"disposition": "unavailable", "stop": {"reason": "launch-failed", "confirmed": True}}, "NOT_GRADED",
+     "infrastructure-failure"),
+    ({"disposition": "unavailable", "stop": {"reason": "never-started", "confirmed": True}}, "NOT_GRADED",
+     "non-start"),
+    ({"disposition": "not-run", "stop": {"reason": "never-started", "confirmed": True}}, "NOT_GRADED", "non-start"),
+    ({"disposition": "captured", "stop": {"reason": "exited", "confirmed": True}}, "UNKNOWN", "unknown"),
+    ({"disposition": "captured", "stop": {"reason": "exited", "confirmed": True}}, "NOT_GRADED", "unknown"),
+])
+def test_640_every_attempt_lands_in_exactly_one_accounting_class(
+        record: dict[str, object], status: str, expected: str) -> None:
+    """One committed control per class. `unknown` stays its own class: an
+    ungraded or UNKNOWN capture is never counted as a success or a failure."""
+    assert cr.accounting_class(record, status) == expected
+    assert expected in cr.ACCOUNTING_CLASSES
+
+
+def test_640_accounting_reports_every_class_per_arm_zeros_included() -> None:
+    counts = cr.accounting_by_arm([{"arm": "a", "accounting": "success"}, {"arm": "b", "accounting": "non-start"}])
+    assert counts == {"a": dict.fromkeys(cr.ACCOUNTING_CLASSES, 0) | {"success": 1},
+                      "b": dict.fromkeys(cr.ACCOUNTING_CLASSES, 0) | {"non-start": 1}}
