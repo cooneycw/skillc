@@ -300,6 +300,15 @@ class GameOracle:
                 for side, team in zip(("away", "home"), self.teams, strict=True)
                 for kind, role in (("goalies", "goalie"), ("skaters", "skater"))}
 
+    def on_ice_counts(self) -> Iterator[Json]:
+        """Retain observed goalie/skater presence, including legitimate empties."""
+        for start, duration in self.periods.values():
+            for second in range(start, start + duration):
+                counts = self.counts(second)
+                for side, team in zip(("away", "home"), self.teams, strict=True):
+                    yield {"game_id": self.identity, "game_elapsed_second": second, "team_id": team,
+                           "skater_count": counts[f"{side}_skaters"], "goalie_count": counts[f"{side}_goalies"]}
+
     def _events(self, kind: str) -> list[Json] | None:
         if self.plays is None or self.play_conflict:
             return None

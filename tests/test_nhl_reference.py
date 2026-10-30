@@ -290,11 +290,23 @@ def test_derive_completion_index_pins_manifest_goal_and_row_count(tmp_path: Path
     assert result["census"]["game_count"] == 1
     assert result["goal_sha256"] == snapshot.sha256(goal.read_bytes())
     assert result["games"][0]["on_ice_rows"] == 14400
+    assert result["games"][0]["on_ice_count_rows"] == 7200
     assert result["games"][0]["on_ice_availability"] == "AVAILABLE"
     assert (tmp_path / "derived/derivation.json").exists()
     with pytest.raises(snapshot.ReferenceError, match="manifest"):
         derive(root, tmp_path / "wrong", manifest_sha256="0" * 64, goal=goal)
     assert not (tmp_path / "wrong").exists()
+
+
+def test_per_second_counts_preserve_pulled_goalie_without_filling_it_in() -> None:
+    data = fixture()
+    goalie = next(r for r in data["shifts"]["data"] if r.get("playerId") == 202 and r.get("period") == 1)
+    goalie.update(endTime="19:00", duration="19:00")
+    game = make_game(data)
+    counts = [r for r in game.on_ice_counts() if r["team_id"] == 20 and r["game_elapsed_second"] in (1139, 1140)]
+    assert [r["goalie_count"] for r in counts] == [1, 0]
+    assert all(r["skater_count"] == 1 for r in counts)
+    assert (20, 202) not in game.lineup(1140)
 
 
 def test_grade_seam_binds_live_game_and_sources_and_drift_vetoes_wrong_output(tmp_path: Path) -> None:

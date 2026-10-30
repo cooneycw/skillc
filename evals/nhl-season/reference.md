@@ -68,7 +68,10 @@ when this infrastructure is wired into a declared run.
 ## Independent results and bounded comparison
 
 `derive` writes one private `reconciliation/{game_id}.json` and one streamed
-`on_ice/{game_id}.jsonl` per game. It publishes `derivation.json` last, binding
+`on_ice/{game_id}.jsonl` per game. A streamed
+`on_ice_counts/{game_id}.jsonl` retains skater/goalie counts for each team at every
+played second, including observed empty nets; count and membership artifact
+hashes/row counts are bound in the completion index. It publishes `derivation.json` last, binding
 the manifest, goal, oracle and snapshot-code hashes, per-game artifact hashes,
 period timing, row count and on-ice availability. An absent completion index
 means derivation is incomplete. Exit zero means artifact production completed;

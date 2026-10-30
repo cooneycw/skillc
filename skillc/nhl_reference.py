@@ -41,6 +41,7 @@ def derive(root: Path, output: Path, *, manifest_sha256: str, goal: Path) -> Jso
     output.mkdir(parents=True, exist_ok=False)
     (output / "reconciliation").mkdir()
     (output / "on_ice").mkdir()
+    (output / "on_ice_counts").mkdir()
     summaries = []
     artifacts = []
     for game in manifest["games"]:
@@ -56,6 +57,13 @@ def derive(root: Path, output: Path, *, manifest_sha256: str, goal: Path) -> Jso
                 for row in model.on_ice():
                     stream.write(json.dumps(row, sort_keys=True) + "\n")
                     rows += 1
+        count_path = output / "on_ice_counts" / f"{identity}.jsonl"
+        count_rows = 0
+        with count_path.open("w") as stream:
+            if model.on_ice_available:
+                for count in model.on_ice_counts():
+                    stream.write(json.dumps(count, sort_keys=True) + "\n")
+                    count_rows += 1
         summaries.append({"game_id": identity,
                           "families": [{"family_id": f["family_id"], "status": f["status"]}
                                        for f in report["families"]]})
@@ -63,6 +71,8 @@ def derive(root: Path, output: Path, *, manifest_sha256: str, goal: Path) -> Jso
                           "reconciliation_sha256": snapshot.sha256(report_path.read_bytes()),
                           "on_ice": str(ice_path.relative_to(output)),
                           "on_ice_sha256": _file_hash(ice_path), "on_ice_rows": rows,
+                          "on_ice_counts": str(count_path.relative_to(output)),
+                          "on_ice_counts_sha256": _file_hash(count_path), "on_ice_count_rows": count_rows,
                           "on_ice_availability": "AVAILABLE" if model.on_ice_available else "UNAVAILABLE",
                           "periods": {str(k): {"start_second": v[0], "played_duration_seconds": v[1]}
                                       for k, v in model.periods.items()}})
