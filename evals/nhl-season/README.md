@@ -26,3 +26,6 @@ F6 explicitly reports unavailable when recognizable independent shift-chart
 goal entries are absent. F7 states an exact second/boundary convention; it does
 not silently repair event-versus-shift disagreement. F8 distinguishes roster
 membership from actual participation, so an unused backup need not have shifts.
+
+Controller infrastructure preparation is described in [reference.md](reference.md).
+Its synthetic controls are separate from actual private season acquisition.
