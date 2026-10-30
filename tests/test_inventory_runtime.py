@@ -189,7 +189,7 @@ def test_oracle_transport_refuses_incomplete_results_and_always_removes_containe
 
 
 def reviewed_oracle(program: str, *, extra_test: bool = False, empty_tests: bool = False,
-                    renamed_legacy: bool = False, no_legacy: bool = False) -> dict[str, Any]:
+                    renamed_legacy: bool = False, no_legacy: bool = False, search_path: str = "") -> dict[str, Any]:
     """Host test emulator accepts named committed B1 programs only, never an
     arbitrary candidate path or bytes. Production io.run has no such route."""
     engine = load(TASK / 'oracle.py')
@@ -201,7 +201,9 @@ def reviewed_oracle(program: str, *, extra_test: bool = False, empty_tests: bool
         files['implementation.py'] = files['inventory.py']
         files['inventory.py'] = b'from implementation import *\nif __name__ == "__main__": raise SystemExit(main())\n'
     if program == 'executable':
-        files['helper_cli'] = b'#!/usr/bin/env python3\n' + files['implementation.py']
+        # The emulator runs on hosts where Python may only live in a venv or
+        # /usr/local; use its measured interpreter, not an assumed PATH.
+        files['helper_cli'] = b'#!' + sys.executable.encode() + b'\n' + files['implementation.py']
         files['inventory.py'] = (b'from implementation import *\n'
                                  b'if __name__ == "__main__":\n'
                                  b' import subprocess,sys; raise SystemExit(subprocess.call(["./helper_cli", *sys.argv[1:]]))\n')
@@ -229,12 +231,13 @@ real=m.subprocess.Popen
 def launch(*args,**kwargs):
  assert kwargs.pop('user')==65534 and kwargs.pop('group')==65534
  assert kwargs.pop('extra_groups')==[]
+ if sys.argv[2]: kwargs['env']={**kwargs['env'],'PATH':sys.argv[2]}
  return real(*args,**kwargs)
 m.subprocess.Popen=launch
 m.container_parent=lambda:True
 m.main()
 '''
-    proc = subprocess.run([sys.executable, '-c', driver, str(Path(harness.__file__))],
+    proc = subprocess.run([sys.executable, '-c', driver, str(Path(harness.__file__)), search_path],
                           input=json.dumps(job), capture_output=True, text=True, timeout=180, check=False)
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout.splitlines()[-1][len(job['nonce']):])
@@ -416,3 +419,11 @@ def test_oracle_transport_bounds_both_pipes(program: str, data: str, limit: int,
     if expected is None:
         assert code == 0
         assert output == b'hello'
+
+
+def test_reviewed_executable_control_uses_the_test_interpreter_without_system_python(tmp_path: Path, judge: Any) -> None:
+    result = reviewed_oracle('executable', search_path=str(tmp_path))
+    assert result['status'] == 'ran', result
+    rows = outcomes(judge, envelope(result))
+    for criterion in ('tests-protect', 'feature-correct', 'legacy-preserved'):
+        assert rows[criterion]['outcome'] == 'SATISFIED', (criterion, result)

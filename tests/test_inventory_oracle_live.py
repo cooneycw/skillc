@@ -23,19 +23,20 @@ from test_codex_guard_live import pytestmark as _live_marks
 from skillc import inventory_oracle as io
 from skillc import inventory_oracle_harness as harness
 from skillc.backend import Confirmation
-from skillc.docker_backend import DockerBackend
+from skillc.docker_backend import DockerBackend, _Handle
 
 pytestmark = [*_live_marks, pytest.mark.timeout(1800)]
 TASK = Path(__file__).resolve().parents[1] / 'evals/level3/change-with-regression-568'
 
 
 @pytest.fixture(scope='module')
-def attempt(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[DockerBackend, object]]:
+def attempt(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[DockerBackend, _Handle]]:
     tag, built = _trial_image()
     backend = DockerBackend(image=tag, base_dir=tmp_path_factory.mktemp('inventory-live'),
                             network='none', daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT)
     try:
         handle = backend.prepare('inventory-live-' + secrets.token_hex(8))
+        assert isinstance(handle, _Handle)
         try:
             assert backend.image_id(handle) is not None
             yield backend, handle
@@ -74,7 +75,7 @@ def _files(program: str) -> dict[str, dict[str, str]]:
 
 
 @pytest.mark.parametrize('program', ['reference', 'fixture', 'executable'])
-def test_captured_program_outcomes_from_the_real_oracle(attempt: tuple[DockerBackend, object], program: str) -> None:
+def test_captured_program_outcomes_from_the_real_oracle(attempt: tuple[DockerBackend, _Handle], program: str) -> None:
     backend, handle = attempt
     oracle = io.run(_files(program), backend, handle, task_root=TASK)
     assert oracle['status'] == 'ran', oracle  # Includes real-daemon cleanup confirmation.
@@ -103,14 +104,14 @@ for path in ('/inventory-readonly-control','/dev/mqueue/inventory-readonly-contr
   pathlib.Path(path).unlink()
   readonly.append(False)
 child="import os,pathlib,time;os.setsid();pathlib.Path('escaped.pid').write_text(str(os.getpid()));time.sleep(20)"
-parent="import os,pathlib,subprocess,sys,time;assert os.geteuid()==65534 and os.getegid()==65534;subprocess.Popen([sys.executable,'-c',"+repr(child)+"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);end=time.monotonic()+2\nwhile not pathlib.Path('escaped.pid').exists() and time.monotonic()<end: time.sleep(.01)\nassert pathlib.Path('escaped.pid').exists();print('uid=65534')"
+parent="import os,pathlib,subprocess,sys,time;assert os.geteuid()==65534 and os.getegid()==65534;subprocess.Popen([sys.executable,'-c',"+repr(child)+"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);end=time.monotonic()+2\nwhile not pathlib.Path('escaped.pid').exists() and time.monotonic()<end: time.sleep(.01)\nassert pathlib.Path('escaped.pid').exists();print('candidate-privileges-dropped')"
 class Budget:
  deadline=time.monotonic()+15; capacity=1024*1024; used=0; processes=0
  def check(self): pass
 with tempfile.TemporaryDirectory() as temp:
  root=pathlib.Path(temp)
  code,out,err=namespace['execute']([sys.executable,'-c',parent],root,Budget())
- assert code==0 and out.strip()=='uid=65534',(code,out,err)
+ assert code==0 and out.strip()=='candidate-privileges-dropped',(code,out,err)
  pid=int((root/'escaped.pid').read_text())
  p=pathlib.Path('/proc')/str(pid)/'stat'
  alive=p.exists() and p.read_text().rsplit(')',1)[1].split()[0] not in ('Z','X')
@@ -122,7 +123,7 @@ def _assert_contained(result: dict[str, Any]) -> None:
     assert result == {'readonly': [True, True], 'uid': 65534, 'swept': True}, result
 
 
-def test_real_parent_containment_and_weakened_flag_negative_control(attempt: tuple[DockerBackend, object]) -> None:
+def test_real_parent_containment_and_weakened_flag_negative_control(attempt: tuple[DockerBackend, _Handle]) -> None:
     backend, handle = attempt
     image = backend.image_id(handle)
     assert isinstance(image, str)
