@@ -1953,6 +1953,57 @@ _DAEMON_WORDING = "Error response from daemon: container is not running"
 _Events = list[tuple[int, str, str | None]]
 
 
+def test_exec_in_attempt_reports_launch_failed_when_the_docker_binary_is_missing(
+    base: Path, docker_state: Path,
+) -> None:
+    """#550 item 3: an unknown container state is not a confirmed stop."""
+    backend, handle = _ready(base, docker_state, "a-exec-550-missing")
+    broken = d.DockerBackend(
+        image="fake-image:1", base_dir=base,
+        docker_bin=["/nonexistent/docker-binary-xyz"],
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
+    try:
+        result = broken.exec_in_attempt(handle, ["true"], Limits(timeout=1))
+        assert result.reason == "launch-failed"
+        assert result.exit_code is None
+        assert result.error is not None
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("state", ["created", "exited", "absent"])
+def test_exec_in_attempt_refuses_a_confirmed_nonrunning_container(
+    base: Path, docker_state: Path, state: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opposite verdict: a reachable inspect must still refuse known stops."""
+    backend, handle = _ready(base, docker_state, "a-exec-550-stopped")
+    def unexpected_launch(*args: object, **kwargs: object) -> None:
+        pytest.fail("a confirmed nonrunning container must be refused before launch")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(d.DockerBackend, "_inspect", lambda *_: (True, state == "absent", state))
+            patch.setattr(d.DockerBackend, "_launch_and_wait", unexpected_launch)
+            result = backend.exec_in_attempt(handle, ["true"], Limits(timeout=1))
+        assert (result.reason, result.exit_code) == ("attempt-not-running", None)
+    finally:
+        backend.destroy(handle)
+
+
+def test_exec_in_attempt_can_run_after_an_unreachable_inspect(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed preflight does not establish that the real exec will fail."""
+    backend, handle = _ready(base, docker_state, "a-exec-550-recovered")
+    try:
+        monkeypatch.setattr(d.DockerBackend, "_inspect", lambda *_: (False, False, None))
+        result = backend.exec_in_attempt(handle, ["sh", "-c", "printf recovered"], Limits(timeout=5))
+        assert (result.reason, result.exit_code, result.stdout) == ("exited", 0, b"recovered")
+    finally:
+        backend.destroy(handle)
+
+
 def _edit_events(monkeypatch: pytest.MonkeyPatch, edit: Callable[[_Events, int], _Events | None]) -> None:
     """Feed the decision a doctored copy of the fake daemon's REAL event answer
     (buffer loss, format drift) - the edit receives the window start."""

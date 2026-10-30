@@ -2263,7 +2263,7 @@ class DockerBackend:
             # downstream (gate_witness.py's `_NOT_STARTED_REASONS`).
             #
             # Deliberately `reachable and (...)`, NOT `not reachable or
-            # (...)` like `exec_in_attempt()`'s otherwise-identical guard:
+            # (...)` (both execution entry guards use this distinction):
             # `reachable=False` means `_inspect()` itself could not get an
             # answer (unreachable daemon, missing binary) - a DIFFERENT,
             # unconfirmed fact, not a positive "not running". Folding it in
@@ -2587,11 +2587,12 @@ class DockerBackend:
         separately; this method does not touch it.
 
         REFUSED (never an "exited" result) when the attempt's own primary
-        process is not reachable to exec into at all: not yet started,
+        process is confirmed not running: not yet started,
         already stopped, or the container is simply gone - `reason=
         "attempt-not-running"`, `exit_code=None`, checked via the SAME
-        `_inspect()` `confirm_stopped()` already uses, so a caller cannot
-        get a different answer from the two. This is a REFUSAL, not a
+        `_inspect()` `confirm_stopped()` already uses. An unreachable
+        daemon leaves that state unknown, so the real exec is attempted
+        and reports its own outcome. This is a REFUSAL, not a
         guessed result - the orchestrator ruling this was built to satisfy
         is explicit that a "container not running" exec must never be
         folded into a normal exit code (#183's own channel already proved
@@ -2724,7 +2725,7 @@ class DockerBackend:
         condition)."""
         assert isinstance(handle, _Handle)
         reachable, absent, status = self._inspect(handle)
-        if not reachable or absent or status != "running":
+        if reachable and (absent or status != "running"):
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
         marker_root = CONTAINER_HOME if self.witness_io else CONTAINER_WORKSPACE
