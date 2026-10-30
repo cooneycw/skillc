@@ -138,7 +138,16 @@ gate ran):
   scanner is not evidence of no secret, and the pre-push hook below still
   catches it before anything reaches GitHub.
 
-`make test` uses up to eight workers for ordinary tests, then runs all selected
+`make test` uses up to eight workers for ordinary tests. Automatic worker
+sizing is additionally capped at twice the container's cgroup v2 `cpu.max`
+quota (rounded down, minimum one), so a two-CPU quota permits at most four
+workers even when host affinity exposes more CPUs. Missing, unreadable,
+unlimited or malformed quotas preserve the existing cap. Explicit
+`PYTEST_WORKERS` counts remain caller-controlled; the serial lane always uses
+zero workers. `controls/pytest-workers/cases.json` commits limited/unlimited,
+malformed and override cases exercised by `tests/test_pytest_lanes.py`.
+The runner logs the effective worker setting and cap for each lane.
+It then runs all selected
 `tests/test_load_harness.py` and `tests/test_change_with_regression_568.py` items
 in a separate `-n 0` pytest invocation after
 those workers exit and are reaped (#462). The attribution self-tests require

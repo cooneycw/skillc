@@ -21,9 +21,34 @@ if __package__ in (None, ""):
 from ci.check_pytest_population import collected
 from ci.merge_pytest_reports import merge, serial_identity
 
+CPU_MAX = Path("/sys/fs/cgroup/cpu.max")
+
+
+def automatic_worker_cap(maxprocesses: int) -> int:
+    """Bound automatic xdist sizing by twice the cgroup v2 CPU quota (#643).
+
+    Keep xdist's CPU/affinity selection and the caller's existing cap. Missing,
+    unlimited or malformed quotas leave that cap unchanged. Fractional quotas
+    round down after doubling, with at least one worker for any positive quota.
+    """
+    try:
+        quota_text, period_text = CPU_MAX.read_text(encoding="ascii").split()
+        if quota_text == "max":
+            return maxprocesses
+        quota, period = int(quota_text), int(period_text)
+    except (OSError, UnicodeError, ValueError):
+        return maxprocesses
+    if quota <= 0 or period <= 0:
+        return maxprocesses
+    quota_cap = max(1, 2 * quota // period)
+    # xdist treats a zero cap as unlimited.
+    return min(maxprocesses, quota_cap) if maxprocesses > 0 else quota_cap
+
 
 def pytest_command(selection: list[str], lane: str, report: Path, *, workers: str,
                    maxprocesses: int, dist: str, durations: int) -> list[str]:
+    if lane != "serial" and workers in ("auto", "logical"):
+        maxprocesses = automatic_worker_cap(maxprocesses)
     return [sys.executable, "-m", "pytest", *selection,
             "-p", "ci.pytest_lanes", f"--skillc-test-lane={lane}",
             "-n", "0" if lane == "serial" else workers,
@@ -54,7 +79,9 @@ def run(report_dir: Path, selection: list[str], *, workers: str = "auto",
         command = pytest_command(selection, lane, report, workers=workers,
                                  maxprocesses=maxprocesses, dist=dist, durations=durations)
         started = time.monotonic_ns()
-        print(f"pytest-lanes: starting {lane}", flush=True)
+        # Read our trailing options, which override any selection's earlier -n.
+        effective_workers, effective_cap = command[-6:-4]
+        print(f"pytest-lanes: starting {lane} workers={effective_workers} {effective_cap}", flush=True)
         process = subprocess.Popen(command)
         code = process.wait()  # The ordinary pytest and its workers exit before serial starts.
         ended = time.monotonic_ns()
