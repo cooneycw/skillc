@@ -725,6 +725,9 @@ class FixtureService:
                     (transport.scheme == "file" and transport.netloc in ("", "localhost")
                      and transport.path.startswith("/"))):
                 raise DeclarationRefused("creation_transport_url must be an absolute local fixture path")
+            # Workflow helpers inspect the literal origin while Git transports
+            # use a local insteadOf rewrite installed by the shim.
+            self._remote_urls = self._remote_urls | {f"https://github.com/{self.repository}.git"}
         self._permission = repo.get("viewer_permission", "WRITE")
         authority = decl.get("authority")
         if not isinstance(authority, list) or set(authority) - set(OPS):
@@ -1162,7 +1165,8 @@ class FixtureService:
                 raise _GhError("remote-not-empty", "fixture transport already has a default branch\n")
             self._creation_preparation = preparation
             return ({"exit_code": 0, "stdout": "", "stderr": "", "local_git": {
-                "origin_url": self._creation_url, "default_branch": self._default,
+                "origin_url": f"https://github.com/{self.repository}.git",
+                "transport_url": self._creation_url, "default_branch": self._default,
                 "source_head": head}}, "read", None)
         if phase != "complete":
             raise _GhError("usage", "repository creation requires the fixture transport handshake\n")

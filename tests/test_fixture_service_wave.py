@@ -145,9 +145,11 @@ def test_pending_repository_create_pushes_real_source_and_records_observed_head(
             assert service._remote.resolve('refs/heads/main') is None
             made = h.shim('repo', 'create', 'widget', '--private', '--source=.', '--push')
             assert made.returncode == 0, made.stderr
-            assert _git(source, 'config', '--get', 'remote.origin.url') == str(bare)
+            assert _git(source, 'config', '--get', 'remote.origin.url') == 'https://github.com/fixture/widget.git'
+            assert _git(source, 'remote', 'get-url', 'origin') == str(bare)
             assert _git(source, 'rev-parse', '--abbrev-ref', '@{upstream}') == 'origin/main'
             assert service._remote.resolve('refs/heads/main') == head
+            _git(source, 'fetch', 'origin')  # GIT_ALLOW_PROTOCOL=file proves the rewrite is used
             duplicate = h.shim('repo', 'create', 'widget', '--private', '--source=.', '--push')
             assert duplicate.returncode != 0
         finally:
@@ -171,7 +173,7 @@ def test_new_pinned_converter_filter_evaluates_actual_body(wave: Harness) -> Non
     assert {row.split('\x1f')[0] for row in result.stdout.splitlines()} == {'1', '3'}
 
 
-def test_pinned_converter_creates_dependencies_and_reruns_without_duplicates(wave: Harness, tmp_path: Path) -> None:
+def _run_pinned_converter(wave: Harness, tmp_path: Path, first: int, *, configure_origin: bool = False) -> None:
     import hashlib
     import shutil
     import subprocess
@@ -182,7 +184,8 @@ def test_pinned_converter_creates_dependencies_and_reruns_without_duplicates(wav
         assert hashlib.sha256((fixture / name).read_bytes()).hexdigest() == digest
     # Its URL guard sees a GitHub-shaped logical URL; no command may use that URL
     # for transport. gh resolves explicitly to the controller's one repository.
-    _git(wave.world.work, 'remote', 'set-url', 'origin', 'https://github.com/fixture/widget.git')
+    if configure_origin:
+        _git(wave.world.work, 'remote', 'set-url', 'origin', 'https://github.com/fixture/widget.git')
     tasks = wave.world.work / '.specify/specs/widget/tasks.md'
     tasks.parent.mkdir(parents=True)
     tasks.write_text('# Tasks\n\n- [ ] T001 Implement first task\n- [ ] T002 Implement second task (depends on T001)\n')
@@ -209,7 +212,7 @@ def test_pinned_converter_creates_dependencies_and_reruns_without_duplicates(wav
     record = wave.service.finalize('attempt-1')
     creates = [e for e in record.events if e['op'] == 'issue.create' and e['decision'] == 'applied']
     assert len(creates) == 2
-    assert 'Blocked by #4' in record.final_state['issues']['5']['body']
+    assert f'Blocked by #{first}' in record.final_state['issues'][str(first + 1)]['body']
     assert any(e['op'] == 'issue.edit' and e['decision'] == 'applied' for e in record.events)
     assert record.coverage_complete
 
@@ -297,3 +300,15 @@ def test_lost_create_reply_leaves_one_controller_issue(wave: Harness) -> None:
     assert record.events[0]['decision'] == 'applied'
     assert record.events[0]['fault'] == 'lost-response'
     assert record.events[0]['effect']['number'] == 4
+
+
+def test_pinned_converter_creates_dependencies_and_reruns_without_duplicates(wave: Harness, tmp_path: Path) -> None:
+    _run_pinned_converter(wave, tmp_path, 4, configure_origin=True)
+
+
+def test_project_creation_then_pinned_conversion_uses_fixture_transport(pending: Harness, tmp_path: Path) -> None:
+    made = pending.shim('repo', 'create', 'widget', '--private', '--source=.', '--push')
+    assert made.returncode == 0, made.stderr
+    # No manual origin substitution between the actual project-init operations.
+    _run_pinned_converter(pending, tmp_path, 1)
+    assert pending.service.finalize('attempt-1').remote_integrity == 'SATISFIED'

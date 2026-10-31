@@ -127,7 +127,7 @@ def _create_source(args: list[str]) -> str | None:
 
 def _push_created_source(source: str, action: object) -> str | None:
     """Only local git runs here. The controller verifies the remote ref itself."""
-    if not isinstance(action, dict) or set(action) != {"origin_url", "default_branch", "source_head"} \
+    if not isinstance(action, dict) or set(action) != {"origin_url", "transport_url", "default_branch", "source_head"} \
             or not all(isinstance(v, str) and v for v in action.values()):
         raise _ChannelError("invalid repository transport action")
     url, branch, head = (action[k] for k in ("origin_url", "default_branch", "source_head"))
@@ -135,6 +135,11 @@ def _push_created_source(source: str, action: object) -> str | None:
         current = _git("-C", source, "rev-parse", "--verify", "HEAD")
         if current != head:
             return "source HEAD changed during creation"
+        rewrite = subprocess.run(["git", "-C", source, "config", "--local",
+                                  f"url.{action['transport_url']}.insteadOf", url],
+                                 capture_output=True, text=True, timeout=10, check=False)
+        if rewrite.returncode != 0:
+            return "could not configure fixture transport"
         origin = subprocess.run(["git", "-C", source, "config", "--get", "remote.origin.url"],
                                 capture_output=True, text=True, timeout=10, check=False)
         if origin.returncode not in (0, 1):

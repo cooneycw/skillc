@@ -113,7 +113,12 @@ creation accepts either the declared full name or its bare name, requires
 exactly one of `--private`/`--public`, and requires `--source` and `--push`.
 The shim sends the source HEAD and a prepare request. The controller checks
 that the fixture remote is empty and returns its declared transport. The shim
-configures origin and pushes the source, including upstream tracking. A second
+configures a controller-derived `https://github.com/OWNER/NAME.git` logical
+origin, installs a local `url.TRANSPORT.insteadOf` rewrite to the declared
+fixture path, and pushes the source, including upstream tracking. Git fetch
+and push therefore stay on the fixture transport, while workflow guards see
+the expected logical origin. The derived logical URL is accepted only for this
+pending fixture repository. A second
 request completes only if it matches the preparation and the controller reads
 the claimed HEAD from the remote's default branch. That event alone is
 `applied` and records visibility and the observed commit. A failed local git
@@ -126,8 +131,8 @@ Created issues, labels, edits, authority refusals and unsupported requests use
 the same event sequence, before/after state digests and fault machinery as
 existing operations. They are held by one service instance per attempt.
 `tests/test_fixture_service_wave.py` exercises real shim/socket/Git effects and
-the pinned converter plus its context helper, including dependency edits and a
-second conversion with no duplicates. It uses no model or GitHub connection.
+the pinned converter plus its context helper, including creation immediately followed by conversion without an origin
+substitution, dependency edits and a second conversion with no duplicates. It uses no model or GitHub connection.
 The exact subject-specific jq strings live in packaged
 `skillc/fixture_service_filters.json`; the generic controller executes them with
 real jq. Both inventories are checked together, with committed unsupported
