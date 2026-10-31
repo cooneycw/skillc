@@ -33,7 +33,7 @@ drain stderr, contain descendants, confirm process stop and finalize all capture
 The adapter does not own those backend obligations and starts no host process.
 
 Construct `GoalSession` with the objective and exact model from the declaration,
-and `cpp_sessions`, a nonempty list of exactly
+and `comparison_sessions`, a nonempty list of exactly
 `{"session": "logical-session-id", "role": "logical-role", "token_budget": 123}`
 rows. Every CPP session, including its orchestrator, must appear once. The caller
 must derive these rows from its frozen full declaration; the adapter cannot
@@ -80,6 +80,25 @@ Native `usageLimited` and structured `usageLimitExceeded` produce
 its original evidence. Paused, blocked, cleared, budget-limited or still-active
 goals do not pool as completed attempts. A finite native budget is a protocol
 refusal because it violates the uncapped Codex treatment.
+
+## Shared recipe and historical campaigns
+
+Future #639 declarations must explicitly pin Codex 0.165.0 for both arms and
+receive the owner's usual declaration approval. One shared recipe preserves
+client symmetry. Before narrowing the scripted campaign checks, the native
+0.157.1 declarations in the committed corpus and their linked issue dispositions
+were inventoried with a known native positive control and retained-record
+negative control. No pending or rerun native schedule was identified there.
+Private uncommitted plans outside those sources could not be certified absent.
+Historical approvals are not reused and no frozen data is rewritten.
+
+The #271/#375/#434 deterministic campaigns execute their pinned actor and fake
+client, rather than the native binary in today's recipe (#548 item 4). Their
+checks retain the frozen subject/client, task, runtime, harness, candidate and
+cap comparisons, and omit only the unrelated current native-recipe version
+comparison. Native calibration/pilot entry points keep their recipe-version
+refusals and in-image identity probes. `tests/test_scripted_recipe_identity.py`
+commits controls in both directions.
 
 ## Rehearsal and provenance
 

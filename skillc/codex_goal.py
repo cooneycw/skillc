@@ -108,21 +108,21 @@ def _text(value: object, name: str, maximum: int = 4000) -> str:
 def recorded_budget(sessions: object) -> int:
     """Sum every declared CPP role/session, refusing an empty population."""
     if not isinstance(sessions, list) or not sessions:
-        raise GoalRefused("CPP session budget population is empty")
+        raise GoalRefused("comparison session budget population is empty")
     seen: set[str] = set()
     total = 0
     for row in sessions:
         if not isinstance(row, dict) or set(row) != {"session", "role", "token_budget"}:
-            raise GoalRefused("CPP budget rows must name session, role and token_budget")
+            raise GoalRefused("comparison budget rows must name session, role and token_budget")
         session = _text(row["session"], "session")
         _text(row["role"], "role")
         budget = row["token_budget"]
         if session in seen or type(budget) is not int or not 0 < budget <= 2**63 - 1:
-            raise GoalRefused("duplicate session or invalid CPP token budget")
+            raise GoalRefused("duplicate session or invalid comparison token budget")
         seen.add(session)
         total += budget
     if total > 2**63 - 1:
-        raise GoalRefused("CPP token budget sum overflows int64")
+        raise GoalRefused("comparison token budget sum overflows int64")
     return total
 
 
@@ -181,11 +181,11 @@ class GoalSession:
     """
 
     def __init__(self, transport: Transport, *, objective: str, model: str,
-                 cpp_sessions: object) -> None:
+                 comparison_sessions: object) -> None:
         self.transport = transport
         self.objective = _text(objective, "objective").strip()
         self.model = _text(model, "declared model")
-        self.budget = recorded_budget(cpp_sessions)
+        self.budget = recorded_budget(comparison_sessions)
         self.thread_id: str | None = None
         self.goal: dict[str, Any] | None = None
         self.events: list[dict[str, Any]] = []

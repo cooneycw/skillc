@@ -48,7 +48,7 @@ def session(mode: str = "healthy") -> Iterator[tuple[g.GoalSession, Peer]]:
     peer = Peer(mode)
     try:
         yield g.GoalSession(peer, objective="Deliver the public goal", model="scripted-model",
-                            cpp_sessions=SESSIONS), peer
+                            comparison_sessions=SESSIONS), peer
     finally:
         peer.proc.terminate()
         peer.proc.communicate(timeout=3)

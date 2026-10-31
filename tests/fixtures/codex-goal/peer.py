@@ -2,10 +2,12 @@
 
 import json
 import sys
+from typing import Any
 
 MODE = sys.argv[1]
 THREAD = "scripted-thread"
-goal = None
+goal: dict[str, Any] | None = None
+result: dict[str, Any]
 initialized = False
 ready = False
 started = False
@@ -62,6 +64,7 @@ for line in sys.stdin:
     else:
         send({"id": msg["id"], "result": result})
     if method == "thread/goal/set" and not started and MODE != "rpc-error":
+        assert goal is not None
         started = True
         if MODE == "model-change":
             note("model/rerouted", threadId=THREAD, turnId="turn-1", fromModel="scripted-model",
