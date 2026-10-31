@@ -8,7 +8,6 @@ All subjects run in Docker. An unavailable daemon never falls back to the host.
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import re
 import subprocess
@@ -20,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from . import controller_turns as turns
-from . import egress, fixture_overlay, leak
+from . import fixture_overlay, leak
 from .backend import BackendUnavailable, Confirmation, ExecuteResult, Limits
 from .codex_guard import CodexGuardSession
 from .completion import CompletionDeadline, CompletionUnavailable
@@ -37,6 +36,8 @@ from .docker_backend import (
 from .wave_attachment import WAVE_ROOT, WaveAttachment
 
 ROLE_NAME = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
+FIXTURE_ALIAS = "skillc-fixture"
+FIXTURE_URL = "git://" + FIXTURE_ALIAS + "/repo.git"
 
 
 @dataclass(frozen=True)
@@ -93,18 +94,22 @@ class DockerWave:
     """
 
     def __init__(self, *, attempt_id: str, image: str, root: Path, fixture: Path,
-                 roles: Sequence[Role], seconds: float, docker_bin: Sequence[str] = ("docker",)) -> None:
+                 roles: Sequence[Role], seconds: float, docker_bin: Sequence[str] = ("docker",),
+                 daemon_timeout: float = 5.0) -> None:
         if not ROLE_NAME.fullmatch(attempt_id):
             raise ValueError("attempt_id must be a logical name")
         if len(roles) < 2 or len({r.name for r in roles}) != len(roles):
             raise ValueError("a wave requires at least two uniquely named roles")
         if not fixture.is_dir():
             raise ValueError("fixture must be a controller-owned git checkout")
+        if (isinstance(daemon_timeout, bool) or not 0 < daemon_timeout < float("inf")):
+            raise ValueError("daemon_timeout must be positive and finite")
         root.mkdir(parents=True, exist_ok=False)
         self.attempt_id, self.image, self.root, self.fixture = attempt_id, image, root, fixture
         self.roles = tuple(roles)
         self.deadline = CompletionDeadline.after(seconds)
         self.docker_bin, self.env = tuple(docker_bin), _docker_env()
+        self.daemon_timeout = daemon_timeout
         self.token = uuid.uuid4().hex
         self.network = f"skillc-wave-{self.token}"
         self.attachment = WaveAttachment(self.network + "-state")
@@ -126,7 +131,7 @@ class DockerWave:
         path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
 
     def _call(self, argv: Sequence[str], *, cleanup: bool = False) -> bytes:
-        timeout = 5.0 if cleanup else self.deadline.remaining(5.0)
+        timeout = self.daemon_timeout if cleanup else self.deadline.remaining(self.daemon_timeout)
         try:
             done = subprocess.run([*self.docker_bin, *argv], env=self.env,
                                   capture_output=True, timeout=timeout, check=False)
@@ -140,7 +145,7 @@ class DockerWave:
     def _backend(self, name: str, **kwargs: Any) -> DockerBackend:
         return DockerBackend(image=self.image, base_dir=self.root / name,
                              docker_bin=self.docker_bin, witness_io=True,
-                             daemon_timeout=self.deadline.remaining(5.0), **kwargs)
+                             daemon_timeout=self.deadline.remaining(self.daemon_timeout), **kwargs)
 
     def _limits(self, cap: float) -> Limits:
         return Limits(timeout=self.deadline.remaining(cap), completion_deadline=self.deadline)
@@ -178,6 +183,11 @@ class DockerWave:
         # git daemon is the only service exposed by the fixture container.
         self._call(["exec", "-d", "--", self._name(self.remote), "git", "daemon", "--reuseaddr",
                     "--export-all", "--enable=receive-pack", "--base-path=/fixture", "/fixture"])
+        self._exec(remote_backend, self.remote, ["python3", "-c",
+            ("import socket,time\nend=time.monotonic()+10\n"
+             "while True:\n"
+             " try:\n  socket.create_connection(('127.0.0.1',9418),timeout=1).close();break\n"
+             " except OSError:\n  assert time.monotonic()<end,'fixture git daemon unavailable';time.sleep(.02)\n")])
         for role in self.roles:
             guard = CodexGuardSession(self.attempt_id + "-" + role.name)
             backend = self._backend(role.name, egress=True, wave_attachment=self.attachment,
@@ -189,11 +199,8 @@ class DockerWave:
             role_network = getattr(handle, "egress_network", None)
             if not isinstance(role_network, str):
                 raise BackendUnavailable("role provider-egress network missing")
-            self._call(["network", "connect", role_network, self._name(self.remote)])
-            address = self._call(egress.proxy_address_argv((), role_network, self._name(self.remote))).decode().strip()
-            ipaddress.ip_address(address)
-            remote_url = f"git://{address}/repo.git"
-            self._exec(backend, handle, ["git", "clone", remote_url, "."])
+            self._call(["network", "connect", "--alias", FIXTURE_ALIAS, role_network, self._name(self.remote)])
+            self._exec(backend, handle, ["git", "clone", FIXTURE_URL, "."])
             fixture_overlay.install_codex_guard(backend, handle, {})
             self._write(role.name + "/setup.json", {"guard_installed": True,
                 "credential": "not-delivered-model-free", "project": "independent-clone",
@@ -263,7 +270,8 @@ class DockerWave:
 
         threads: list[threading.Thread] = []
         try:
-            self.prepare()
+            if not self._prepared:
+                self.prepare()
             for role in self.roles:
                 thread = threading.Thread(target=actor, args=(role,))
                 threads.append(thread)

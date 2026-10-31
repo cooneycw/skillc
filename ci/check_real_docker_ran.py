@@ -74,6 +74,7 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_inventory_oracle_live",
     # #634: NHL replay isolation, controller custody and cleanup qualification.
     "tests.test_nhl_rerun_live",
+    "tests.test_docker_wave_live",
 )
 
 ERROR = "ERROR"

@@ -1,0 +1,7 @@
+{
+  "passed": "SUCCESS",
+  "missing": "ERROR",
+  "skipped": "FAILURE",
+  "failed": "FAILURE",
+  "error": "FAILURE"
+}

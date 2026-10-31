@@ -162,7 +162,8 @@ def test_wave_owns_each_role_and_only_declared_shared_surfaces(runtime: Any) -> 
     assert "com.docker.network.bridge.enable_icc=false" in network
     for role, state in controller.states.items():
         assert ["network", "connect", controller.network, state.handle.name] in calls
-        assert ["network", "connect", state.handle.egress_network, "test-wave-fixture"] in calls
+        assert ["network", "connect", "--alias", "skillc-fixture",
+                state.handle.egress_network, "test-wave-fixture"] in calls
         launches = [v for k, v in state.backend.calls if k == "turn"]
         assert launches[1][0] == (*state.role.argv, "resume", state.session_id, "continue")
         assert launches[0][1].completion_deadline is controller.deadline
@@ -273,7 +274,9 @@ def test_actual_docker_backend_role_lifecycle_through_fake_cli(
             # Unlike the common-wave network/volume, these per-role networks
             # are owned by the ACTUAL backend, so model their remote endpoints
             # in the shared fake daemon. This makes teardown ordering observable.
-            done = subprocess.run([*controller.docker_bin, *argv], capture_output=True, timeout=10, check=False)
+            # The existing fake daemon models endpoints, not embedded DNS.
+            endpoint_argv = [*argv[:2], *argv[-2:]]
+            done = subprocess.run([*controller.docker_bin, *endpoint_argv], capture_output=True, timeout=10, check=False)
             assert done.returncode == 0, done.stderr
             if hold_remote:
                 (state_dir / (".stuck-" + controller._name(controller.remote))).touch()
@@ -353,3 +356,25 @@ def test_close_waits_for_inflight_turn_capture(runtime: Any, monkeypatch: Any) -
     assert (controller.root / "worker-a/turn-0.stderr").is_file()
     with pytest.raises(ValueError, match="closed"):
         controller.turn("worker-b")
+
+
+def test_fixture_remote_url_uses_a_declared_alias_in_each_role(runtime: Any) -> None:
+    controller, calls = runtime
+    controller.prepare()
+    try:
+        for state in controller.states.values():
+            setup = [argv for action, argv in state.backend.calls if action == "setup-exec"]
+            assert ("git", "clone", "git://skillc-fixture/repo.git", ".") in setup
+            assert ["network", "connect", "--alias", "skillc-fixture",
+                    state.handle.egress_network, "test-wave-fixture"] in calls
+    finally:
+        controller.close()
+
+
+def test_prepared_wave_can_run_scripted_turns_without_reallocation(runtime: Any) -> None:
+    controller, calls = runtime
+    controller.prepare()
+    before = sum(c[:2] == ['network', 'create'] for c in calls)
+    report = controller.run_scripted()
+    assert sum(c[:2] == ['network', 'create'] for c in calls) == before == 1
+    assert all(role['exit_codes'] == [0, 0] for role in report['roles'].values())
