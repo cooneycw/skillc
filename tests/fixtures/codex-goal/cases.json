@@ -1,0 +1,11 @@
+{
+  "healthy": {"model_identity": "STABLE", "outcome": "goal-complete", "pool_eligible": true},
+  "model-change": {"model_identity": "CHANGED", "outcome": "goal-complete", "pool_eligible": false},
+  "usage-limit": {"model_identity": "STABLE", "outcome": "infrastructure-usage-limit", "pool_eligible": false},
+  "ordinary-turn": {"model_identity": "STABLE", "outcome": "goal-active", "pool_eligible": false},
+  "foreign-thread": {"model_identity": "UNKNOWN", "outcome": "infrastructure-protocol-error", "pool_eligible": false},
+  "unsolicited-response": {"model_identity": "UNKNOWN", "outcome": "infrastructure-protocol-error", "pool_eligible": false},
+  "enforced-budget": {"model_identity": "UNKNOWN", "outcome": "infrastructure-protocol-error", "pool_eligible": false},
+  "rpc-error": {"model_identity": "UNKNOWN", "outcome": "infrastructure-protocol-error", "pool_eligible": false},
+  "startup-model-change": {"model_identity": "CHANGED", "outcome": "infrastructure-protocol-error", "pool_eligible": false}
+}
