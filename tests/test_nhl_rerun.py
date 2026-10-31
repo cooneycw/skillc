@@ -230,3 +230,14 @@ def test_entrypoint_timeout_vs_unknown_execution(tmp_path: Path, cases: list[dic
         tmp_path / 'project', adapter, cases[0], tmp_path / 'evidence')
     assert result['status'] == ('FAIL' if confirmed else 'UNKNOWN')
     assert (tmp_path / 'evidence/execution.json').is_file()
+
+
+def test_controller_source_extraction_failure_is_unknown(tmp_path: Path, cases: list[dict[str, Any]]) -> None:
+    adapter = materialize(tmp_path / 'project')
+    adapter['controller_extract_commands'] = ['controller-db-export']
+    def run(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        rc = 17 if args[1] == 'exec' and args[-1] == 'controller-db-export' else 0
+        return subprocess.CompletedProcess(args, rc, '', '')
+    result = nhl_rerun.DockerReplay(IMAGE, IMAGE, run=run).execute(
+        tmp_path / 'project', adapter, cases[0], tmp_path / 'evidence')
+    assert result['status'] == 'UNKNOWN'

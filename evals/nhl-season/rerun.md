@@ -61,8 +61,8 @@ A private adapter JSON selects:
 - `reconciliation`: path relative to that directory for the public
   `reconciliation.json` export (including its `games` array).
 - `payloads`: endpoint path plus query to relative retained-JSON export filename.
-  The controller obtains these filenames from the delivered project's documented
-  retained-source export. They need not use any particular participant naming.
+  The controller obtains these filenames from the delivered project's retained
+  source records, using its export or the controller extraction below. They need not use any particular participant naming.
   It must map every successfully requested schedule and detailed source; identical
   payloads may share a retained file. Unrequested schedule aliases need no export. A project
   retaining sources only in a database needs its documented export command to
@@ -80,6 +80,7 @@ uv run python -m skillc.nhl_rerun selftest
 uv run python -m skillc.nhl_rerun run \
   --reference "$REFERENCE" --manifest-sha256 "$MANIFEST_SHA256" \
   --sample "$GAME_A" "$GAME_B" --plants "$PRIVATE_PLANTS" \
+  --goal evals/nhl-season/goal.md \
   --project "$DELIVERED_PROJECT" --adapter "$PRIVATE_ADAPTER" \
   --candidate-image "$PINNED_CANDIDATE_IMAGE" \
   --server-image "$PINNED_SERVER_IMAGE" --timeout 120 \
@@ -119,7 +120,9 @@ an unchanged game, missing checks, and always-PASS reporting fail.
 
 Private per-case `execution.json` records argv, exit status and captured output;
 `output/` retains candidate exports and `verdict.json` names the reason. A final
-`report.json` accounts for all ten cases. Exit codes are 0 PASS, 1 FAIL and
+`report.json` accounts for all ten cases and binds the public goal, recipes,
+adapter and grader implementation hashes. Goal/recipe/adapter bytes are
+rechecked after execution; a changed declaration input invalidates the result. Exit codes are 0 PASS, 1 FAIL and
 2 UNKNOWN. Preparation and Docker transport failures are UNKNOWN. A failed documented
 command is FAIL only when an independent inspect still confirms the candidate
 container running; failed/uncertain inspection does not blame the candidate. PASS here covers only these replay

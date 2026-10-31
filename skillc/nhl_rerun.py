@@ -242,6 +242,9 @@ def validate_adapter(project: Path, adapter: Json) -> None:
     if not ((environment and environment in readme) or
             (isinstance(placeholder, str) and placeholder and any(placeholder in c for c in commands))):
         raise ReferenceError("endpoint override absent from README")
+    extractions = adapter.get("controller_extract_commands", [])
+    if not isinstance(extractions, list) or any(not isinstance(c, str) or not c.strip() for c in extractions):
+        raise ReferenceError("invalid controller source extraction commands")
     # Export path belongs to the candidate container, not a host mount.
     export = adapter["export_dir"]
     if not isinstance(export, str) or not export.startswith("/project/") or ".." in Path(export).parts:
@@ -338,6 +341,10 @@ class DockerReplay:
                 if adapter.get("api_base_placeholder"):
                     command = command.replace(adapter["api_base_placeholder"], "http://nhl-source:8080")
                 call(["exec", candidate, "/bin/sh", "-eu", "-c", command], candidate_command=True)
+            # Trusted adapter extraction reads existing retained source records;
+            # it is not a delivered entry point or a replacement reconciler.
+            for command in adapter.get("controller_extract_commands", []):
+                call(["exec", candidate, "/bin/sh", "-eu", "-c", command])
             check_export = "from pathlib import Path;raise SystemExit(0 if Path(" + repr(adapter["export_dir"]) + ").is_dir() else 71)"
             call(["exec", candidate, "python3", "-c", check_export], candidate_command=True)
             # Stop delivered code before collecting files; no live writer races.
@@ -380,6 +387,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--reference", type=Path, required=True)
     run.add_argument("--manifest-sha256", required=True)
     run.add_argument("--sample", type=int, nargs="+", required=True)
+    run.add_argument("--goal", type=Path, required=True)
     run.add_argument("--plants", type=Path, required=True)
     run.add_argument("--project", type=Path, required=True)
     run.add_argument("--adapter", type=Path, required=True)
@@ -397,12 +405,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         custody(args.project, args.reference, args.plants, args.adapter, args.evidence)
         cases = scenarios(args.reference, args.manifest_sha256, args.sample, json.loads(args.plants.read_text()))
+        frozen = {path: snapshot.sha256(path.read_bytes()) for path in (args.goal, args.adapter, args.plants)}
         adapter = json.loads(args.adapter.read_text())
         executor = DockerReplay(args.candidate_image, args.server_image, timeout=args.timeout)
         args.evidence.mkdir(parents=True, exist_ok=False)
         results = [executor.execute(args.project, adapter, case, args.evidence / case["name"]) for case in cases]
+        if any(snapshot.sha256(path.read_bytes()) != digest for path, digest in frozen.items()):
+            raise ReferenceError("controller declaration inputs changed during replay")
         status = "UNKNOWN" if any(r["status"] == "UNKNOWN" for r in results) else "FAIL" if any(r["status"] == "FAIL" for r in results) else "PASS"
-        result = {"status": status, "manifest_sha256": args.manifest_sha256, "sample": args.sample, "cases": results}
+        result = {"status": status, "manifest_sha256": args.manifest_sha256,
+                  "goal_sha256": snapshot.sha256(args.goal.read_bytes()),
+                  "adapter_sha256": snapshot.sha256(args.adapter.read_bytes()),
+                  "plants_sha256": snapshot.sha256(args.plants.read_bytes()),
+                  "code_sha256": {name: snapshot.sha256(Path(path).read_bytes()) for name, path in
+                                  (("replay", __file__), ("oracle", oracle.__file__),
+                                   ("snapshot", snapshot.__file__),
+                                   ("server", str(Path(__file__).with_name("nhl_serve.py"))))},
+                  "sample": args.sample, "cases": results}
         (args.evidence / "report.json").write_text(json.dumps(result, indent=2))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         result = {"status": "UNKNOWN", "reason": str(exc)}
