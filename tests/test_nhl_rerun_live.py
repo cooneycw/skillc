@@ -7,6 +7,7 @@ trusted authored controls, never live model output or fetched NHL data.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import uuid
@@ -25,6 +26,21 @@ def docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(['docker', *args], capture_output=True, text=True, check=check, timeout=30)
 
 
+def container_is_absent(name: str, inspected: subprocess.CompletedProcess[str]) -> bool:
+    """The cleanup witness, also exercised without Docker by committed controls."""
+    if inspected.returncode != 1:
+        return False
+    try:
+        if json.loads(inspected.stdout) != []:
+            return False
+    except json.JSONDecodeError:
+        return False
+    missing = re.fullmatch(
+        r'error(?: response from daemon)?:\s*no such (?:object|container):\s*(?P<name>[^\r\n]+)',
+        inspected.stderr.strip(), re.IGNORECASE)
+    return missing is not None and missing.group('name') == name
+
+
 @pytest.mark.timeout(1200)
 def test_physical_replay_controls_isolation_and_cleanup(tmp_path: Path) -> None:
     docker('info')  # Reachability failure is loud once selected on a Docker runner.
@@ -39,6 +55,8 @@ def test_physical_replay_controls_isolation_and_cleanup(tmp_path: Path) -> None:
         docker('run', '--detach', '--pull=never', '--network', witness_network,
                '--name', witness, '--entrypoint', 'python3', image,
                '-m', 'http.server', '8080')
+        present = docker('inspect', witness)
+        assert not container_is_absent(witness, present), present
         ip = docker('inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', witness).stdout.strip()
         assert ip
         sentinel = tmp_path / 'controller-private' / 'sentinel.txt'
@@ -102,7 +120,7 @@ def test_physical_replay_controls_isolation_and_cleanup(tmp_path: Path) -> None:
         docker('info')
         for name in owned:
             absent = docker('inspect', name, check=False)
-            assert absent.returncode != 0 and 'No such' in absent.stderr, absent
+            assert container_is_absent(name, absent), absent
         for path in tmp_path.glob('evidence-*/execution.json'):
             execution: dict[str, Any] = json.loads(path.read_text())
             network = execution['commands'][0]['stdout'].strip()
