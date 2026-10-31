@@ -992,7 +992,7 @@ class DockerBackend:
                 ("one persistent container per attempt (docker run -d at prepare()); "
                  "install()/execute() act on it via docker cp/docker exec - no bind mount, "
                  "no shared volume, no second container" if self.wave_attachment is None else
-                 "one role container with private workspace/home/PID namespace; controller-owned "
+                 "one role container with private workspace, home and PID namespace; controller-owned "
                  "wave-state named volume mounted at a fixed path; wave controller owns shared topology"),
             ),
             unobserved=(
