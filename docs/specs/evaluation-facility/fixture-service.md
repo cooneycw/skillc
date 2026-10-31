@@ -26,8 +26,8 @@ The service makes the CONTROLLER the only GitHub:
   the pinned flow-check build context
   (`tests/test_fixture_service_runtime_pin.py`); how it reaches a trial is
   #434's decision. The shim
-  sends each invocation as one `op: "gh"` request over the attempt's one #183
-  socket.
+  sends each invocation as an `op: "gh"` request over the attempt's one #183
+  socket. Repository creation uses a prepare/complete pair around the local push.
 - The service parses the request against a closed grammar, decides the answer,
   and appends an event to its own record. Only then does it reply.
 - The subject sees gh-shaped stdout, stderr and an exit code. It never sees or
@@ -38,7 +38,11 @@ merges or closures is a claim to compare against that record.
 
 ## Supported request semantics
 
-The grammar is exactly what the pinned CPP 86641e8 flow:auto lane calls.
+The grammar covers the pinned CPP 86641e8 flow:auto lane and the project-init
+and flow-wave surfaces at `87ecb0970f70aace9e0323feee00c9ca57dda133`.
+[The additive wave inventory](fixture-service-wave-gh-inventory.json) records
+source hashes, literal call sites, normalized extension cases and exclusions.
+The legacy inventory stays frozen at its original pin.
 [fixture-service-gh-inventory.txt](fixture-service-gh-inventory.txt) lists
 every call with its `source:line`. Each subcommand accepts only the flags listed
 below. Anything else is `unsupported` (see Coverage).
@@ -46,8 +50,13 @@ below. Anything else is `unsupported` (see Coverage).
 | Subcommand | Flags | Semantics |
 |---|---|---|
 | `auth status` | none | Logged in as `fixture-subject` |
+| `repo create NAME` | `--private --public --source --push` | One declared pending repository; actual fixture push is verified before success |
+| `label list` | `--repo --json --jq --limit` | Attempt-local name, color and description |
+| `label create NAME` | `--repo --color --description` | Refuses duplicate names; color is six hexadecimal digits |
+| `issue create` | `--repo --title --body --body-file --label` | Allocates the next shared issue/PR number; labels must exist |
+| `issue edit N` | `--repo --title --body --body-file` | Preserves other fields; `--body-file -` reads stdin |
 | `repo view` | `--repo --json --jq` | `nameWithOwner name owner url viewerPermission defaultBranchRef` |
-| `api PATH` | `--jq --paginate -H` | GET only. `repos/O/R`, `.../pulls/N/files`, `.../rules/branches/B` (`[]`), and `.../branches/B/protection/required_status_checks` (HTTP 404 "Branch not protected", printed raw with no jq applied, as gh does) |
+| `api PATH` | `--jq --paginate -H` | GET only. `user` (fixture login/email), `repos/O/R`, `.../pulls/N/files`, `.../rules/branches/B` (`[]`), and `.../branches/B/protection/required_status_checks` (HTTP 404 "Branch not protected", printed raw with no jq applied, as gh does) |
 | `issue view N` | `--repo --json --jq` | `number title body state url createdAt updatedAt closedAt labels comments author` |
 | `issue list` | `--repo --state --search --limit --json --jq` | Newest first. Default state is open, default limit 30 |
 | `issue close N` | `--repo --comment --reason` | OPEN to CLOSED, adding the comment first. An already-closed issue is a no-op with exit 0 and no effect |
@@ -56,7 +65,7 @@ below. Anything else is `unsupported` (see Coverage).
 | `pr list` | `--repo --state --head --base --search --limit --json --jq` | `closed` includes merged, as on GitHub |
 | `pr create` | `--repo --title --body --body-file --base --head` | Title and body are required, as in non-interactive gh. The head must exist on the remote and be ahead of the base |
 | `pr edit N` | `--repo --base --title --body` | Open PRs only |
-| `pr merge [N]` | `--repo --squash --subject --body --body-file --delete-branch --admin` | Squash only; see below |
+| `pr merge [N]` | `--repo --squash --subject --body --body-file --delete-branch --admin --match-head-commit` | Squash only; a mismatched live head refuses without a merge; see below |
 | `run list` | `--repo --commit --branch --limit --json --jq` | Always `[]`. The effect is marked `simulated: no-ci` |
 | `run view ID` | `--repo --json --jq` | Always "could not find any workflow run" |
 
@@ -86,6 +95,48 @@ The origin URL and the current branch come from the subject's checkout. Real gh
 reads both from the checkout too. Because the service answers for exactly ONE
 repository, a forged origin can only make a request fail. It can never reach
 other state.
+
+### Project creation and attempt isolation (#636)
+
+A pending fixture declares `repository.exists: false` and an empty bare remote,
+with `repository.creation_transport_url` naming one of its `remote_urls` as an
+absolute local path or local `file:` URL. Existing declarations still mean an
+existing repository and preserve their state shape. Pending declarations cannot
+seed issues or PRs. The fixture owner must provision a separate transport for
+each attempt, as for the existing service; this service never creates a live
+GitHub repository. Optional top-level `labels` entries declare `name`, six-digit
+`color` and optional `description`. Labels already present on seeded issues are
+also available with a default color and empty description.
+
+`gh api user` and `gh auth status` work before an origin exists. Repository
+creation accepts either the declared full name or its bare name, requires
+exactly one of `--private`/`--public`, and requires `--source` and `--push`.
+The shim sends the source HEAD and a prepare request. The controller checks
+that the fixture remote is empty and returns its declared transport. The shim
+configures a controller-derived `https://github.com/OWNER/NAME.git` logical
+origin, installs a local `url.TRANSPORT.insteadOf` rewrite to the declared
+fixture path, and pushes the source, including upstream tracking. Git fetch
+and push therefore stay on the fixture transport, while workflow guards see
+the expected logical origin. The derived logical URL is accepted only for this
+pending fixture repository. A second
+request completes only if it matches the preparation and the controller reads
+the claimed HEAD from the remote's default branch. That event alone is
+`applied` and records visibility and the observed commit. A failed local git
+operation, missing ref, different origin, changed HEAD or duplicate creation
+cannot manufacture a successful creation event. The controller never reads a
+subject-supplied source path. Raw unrecorded pushes still trigger the existing
+remote-integrity check.
+
+Created issues, labels, edits, authority refusals and unsupported requests use
+the same event sequence, before/after state digests and fault machinery as
+existing operations. They are held by one service instance per attempt.
+`tests/test_fixture_service_wave.py` exercises real shim/socket/Git effects and
+the pinned converter plus its context helper, including creation immediately followed by conversion without an origin
+substitution, dependency edits and a second conversion with no duplicates. It uses no model or GitHub connection.
+The exact subject-specific jq strings live in packaged
+`skillc/fixture_service_filters.json`; the generic controller executes them with
+real jq. Both inventories are checked together, with committed unsupported
+command/filter controls.
 
 ### The merge is the controller's
 

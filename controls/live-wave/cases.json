@@ -1,0 +1,462 @@
+[
+  {
+    "name": "healthy",
+    "expected": "PASS",
+    "patches": [],
+    "reason": null
+  },
+  {
+    "name": "alternative-work-order",
+    "expected": "PASS",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol",
+          0,
+          "elapsed"
+        ],
+        "value": 1.4
+      },
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol",
+          1,
+          "elapsed"
+        ],
+        "value": 2.8
+      },
+      {
+        "path": [
+          "roles",
+          2,
+          "protocol",
+          0,
+          "elapsed"
+        ],
+        "value": 1.1
+      },
+      {
+        "path": [
+          "roles",
+          2,
+          "protocol",
+          1,
+          "elapsed"
+        ],
+        "value": 2.1
+      }
+    ],
+    "reason": null
+  },
+  {
+    "name": "unfinished-integration",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          0,
+          "protocol"
+        ],
+        "value": [
+          {
+            "wave_id": "wave-1",
+            "role": "orchestrator",
+            "attempt_id": "attempt-orchestrator",
+            "session_id": "session-orchestrator",
+            "task": "integrate",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-orchestrator",
+            "op": "ack",
+            "elapsed": 1.0
+          }
+        ]
+      },
+      {
+        "path": [
+          "roles",
+          0,
+          "artifacts"
+        ],
+        "value": {}
+      }
+    ],
+    "reason": "orchestrator:unfinished-role"
+  },
+  {
+    "name": "wrong-role-acknowledgement",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol",
+          0,
+          "role"
+        ],
+        "value": "worker-b"
+      }
+    ],
+    "reason": "worker-a:wrong-assignment-identity"
+  },
+  {
+    "name": "stale-acknowledgement",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol",
+          0,
+          "revision"
+        ],
+        "value": 2
+      }
+    ],
+    "reason": "worker-a:wrong-assignment-identity"
+  },
+  {
+    "name": "duplicate-completion",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol"
+        ],
+        "value": [
+          {
+            "wave_id": "wave-1",
+            "role": "worker-a",
+            "attempt_id": "attempt-worker-a",
+            "session_id": "session-worker-a",
+            "task": "worker-a",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-a",
+            "op": "ack",
+            "elapsed": 1.1
+          },
+          {
+            "wave_id": "wave-1",
+            "role": "worker-a",
+            "attempt_id": "attempt-worker-a",
+            "session_id": "session-worker-a",
+            "task": "worker-a",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-a",
+            "op": "complete",
+            "elapsed": 2.1
+          },
+          {
+            "wave_id": "wave-1",
+            "role": "worker-a",
+            "attempt_id": "attempt-worker-a",
+            "session_id": "session-worker-a",
+            "task": "worker-a",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-a",
+            "op": "complete",
+            "elapsed": 2.1
+          }
+        ]
+      }
+    ],
+    "reason": "worker-a:duplicate-or-unacknowledged-completion"
+  },
+  {
+    "name": "missed-deadline",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "completion_elapsed"
+        ],
+        "value": 10.01
+      }
+    ],
+    "reason": "deadline"
+  },
+  {
+    "name": "missing-capture",
+    "expected": "UNKNOWN",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "transcript"
+        ],
+        "value": null
+      }
+    ],
+    "reason": "worker-a:transcript-unavailable"
+  },
+  {
+    "name": "bad-integration",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          0,
+          "artifacts",
+          "output.json"
+        ],
+        "value": "{}"
+      }
+    ],
+    "reason": "incorrect-integrated-delivery"
+  },
+  {
+    "name": "launch-failure",
+    "expected": "UNKNOWN",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "started"
+        ],
+        "value": false
+      },
+      {
+        "path": [
+          "roles",
+          1,
+          "stop_reason"
+        ],
+        "value": "launch-failed"
+      }
+    ],
+    "reason": "worker-a:non-start"
+  },
+  {
+    "name": "uncertain-cleanup",
+    "expected": "UNKNOWN",
+    "patches": [
+      {
+        "path": [
+          "cleanup_confirmed"
+        ],
+        "value": false
+      }
+    ],
+    "reason": "wave-cleanup-unconfirmed"
+  },
+  {
+    "name": "infrastructure-cancellation",
+    "expected": "UNKNOWN",
+    "patches": [
+      {
+        "path": [
+          "infrastructure_failed_at"
+        ],
+        "value": 3
+      },
+      {
+        "path": [
+          "completion_elapsed"
+        ],
+        "value": 12
+      },
+      {
+        "path": [
+          "roles",
+          0,
+          "stop_reason"
+        ],
+        "value": "infrastructure-cancelled"
+      },
+      {
+        "path": [
+          "roles",
+          0,
+          "protocol"
+        ],
+        "value": [
+          {
+            "wave_id": "wave-1",
+            "role": "orchestrator",
+            "attempt_id": "attempt-orchestrator",
+            "session_id": "session-orchestrator",
+            "task": "integrate",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-orchestrator",
+            "op": "ack",
+            "elapsed": 1.0
+          }
+        ]
+      },
+      {
+        "path": [
+          "roles",
+          0,
+          "artifacts"
+        ],
+        "value": {}
+      },
+      {
+        "path": [
+          "roles",
+          1,
+          "stop_reason"
+        ],
+        "value": "infrastructure-cancelled"
+      },
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol"
+        ],
+        "value": [
+          {
+            "wave_id": "wave-1",
+            "role": "worker-a",
+            "attempt_id": "attempt-worker-a",
+            "session_id": "session-worker-a",
+            "task": "worker-a",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-a",
+            "op": "ack",
+            "elapsed": 1.1
+          }
+        ]
+      },
+      {
+        "path": [
+          "roles",
+          1,
+          "artifacts"
+        ],
+        "value": {}
+      },
+      {
+        "path": [
+          "roles",
+          2,
+          "stop_reason"
+        ],
+        "value": "infrastructure-cancelled"
+      },
+      {
+        "path": [
+          "roles",
+          2,
+          "protocol"
+        ],
+        "value": [
+          {
+            "wave_id": "wave-1",
+            "role": "worker-b",
+            "attempt_id": "attempt-worker-b",
+            "session_id": "session-worker-b",
+            "task": "worker-b",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-b",
+            "op": "ack",
+            "elapsed": 1.2
+          }
+        ]
+      },
+      {
+        "path": [
+          "roles",
+          2,
+          "artifacts"
+        ],
+        "value": {}
+      }
+    ],
+    "reason": "infrastructure-failure"
+  },
+  {
+    "name": "violation-survives-missing-capture",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "roles",
+          1,
+          "protocol",
+          0,
+          "role"
+        ],
+        "value": "worker-b"
+      },
+      {
+        "path": [
+          "roles",
+          2,
+          "transcript"
+        ],
+        "value": null
+      }
+    ],
+    "reason": "worker-a:wrong-assignment-identity"
+  },
+  {
+    "name": "witnessed-deadline-survives-cleanup-loss",
+    "expected": "FAIL",
+    "patches": [
+      {
+        "path": [
+          "deadline_witnessed_at"
+        ],
+        "value": 10
+      },
+      {
+        "path": [
+          "infrastructure_failed_at"
+        ],
+        "value": 11
+      },
+      {
+        "path": [
+          "cleanup_confirmed"
+        ],
+        "value": false
+      }
+    ],
+    "reason": "deadline"
+  },
+  {
+    "name": "infrastructure-before-deadline",
+    "expected": "UNKNOWN",
+    "patches": [
+      {
+        "path": [
+          "infrastructure_failed_at"
+        ],
+        "value": 9
+      },
+      {
+        "path": [
+          "deadline_witnessed_at"
+        ],
+        "value": 10
+      },
+      {
+        "path": [
+          "completion_elapsed"
+        ],
+        "value": 12
+      }
+    ],
+    "reason": "infrastructure-failure"
+  }
+]
