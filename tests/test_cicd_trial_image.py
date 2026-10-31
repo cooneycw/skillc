@@ -2,15 +2,13 @@
 
 Two claims, each with a committed case that makes it report the other verdict:
 
-1. The flow-check runtime's build inputs are byte-identical to this PR's
-   base. `docker/profile-trial/build.py`'s `prepare()` hashes every input a
-   flow-check profile-runtime receipt is bound to; the golden values below
-   were measured on main dae6785 (#280's base after its rebase), which #280
-   does not modify. They moved once already, by #414 and not by #280:
-   #414's edit to build.py (whose bytes enter the context as
-   runtime-build.py) changed build_context_sha256 from 1fc1e6e's 0fda8029... A one-byte change to
+1. The flow-check runtime's build inputs match its reviewed recipe.
+   `docker/profile-trial/build.py`'s `prepare()` hashes every input a
+   flow-check profile-runtime receipt is bound to. The current goldens were
+   measured after #637's deliberate Codex 0.165.0 pin upgrade; historical
+   declarations and runtime receipts are not rewritten. A one-byte change to
    any docker/trial input must move them (the negative control), so a pass
-   here means "unchanged", not "not looked at".
+   here means "matches the reviewed inputs", not "not looked at".
 2. `docker/cicd-trial/build.py` writes a receipt only for an image that is its
    validated base plus exactly one layer, with the base's configuration and
    descriptor. Each binding check has a fake-Docker case that breaks only it.
@@ -34,11 +32,11 @@ from skillc import runtime_supply as rs
 ROOT = Path(__file__).resolve().parents[1]
 from test_runtime_supply import DESCRIPTOR, RECEIPT
 
-#: `prepare()` on main dae6785 (#280's rebased base), in a clean worktree.
+#: `prepare()` after #637's Codex 0.165.0 recipe/manifest pin upgrade.
 GOLDEN_FLOW_CHECK_INPUTS = {
-    "build_context_sha256": "8d71d55a7f746a00e1fe15c90aab9bd0bb4b33bc765453bb305b1b6f5d86a805",
-    "base_recipe_sha256": "8dd69ef9b9de6ae2d777f98d4a6dbb76ef25d938fc8799bd3c81453c756a92b6",
-    "recipe_sha256": "ed3290c0983ba9e72e9a64365127890d33bc5aa540ab3d104959f9e52b94eb96",
+    "build_context_sha256": "4177260e9058a2e8f7118a7e8cf169a79d616576e8020eacade6bf51bb8501f6",
+    "base_recipe_sha256": "23e9583d0c4498d37851d2d2cce8b7cb72ecf873fd4ce306e3b81739d78d8a85",
+    "recipe_sha256": "1c8731b14c097db59b9daa3faef89d39340e369fee1f01b80e2ed5586e93a9a9",
 }
 SUBJECT = "evals/subjects/cpp-codex-flow-check-86641e8"
 FIXTURE = "tests/fixtures/profile-cpp-codex-flow-check-86641e8"
@@ -72,7 +70,7 @@ def _prepared(tmp_path: Path, inputs: dict[str, bytes]) -> dict[str, str]:
     return {key: prepared[key] for key in GOLDEN_FLOW_CHECK_INPUTS}
 
 
-def test_the_flow_check_runtime_build_inputs_are_unchanged(tmp_path: Path) -> None:
+def test_the_flow_check_runtime_build_inputs_match_the_reviewed_recipe(tmp_path: Path) -> None:
     assert _prepared(tmp_path, _flow_check_inputs()) == GOLDEN_FLOW_CHECK_INPUTS
 
 

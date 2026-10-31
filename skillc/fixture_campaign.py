@@ -329,11 +329,13 @@ def check_frozen(manifest: Manifest, root: Path) -> list[str]:
     if pinned.get("revision") != subject["revision"]:
         problems.append(f"subject profile {subject['profile']}: revision {pinned.get('revision')} != frozen")
     client = frozen["client"]
-    pinned_cli = json.loads((root / "docker" / "trial" / "pinned-versions.json").read_text(encoding="utf-8"))
-    for source, version in (("subject pin", pinned.get("client", {}).get("version")),
-                            ("trial image pin", pinned_cli.get("codex", {}).get("version"))):
-        if client.get("name") != "codex" or client.get("version") != version:
-            problems.append(f"client {client!r} != {source} {version!r}")
+    # This path executes ACTOR_SOURCE and the fake client, both bound below
+    # by harness_digest, rather than the native CLI in the current image recipe.
+    # Keep the frozen subject/client contract; native entry points independently
+    # enforce their declared image/client identities (#548, #637).
+    version = pinned.get("client", {}).get("version")
+    if client.get("name") != "codex" or client.get("version") != version:
+        problems.append(f"client {client!r} != subject pin {version!r}")
     policy = json.loads((root / "skillc" / "runtime-policy.json").read_text(encoding="utf-8"))
     for key, value in frozen["runtime"].items():
         if policy.get(key) != value:

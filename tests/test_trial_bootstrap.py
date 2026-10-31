@@ -63,7 +63,7 @@ def _load_check_helpers():
 
 def test_pinned_cli_version_reads_the_real_manifest():
     assert tb.pinned_cli_version("claude_code") == "2.1.283"
-    assert tb.pinned_cli_version("codex") == "0.157.1"
+    assert tb.pinned_cli_version("codex") == "0.165.0"
 
 
 def test_pinned_cli_version_refuses_an_unknown_client():
