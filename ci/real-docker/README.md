@@ -34,7 +34,19 @@ fills in at install time, never committed values.
 | Component | Lives in | Updated |
 |---|---|---|
 | `ci/check_real_docker_ran.py`, `ci/real_docker_summary.py`, `ci/real_docker_isolation.py`, `ci/real_docker_trigger.py`, `ci/real_docker_post.py`, `ci/real-docker/*` | the INSTALLED copy (`$INSTALLED_ROOT`, e.g. `/opt/skillc-real-docker-runner`) - a git checkout pinned to a reviewed main SHA | explicit operator step only (`git fetch && git checkout <reviewed-sha>` in `$INSTALLED_ROOT`), never implicitly |
-| `tests/` (whatever `real_docker`-marked tests the requested commit carries) | the WORK checkout (`$WORK_CHECKOUT`) - re-fetched and re-detached to the requested sha on every run | every run |
+| `tests/` (whatever `real_docker`-marked tests the requested commit carries) **and the product code they import (`skillc/`)** | the WORK checkout (`$WORK_CHECKOUT`) - re-fetched and re-detached to the requested sha on every run | every run |
+
+**Product code follows the checkout (#654).** `PYTHONPATH="$INSTALLED_ROOT"`
+is set inline on each of the runner's own `ci/*.py` calls and is never
+exported; the certifying pytest (and the opt-in helper's pytest) runs with
+`PYTHONPATH` unset, so `import skillc` resolves to the tested commit's
+editable install. Between 1e7ae69 (#578) and the #654 fix the export leaked
+into pytest, and every status certified the requested sha's tests against the
+runner pin's `skillc/` - a fix stayed red, and a regression stayed green, until
+the next re-pin. `tests/test_run_real_docker_product_import.py` drives the real
+runner with differing `skillc/` copies and is red if the leak returns. The fix
+takes effect on the runner host only after the operator re-pins
+`$INSTALLED_ROOT` to a sha that contains it.
 
 **Why the split (R1):** the requested sha is untrusted input - it is either
 an ordinary main commit or an owner-authorized ad hoc sha, but either way it
