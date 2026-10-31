@@ -219,7 +219,7 @@ def test_run_real_docker_tells_its_pytest_that_it_holds_run_lock() -> None:
     otherwise risk a neighbour's artifacts on a shared daemon), so the runner -
     which holds run.lock - must pass it to the pytest it launches."""
     script = (ROOT / "ci" / "real-docker" / "run-real-docker").read_text()
-    pytest_block = script[script.index("env SKILLC_LIVE_TEST_BREAK="):script.index("uv run --no-sync pytest -m real_docker")]
+    pytest_block = script[script.index("SKILLC_LIVE_TEST_BREAK=\"$CHANNEL_BREAK_VALUE\""):script.index("uv run --no-sync pytest -m real_docker")]
     assert "SKILLC_REAL_DOCKER_RUN_LOCK_HELD=1" in pytest_block
 
 

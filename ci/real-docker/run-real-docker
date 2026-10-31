@@ -8,8 +8,12 @@
 # an INSTALLED copy pinned to a reviewed main SHA - never from the checkout
 # under test. Updating the runner is an explicit operator step (see
 # ci/real-docker/README.md's "Setup" section), never implicit at each
-# tick. The checkout supplies ONLY the test files pytest collects; it is
-# never on PYTHONPATH for the verdict/summary/posting step.
+# tick. The checkout supplies the test files pytest collects AND the product
+# code they import; it is never on PYTHONPATH for the verdict/summary/posting
+# step. The reverse holds too (#654): PYTHONPATH="$INSTALLED_ROOT" is set
+# INLINE on each runner helper call, never exported, and the certifying pytest
+# runs with PYTHONPATH unset - otherwise `import skillc` resolves to the pinned
+# copy and a status on <sha> certifies <sha>'s tests against the pin's code.
 #
 # Entrypoint lives OUTSIDE .woodpecker/ on purpose (#309 review): that
 # directory is auto-discovered WHOLESALE by the main Woodpecker server's
@@ -120,7 +124,9 @@ for var in INSTALLED_ROOT WORK_CHECKOUT LOCK_FILE GITHUB_TOKEN_FILE OPTIN_EVIDEN
     fi
 done
 [[ "$CONFIG_FILE" = /* ]] || CONFIG_FILE="$CALLER_CWD/$CONFIG_FILE"
-export SKILLC_REAL_DOCKER_CONFIG="$CONFIG_FILE" PYTHONPATH="$INSTALLED_ROOT"
+# PYTHONPATH is deliberately NOT exported (#654): it would reach the
+# certifying pytest below. Each runner helper call sets it inline instead.
+export SKILLC_REAL_DOCKER_CONFIG="$CONFIG_FILE"
 cd "$INSTALLED_ROOT"
 
 RUNNER_SHA="$(git -C "$INSTALLED_ROOT" rev-parse HEAD)"
@@ -333,7 +339,9 @@ if [ -n "$OPTIN_NAME" ]; then
     (cd "$INSTALLED_ROOT" && PYTHONPATH="$INSTALLED_ROOT" python3 "$INSTALLED_ROOT/ci/real_docker_optin.py" \
         run "$OPTIN_NAME" "$WORK_CHECKOUT" "$REPORT_PATH") || OPTIN_RUN_EXIT=$?
 else
-if ! (cd "$WORK_CHECKOUT" && uv sync --locked --extra dev --quiet); then
+# `env -u PYTHONPATH` (#654): product code comes from the checkout's own
+# environment, even when the operator's shell carries a PYTHONPATH.
+if ! (cd "$WORK_CHECKOUT" && env -u PYTHONPATH uv sync --locked --extra dev --quiet); then
     refuse_before_checkout "uv sync failed - environment setup could not complete"
     exit 1
 fi
@@ -349,7 +357,8 @@ fi
     # the seven families' live-file break modes cannot cross-contaminate each other and a stale
     # inherited value can never silently activate a break during a "none"
     # (certifying) run.
-    env SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE" \
+    env -u PYTHONPATH \
+        SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE" \
         SKILLC_FLOW_AUTO_COLD=0 \
         SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE" \
         SKILLC_GATE_SHIM_LIVE_BREAK="$GATESHIM_BREAK_VALUE" \
