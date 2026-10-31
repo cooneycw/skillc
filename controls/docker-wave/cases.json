@@ -1,0 +1,7 @@
+[
+  {"name": "isolated", "input": {"listener_before": "ready", "listener_after": "ready", "connect": "refused"}, "expected": "PASS"},
+  {"name": "peer-channel-open", "input": {"listener_before": "ready", "listener_after": "ready", "connect": "connected"}, "expected": "FAIL"},
+  {"name": "listener-never-started", "input": {"listener_before": null, "listener_after": null, "connect": "refused"}, "expected": "UNKNOWN"},
+  {"name": "listener-died-during-probe", "input": {"listener_before": "ready", "listener_after": null, "connect": "refused"}, "expected": "UNKNOWN"},
+  {"name": "connection-observation-lost", "input": {"listener_before": "ready", "listener_after": "ready", "connect": null}, "expected": "UNKNOWN"}
+]
