@@ -104,3 +104,45 @@ qualification lane. This slice does not change that lane or its runner.
 
 This implementation adopts the three-valued observation and ordered retirement
 principles referenced by #621, but copies no source text from another repository.
+
+## Physical qualification cases
+
+`tests/test_docker_wave_live.py` declares five model-free cases: intact, an open
+peer bridge, missing mail, a timed-out role, and a cancelled role. It runs only
+through the existing real-Docker CI selection. A new test file also requires
+explicit runner-floor registration; collecting its marker alone is insufficient
+for a certifying status. Until the floor is registered and actual execution
+receipts exist, these cases are implementation, not qualification evidence.
+
+The fixture remote uses the fixed `skillc-fixture` network alias and
+`git://skillc-fixture/repo.git`, keeping Docker addresses out of captured git
+configuration. `prepare()` waits for the fixture git daemon to accept a local
+connection before cloning. `daemon_timeout` defaults to five seconds; the live
+qualification passes the existing explicit live-daemon budget. All operations
+remain bounded by the wave's original completion endpoint.
+
+A caller may `prepare()`, perform controller-owned preflight probes, then call
+`run_scripted()` on that prepared wave; it is not prepared twice. The physical
+cases use three scripted Python actors, copied fixture git remotes and the
+pinned CPP registry scripts. Their raw peer-liveness readings are captured
+without injected liveness overrides. Every actor writes and reads shared mail,
+pushes a private branch, fetches sibling artifacts, emits its own exec header
+and appends a resumed transcript. The timeout case proves siblings finish, and
+the cancellation case proves sibling shells remain usable.
+
+Each role's own shell checks a nonprovider proxy refusal, blocked direct TCP,
+an allowed `codex --version` and forbidden nested version under the existing
+offline `codex sandbox` control. No model turn is launched. Synthetic per-role
+credential bytes are copied into private homes; wrong-role reads are a red
+input. Six ordered TCP peer legs require a working listener before and after
+the connection attempt. The same assay must report FAIL with ICC enabled and
+PASS with ICC disabled. Captured state, artifacts and transcripts are leak
+checked after confirmed retirement; credential directories are excluded from
+capture by construction.
+
+The wave file is now declared in the certification floor. Committed JUnit
+controls under `controls/docker-wave-floor/` require failure/error for a
+missing, skipped or failed wave population while every other floor file passes.
+They also require success with all five wave cases executed. Installed-runner
+activation remains an operator step after merge; no re-pin is performed or
+requested by the qualification implementation itself.

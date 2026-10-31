@@ -315,6 +315,10 @@ _NHL_RERUN_PASS_CASE = (
     'name="test_physical_replay_controls_isolation_and_cleanup"/>'
 )
 
+_WAVE_PASS_CASE = (
+    '<testcase classname="tests.test_docker_wave_live" name="qualification"/>'
+)
+
 _FLOOR = (
     "tests.test_decide_reply_channel_live",
     "tests.test_trial_image_build_live",
@@ -334,6 +338,7 @@ _FLOOR = (
     "tests.test_step6_oracle_live",
     "tests.test_inventory_oracle_live",
     "tests.test_nhl_rerun_live",
+    "tests.test_docker_wave_live",
 )
 
 
@@ -349,7 +354,7 @@ def test_the_other_eight_floor_files_pass_but_gate_witness_all_skipped_is_failur
     extend this test's fixtures is caught here (as a missing-testcase ERROR,
     not a silent FAILURE/SUCCESS misread) rather than passing by accident."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -358,7 +363,7 @@ def test_the_other_eight_floor_files_pass_but_gate_witness_all_skipped_is_failur
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_OVERLAY_PASS_CASE,
                 _GATE_WITNESS_SKIP_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: the full declared floor
@@ -397,7 +402,7 @@ def test_the_other_eight_floor_files_pass_but_coldinstall_all_skipped_is_failure
     must give FAILURE, never SUCCESS - a skip counts as failure for a
     floor file, by design."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -406,7 +411,7 @@ def test_the_other_eight_floor_files_pass_but_coldinstall_all_skipped_is_failure
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_SKIP_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: the full declared floor
@@ -419,7 +424,7 @@ def test_the_other_eight_floor_files_pass_but_trial_image_tools_all_skipped_is_f
     other declared file executes and passes; only the trial-image
     tool-probe file goes silent (no reachable Docker daemon)."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -428,7 +433,7 @@ def test_the_other_eight_floor_files_pass_but_trial_image_tools_all_skipped_is_f
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_SKIP_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: the full declared floor
@@ -441,7 +446,7 @@ def test_the_other_eight_floor_files_pass_but_closure_preflight_all_skipped_is_f
     this test module's own fixtures just added - every other declared
     file executes and passes; only the new entry goes silent."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -450,7 +455,7 @@ def test_the_other_eight_floor_files_pass_but_closure_preflight_all_skipped_is_f
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_SKIP_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: the full declared floor
@@ -464,7 +469,7 @@ def test_the_other_eight_floor_files_pass_but_cwd_confinement_all_skipped_is_fai
     daemon). Before this entry joined the floor, this exact report read
     SUCCESS - the file was tagged `real_docker` but never certified."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -473,7 +478,7 @@ def test_the_other_eight_floor_files_pass_but_cwd_confinement_all_skipped_is_fai
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_SKIP_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_SKIP_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: the full declared floor
@@ -487,7 +492,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
     joined the floor, this exact report read SUCCESS (counter-model review:
     the file was tagged `real_docker` but never certified)."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -496,7 +501,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_SKIP_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_SKIP_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: the full declared floor
@@ -512,7 +517,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
                 '<testcase classname="tests.test_install_nested_dirs_live" '
                 'name="test_the_candidate_can_create_files_in_installed_nested_directories" time="1.0">'
                 '<failure message="Permission denied"/></testcase>',
-                _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         assert c.verdict(failing).status == c.FAILURE
@@ -522,7 +527,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
             ),
         )
         assert c.verdict(passing).status == c.SUCCESS
@@ -570,13 +575,13 @@ def test_the_other_nine_floor_files_pass_but_cleanup_live_all_skipped_is_failure
     verdict is FAILURE, never a green the new proof did not earn."""
     import tempfile
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     with tempfile.TemporaryDirectory() as td:
         suite = (
             _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
             _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
         )
         skipped = c.verdict(_write(Path(td), "skipped.xml", _suite(*suite, _CLEANUP_LIVE_SKIP_CASE)))
         assert skipped.status == c.FAILURE
@@ -591,13 +596,13 @@ def test_the_other_ten_floor_files_pass_but_egress_live_all_skipped_is_failure()
     FAILURE, never a green the egress proof did not earn."""
     import tempfile
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     with tempfile.TemporaryDirectory() as td:
         suite = (
             _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
             _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
         )
         skipped = c.verdict(_write(Path(td), "skipped.xml", _suite(*suite, _EGRESS_LIVE_SKIP_CASE)))
         assert skipped.status == c.FAILURE
@@ -610,7 +615,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_profile_all_skipped_is_failu
     only the local CI/CD profile proof goes silent. Without its floor entry
     this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -622,7 +627,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_profile_all_skipped_is_failu
         )
         silent = _write(Path(td), "silent.xml", _suite(*cases, _CICD_PROFILE_SKIP_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
                                                        _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE,
-                                                       _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE))
+                                                       _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE))
         result = c.verdict(silent)
         assert result.status == c.FAILURE
         assert result.skipped_only_files == ("tests.test_cicd_profile_live",)
@@ -630,7 +635,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_profile_all_skipped_is_failu
         without = tuple(f for f in _FLOOR if f != "tests.test_cicd_profile_live")
         assert c.verdict(silent, without).status == c.SUCCESS
         ran = _write(Path(td), "ran.xml", _suite(*cases, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE,
-                                                 _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE))
+                                                 _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE))
         assert c.verdict(ran).status == c.SUCCESS
 
 
@@ -639,7 +644,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_deploy_verify_all_skipped_is
     only the deploy-verification proof goes silent. Without its floor entry
     this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -647,7 +652,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_deploy_verify_all_skipped_is
             _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
             _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE,
-            _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+            _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
         )
         silent = _write(Path(td), "silent.xml", _suite(*cases, _CICD_DEPLOY_VERIFY_SKIP_CASE))
         result = c.verdict(silent)
@@ -665,7 +670,7 @@ def test_the_other_thirteen_floor_files_pass_but_level3_cicd_pipeline_all_skippe
     only the cicd-pipeline grader certification goes silent. Without its floor
     entry this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -674,7 +679,7 @@ def test_the_other_thirteen_floor_files_pass_but_level3_cicd_pipeline_all_skippe
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
             _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE,
             _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
-            _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+            _CODEX_GUARD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
         )
         silent = _write(Path(td), "silent.xml", _suite(*cases, _L3_CICD_SKIP_CASE))
         result = c.verdict(silent)
@@ -691,7 +696,7 @@ def test_the_other_fourteen_floor_files_pass_but_codex_guard_all_skipped_is_fail
     the live nested-codex guard proof goes silent. Without its floor entry this
     exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current eighteen-file floor - update it if the floor changes"
+        "this test assumes the current nineteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -700,7 +705,7 @@ def test_the_other_fourteen_floor_files_pass_but_codex_guard_all_skipped_is_fail
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
             _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE,
             _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
-            _L3_CICD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+            _L3_CICD_PASS_CASE, _STEP6_ORACLE_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
         )
         silent = _write(Path(td), "silent.xml", _suite(*cases, _CODEX_GUARD_SKIP_CASE))
         result = c.verdict(silent)
@@ -733,7 +738,7 @@ def test_the_other_fifteen_floor_files_pass_but_step6_oracle_all_skipped_is_fail
         _COLDINSTALL_PASS_CASE, _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
         _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE,
         _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
-        _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE,
+        _L3_CICD_PASS_CASE, _CODEX_GUARD_PASS_CASE, _INVENTORY_ORACLE_PASS_CASE, _NHL_RERUN_PASS_CASE, _WAVE_PASS_CASE,
     )
     silent = c.verdict(_write(tmp_path, "silent.xml", _suite(*cases, _STEP6_ORACLE_SKIP_CASE)))
     assert silent.status == c.FAILURE
@@ -775,3 +780,21 @@ def test_nhl_rerun_floor_rejects_silence_and_failure(tmp_path: Path, case: str |
     assert result.status == expected
     if expected == c.SUCCESS:
         assert result.executed_by_file[target] == 1
+
+
+@pytest.mark.parametrize(('case', 'expected'), [
+    ('passed', c.SUCCESS), ('missing', c.ERROR), ('skipped', c.FAILURE),
+    ('failed', c.FAILURE), ('error', c.FAILURE),
+])
+def test_wave_qualification_floor_discriminates_committed_cases(case: str, expected: str) -> None:
+    target = 'tests.test_docker_wave_live'
+    report = Path(__file__).resolve().parents[1] / 'controls/docker-wave-floor' / (case + '.xml')
+    observed = c.verdict(str(report))
+    assert observed.status == expected
+    if case == 'passed':
+        assert observed.executed_by_file[target] == 5
+    else:
+        # Every unrelated prerequisite passes. Removing only this floor entry
+        # makes the same known-bad report falsely green, proving attribution.
+        without = tuple(name for name in c.DECLARED_REAL_DOCKER_FILES if name != target)
+        assert c.verdict(str(report), without).status == c.SUCCESS

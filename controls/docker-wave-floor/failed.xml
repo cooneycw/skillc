@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites>
+  <testsuite name="physical-wave-floor">
+    <testcase classname="tests.test_decide_reply_channel_live" name="other-proof-passed" />
+    <testcase classname="tests.test_trial_image_build_live" name="other-proof-passed" />
+    <testcase classname="tests.test_gate_witness_live" name="other-proof-passed" />
+    <testcase classname="tests.test_gate_overlay_live" name="other-proof-passed" />
+    <testcase classname="tests.test_profile_install_cold_container_live" name="other-proof-passed" />
+    <testcase classname="tests.test_trial_image_tools_live" name="other-proof-passed" />
+    <testcase classname="tests.test_profile_closure_preflight_live" name="other-proof-passed" />
+    <testcase classname="tests.test_cwd_confinement_live" name="other-proof-passed" />
+    <testcase classname="tests.test_install_nested_dirs_live" name="other-proof-passed" />
+    <testcase classname="tests.test_real_docker_cleanup_live" name="other-proof-passed" />
+    <testcase classname="tests.test_agent_egress_live" name="other-proof-passed" />
+    <testcase classname="tests.test_cicd_profile_live" name="other-proof-passed" />
+    <testcase classname="tests.test_cicd_deploy_verify_live" name="other-proof-passed" />
+    <testcase classname="tests.test_level3_cicd_pipeline_live" name="other-proof-passed" />
+    <testcase classname="tests.test_codex_guard_live" name="other-proof-passed" />
+    <testcase classname="tests.test_step6_oracle_live" name="other-proof-passed" />
+    <testcase classname="tests.test_inventory_oracle_live" name="other-proof-passed" />
+    <testcase classname="tests.test_nhl_rerun_live" name="other-proof-passed" />
+    <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[intact]">
+      <failure message="physical qualification control failed" />
+    </testcase>
+    <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[peer-open]" />
+    <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[omit-mail]" />
+    <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[timeout]" />
+    <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[cancel]" />
+  </testsuite>
+</testsuites>
