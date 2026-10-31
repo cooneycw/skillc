@@ -90,6 +90,7 @@ class Slot:
     pending: Poke | None = None
     end: str | None = None
     active_nonce: str | None = None
+    compatible: bool = True
 
 
 @dataclass
@@ -123,14 +124,20 @@ class WakeState:
         except ct.TurnsRefused:
             session = None
         slot.pending = None
-        slot.session = session
+        if slot.session is None:
+            slot.session = session
+        elif slot.session != session:
+            slot.compatible = False
         slot.watermark = revision.identity if revision is not None else None
         self.record('turn-ended', role, now, reason=result.reason, exit_code=result.exit_code,
-                    session=session, revision=slot.watermark, nonce=slot.active_nonce)
+                    session=session, binding_session=slot.session,
+                    revision=slot.watermark, nonce=slot.active_nonce)
         slot.active_nonce = None
         reason = None
         if result.reason != 'exited' or result.exit_code != 0:
             reason = 'turn-' + result.reason if result.reason != 'exited' else 'nonzero-exit'
+        elif not slot.compatible:
+            reason = 'session-incompatible'
         elif session is None:
             reason = 'session-unavailable'
         elif slot.pokes >= self.policy.max_pokes:
@@ -201,7 +208,7 @@ class WakeState:
         return {'version': 1, 'outcome': outcome, 'policy_digest': self.policy.digest,
                 'poke_count': sum(slot.pokes for slot in self.slots.values()),
                 'poke_counts': [{'role': role, 'session_id': slot.session,
-                                 'pokes': slot.pokes if slot.session is not None else None}
+                                 'pokes': slot.pokes if slot.session is not None and slot.compatible else None}
                                 for role, slot in self.slots.items()],
                 'pokes': pokes,
                 'roles': {role: asdict(slot) for role, slot in self.slots.items()},
@@ -386,7 +393,7 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
         report = state.report(outcome)
         report['attempt_id'] = wave.attempt_id
         for row in report['poke_counts']:
-            if errors or wave.states[row['role']].session_id != row['session_id']:
+            if wave.states[row['role']].session_id != row['session_id']:
                 row['pokes'] = None
         report['completion'] = completion
         report['declaration_digest'] = declaration_digest

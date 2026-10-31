@@ -71,9 +71,33 @@ For #620 the report has exactly this per-role projection in `poke_counts`:
 
 `session_id` is a string when observed, otherwise null. `pokes` is a nonnegative
 integer only for an observed compatible session binding. Missing/incompatible
-binding or failed controller accounting produces null, never an inferred zero.
-A suppressed transport still counts as an attempt. Counts remain diagnostics
-separate from task grade and mailbox acknowledgements.
+binding produces null, never an inferred zero. A known count, including observed
+zero, stays concrete even when a separate controller journal/publication error
+makes the driver outcome UNKNOWN. A suppressed transport still counts as an
+attempt. Null is reserved for an already unobserved or incompatible role binding;
+it is not a routine fallback for otherwise observed roles.
+
+Counts are separate from task-achievement criteria and mailbox acknowledgements,
+but their evidence is mandatory completeness for #620. A missing row or null
+count/session binding makes that whole wave's evidence UNKNOWN. Describing counts
+as diagnostic does not make missing count evidence optional.
+
+### Runtime session binding phase
+
+The caller predeclares role population, attempts, task pins/criteria and task
+generation/revision/nonce before launch. Those facts do not change when session
+IDs become available. The initial exec's controller-captured header is the
+authority for the runtime session ID. With the current backend, that header is
+parsed when the first exec result returns; until then the binding is unobserved.
+Raw controller events may buffer during that turn. Finalize the header binding
+before accepting/attributing them in the offline wave verdict, and keep that
+initial binding immutable across resumes. Participant prose never supplies it.
+
+The existing #621 `roles[role].session_id` capture and the wake report's
+`poke_counts` projection provide this handoff; no new artifact name is required.
+Retain every planned role when binding is unavailable so its null remains
+explicit rather than disappearing from the population. Per-poke nonces in the
+wake journal are separate from the caller's predeclared task nonce.
 
 The driver reports `STOPPED`, `DEADLINE` or `UNKNOWN`, never task PASS. STOPPED
 means its declared role policies ended, including caps or failures. Task results

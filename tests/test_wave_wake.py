@@ -464,3 +464,37 @@ def test_session_change_between_offer_and_execution_is_fenced_and_recorded(tmp_p
     assert report['pokes'][0]['refusal']['reason'] == 'turn-fenced'
     assert all(text is None for _, text, _ in wave.calls)
     assert report['poke_counts'][0]['pokes'] is None
+
+
+def test_known_attempt_counts_survive_journal_error_without_null_fallback(tmp_path: Path) -> None:
+    wave = ScriptedWave(tmp_path / 'wave', 'plain-files')
+    original = wave._write
+
+    def write(name: str, payload: object) -> None:
+        if name == 'wake-events.json':
+            raise OSError('planted controller journal failure')
+        original(name, payload)
+
+    wave._write = write  # type: ignore[method-assign]
+    with pytest.raises(OSError, match='planted controller journal failure'):
+        drive(wave, policy(), read_revision=wave.read)
+    report = json.loads((wave.root / 'wake-report.json').read_text())
+    assert report['outcome'] == 'UNKNOWN'
+    rows = report['poke_counts']
+    assert {row['role'] for row in rows} == {'worker-a', 'worker-b'}
+    observed = [row for row in rows if row['session_id'] is not None]
+    assert observed, 'control never obtained a controller session binding'
+    assert all(row['pokes'] == 0 for row in observed)
+
+
+def test_initial_header_binding_is_not_reassigned_by_a_different_resume_session() -> None:
+    state = WakeState(policy(), ('worker-a',))
+    state.ended('worker-a', SID, ExecuteResult('exited', 0), BASE, 0)
+    poke = state.offer('worker-a', FILE, 1)
+    assert poke is not None and state.dispatch(poke, FILE, current_role='worker-a', current_session=SID,
+                                              idle=True, live=True, now=1)
+    state.ended('worker-a', SID[:-1] + '2', ExecuteResult('exited', 0), FILE, 2)
+    row = state.report('UNKNOWN')['poke_counts'][0]
+    assert row['session_id'] == SID
+    assert row['pokes'] is None
+    assert state.slots['worker-a'].end == 'session-incompatible'
