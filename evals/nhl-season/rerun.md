@@ -139,6 +139,13 @@ network/custody arguments, failed entry points, failed collection and cleanup.
 It runs the same twenty-one reference/bad project replays, including a different schedule date, proves a disconnected
 witness is unreachable with a connected witness as the negative control, tests
 host-file custody with an explicitly copied file as the bad access case, and
-checks actual container/network absence after cleanup. A skipped local test is
-not that evidence: retain the exact node's executed CI result before declared
-use. No protected real-Docker runner files are changed here.
+checks actual container/network absence after cleanup. The file is registered in the real-Docker certification floor. The installed
+runner must still be re-pinned and its state re-seeded by the operator after
+merge; adding the entry in Git does not change the host's installed floor.
+A skipped local test is not physical evidence. Before declared use, retain the
+exact node's executed result and require `skillc/real-docker` SUCCESS with the
+runner SHA equal to the tested head and the executed count including this file.
+The floor's committed controls reject this file being skipped, failed, errored
+or missing while every other declared file passes. The passing control counts
+its actual test. Runner host re-pinning and state re-seeding are outside this
+change; #634 remains open until certification and remaining acceptance.
