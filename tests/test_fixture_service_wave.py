@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -176,7 +178,30 @@ def test_new_pinned_converter_filter_evaluates_actual_body(wave: Harness) -> Non
     assert {row.split('\x1f')[0] for row in result.stdout.splitlines()} == {'1', '3'}
 
 
-def _run_pinned_converter(wave: Harness, tmp_path: Path, first: int, *, configure_origin: bool = False) -> None:
+@pytest.fixture(params=["system", "venv-only"])
+def converter_path(request: pytest.FixtureRequest, tmp_path: Path) -> str:
+    if request.param == "system":
+        return os.defpath
+    # python:3.12-slim keeps Python outside /usr/bin:/bin. Mirror its Unix
+    # tools without borrowing this host's system Python, which masks the gap.
+    system_tools = tmp_path / "system-tools"
+    system_tools.mkdir()
+    for directory in os.defpath.split(os.pathsep):
+        for tool in Path(directory).iterdir():
+            target = system_tools / tool.name
+            if (not tool.name.startswith("python") and tool.is_file()
+                    and os.access(tool, os.X_OK) and not target.exists()):
+                target.symlink_to(tool)
+    path = str(system_tools)
+    assert shutil.which("bash", path=path) and shutil.which("git", path=path)
+    assert shutil.which("jq", path=path)
+    assert shutil.which("python3", path=path) is None
+    assert Path(sys.executable).parent != system_tools
+    return path
+
+
+def _run_pinned_converter(wave: Harness, tmp_path: Path, first: int, system_path: str, *,
+                          configure_origin: bool = False) -> None:
     import hashlib
     import shutil
     import subprocess
@@ -194,11 +219,12 @@ def _run_pinned_converter(wave: Harness, tmp_path: Path, first: int, *, configur
     tasks.write_text('# Tasks\n\n- [ ] T001 Implement first task\n- [ ] T002 Implement second task (depends on T001)\n')
     bin_dir = tmp_path / 'bin'
     bin_dir.mkdir()
+    (bin_dir / 'python3').symlink_to(sys.executable)
     from test_fixture_service_channel import SHIM
     shim = bin_dir / 'gh'
     shim.write_text('#!' + sys.executable + '\n' + SHIM.read_text().split('\n', 1)[1])
     shim.chmod(0o755)
-    env = {'PATH': str(bin_dir) + ':/usr/bin:/bin', 'SKILLC_TRIGGER_SOCKET': str(wave.socket_path),
+    env = {'PATH': str(bin_dir) + os.pathsep + system_path, 'SKILLC_TRIGGER_SOCKET': str(wave.socket_path),
            'HOME': str(wave.world.work), 'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_NOSYSTEM': '1'}
     runtime = tmp_path / 'converter'
     runtime.mkdir()
@@ -305,15 +331,17 @@ def test_lost_create_reply_leaves_one_controller_issue(wave: Harness) -> None:
     assert record.events[0]['effect']['number'] == 4
 
 
-def test_pinned_converter_creates_dependencies_and_reruns_without_duplicates(wave: Harness, tmp_path: Path) -> None:
-    _run_pinned_converter(wave, tmp_path, 4, configure_origin=True)
+def test_pinned_converter_creates_dependencies_and_reruns_without_duplicates(
+        wave: Harness, tmp_path: Path, converter_path: str) -> None:
+    _run_pinned_converter(wave, tmp_path, 4, converter_path, configure_origin=True)
 
 
-def test_project_creation_then_pinned_conversion_uses_fixture_transport(pending: Harness, tmp_path: Path) -> None:
+def test_project_creation_then_pinned_conversion_uses_fixture_transport(
+        pending: Harness, tmp_path: Path, converter_path: str) -> None:
     made = pending.shim('repo', 'create', 'widget', '--private', '--source=.', '--push')
     assert made.returncode == 0, made.stderr
     # No manual origin substitution between the actual project-init operations.
-    _run_pinned_converter(pending, tmp_path, 1)
+    _run_pinned_converter(pending, tmp_path, 1, converter_path)
     assert pending.service.finalize('attempt-1').remote_integrity == 'SATISFIED'
 
 
