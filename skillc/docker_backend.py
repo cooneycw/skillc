@@ -11,7 +11,7 @@ bodies for `prepare`, `install`, `execute`, `confirm_stopped`, `export`,
 already merged - none of that interface surface changes here.
 
 ONE PERSISTENT CONTAINER PER ATTEMPT, ACTED ON THROUGH `docker cp`/`docker
-exec` - NEVER a bind mount, and never a second container or a shared volume
+exec` - NEVER a workspace/home bind mount, and never a second role container
 (orchestrator direction, PR #83 review, 2026-09-26). `execute()`'s real argv
 is not known until it is called, so the container cannot be created with the
 subject's command baked in the way `compose_run_argv` composes it for a
@@ -22,7 +22,10 @@ a placeholder keep-alive command (`sleep infinity`) via `docker run -d`, and
 this call specifically: this container's teardown is owned explicitly by
 `destroy()`/`confirm_absent()` below, and Docker's own auto-removal on exit
 would otherwise race `export()` after a forced `docker kill` (see `execute()`
-and `_stop()`).
+and `_stop()`). #621 adds one closed named-volume mount at the fixed wave-state
+path for roles owned by `DockerWave`; the wave controller owns that volume,
+network and fixture remote. Every role still owns an independent workspace,
+home and PID namespace. This opt-in does not change existing callers.
 
 NEUTRAL IDENTITY (interfaces.md "Execution backend" section; operator rule,
 skillc is public, #63): a fixed non-root user, a fixed hostname, fixed
@@ -58,14 +61,14 @@ similar name but carrying neither label is never touched. See
 docs/specs/evaluation-facility/failure-matrix.md for the full failure-path
 matrix and the reaping/snapshot contract.
 
-NO ESCAPE HATCH, WITH ONE NAMED, NARROW EXCEPTION (addendum item C12; #183,
+NO ESCAPE HATCH, WITH NAMED, NARROW EXCEPTIONS (addendum item C12; #183,
 owner ruling 2026-10-03): `compose_run_argv` emits a FIXED, closed set of
 flags. There is still no passthrough parameter for arbitrary extra `docker
 run` arguments, so there is no code path through which a caller could add
-`--privileged`, a `docker` binary, a second mount, or a mount at a caller-
+`--privileged`, a `docker` binary, an arbitrary mount, or a mount at a caller-
 chosen target - the guarantee is structural for all of those, not a
 convention nobody happens to violate yet, exactly as `container_executor`'s
-own closed schema is elsewhere in this fleet's ecosystem. The one exception:
+own closed schema is elsewhere in this fleet's ecosystem. The socket exception:
 `DockerBackend.trigger_decide`, when set, bind-mounts exactly ONE
 host-owned Unix socket at the single hardcoded target `TRIGGER_SOCKET_PATH`
 - the controller-owned decide-and-reply channel #183 and #269 build on. The
@@ -74,6 +77,11 @@ accepted from an arbitrary caller; the TARGET is never a parameter at all.
 See `compose_run_argv`'s own `trigger_socket_host_path` docstring and
 `docs/specs/evaluation-facility/decide-reply-channel.md` §2c for the full
 reasoning and for what stays refused.
+
+#621 additionally permits one controller-owned named volume at a fixed path
+through `wave_attachment`. Its closed type refuses host paths and arbitrary
+targets; the wave controller owns creation, capture and removal. A role's
+workspace and home still use no shared mount.
 
 UNKNOWN NEVER REAPS. `confirm_stopped()`/`confirm_absent()` return
 `Confirmation.UNKNOWN` whenever the daemon cannot be asked at all (a timeout,
@@ -151,6 +159,7 @@ from .completion import CompletionUnavailable, number
 from .decide_reply_channel import DecideFn, DecideReplyChannel, LoggedDecision
 from .lifecycle import CANARY_NONCE_KEY
 from .verify import SURFACE_EXECUTABLE_KEY
+from .wave_attachment import WaveAttachment
 
 DAEMON_TIMEOUT = 5.0
 
@@ -481,15 +490,17 @@ def compose_run_argv(
     disk_limit: str | None,
     trigger_socket_host_path: Path | None = None,
     dns: str | None = None,
+    wave_attachment: WaveAttachment | None = None,
 ) -> list[str]:
     """The full `docker run` argv. Pure - makes no call, mutates nothing. A
     FIXED, closed set of flags: there is no passthrough for arbitrary extra
     arguments, so nothing here can ever mount the docker socket, add
     `--privileged`, or otherwise widen the container (addendum item C12).
     `trigger_socket_host_path` (below) is the ONE deliberate, narrow
-    exception the owner's 2026-10-03 ruling on #183 authorized - everything
-    else C12 names stays refused, with no other way to reach this function
-    that could add a second mount or any other flag.
+    exception the owner's 2026-10-03 ruling on #183 authorized. #621's
+    `wave_attachment` adds one controller-owned NAMED volume at a fixed
+    wave-state path; it accepts neither host paths nor caller-chosen targets.
+    All other mounts and arbitrary flags remain refused.
 
     NO BIND MOUNT for the workspace or home (design decision, orchestrator
     review of PR #83, 2026-09-26, choosing the "preferred" option over
@@ -559,10 +570,12 @@ def compose_run_argv(
         argv += ["--storage-opt", f"size={disk_limit}"]
     if trigger_socket_host_path is not None:
         argv += ["--mount", f"type=bind,source={trigger_socket_host_path},target={TRIGGER_SOCKET_PATH}"]
+    if wave_attachment is not None:
+        argv += wave_attachment.mount_args()
     argv += [
         "-w", CONTAINER_WORKSPACE,
         "-e", f"HOME={CONTAINER_HOME}",
-        *_env_args(env),
+        *_env_args({**env, **(wave_attachment.environment() if wave_attachment else {})}),
         "--", image, *subject_argv,
     ]
     return argv
@@ -953,6 +966,8 @@ class DockerBackend:
     #: controller-run gate never re-enters the shim. `None` keeps every
     #: earlier caller's argv unchanged.
     agent_exec_env: Callable[[], Mapping[str, str]] | None = field(default=None, repr=False)
+    #: #621: one closed named-volume mount, created and retired by the wave controller.
+    wave_attachment: WaveAttachment | None = None
 
     def describe(self) -> BackendDescription:
         version = probe_daemon(self.docker_bin, self.daemon_timeout, _docker_env())
@@ -976,9 +991,13 @@ class DockerBackend:
                 "no docker socket, no docker binary, no passthrough flags in the composed argv",
                 ("one persistent container per attempt (docker run -d at prepare()); "
                  "install()/execute() act on it via docker cp/docker exec - no bind mount, "
-                 "no shared volume, no second container"),
+                 "no shared volume, no second container" if self.wave_attachment is None else
+                 "one role container with private workspace/home/PID namespace; controller-owned "
+                 "wave-state named volume mounted at a fixed path; wave controller owns shared topology"),
             ),
             unobserved=(
+                *(("wave shared-state delivery and peer network isolation require real-daemon qualification",)
+                  if self.wave_attachment is not None else ()),
                 *(("network egress actually blocked - not verified from inside the container",)
                   if self.network == "none" and not self.egress else ()),
                 *((("egress restriction verified only by the real-Docker live controls (#442), not on "
@@ -1041,6 +1060,7 @@ class DockerBackend:
             pids_limit=self.pids_limit, cpus=self.cpus, shm_size=self.shm_size,
             container_user=_container_user(), disk_limit=self.disk_limit,
             trigger_socket_host_path=trigger_socket_host_path, dns=dns,
+            wave_attachment=self.wave_attachment,
         )
         argv.insert(argv.index("run") + 1, "-d")
         argv.remove("--rm")
