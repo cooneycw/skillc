@@ -105,7 +105,22 @@ def test_pause_resume_edit_and_clear_retain_every_state() -> None:
                                                 "active", "active", "active", "active", "active"]
         assert states[-1]["objective"] == "Updated public goal"
         assert report["goal_state"] == "cleared"
-        assert report["pool_eligible"] is False
+        assert report["pool_eligible"] is True
+
+
+@pytest.mark.parametrize("mode", ["ordinary-turn", "blocked", "paused", "cleared"])
+@pytest.mark.parametrize("identity,eligible", [("stable", True), ("changed", False), ("unknown", False)])
+def test_eligibility_does_not_depend_on_goal_success(mode: str, identity: str, eligible: bool) -> None:
+    """Keep unfinished control attempts; identity evidence still decides pooling."""
+    with session(mode) as (driver, _):
+        driver.start(cwd="/work")
+        driver.poll()
+        evidence = (record("scripted-model") if identity == "stable" else
+                    record("scripted-model", "other-model") if identity == "changed" else None)
+        report = driver.report(evidence)
+        assert report["pool_eligible"] is eligible
+        assert report["task_grade"] == "UNASSESSED"
+        assert report["goal_state"] != "complete"
 
 
 @pytest.mark.parametrize("bad", [None, [], {}, [{"session": "x", "role": "w", "token_budget": True}],

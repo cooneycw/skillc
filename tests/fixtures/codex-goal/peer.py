@@ -76,7 +76,11 @@ for line in sys.stdin:
         if MODE == "ordinary-turn":
             note("turn/completed", threadId=THREAD, turn={"id": "turn-1", "status": "completed"})
             continue
-        goal["status"] = "usageLimited" if MODE == "usage-limit" else "complete"
+        if MODE == "cleared":
+            goal = None
+            note("thread/goal/cleared", threadId=THREAD)
+            continue
+        goal["status"] = {"usage-limit": "usageLimited", "blocked": "blocked", "paused": "paused"}.get(MODE, "complete")
         goal["tokensUsed"] = 5000
         goal["timeUsedSeconds"] = 2
         goal["updatedAt"] = 3

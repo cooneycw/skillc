@@ -70,16 +70,19 @@ an arbitrary prefix supplied to this library is not authenticated evidence.
 `pool_eligible: false` and must be reported separately, never pooled with the
 declared treatment. Missing, truncated, conflicting or unbound session evidence
 is `UNKNOWN` and also cannot pool. Prose inside agent output supplies no identity
-or lifecycle facts. A complete goal with stable evidence is eligible for the
-caller's remaining declaration/population checks, not automatically a successful
-task. `task_grade` remains `UNASSESSED`.
+or lifecycle facts. A stable-model attempt without an infrastructure outcome is
+eligible for the caller's remaining declaration/population checks regardless of
+goal completion. Independent grading and accounting read `goal_state` and
+`outcome`; `task_grade` remains `UNASSESSED`.
 
 Native `usageLimited` and structured `usageLimitExceeded` produce
 `infrastructure-usage-limit`, never task failure. Protocol/transport loss produces
 `infrastructure-protocol-error`; the caller must still stop the attempt and retain
-its original evidence. Paused, blocked, cleared, budget-limited or still-active
-goals do not pool as completed attempts. A finite native budget is a protocol
-refusal because it violates the uncapped Codex treatment.
+its original evidence. Stable paused, blocked, cleared, budget-limited or
+still-active goals remain in the comparison population with their actual states,
+including attempts stopped by the controller's deadline. Filtering them out
+would bias the control arm toward its completed attempts. A finite native budget
+is a protocol refusal because it violates the uncapped Codex treatment.
 
 ## Shared recipe and historical campaigns
 

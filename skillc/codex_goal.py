@@ -367,7 +367,8 @@ class GoalSession:
         """Derive treatment identity separately from native goal outcome.
 
         A missing/unreadable session record is UNKNOWN and never poolable.
-        Even a poolable completed goal still requires independent task grading.
+        Eligibility never depends on completion; every task needs independent
+        grading and accounting, including stable unfinished attempts.
         """
         models = list(self.observed_models)
         missing: str | None = None
@@ -389,6 +390,8 @@ class GoalSession:
             "recorded_token_budget": self.budget, "budget_enforced": False,
             "native_token_budget": None, "goal": self.goal, "goal_state": state,
             "outcome": outcome, "task_grade": "UNASSESSED",
-            "pool_eligible": identity == "STABLE" and state == "complete" and not usage_limited,
+            # Keeping only completed goals would discard control-arm failures
+            # and create survivorship bias. Outcome and grading stay separate.
+            "pool_eligible": identity == "STABLE" and not outcome.startswith("infrastructure-"),
             "events": self.events,
         })
