@@ -85,9 +85,13 @@ def _bounded(argv: Sequence[str], data: str, *, timeout: float, limit: int,
 
 
 def container_argv(docker_bin: Sequence[str], image: str, name: str) -> list[str]:
+    # /tmp needs an explicit `exec` (#652): Docker mounts --tmpfs noexec by
+    # default, so a captured 100755 file staged there could not run and the
+    # delivery read as a legacy FAIL. noexec was no boundary anyway: candidates
+    # already run arbitrary Python as nobody. nosuid and nodev stay.
     return [*docker_bin, 'run', '--rm', '-i', '--name', name, '--network', 'none',
             '--read-only', '--ipc', 'none', '--tmpfs', '/dev/mqueue:ro', '--pull', 'never',
-            '--tmpfs', '/tmp:rw,nosuid,nodev,size=128m,mode=1777', '--user', '0:0',
+            '--tmpfs', '/tmp:rw,exec,nosuid,nodev,size=128m,mode=1777', '--user', '0:0',
             '--cap-drop', 'ALL', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--cap-add', 'KILL',
             '--cap-add', 'DAC_OVERRIDE', '--security-opt', 'no-new-privileges',
             '--memory', '256m', '--memory-swap', '256m', '--pids-limit', '64', '--cpus', '1',

@@ -8,6 +8,6 @@
  "evals/level3/change-with-regression-568/fixture/tests/test_legacy.py": "3e68a11823c496c5817119cf57755ff32f7c0b56a5ab74a602a98a5d25f43dec",
  "evals/level3/change-with-regression-568/oracle.py": "202af80732cb7e4197a34f55fe8c947de0dc26b983bea8cf7d2e1f8e122216ab",
  "evals/level3/flow-auto-necessity/builder/build.py": "2d5e20adc4a1ecdf93ed8a78fe87767d780032333dac2d7fbbfddb1491044f08",
- "skillc/inventory_oracle.py": "f54eb61f752ef4f3e4e0e77adba54f6166d61c094be1707db8288242b2e469bb",
+ "skillc/inventory_oracle.py": "aa8cf15eadd6233a3c7e6b949016676845cf9b79461c8cdf8b09d18beeb7f297",
  "skillc/inventory_oracle_harness.py": "a7438a05fe0bf3fcb6614a3937fb4cd1debda2263d73195db16c58c37a7b013b"
 }
