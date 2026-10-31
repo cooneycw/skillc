@@ -56,3 +56,7 @@ plays remain retained and remain in F7 strength-state checks. The synthetic
 good source contains an authored case of each kind; no fetched NHL data is
 committed. This clarification changes the goal bytes and eventual declaration
 digest, without changing an already-run attempt.
+
+Controller delivered-code replay preparation and its model-free controls are
+in [rerun.md](rerun.md) (#634). Physical Docker qualification and validation on
+an authorized private actual sample remain prerequisites for declared use.
