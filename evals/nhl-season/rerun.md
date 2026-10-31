@@ -63,7 +63,8 @@ A private adapter JSON selects:
 - `payloads`: endpoint path plus query to relative retained-JSON export filename.
   The controller obtains these filenames from the delivered project's documented
   retained-source export. They need not use any particular participant naming.
-  It must map every served schedule and detailed source exactly once. A project
+  It must map every successfully requested schedule and detailed source; identical
+  payloads may share a retained file. Unrequested schedule aliases need no export. A project
   retaining sources only in a database needs its documented export command to
   expose the source payloads; don't substitute controller-fabricated payloads.
 
@@ -93,7 +94,13 @@ HTTP server; the candidate receives only its project. There are no host bind
 mounts, Docker socket mounts, published ports or live NHL fallback. Two
 containers share a new internal Docker network, removed after each case.
 The server uses the live API path/query shapes and returns 404 for undeclared
-requests. Containers drop capabilities, disallow privilege escalation, and have
+requests. Every date covered by a retained schedule page can return that same
+page, allowing different daily/weekly traversal choices without prescribing
+fetch order. A controller-only server access log records successful requests;
+readiness uses TCP rather than fetching a payload. Grading requires at least
+one schedule request and all detailed endpoints for every selected game, then
+compares retained payloads for the observed requests. Candidate processes never
+receive the access log or private grader mapping. Containers drop capabilities, disallow privilege escalation, and have
 PID/memory/CPU limits. Commands share a whole-case wall deadline and a four MiB per-command output
 capture cap; exported JSON files must be regular, nonsymlink files no larger
 than 64 MiB each. Freeze these bounds in the declaration after sizing. Delivered code
@@ -126,7 +133,7 @@ selftest verifies the exact committed case matrix. Tests also blind the export
 comparator and require qualification to reject it. Docker CLI stand-ins exercise
 network/custody arguments, failed entry points, failed collection and cleanup.
 `tests/test_nhl_rerun_live.py` is selected by the existing real-Docker CI lane.
-It runs the same twenty reference/bad project replays, proves a disconnected
+It runs the same twenty-one reference/bad project replays, including a different schedule date, proves a disconnected
 witness is unreachable with a connected witness as the negative control, tests
 host-file custody with an explicitly copied file as the bad access case, and
 checks actual container/network absence after cleanup. A skipped local test is

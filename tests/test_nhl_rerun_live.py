@@ -83,20 +83,21 @@ def test_physical_replay_controls_isolation_and_cleanup(tmp_path: Path) -> None:
         selections = [('reference', case) for case in cases]
         selections += [('strict', cases[1]), ('drop-fields', cases[1])]
         selections += [('never-discrepancy', case) for case in cases[2:]]
+        selections += [('alternate-date', cases[0])]
         for index, (mode, case) in enumerate(selections):
             project = tmp_path / f'project-{index}'
             adapter = nhl_rerun_control.materialize(project)
             command = f'CONTROL_MODE={mode} python3 project.py'
             (project / 'README.md').write_text(f'Set NHL_API_BASE then run:\n{command}\n')
             adapter['commands'] = [command]
-            paths = ['/v1/schedule/2025-10-07']
+            paths = ['/v1/schedule/' + ('2025-10-08' if mode == 'alternate-date' else '2025-10-07')]
             for identity in sorted(case['expected']):
                 paths.extend(nhl_rerun.route(nhl_rerun.snapshot.endpoint(source, identity))
                              for source in nhl_rerun.snapshot.SOURCE_IDS)
             adapter['payloads'] = {path: f'payload-{i}.json' for i, path in enumerate(paths)}
             result = nhl_rerun.DockerReplay(image, image, timeout=120, run=run).execute(
                 project, adapter, case, tmp_path / f'evidence-{index}')
-            assert result['status'] == ('PASS' if mode == 'reference' else 'FAIL'), result
+            assert result['status'] == ('PASS' if mode in ('reference', 'alternate-date') else 'FAIL'), result
         assert proved, 'physical isolation probes never executed'
         docker('info')
         for name in owned:

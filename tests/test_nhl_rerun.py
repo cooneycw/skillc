@@ -118,6 +118,8 @@ def test_docker_lifecycle_internal_network_custody_and_failures(tmp_path: Path, 
     def run(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         assert timeout > 0
+        if args[1] == 'cp' and args[2].endswith(':/access.jsonl'):
+            Path(args[3]).write_text(''.join(json.dumps(p)+'\n' for p in cases[0]['payloads']))
         if args[1] == 'cp' and args[2].endswith('/exports/.') and failed != 'copy':
             adapter.update(export(cases[0], tmp_path / 'generated'))
             shutil.copytree(tmp_path / 'generated', Path(args[3]), dirs_exist_ok=True)
@@ -140,7 +142,7 @@ def test_docker_lifecycle_internal_network_custody_and_failures(tmp_path: Path, 
 
 
 def test_qualifier_rejects_blind_comparator(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(nhl_rerun, 'grade', lambda *args: {'status': 'PASS'})
+    monkeypatch.setattr(nhl_rerun, 'grade', lambda *args, **kwargs: {'status': 'PASS'})
     with pytest.raises(nhl_snapshot.ReferenceError, match='blind/noisy'):
         nhl_rerun_control.qualify()
 
@@ -148,7 +150,7 @@ def test_qualifier_rejects_blind_comparator(monkeypatch: pytest.MonkeyPatch) -> 
 def test_qualifier_committed_matrix() -> None:
     result = nhl_rerun_control.qualify()
     assert result['status'] == 'PASS'
-    assert len(result['controls']) == 20
+    assert len(result['controls']) == 21
 
 
 def test_command_capture_timeout_and_overflow_controls() -> None:
@@ -202,3 +204,29 @@ def test_documented_base_argument_placeholder(tmp_path: Path) -> None:
     adapter['api_base_placeholder'] = '<UNDOCUMENTED>'
     with pytest.raises(nhl_snapshot.ReferenceError, match='override absent'):
         nhl_rerun.validate_adapter(project, adapter)
+
+
+def test_alternate_schedule_date_does_not_require_fetching_all_aliases(tmp_path: Path, cases: list[dict[str, Any]]) -> None:
+    assert actual_control(tmp_path / 'project', 'alternate-date', cases[0])['status'] == 'PASS'
+
+
+def test_observed_request_population_is_required(tmp_path: Path, cases: list[dict[str, Any]]) -> None:
+    adapter = export(cases[0], tmp_path / 'exports')
+    assert nhl_rerun.grade(cases[0], tmp_path / 'exports', adapter, requested=[])['status'] == 'FAIL'
+    only_schedule = ['/v1/schedule/2025-10-07']
+    assert nhl_rerun.grade(cases[0], tmp_path / 'exports', adapter, requested=only_schedule)['status'] == 'FAIL'
+
+
+@pytest.mark.parametrize('confirmed', [True, False])
+def test_entrypoint_timeout_vs_unknown_execution(tmp_path: Path, cases: list[dict[str, Any]], confirmed: bool) -> None:
+    adapter = materialize(tmp_path / 'project')
+    def run(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if args[1] == 'exec' and '/bin/sh' in args:
+            raise subprocess.TimeoutExpired(args, timeout)
+        if args[1] == 'inspect':
+            return subprocess.CompletedProcess(args, 0 if confirmed else 1, 'true' if confirmed else '', '')
+        return subprocess.CompletedProcess(args, 0, '', '')
+    result = nhl_rerun.DockerReplay(IMAGE, IMAGE, run=run).execute(
+        tmp_path / 'project', adapter, cases[0], tmp_path / 'evidence')
+    assert result['status'] == ('FAIL' if confirmed else 'UNKNOWN')
+    assert (tmp_path / 'evidence/execution.json').is_file()

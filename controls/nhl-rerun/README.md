@@ -14,7 +14,8 @@ payloads plus reconciliation. Modes are committed in [cases.json](cases.json):
 strict refuses added fields, drop-fields loses them, never-discrepancy falsely
 labels all checks PASS. Each must lose to the actual grader on the same cases
 that the reference passes. Missing commands/exports and extra false positives
-also fail. Qualification checks both the controls and deliberately blinded
+also fail. A reference using an alternate covered schedule date passes, so
+qualification does not require one traversal order or every schedule alias. Qualification checks both the controls and deliberately blinded
 versions of the grader.
 
 No live model, external NHL requests, private data acquisition or Docker build

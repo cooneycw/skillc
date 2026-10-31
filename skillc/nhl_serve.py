@@ -3,18 +3,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 
-def make_server(payloads: dict[str, Any], host: str, port: int) -> ThreadingHTTPServer:
+def make_server(payloads: dict[str, Any], host: str, port: int,
+                access_log: Path | None = None) -> ThreadingHTTPServer:
+    lock = threading.Lock()
+    if access_log is not None:
+        access_log.write_text("")
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path not in payloads:
                 self.send_error(404, "undeclared NHL endpoint")
                 return
             raw = json.dumps(payloads[self.path], sort_keys=True).encode()
+            if access_log is not None:
+                with lock, access_log.open("a") as stream:
+                    stream.write(json.dumps(self.path) + "\n")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(raw)))
@@ -30,10 +38,11 @@ def make_server(payloads: dict[str, Any], host: str, port: int) -> ThreadingHTTP
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--payloads", required=True, type=Path)
+    parser.add_argument("--access-log", type=Path)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", default=8080, type=int)
     args = parser.parse_args()
-    with make_server(json.loads(args.payloads.read_text()), args.host, args.port) as server:
+    with make_server(json.loads(args.payloads.read_text()), args.host, args.port, args.access_log) as server:
         server.serve_forever()
 
 

@@ -101,6 +101,10 @@ def scenarios(root: Path, manifest_sha256: str, sample: list[int], plants: list[
             if data is None:
                 raise ReferenceError("replay requires available sources")
             payloads[route(entry["endpoint"])] = copy.deepcopy(data)
+            if name == "schedule":
+                for day in data["gameWeek"]:
+                    # Same measured page shape for any date in its coverage.
+                    payloads.setdefault(route(snapshot.endpoint("schedule", day["date"])), copy.deepcopy(data))
     clean = reports(games, payloads)
     # Clean games must really be clean to measure false positive reports.
     if any(f["status"] != "PASS" for r in clean.values() for f in r["families"]):
@@ -148,7 +152,7 @@ def safe_file(root: Path, relative: str) -> Path:
     return path
 
 
-def grade(case: Json, output: Path, adapter: Json) -> Json:
+def grade(case: Json, output: Path, adapter: Json, *, requested: list[str] | None = None) -> Json:
     """Read ordinary delivered exports via controller-selected path mapping.
 
     Payload equality is structural JSON equality, preserving every field and
@@ -158,9 +162,16 @@ def grade(case: Json, output: Path, adapter: Json) -> Json:
     reasons = []
     try:
         retained = adapter["payloads"]
-        if set(retained) != set(case["payloads"]):
-            raise ReferenceError("retained-source mapping population differs")
-        for endpoint, expected in case["payloads"].items():
+        observed = set(case["payloads"] if requested is None else requested)
+        required = {route(snapshot.endpoint(source, identity)) for identity in case["expected"]
+                    for source in snapshot.SOURCE_IDS}
+        schedules = {path for path in observed if path.startswith("/v1/schedule/")}
+        if not required <= observed or not schedules or not observed <= set(case["payloads"]):
+            raise ReferenceError("retriever did not request schedule and every required game source")
+        if not observed <= set(retained):
+            raise ReferenceError("retained-source mapping missing requested endpoint")
+        for endpoint in observed:
+            expected = case["payloads"][endpoint]
             actual = json.loads(safe_file(output, retained[endpoint]).read_text())
             if json.dumps(actual, sort_keys=True) != json.dumps(expected, sort_keys=True):
                 reasons.append(f"retained payload differs: {endpoint}")
@@ -271,7 +282,17 @@ class DockerReplay:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ReferenceError("replay exceeded whole-case wall-time cap")
-            completed = self.run(["docker", *args], remaining)
+            try:
+                completed = self.run(["docker", *args], remaining)
+            except subprocess.TimeoutExpired as exc:
+                transcript.append({"argv": args, "error": "timeout"})
+                if candidate_command:
+                    state = self.run(["docker", "inspect", "--format", "{{.State.Running}}", candidate], 3)
+                    transcript.append({"argv": ["inspect", candidate], "returncode": state.returncode,
+                                       "stdout": state.stdout, "stderr": state.stderr})
+                    if state.returncode == 0 and state.stdout.strip() == "true":
+                        raise ReferenceError("documented entry point exceeded declared wall-time cap") from exc
+                raise
             transcript.append({"argv": args, "returncode": completed.returncode,
                                "stdout": completed.stdout, "stderr": completed.stderr})
             if completed.returncode:
@@ -291,7 +312,8 @@ class DockerReplay:
                       "--pids-limit=128", "--memory=512m", "--cpus=1", "--network", network,
                       "--no-healthcheck", "--log-driver=none"]
             call(["create", *limits, "--name", server, "--network-alias", "nhl-source",
-                  "--entrypoint", "python3", "--", self.server_image, "/server.py", "--payloads", "/payloads.json"])
+                  "--entrypoint", "python3", "--", self.server_image, "/server.py", "--payloads", "/payloads.json",
+                  "--access-log", "/access.jsonl"])
             with tempfile.TemporaryDirectory() as temporary:
                 data = Path(temporary) / "payloads.json"
                 data.write_text(json.dumps(case["payloads"]))
@@ -306,9 +328,9 @@ class DockerReplay:
             call(["cp", str(project) + "/.", f"{candidate}:/project"])
             call(["start", candidate])
             # Readiness is checked from the same isolated network, no host port.
-            ready = ("import urllib.request,time\n"
+            ready = ("import socket,time\n"
                      "for i in range(50):\n"
-                     " try: urllib.request.urlopen(" + repr("http://nhl-source:8080" + next(iter(case["payloads"]))) + "); break\n"
+                     " try: socket.create_connection(('nhl-source',8080),timeout=1).close(); break\n"
                      " except OSError: time.sleep(.1)\n"
                      "else: raise SystemExit('source server unavailable')")
             call(["exec", candidate, "python3", "-c", ready])
@@ -323,7 +345,11 @@ class DockerReplay:
             output = evidence / "output"
             output.mkdir()
             call(["cp", f"{candidate}:{adapter['export_dir']}/.", str(output)])
-            verdict = grade(case, output, adapter)
+            call(["stop", "--time", "1", server])
+            access_log = evidence / "access.jsonl"
+            call(["cp", f"{server}:/access.jsonl", str(access_log)])
+            requested = [json.loads(line) for line in access_log.read_text().splitlines()]
+            verdict = grade(case, output, adapter, requested=requested)
         except (OSError, InfrastructureError, subprocess.SubprocessError) as exc:
             verdict = {"name": case["name"], "status": "UNKNOWN", "reasons": [str(exc)]}
         except (ValueError, KeyError, TypeError) as exc:
@@ -336,7 +362,7 @@ class DockerReplay:
                     receipt = self.run(["docker", *args], 30)
                     cleanup.append({"argv": args, "returncode": receipt.returncode,
                                     "stdout": receipt.stdout, "stderr": receipt.stderr})
-                except (OSError, subprocess.SubprocessError) as exc:
+                except (OSError, ValueError, subprocess.SubprocessError) as exc:
                     cleanup.append({"argv": args, "error": str(exc)})
             (evidence / "execution.json").write_text(json.dumps({"commands": transcript, "cleanup": cleanup}, indent=2))
         if any(c.get("returncode") != 0 for c in cleanup):

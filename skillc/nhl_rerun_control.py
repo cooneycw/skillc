@@ -31,7 +31,7 @@ def sample(tmp_path: Path) -> tuple[Path, str, list[int], list[dict[str, Any]]]:
             data[source]['id'] = identity
             responses[nhl_snapshot.endpoint(source, identity)] = json.dumps(data[source]).encode()
     responses[nhl_snapshot.endpoint('schedule', '2025-10-07')] = json.dumps(
-        {'gameWeek': [{'date': '2025-10-07', 'games': games}]}).encode()
+        {'gameWeek': [{'date': '2025-10-07', 'games': games}, {'date': '2025-10-08', 'games': []}]}).encode()
     root = tmp_path / 'snapshot'
     nhl_snapshot.acquire(root, '2025-10-07', '2025-10-07', fetch=responses.__getitem__)
     recipes = json.loads((ROOT / 'controls/nhl-reference/bad/cases.json').read_text())
@@ -64,10 +64,11 @@ def materialize(project: Path) -> dict[str, Any]:
 def actual_control(project: Path, mode: str, case: dict[str, Any]) -> dict[str, Any]:
     """Only the committed trusted reference fixture runs locally, never subject code."""
     adapter = materialize(project)
-    paths = ['/v1/schedule/2025-10-07']
+    paths = ['/v1/schedule/' + ('2025-10-08' if mode == 'alternate-date' else '2025-10-07')]
     for identity in sorted(case['expected']):
         paths.extend(nhl_rerun.route(nhl_snapshot.endpoint(source, identity)) for source in nhl_snapshot.SOURCE_IDS)
-    with nhl_serve.make_server(case['payloads'], '127.0.0.1', 0) as server:
+    access_log = project / 'access.jsonl'
+    with nhl_serve.make_server(case['payloads'], '127.0.0.1', 0, access_log) as server:
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
@@ -80,13 +81,15 @@ def actual_control(project: Path, mode: str, case: dict[str, Any]) -> dict[str, 
     if completed.returncode:
         return {'status': 'FAIL', 'reasons': [completed.stderr]}
     adapter['payloads'] = {path: f'payload-{index}.json' for index, path in enumerate(paths)}
-    return nhl_rerun.grade(case, project / 'exports', adapter)
+    return nhl_rerun.grade(case, project / 'exports', adapter,
+                           requested=[json.loads(line) for line in access_log.read_text().splitlines()])
 
 
 def qualify() -> dict[str, Any]:
     matrix = json.loads((CONTROLS / 'cases.json').read_text())
     required = [('reference', 'all', 'PASS'), ('strict', 'drift', 'FAIL'),
-                ('drop-fields', 'drift', 'FAIL'), ('never-discrepancy', 'F1-F8', 'FAIL')]
+                ('drop-fields', 'drift', 'FAIL'), ('never-discrepancy', 'F1-F8', 'FAIL'),
+                ('alternate-date', 'clean', 'PASS')]
     if [(c['mode'], c['scenario'], c['expected']) for c in matrix] != required:
         raise nhl_snapshot.ReferenceError('replay qualification control population differs')
     observations = []

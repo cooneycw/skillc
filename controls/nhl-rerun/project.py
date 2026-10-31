@@ -50,7 +50,8 @@ def main():
         db.execute('INSERT INTO sources VALUES (?, ?)', (path, json.dumps(payload)))
         return payload
 
-    schedule = retrieve('/v1/schedule/2025-10-07')
+    date = '2025-10-08' if mode == 'alternate-date' else '2025-10-07'
+    schedule = retrieve('/v1/schedule/' + date)
     games = nhl_snapshot.completed_games([schedule])
     results = []
     for identity, game in sorted(games.items()):
