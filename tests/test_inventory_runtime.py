@@ -150,6 +150,13 @@ def test_oracle_container_is_separate_offline_and_has_no_host_mount() -> None:
         assert argv[argv.index(pair[0]) + 1] == pair[1]
     assert 'run' in argv and 'exec' not in argv and '--read-only' in argv
     assert not {'-v', '--volume', '--mount', '--privileged', '--pid=host'} & set(argv)
+    # #652: Docker mounts --tmpfs noexec unless told otherwise, so a captured
+    # 100755 helper staged under /tmp could not run and read as a legacy FAIL.
+    tmp = [argv[i + 1] for i, a in enumerate(argv) if a == '--tmpfs' and argv[i + 1].startswith('/tmp:')]
+    assert len(tmp) == 1, tmp
+    options = tmp[0].split(':', 1)[1].split(',')
+    assert 'exec' in options and 'noexec' not in options, options
+    assert {'nosuid', 'nodev'} <= set(options), options
     assert 'user=65534' in Path(harness.__file__).read_text()
     assert 'sweep()' in Path(harness.__file__).read_text()
 
