@@ -226,8 +226,12 @@ def test_scripted_arms_receive_identical_controller_pokes(tmp_path: Path, arm: s
     assert report['outcome'] == 'STOPPED'
     assert report['poke_count'] == 2
     attempts = [e for e in report['events'] if e['event'] == 'poke-attempt']
-    assert [(e['role'], e['revision']) for e in attempts] == [
-        ('worker-a', wave.revisions[0].identity), ('worker-b', wave.revisions[1].identity)]
+    assert [e['role'] for e in attempts] == ['worker-a', 'worker-b']
+    assert attempts[0]['revision'] == wave.revisions[0].identity
+    # With the conservative prior-sample watermark, worker-b may also wake
+    # for activity late in its initial turn. Both observed revisions are valid;
+    # role/literal/count parity across arms remains exact.
+    assert attempts[1]['revision'] in {revision.identity for revision in wave.revisions}
     assert all(poke['result']['exit_code'] == 0 for poke in report['pokes'])
     assert all(slot['end'] == 'max-pokes' for slot in report['roles'].values())
     assert wave.calls[2:] == [('worker-a', policy().literal, SID), ('worker-b', policy().literal, SID[:-1] + '2')]
@@ -498,3 +502,53 @@ def test_initial_header_binding_is_not_reassigned_by_a_different_resume_session(
     assert row['session_id'] == SID
     assert row['pokes'] is None
     assert state.slots['worker-a'].end == 'session-incompatible'
+
+
+def test_change_after_turn_return_before_next_sample_is_not_absorbed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from concurrent.futures import Future, ThreadPoolExecutor
+
+    from skillc import wave_wake
+
+    wave = ScriptedWave(tmp_path / 'wave', 'plain-files')
+    clock = PolicyClock()
+    clock.watchdog = time.monotonic() + 2
+    wave.deadline = CompletionDeadline.after(1, clock)
+    wrote_after_return = False
+    first: list[Future[Any]] = []
+
+    class ControlledExecutor:
+        """Force exactly the reviewer's interleaving, without a sleep race."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            self.pool = ThreadPoolExecutor(**kwargs)
+
+        def submit(self, function: Any, *args: Any, **kwargs: Any) -> Future[Any]:
+            if args == ('worker-a',):
+                future: Future[Any] = Future()
+                future.set_result(function(*args, **kwargs))
+                first.append(future)  # Turn has RETURNED before the next sample.
+                return future
+            return self.pool.submit(function, *args, **kwargs)
+
+        def shutdown(self, *, wait: bool) -> None:
+            self.pool.shutdown(wait=wait)
+
+    def read() -> Revision:
+        nonlocal wrote_after_return
+        if first and not wrote_after_return:
+            assert first[0].done()
+            (wave.shared / 'message').write_bytes(b'sibling write after turn ended, before sample')
+            wrote_after_return = True
+        if any(role == 'worker-a' and text is not None for role, text, _ in wave.calls):
+            clock.value = 1  # End the original endpoint only after the wanted resume.
+        return wave.current_revision()
+
+    monkeypatch.setattr(wave_wake, 'ThreadPoolExecutor', ControlledExecutor)
+    report = drive(wave, policy(), read_revision=read, clock=clock)
+    assert wrote_after_return
+    assert report['outcome'] == 'DEADLINE'  # The sibling is deliberately still blocking.
+    row = next(row for row in report['poke_counts'] if row['role'] == 'worker-a')
+    assert row['pokes'] == 1
+    assert any(role == 'worker-a' and text == policy().literal for role, text, _ in wave.calls)

@@ -22,14 +22,19 @@ infer which role a message addresses. This intentional broadcast rule is the
 same for plain-file and CPP arms. CPP-specific state can be retained separately
 as a diagnostic, but is not queried as a wake condition.
 
-After confirming an exec turn has ended, the controller samples the role's
-end-of-turn watermark before exposing it as idle. Only futures already complete
-before that sample acquire that watermark. A future that finishes during the
-sample is handled at the next sample. Observation is polling, not a transactional
-filesystem journal: changes that appear and disappear entirely between samples
-are outside its coverage, and a digest can combine individually stable reads
-from a concurrently active tree. The observation fence is explicit rather than
-an assertion of atomic timing at the client's last instruction.
+When an exec turn is first seen as finished, its watermark is the PREVIOUS
+controller revision, observed before completion was seen. The new sample can
+therefore never absorb a sibling write made after that turn returned but before
+the controller next polled. This conservative fence can cause an extra recorded
+poke for activity late in a running turn; it cannot silently discard the
+post-turn activity as already consumed. Futures finishing during the current
+sample are handled at the next poll against its previous revision.
+
+Observation is polling, not a transactional filesystem journal: changes that
+appear and disappear entirely between samples are outside its coverage, and a
+digest can combine individually stable reads from a concurrently active tree.
+The fence is explicit rather than an assertion of atomic timing at the client's
+last instruction.
 
 ## Declared policy and fencing
 

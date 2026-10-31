@@ -317,6 +317,7 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
             futures[role] = pool.submit(wave.turn, role)
         while True:
             wave.deadline.remaining(policy.poll_seconds)
+            previous_revision = last_revision
             finished = {role: future for role, future in futures.items() if future.done()}
             revision = sample()
             if revision is None:
@@ -325,7 +326,10 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
             last_revision = revision
             now = number(clock())
             for role, future in finished.items():
-                completed(role, future, revision)
+                # Do not absorb a sibling write made after this turn returned
+                # but before the current sample. A conservative extra poke is
+                # observable; a silently missed wake would be a false deadline.
+                completed(role, future, previous_revision)
                 del futures[role]
             if all(slot.phase == 'terminal' for slot in state.slots.values()):
                 outcome = 'STOPPED'
