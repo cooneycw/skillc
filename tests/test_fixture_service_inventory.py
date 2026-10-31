@@ -30,6 +30,21 @@ def _entries() -> list[tuple[str, str, list[object]]]:
             continue
         kind, source, *columns = line.split("\t")
         rows.append((kind, source, [json.loads(c) for c in columns]))
+    extension = json.loads(INVENTORY.with_name("fixture-service-wave-gh-inventory.json").read_text())
+    payloads = {
+        "issue.view": {"body": "fixture", "labels": [{"name": "bug"}]},
+        "issue.list": [{"number": 1, "title": "T001: fixture", "body": "Blocked by #2"}],
+        "pr.view": {"headRefOid": "a" * 40, "statusCheckRollup": []},
+        "pr.list": [{"number": 4, "state": "OPEN", "headRefOid": "a" * 40}],
+        "repo.view": {"nameWithOwner": "fixture/widget"},
+        "api.user": {"login": "fixture-subject", "email": "fixture@fixture.invalid"},
+    }
+    for case in extension["extension_cases"] + extension["issue_required_capabilities"]:
+        argv = case["argv"]
+        rows.append(("call", case["source"], [argv]))
+        if "--jq" in argv:
+            op = "api.user" if argv[:2] == ["api", "user"] else ".".join(argv[:2])
+            rows.append(("jq", case["source"], [argv[argv.index("--jq") + 1], payloads[op]]))
     return rows
 
 
@@ -92,5 +107,7 @@ def test_every_call_names_a_pinned_source_line() -> None:
         if kind.startswith("control-"):
             assert source.startswith("control:")
             continue
+        if source == "skillc#636":
+            continue  # capability explicitly required by the task, no pinned caller
         path, _, line = source.rpartition(":")
-        assert path.startswith(("scripts/", ".claude/commands/flow/")) and line.isdigit(), source
+        assert path.startswith(("scripts/", ".claude/commands/flow/", "codex/skills/")) and line.isdigit(), source

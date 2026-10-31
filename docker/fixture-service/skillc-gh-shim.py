@@ -114,14 +114,68 @@ def _ask(request: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _create_source(args: list[str]) -> str | None:
+    if args[:2] != ["repo", "create"]:
+        return None
+    for i, arg in enumerate(args):
+        if arg.startswith("--source="):
+            return arg.split("=", 1)[1]
+        if arg == "--source" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _push_created_source(source: str, action: object) -> str | None:
+    """Only local git runs here. The controller verifies the remote ref itself."""
+    if not isinstance(action, dict) or set(action) != {"origin_url", "transport_url", "default_branch", "source_head"} \
+            or not all(isinstance(v, str) and v for v in action.values()):
+        raise _ChannelError("invalid repository transport action")
+    url, branch, head = (action[k] for k in ("origin_url", "default_branch", "source_head"))
+    try:
+        current = _git("-C", source, "rev-parse", "--verify", "HEAD")
+        if current != head:
+            return "source HEAD changed during creation"
+        rewrite = subprocess.run(["git", "-C", source, "config", "--local",
+                                  f"url.{action['transport_url']}.insteadOf", url],
+                                 capture_output=True, text=True, timeout=10, check=False)
+        if rewrite.returncode != 0:
+            return "could not configure fixture transport"
+        origin = subprocess.run(["git", "-C", source, "config", "--get", "remote.origin.url"],
+                                capture_output=True, text=True, timeout=10, check=False)
+        if origin.returncode not in (0, 1):
+            return "could not inspect origin"
+        if origin.returncode == 0:
+            if origin.stdout.strip() != url:
+                return "source already has a different origin"
+        else:
+            configured = subprocess.run(["git", "-C", source, "remote", "add", "origin", url],
+                                        capture_output=True, text=True, timeout=10, check=False)
+            if configured.returncode != 0:
+                return "could not configure origin"
+        pushed = subprocess.run(["git", "-C", source, "-c", "core.hooksPath=/dev/null", "push",
+                                 "-u", "origin", f"HEAD:refs/heads/{branch}"],
+                                capture_output=True, text=True, timeout=30, check=False)
+        return None if pushed.returncode == 0 else "source push failed"
+    except (OSError, subprocess.TimeoutExpired):
+        return "source configuration or push failed"
+
+
 def main(argv: list[str]) -> int:
     args = argv[1:]
     try:
         context = {"origin_url": _git("config", "--get", "remote.origin.url"),
                    "branch": _git("branch", "--show-current")}
+        source = _create_source(args)
+        if source is not None:
+            context.update(source_head=_git("-C", source, "rev-parse", "--verify", "HEAD"),
+                           creation_phase="prepare")
         request = {"op": "gh", "argv": args, "cwd": os.getcwd(), "context": context,
                    "body_files": _body_files(args)}
         result = _ask(request)
+        if source is not None and result["exit_code"] == 0 and "local_git" in result:
+            error = _push_created_source(source, result["local_git"])
+            context.update(creation_phase="complete", creation_error=error)
+            result = _ask(request)
     except _ChannelError as exc:
         print(f"skillc-gh-shim: channel error: {exc}", file=sys.stderr)
         return EXIT_CHANNEL_FAILURE

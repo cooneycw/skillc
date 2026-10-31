@@ -1,0 +1,2720 @@
+{
+  "inventory_schema": 1,
+  "issue": 636,
+  "repository": "cooneycw/claude-power-pack",
+  "commit": "87ecb0970f70aace9e0323feee00c9ca57dda133",
+  "scope": [
+    "project-init",
+    "flow-wave",
+    "flow-register",
+    "flow-auto",
+    "flow-eli5",
+    "github-issue-create"
+  ],
+  "scope_notes": [
+    "Installed Codex references, bundled helpers, and canonical helper fallbacks are included. Existing flow-auto normalized calls and filters remain in fixture-service-gh-inventory.txt at their original pin; this additive inventory records the new pin source ledger and the required extension cases.",
+    "Source ledger includes guidance and forbidden examples with explicit classifications, rather than treating every mention as executable. Shell variables and helper calls are retained literally in source excerpts. Normalized extension cases use fixture repository, issue, branch, SHA and body placeholders.",
+    "Labels list/create are required capabilities by issue #636 even where the pinned procedure has no literal invocation. Browser --web, gh auth login, Qwen/Gemma alternate drivers, wp/curl CI backends, live GitHub writes and models are outside this lane.",
+    "The identity endpoint is authenticated fixture identity. Repository creation is bounded to the controller-declared attempt repository and transport. All mutations and refused requests must remain controller-recorded."
+  ],
+  "sources": [
+    {
+      "path": ".claude/commands/flow/auto.md",
+      "sha256": "62617902d1ed20f3e22af7dfe5802b729cf4447dae83289dc76546918ec7c243",
+      "git_blob": "975be7a3a8c08f844b33489ca392ca59e805db9a",
+      "mode": "100644"
+    },
+    {
+      "path": ".claude/commands/flow/eli5.md",
+      "sha256": "1d057640d1f6af6a120d0ed4b2ada9c5583ecbf59ad27725fba33cfe59bfd9a5",
+      "git_blob": "8c0cbaed1b31d72e50b2906754b4e382c97aee0e",
+      "mode": "100644"
+    },
+    {
+      "path": ".claude/commands/flow/register.md",
+      "sha256": "d0ebac609f043643060e410175899d9f004efd042978a579b66f38be747e9db6",
+      "git_blob": "55407746326248a8059698b7ea022a71e022162c",
+      "mode": "100644"
+    },
+    {
+      "path": ".claude/commands/flow/wave.md",
+      "sha256": "36dd335de3fbc73e2c7914d5b409fa66882fc61eb3e39302acc669b325b3981d",
+      "git_blob": "f74adee2972ec967e45d94d61a5139b2b0396c83",
+      "mode": "100644"
+    },
+    {
+      "path": ".claude/commands/project/init.md",
+      "sha256": "b999cfa720df9aba9e4a195d6cf563086490c035154eac09e5f93235e6264e67",
+      "git_blob": "da115e0396e8a1d5e36a53f668aa6c8f41c3c39c",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/PROVENANCE.md",
+      "sha256": "e9022fe0e4c92c3225277e91bf80865b15b245d3d36f35303c86616c3dba49dc",
+      "git_blob": "6ef97dbf4bbc302f6e2b8512f74aa6da57556932",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/SKILL.md",
+      "sha256": "4eb7f25ed9bd264c73d4b9b2320fdfabab9dbda70ca192e1415481c017ee9b08",
+      "git_blob": "0380a00b21b0ec6124cc4ec9e2d50a728853d3b2",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/agents/closing-report-contract.md",
+      "sha256": "13d0beae8e06d3c084b6d7d74c8a18641aa1250c65573d90c9d64b72cb8cb695",
+      "git_blob": "565c8f38a005f9ab0cd032010abb9fdf007ab143",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/agents/detector-contracts.md",
+      "sha256": "d97fa7aed7e6f3ec7ad8e217dc751d06902f9d740d91d1f78562376d847b50db",
+      "git_blob": "090687b58e637b7243a2684f1ca24b8b1bc3d04c",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/agents/flow-plan-record.md",
+      "sha256": "7f7e9d5935b6d1249b37855b3aa0670dc60235d93bd0aacb91716c054c6c98ab",
+      "git_blob": "3663ba4bd7fea5ff2a3dac30e064cd78f68b71ad",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/agents/issue-contract.md",
+      "sha256": "7c70b4ab2cfceba6d8c38d38d9522744e3ef2b1cb4a8c692cdd598022f04809e",
+      "git_blob": "0ef1b7bff7230dd211a4e645373b99e0f3fbf09f",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md",
+      "sha256": "91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d",
+      "git_blob": "083365031e75831e7d1aced6c9db8b1d1fb267cf",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md",
+      "sha256": "13eca0c5cd919339b77010b8f4f3f77a57dd2d354f4b02b5c433a68bb507719e",
+      "git_blob": "dc8e9f908b29867d75d65234711308124cf8e330",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+      "sha256": "991261cba992a14f4aef581a2bf0512e961234dd4e8dba9fbee229ff488aa393",
+      "git_blob": "358944facda04f3aa87ebbcfa98a7748f48172db",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md",
+      "sha256": "8fb644b69ee093ac619cf22c8911a464b8cb7bdce05ea1e2c526b12ad0604f52",
+      "git_blob": "1f5e7039b5a292fb06840b55a2d60f9988ddf5f6",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/lib/vendor.py",
+      "sha256": "468ac086166765ce0d69998d1b642f92867f87d44b59a97be6eafd2793e0cae0",
+      "git_blob": "e2c1dc75e6fada0c1fbe0950469703092b434b46",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/reference.md",
+      "sha256": "2864388d66aba0f11830babb5ee7b00c6a07a165d93cc899a66f26b6bbf44718",
+      "git_blob": "43b2d3f9778e00ac0f3828c9bea29887a7adae65",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/SHA256SUMS",
+      "sha256": "58e6c6fe93ba920a8faff4a6a31f4bfa3af835412695d31388401b72830d0e63",
+      "git_blob": "40bd86fbf3941da3b2fdde4ba4a9c16e670738ab",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+      "sha256": "ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+      "git_blob": "e0a4d429959f1b2e06a9cebe49839917a0aab60f",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/codex-skill-resync.sh",
+      "sha256": "43f257169f891098fdc205cb3109b1636c055aeedf7f0a6357ff5f81f317df5d",
+      "git_blob": "a93afce26215b34a2a38be9c83f63f967bcc46fa",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "sha256": "b21b6c2c8978620106f620dbb7cb851a15a1c81d40081e6e9106df62c1d01d22",
+      "git_blob": "7cddd62b88b6f6da8c0df006888de315ca8cb91f",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+      "sha256": "8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+      "git_blob": "9e6a2d0dabdca04f0f7569d997ea0233b5c4f5f8",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py",
+      "sha256": "10070b93da07f81e3d5bd9d3a434527d231d0abcd8b386ff8e96171f1b5dc92b",
+      "git_blob": "47e41177a269029eecbb5dc48f0536111d23fe63",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/eli5-vendor.py",
+      "sha256": "6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5",
+      "git_blob": "fc41617c59c90b6a02898d95509b41fceec7c12d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-ci-status.sh",
+      "sha256": "71a3d705fd222e4eb44425c87460111fcba49d95d8e5689555d31601e55862ac",
+      "git_blob": "b0aee7ddecda9e97e5e986e088ddf53485457e09",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+      "sha256": "439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+      "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "sha256": "83b0a68caefc010a9907211612e96c1bfb94b35a6cff446939a2306ce95bb2da",
+      "git_blob": "fb6a1c60ea1d343edf288e2a9e7d383d682b094d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+      "sha256": "cbd85a9e0e08471a9c0be29725c177a09059a58a5604e0543263f2cf55cad6ca",
+      "git_blob": "a46781ef3cdf183f80a953c4da0aa48816a4cf3a",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-plan-record.py",
+      "sha256": "05c5aaf1d28a95d31d9e89eab9c128f33f916a7ed931146492fee7c5a5c1244d",
+      "git_blob": "63187a491817fe47703f68f343770754294aa130",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-stale-check.sh",
+      "sha256": "abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+      "git_blob": "718ef98e6458d80c56f04a0d63392c103c6f1597",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+      "sha256": "fa067118095e617c0668a0fa16fd4a3d5c0f0ec99bb95c00611b72671c3421f3",
+      "git_blob": "70128f9598f3f94dd814068af38535c596633599",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+      "sha256": "b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+      "git_blob": "93615e5e4f1521f2583d635f4ec78144ba187831",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+      "sha256": "d3ee7378cc583ccb8dd8e0a6c9c10e2c958b392e5e0bb973dd5824ac310b4d22",
+      "git_blob": "7070e3a57ccec7fd0d645663b1acde3bef801df0",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/friction-log.sh",
+      "sha256": "16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660",
+      "git_blob": "92fcf4be202cb3f16fd50689ce5e9239b560db4c",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/gate-lib.sh",
+      "sha256": "4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8",
+      "git_blob": "c3da2e5ff76fbacf602b28a0c7f96feef1b83f34",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+      "sha256": "a44e285612c90508f77afe1f90601f0adb9c526ea73c331e17bcc677f897e508",
+      "git_blob": "4002cd5773e8952888924f730dedd3dcc61e3e24",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+      "sha256": "31ff4ea2c863e580c40fa80f3fad66d1b443382140d6e7f397435825809c05e3",
+      "git_blob": "0079a7faec1d42f5ecdc71f054661e4499da554d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/nit-store-resolve.sh",
+      "sha256": "673b2314d843cb1bea36ea0fd10669060a62369a276c00e52fcc6c0663a5e837",
+      "git_blob": "5a7b26a26f5add39c051cd9801758daf5b783525",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/speckit-context.py",
+      "sha256": "0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+      "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/stash-worktree-guard.sh",
+      "sha256": "cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745",
+      "git_blob": "5c5d777f2f0e9dc22804dd8e229846c37a4a64fb",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+      "sha256": "30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+      "git_blob": "2ebc1037c87dc6f316f136cbe4afe5e9584a41f3",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-eli5/PROVENANCE.md",
+      "sha256": "bf8ed85ba85dca0eaa0155885a47e23dd8812b32d79acd56e8c282562d315434",
+      "git_blob": "40d3201c87730199fced41f1dbc202575993c51e",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/SKILL.md",
+      "sha256": "c17999afc6d48b70fb7af8ec4a6557803b4062831dd25de949f167b54d43b0d3",
+      "git_blob": "657120bc350070e5e7163f1d45423edfb6e98dca",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/docs/agents/closing-report-contract.md",
+      "sha256": "13d0beae8e06d3c084b6d7d74c8a18641aa1250c65573d90c9d64b72cb8cb695",
+      "git_blob": "565c8f38a005f9ab0cd032010abb9fdf007ab143",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/docs/agents/detector-contracts.md",
+      "sha256": "d97fa7aed7e6f3ec7ad8e217dc751d06902f9d740d91d1f78562376d847b50db",
+      "git_blob": "090687b58e637b7243a2684f1ca24b8b1bc3d04c",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/lib/vendor.py",
+      "sha256": "468ac086166765ce0d69998d1b642f92867f87d44b59a97be6eafd2793e0cae0",
+      "git_blob": "e2c1dc75e6fada0c1fbe0950469703092b434b46",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/reference.md",
+      "sha256": "99f26124dd7ec17f238685674c2f6cfce8c3b067d4161b670133e50eac2ad0e4",
+      "git_blob": "41068f8841e7162cf6ceea66ec45126ffb379f30",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/scripts/SHA256SUMS",
+      "sha256": "0ff680c35aa0589d186595d531c6a2587a21007edec520b1e424d506cc9c87e9",
+      "git_blob": "1bee0e3d6ebdf59187ef0a8d946cd3a97c00aed5",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-eli5/scripts/eli5-core-drift.sh",
+      "sha256": "3d50fddcef06e3babea23fdbbfb0bd58dd0e665aeab44115ecae8601a8095a92",
+      "git_blob": "50b9ab65a28c280d97b7f12a10655e52c9ba0d2f",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-eli5/scripts/eli5-vendor.py",
+      "sha256": "6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5",
+      "git_blob": "fc41617c59c90b6a02898d95509b41fceec7c12d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-register/PROVENANCE.md",
+      "sha256": "cafcf5f4cf1f24b3eaf0fdb0a4990457d30680d5990344461201293a6c8c4190",
+      "git_blob": "e9977556d8878e711d61037f28418a511c2240d9",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-register/SKILL.md",
+      "sha256": "39aa37fad213709c8940013b1f69888838f38d4ac5a8cec61175b91bf6ae82d4",
+      "git_blob": "eb1812c5c4c646951aa0258953db9924a30afdc0",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-register/reference.md",
+      "sha256": "73df728f27abc44c1dd27c0076cdea860fb1c891235be675c59e7ba433d67ee1",
+      "git_blob": "e076b5e3560457c3bbdce5b7a8a73445d654f00f",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/SHA256SUMS",
+      "sha256": "a4d1acc7f6b7f67f3facf11cee045023cca8ca23c610d7d47104f89feefbe060",
+      "git_blob": "65d691ccc4cca48393069d06221ee1cdd91cdc90",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/flow-driver-capability.sh",
+      "sha256": "439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+      "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/flow-vantage.sh",
+      "sha256": "884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93",
+      "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+      "sha256": "a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734",
+      "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+      "sha256": "072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06",
+      "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+      "sha256": "003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae",
+      "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+      "sha256": "23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c",
+      "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/PROVENANCE.md",
+      "sha256": "18ebd0dc4ceb5b333ca599aaccc3a8f00501f0d6f6ae1e6f5adde6e8d9c1d150",
+      "git_blob": "f18eda552ab00e46a50963dc625efc7bc05d649e",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-wave/SKILL.md",
+      "sha256": "60930bb13da9bd620cc148591e4ca468d351f08a1ac1eff9ec6179afdfddca0e",
+      "git_blob": "a21bc64cf22959a7e853440d4996344f9ab16117",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md",
+      "sha256": "8c34c74ac7d9135638e05714fcb102437ac7a996e2ec6d82f3a5a8c9b624f8dc",
+      "git_blob": "2d22bc8294515e975016c1605675479c7062118f",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-wave/reference.md",
+      "sha256": "0ebb9ed92a023cfcf4b089a6c0f1af76449b34959fe3865c2a4fae3421509169",
+      "git_blob": "f66896755e187b8c1999a487a4f54c8aef4f01ea",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/SHA256SUMS",
+      "sha256": "f91f807e267fb2f10728dcaff9c4f31ac3a842b16ac7c967ff2dbac17df5f629",
+      "git_blob": "21e5dedf4d65a6d6737dceb5443022f74a0ae43c",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-driver-capability.sh",
+      "sha256": "439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+      "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-pr-watch.sh",
+      "sha256": "05935f75c2a0b78a5d8a6b0529486ea1d844de13c14927710b16dbef7c4c028e",
+      "git_blob": "a2941050f4dea93bd0a3cfea6846ca4903de8658",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-vantage.sh",
+      "sha256": "884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93",
+      "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-wave-lexicon.sh",
+      "sha256": "a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734",
+      "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "sha256": "072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06",
+      "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-wave-plan.py",
+      "sha256": "df2871bce4ac8a6ed36ff122a4bd425cd8087dc736d8dd5b18e141ca0d24eff3",
+      "git_blob": "fb21ba3bdf910c08e88ebfa58b94552cdf0333a3",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+      "sha256": "003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae",
+      "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-wave-residuals.py",
+      "sha256": "73dd985a40d6498974c58bbd49a35d6efa972eafd6c2b05bfeed3c8fc275f5ed",
+      "git_blob": "d005e4054b78cc74325456fa9fb12c9e1d2fd317",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-worktree-claim.sh",
+      "sha256": "b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+      "git_blob": "93615e5e4f1521f2583d635f4ec78144ba187831",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+      "sha256": "9b963b0186ff8d92f4eb65b3414b1347cd7f4f230f5b02923c363a4ae7192c32",
+      "git_blob": "8e142b0ae85f772fde0758fd9e16ebc64fe6a46f",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/speckit-context.py",
+      "sha256": "0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+      "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh",
+      "sha256": "4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec",
+      "git_blob": "390d13576b57d06226738fef30a2eff77c44669a",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+      "sha256": "23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c",
+      "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+      "sha256": "30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+      "git_blob": "2ebc1037c87dc6f316f136cbe4afe5e9584a41f3",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/github-issue-create/PROVENANCE.md",
+      "sha256": "a578e6597f1ac477783c4aa144bd44f631e8580e3a9f588058ddb2c664fe30cf",
+      "git_blob": "7c688bb495190d4bf380dfa0cc9d42d0f4a0f421",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/github-issue-create/SKILL.md",
+      "sha256": "160799efb2a1cb04bc549975767b39d78d62c573a3810fc8e7c7602e0acf0608",
+      "git_blob": "f5be9b08bf2dbe97879165253c665c44cbe8bcf0",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/github-issue-create/docs/agents/issue-contract.md",
+      "sha256": "7c70b4ab2cfceba6d8c38d38d9522744e3ef2b1cb4a8c692cdd598022f04809e",
+      "git_blob": "0ef1b7bff7230dd211a4e645373b99e0f3fbf09f",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/github-issue-create/docs/agents/knowledge-lifecycle.md",
+      "sha256": "91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d",
+      "git_blob": "083365031e75831e7d1aced6c9db8b1d1fb267cf",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/github-issue-create/reference.md",
+      "sha256": "85eaa8d1b23b031f1873566b8ddaeba40362ef96f7fa0c1e07be52e7c20e4c50",
+      "git_blob": "ebff1e9bd8cac791ec3de87b2523a782641680bc",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/project-init/PROVENANCE.md",
+      "sha256": "6ffa7e100776e38311a13740ad8516c4770c9e64c7050d271051749e17658035",
+      "git_blob": "4c7d68e99dd7378d190863fda4b1a8d72c3a6ffd",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/project-init/SKILL.md",
+      "sha256": "8820b9e918398a42443ea282a2b4c106640442fadc16cd5b109389e00e63017f",
+      "git_blob": "fe3152e00c8137aa9d7e207ae3cf720d11d4cfd8",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/project-init/docs/agents/knowledge-lifecycle.md",
+      "sha256": "91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d",
+      "git_blob": "083365031e75831e7d1aced6c9db8b1d1fb267cf",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/project-init/reference.md",
+      "sha256": "1fb38b47266ee0c879a50241f311323672ed45cb5d4f779086dd42fcb576d366",
+      "git_blob": "f7dea5f3bec8c00bc5a5db3aa64d9c1a863bc213",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/project-init/scripts/SHA256SUMS",
+      "sha256": "05e1ec41938f0931581add1d03ab3ed99f0c802a839cb4936a286273dfa5ecc5",
+      "git_blob": "93fead186855b77dadafedf875b886739e96fe0c",
+      "mode": "100644"
+    },
+    {
+      "path": "codex/skills/project-init/scripts/project-init.py",
+      "sha256": "39b03ed59e5a49313ead549b49a01004058a30ceae26dad7340aba74ea3337b1",
+      "git_blob": "7ab404ca32cac84c8da75560fc8ea7e70a971dbe",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/project-init/scripts/speckit-context.py",
+      "sha256": "0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+      "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+      "mode": "100755"
+    },
+    {
+      "path": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh",
+      "sha256": "4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec",
+      "git_blob": "390d13576b57d06226738fef30a2eff77c44669a",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/check-ignored-additions.sh",
+      "sha256": "ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+      "git_blob": "e0a4d429959f1b2e06a9cebe49839917a0aab60f",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/codex-skill-resync.sh",
+      "sha256": "43f257169f891098fdc205cb3109b1636c055aeedf7f0a6357ff5f81f317df5d",
+      "git_blob": "a93afce26215b34a2a38be9c83f63f967bcc46fa",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/codex-skill-sync.py",
+      "sha256": "b21b6c2c8978620106f620dbb7cb851a15a1c81d40081e6e9106df62c1d01d22",
+      "git_blob": "7cddd62b88b6f6da8c0df006888de315ca8cb91f",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/counter-model-receipt.py",
+      "sha256": "8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+      "git_blob": "9e6a2d0dabdca04f0f7569d997ea0233b5c4f5f8",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/counter-model-reviewer-attribution.py",
+      "sha256": "10070b93da07f81e3d5bd9d3a434527d231d0abcd8b386ff8e96171f1b5dc92b",
+      "git_blob": "47e41177a269029eecbb5dc48f0536111d23fe63",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/eli5-core-drift.sh",
+      "sha256": "3d50fddcef06e3babea23fdbbfb0bd58dd0e665aeab44115ecae8601a8095a92",
+      "git_blob": "50b9ab65a28c280d97b7f12a10655e52c9ba0d2f",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/eli5-vendor.py",
+      "sha256": "6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5",
+      "git_blob": "fc41617c59c90b6a02898d95509b41fceec7c12d",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-ci-status.sh",
+      "sha256": "71a3d705fd222e4eb44425c87460111fcba49d95d8e5689555d31601e55862ac",
+      "git_blob": "b0aee7ddecda9e97e5e986e088ddf53485457e09",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-driver-capability.sh",
+      "sha256": "439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+      "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-finish-gate.sh",
+      "sha256": "83b0a68caefc010a9907211612e96c1bfb94b35a6cff446939a2306ce95bb2da",
+      "git_blob": "fb6a1c60ea1d343edf288e2a9e7d383d682b094d",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-live-driver-guard.sh",
+      "sha256": "cbd85a9e0e08471a9c0be29725c177a09059a58a5604e0543263f2cf55cad6ca",
+      "git_blob": "a46781ef3cdf183f80a953c4da0aa48816a4cf3a",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-plan-record.py",
+      "sha256": "05c5aaf1d28a95d31d9e89eab9c128f33f916a7ed931146492fee7c5a5c1244d",
+      "git_blob": "63187a491817fe47703f68f343770754294aa130",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-pr-watch.sh",
+      "sha256": "05935f75c2a0b78a5d8a6b0529486ea1d844de13c14927710b16dbef7c4c028e",
+      "git_blob": "a2941050f4dea93bd0a3cfea6846ca4903de8658",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-stale-check.sh",
+      "sha256": "abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+      "git_blob": "718ef98e6458d80c56f04a0d63392c103c6f1597",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-start-resolve.sh",
+      "sha256": "fa067118095e617c0668a0fa16fd4a3d5c0f0ec99bb95c00611b72671c3421f3",
+      "git_blob": "70128f9598f3f94dd814068af38535c596633599",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-vantage.sh",
+      "sha256": "884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93",
+      "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-wave-lexicon.sh",
+      "sha256": "a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734",
+      "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-wave-mailbox.sh",
+      "sha256": "072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06",
+      "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-wave-plan.py",
+      "sha256": "df2871bce4ac8a6ed36ff122a4bd425cd8087dc736d8dd5b18e141ca0d24eff3",
+      "git_blob": "fb21ba3bdf910c08e88ebfa58b94552cdf0333a3",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-wave-registry.sh",
+      "sha256": "003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae",
+      "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-wave-residuals.py",
+      "sha256": "73dd985a40d6498974c58bbd49a35d6efa972eafd6c2b05bfeed3c8fc275f5ed",
+      "git_blob": "d005e4054b78cc74325456fa9fb12c9e1d2fd317",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-worktree-claim.sh",
+      "sha256": "b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+      "git_blob": "93615e5e4f1521f2583d635f4ec78144ba187831",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-worktree-guard.sh",
+      "sha256": "d3ee7378cc583ccb8dd8e0a6c9c10e2c958b392e5e0bb973dd5824ac310b4d22",
+      "git_blob": "7070e3a57ccec7fd0d645663b1acde3bef801df0",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/flow-worktree-sweep.sh",
+      "sha256": "9b963b0186ff8d92f4eb65b3414b1347cd7f4f230f5b02923c363a4ae7192c32",
+      "git_blob": "8e142b0ae85f772fde0758fd9e16ebc64fe6a46f",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/friction-log.sh",
+      "sha256": "16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660",
+      "git_blob": "92fcf4be202cb3f16fd50689ce5e9239b560db4c",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/gate-lib.sh",
+      "sha256": "4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8",
+      "git_blob": "c3da2e5ff76fbacf602b28a0c7f96feef1b83f34",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/gh-pr-merge.sh",
+      "sha256": "a44e285612c90508f77afe1f90601f0adb9c526ea73c331e17bcc677f897e508",
+      "git_blob": "4002cd5773e8952888924f730dedd3dcc61e3e24",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/hook-permission-census.sh",
+      "sha256": "31ff4ea2c863e580c40fa80f3fad66d1b443382140d6e7f397435825809c05e3",
+      "git_blob": "0079a7faec1d42f5ecdc71f054661e4499da554d",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/nit-store-resolve.sh",
+      "sha256": "673b2314d843cb1bea36ea0fd10669060a62369a276c00e52fcc6c0663a5e837",
+      "git_blob": "5a7b26a26f5add39c051cd9801758daf5b783525",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/project-init.py",
+      "sha256": "39b03ed59e5a49313ead549b49a01004058a30ceae26dad7340aba74ea3337b1",
+      "git_blob": "7ab404ca32cac84c8da75560fc8ea7e70a971dbe",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/speckit-context.py",
+      "sha256": "0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+      "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/speckit-tasks-to-issues.sh",
+      "sha256": "4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec",
+      "git_blob": "390d13576b57d06226738fef30a2eff77c44669a",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/stash-worktree-guard.sh",
+      "sha256": "cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745",
+      "git_blob": "5c5d777f2f0e9dc22804dd8e229846c37a4a64fb",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/toolchain-provenance.sh",
+      "sha256": "23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c",
+      "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+      "mode": "100755"
+    },
+    {
+      "path": "scripts/worktree-remove.sh",
+      "sha256": "30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+      "git_blob": "2ebc1037c87dc6f316f136cbe4afe5e9584a41f3",
+      "mode": "100755"
+    }
+  ],
+  "source_ledger": [
+    {
+      "source": ".claude/commands/flow/auto.md:361",
+      "category": "call-or-procedure-step",
+      "text": "   if ! gh issue view \"$ISSUE_NUM\" --json body --jq .body > \"$BODY_FILE\"; then"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:477",
+      "category": "call-or-procedure-step",
+      "text": "   ISSUE_DATE=$(gh issue view \"$ISSUE_NUM\" --json createdAt --jq '.createdAt')"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:479",
+      "category": "call-or-procedure-step",
+      "text": "   gh pr list --state merged --search \"merged:>=${ISSUE_DATE%%T*}\" --json number,title,mergedAt"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:480",
+      "category": "call-or-procedure-step",
+      "text": "   gh issue list --state all --search \"<key terms>\" --json number,title,state"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:489",
+      "category": "call-or-procedure-step",
+      "text": "  gh issue close \"$ISSUE_NUM\" --comment \"Closed via /flow:auto ELI5 review - <reason; cite superseding PR/issue>.\""
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:937",
+      "category": "guidance-or-forbidden-example",
+      "text": "does not reach the squash - but a plain `gh pr merge --squash` can compose it from the"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:943",
+      "category": "call-or-procedure-step",
+      "text": "gh pr view \"$PR_NUMBER\" --json title,body --jq '.title, .body' 2>/dev/null"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1422",
+      "category": "call-or-procedure-step",
+      "text": "   gh pr create --title \"type(scope): Description (${ISSUE_REF})\" --body \"...\""
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1470",
+      "category": "call-or-procedure-step",
+      "text": "     read. That is neither absent nor present; check `gh auth status` and the"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1509",
+      "category": "call-or-procedure-step",
+      "text": "  `gh issue comment <NIT_STORE> --repo <NIT_STORE_REPO> --body \"<one finding>\"`."
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1645",
+      "category": "call-or-procedure-step",
+      "text": "   gh pr list --head \"$BRANCH\" --json number --jq '.[0].number'"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1665",
+      "category": "call-or-procedure-step",
+      "text": "   `gh pr merge --match-head-commit`. Going around the helper to get the pin"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1675",
+      "category": "guidance-or-forbidden-example",
+      "text": "   plain `gh pr merge --delete-branch` fails AFTER the remote squash succeeds"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1692",
+      "category": "guidance-or-forbidden-example",
+      "text": "   this replaced was a plain `gh pr merge --squash`. It skipped every guard"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1716",
+      "category": "guidance-or-forbidden-example",
+      "text": "       echo \"REFUSING: gh-pr-merge.sh is not installed; not merging PR #$PR_NUMBER with a plain 'gh pr merge'.\" >&2"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:1726",
+      "category": "call-or-procedure-step",
+      "text": "     `gh pr merge`, because that is the unguarded path this refusal closes."
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:2023",
+      "category": "call-or-procedure-step",
+      "text": "       ISSUE_STATE=$(gh issue view \"$ISSUE_NUM\" --json state --jq '.state' 2>/dev/null)"
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:2026",
+      "category": "call-or-procedure-step",
+      "text": "               gh issue close \"$ISSUE_NUM\" --comment \"Closed via /flow:auto - PR #${PR_NUMBER} merged.\""
+    },
+    {
+      "source": ".claude/commands/flow/auto.md:2051",
+      "category": "guidance-or-forbidden-example",
+      "text": "Do NOT hand-roll this with `curl`, `gh run list`, or - worst of all - a grep over"
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:59",
+      "category": "call-or-procedure-step",
+      "text": "gh issue view \"$ISSUE_NUM\" --json number,title,state,body,createdAt,labels,closedAt"
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:60",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_DATE=$(gh issue view \"$ISSUE_NUM\" --json createdAt --jq '.createdAt')"
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:105",
+      "category": "call-or-procedure-step",
+      "text": "gh pr list --state merged --search \"merged:>=${ISSUE_DATE%%T*}\" \\\n    --json number,title,mergedAt"
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:109",
+      "category": "call-or-procedure-step",
+      "text": "gh issue list --state all --search \"<key terms from the issue>\" \\\n    --json number,title,state,closedAt"
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:148",
+      "category": "call-or-procedure-step",
+      "text": "  gh issue close \"$ISSUE_NUM\" --comment \"<evidence-based reason; reference the superseding PR/issue>\""
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:268",
+      "category": "call-or-procedure-step",
+      "text": "`git log --since`, `gh pr list`, `gh issue list` - is answered by the remote,"
+    },
+    {
+      "source": ".claude/commands/flow/eli5.md:299",
+      "category": "guidance-or-forbidden-example",
+      "text": "- It never writes implementation code; the only mutating action it suggests is `gh issue close` on a `No longer needed` verdict, and that is a recommendation for the reviewer to run."
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:500",
+      "category": "call-or-procedure-step",
+      "text": "  if ! gh issue view \"$N\" --json body --jq .body > \"$CUR\"; then"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:506",
+      "category": "call-or-procedure-step",
+      "text": "      gh issue edit \"$N\" --body-file \"$NEW\" || status=$?"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:530",
+      "category": "call-or-procedure-step",
+      "text": "  nothing. (Concretely: `gh issue view N --json body`, check with a line-match"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:531",
+      "category": "call-or-procedure-step",
+      "text": "  for `Blocked by #M`, and on miss `gh issue edit N --body` with the original"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:546",
+      "category": "call-or-procedure-step",
+      "text": "gh issue list --state all --json number,title,body,state --limit 200 > /tmp/<scratch>/wave-issues.json"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:744",
+      "category": "forbidden-example",
+      "text": "`gh issue create` for a residual during an active wave. Record it instead:"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:905",
+      "category": "forbidden-example",
+      "text": "the audit decision but deliberately does not call `gh issue create`; after a"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:923",
+      "category": "call-or-procedure-step",
+      "text": "not remove them, because `gh pr merge --delete-branch` deletes the remote branch"
+    },
+    {
+      "source": ".claude/commands/flow/wave.md:1056",
+      "category": "call-or-procedure-step",
+      "text": "  `gh issue list` snapshot each time; re-running it is the whole cost of the"
+    },
+    {
+      "source": ".claude/commands/project/init.md:173",
+      "category": "call-or-procedure-step",
+      "text": "`github.com/$(gh api user --jq '.login')/$PROJECT_NAME` as the default. Resolve"
+    },
+    {
+      "source": ".claude/commands/project/init.md:229",
+      "category": "call-or-procedure-step",
+      "text": "complete and continue with the visibility question and `gh repo create`. If the"
+    },
+    {
+      "source": ".claude/commands/project/init.md:284",
+      "category": "comment-or-guidance",
+      "text": "    # Ask user for name and email, or use gh auth info"
+    },
+    {
+      "source": ".claude/commands/project/init.md:285",
+      "category": "call-or-procedure-step",
+      "text": "    GH_USER=$(gh api user --jq '.login' 2>/dev/null)"
+    },
+    {
+      "source": ".claude/commands/project/init.md:286",
+      "category": "call-or-procedure-step",
+      "text": "    GH_EMAIL=$(gh api user --jq '.email // empty' 2>/dev/null)"
+    },
+    {
+      "source": ".claude/commands/project/init.md:309",
+      "category": "call-or-procedure-step",
+      "text": "gh repo create \"$PROJECT_NAME\" $VISIBILITY --source=. --push"
+    },
+    {
+      "source": ".claude/commands/project/init.md:312",
+      "category": "call-or-procedure-step",
+      "text": "If `gh repo create` fails (e.g., repo name taken), report the error and suggest alternatives."
+    },
+    {
+      "source": ".claude/commands/project/init.md:648",
+      "category": "guidance-or-forbidden-example",
+      "text": "- **gh not authenticated:** Stop at Step 3, suggest `gh auth login`"
+    },
+    {
+      "source": "codex/skills/flow-auto/docs/agents/flow-plan-record.md:255",
+      "category": "call-or-procedure-step",
+      "text": "gh issue list --state all --limit 40 --json number,body \\\n  --jq '.[] | \"\\(.body|length) #\\(.number)\"' | sort -rn | head -5"
+    },
+    {
+      "source": "codex/skills/flow-auto/docs/agents/flow-plan-record.md:362",
+      "category": "call-or-procedure-step",
+      "text": "- `gh pr diff --name-only` lists DELETED paths too, so a run that removed the"
+    },
+    {
+      "source": "codex/skills/flow-auto/docs/agents/issue-contract.md:181",
+      "category": "call-or-procedure-step",
+      "text": "from them, and any explicit post-merge `gh issue close`. Changing the final PR body"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:363",
+      "category": "call-or-procedure-step",
+      "text": "   if ! gh issue view \"$ISSUE_NUM\" --json body --jq .body > \"$BODY_FILE\"; then"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:479",
+      "category": "call-or-procedure-step",
+      "text": "   ISSUE_DATE=$(gh issue view \"$ISSUE_NUM\" --json createdAt --jq '.createdAt')"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:481",
+      "category": "call-or-procedure-step",
+      "text": "   gh pr list --state merged --search \"merged:>=${ISSUE_DATE%%T*}\" --json number,title,mergedAt"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:482",
+      "category": "call-or-procedure-step",
+      "text": "   gh issue list --state all --search \"<key terms>\" --json number,title,state"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:491",
+      "category": "call-or-procedure-step",
+      "text": "  gh issue close \"$ISSUE_NUM\" --comment \"Closed via /flow-auto ELI5 review - <reason; cite superseding PR/issue>.\""
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:939",
+      "category": "guidance-or-forbidden-example",
+      "text": "does not reach the squash - but a plain `gh pr merge --squash` can compose it from the"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:945",
+      "category": "call-or-procedure-step",
+      "text": "gh pr view \"$PR_NUMBER\" --json title,body --jq '.title, .body' 2>/dev/null"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1424",
+      "category": "call-or-procedure-step",
+      "text": "   gh pr create --title \"type(scope): Description (${ISSUE_REF})\" --body \"...\""
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1472",
+      "category": "call-or-procedure-step",
+      "text": "     read. That is neither absent nor present; check `gh auth status` and the"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1511",
+      "category": "call-or-procedure-step",
+      "text": "  `gh issue comment <NIT_STORE> --repo <NIT_STORE_REPO> --body \"<one finding>\"`."
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1647",
+      "category": "call-or-procedure-step",
+      "text": "   gh pr list --head \"$BRANCH\" --json number --jq '.[0].number'"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1667",
+      "category": "call-or-procedure-step",
+      "text": "   `gh pr merge --match-head-commit`. Going around the helper to get the pin"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1677",
+      "category": "guidance-or-forbidden-example",
+      "text": "   plain `gh pr merge --delete-branch` fails AFTER the remote squash succeeds"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1694",
+      "category": "guidance-or-forbidden-example",
+      "text": "   this replaced was a plain `gh pr merge --squash`. It skipped every guard"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1718",
+      "category": "guidance-or-forbidden-example",
+      "text": "       echo \"REFUSING: gh-pr-merge.sh is not installed; not merging PR #$PR_NUMBER with a plain 'gh pr merge'.\" >&2"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:1728",
+      "category": "call-or-procedure-step",
+      "text": "     `gh pr merge`, because that is the unguarded path this refusal closes."
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:2025",
+      "category": "call-or-procedure-step",
+      "text": "       ISSUE_STATE=$(gh issue view \"$ISSUE_NUM\" --json state --jq '.state' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:2028",
+      "category": "call-or-procedure-step",
+      "text": "               gh issue close \"$ISSUE_NUM\" --comment \"Closed via /flow-auto - PR #${PR_NUMBER} merged.\""
+    },
+    {
+      "source": "codex/skills/flow-auto/reference.md:2053",
+      "category": "guidance-or-forbidden-example",
+      "text": "Do NOT hand-roll this with `curl`, `gh run list`, or - worst of all - a grep over"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:243",
+      "category": "comment-or-guidance",
+      "text": "#:   Python - an argv list opening with the tool, `[\"gh\", ...]`, or with git"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:252",
+      "category": "comment-or-detector-literal",
+      "text": "#:            without `_BIN`: `\"$GH_BIN\" api` (gh-pr-merge.sh,"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:253",
+      "category": "comment-or-detector-literal",
+      "text": "#:            flow-ci-status.sh), `\"$GH\" issue view` / `\"$GIT\" fetch`"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:256",
+      "category": "comment-or-detector-literal",
+      "text": "#: A bare `(` is deliberately NOT a command position: `\"... (gh issue create)\"`"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:263",
+      "category": "comment-or-guidance",
+      "text": "#: exactly like `run([\"gh\", \"issue\", \"list\"])` inside a docstring simply does"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:272",
+      "category": "comment-or-detector-literal",
+      "text": "#: `echo \"retry; gh issue list\"` no longer matches: the `;` that used to open"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:276",
+      "category": "comment-or-detector-literal",
+      "text": "#: or a variable named for it, with or without `_BIN`: `\"$GH_BIN\" api`"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:277",
+      "category": "comment-or-detector-literal",
+      "text": "#: (gh-pr-merge.sh, flow-ci-status.sh), `\"$GH\" issue view` / `\"$GIT\" fetch`"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:358",
+      "category": "comment-or-detector-literal",
+      "text": "    double-quoted string - `out=\"$(gh issue list)\"` genuinely runs `gh`, and"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py:362",
+      "category": "comment-or-detector-literal",
+      "text": "    function exists to mask - `echo \"retry; gh issue list\"` - which really"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh:280",
+      "category": "guidance-or-forbidden-example",
+      "text": "# IN THE DECLARED CHECKOUT, never the caller's cwd (issue #1262). `gh repo"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh:287",
+      "category": "call-or-procedure-step",
+      "text": "    REPO=\"$(cd \"$CHECK_PATH\" 2>/dev/null && \"$GH_BIN\" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh:315",
+      "category": "call-or-procedure-step",
+      "text": "    default_branch=\"$(\"$GH_BIN\" api \"repos/$REPO\" --jq .default_branch 2>/dev/null)\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh:319",
+      "category": "call-or-procedure-step",
+      "text": "    if ! contexts=\"$(\"$GH_BIN\" api \"repos/$REPO/branches/$default_branch/protection/required_status_checks\" \\\n            --jq '.contexts[]' 2>/dev/null)\"; then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh:609",
+      "category": "call-or-procedure-step",
+      "text": "    \"$GH_BIN\" run list --repo \"$REPO\" --commit \"$SHA\" \\\n        --json status,conclusion,databaseId,url,event 2>/dev/null"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh:647",
+      "category": "call-or-procedure-step",
+      "text": "            done < <(\"$GH_BIN\" run view \"$PIPELINE\" --repo \"$REPO\" --json jobs \\\n                --jq '.jobs[]? | select(.conclusion!=\"success\" and .conclusion!=\"skipped\" and .conclusion!=\"\") | .name' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh:18",
+      "category": "comment-or-guidance",
+      "text": "# It COMPLEMENTS `gh pr list --head <branch>` (an already-shipped branch is the"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh:187",
+      "category": "call-or-procedure-step",
+      "text": "echo \"    2. gh pr list --head <branch>   # already-shipped branch is the other hazard.\" >&2"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-plan-record.py:284",
+      "category": "call-or-procedure-step",
+      "text": "        proc = subprocess.run([\"gh\", \"issue\", \"view\", issue, \"--json\", \"body\", \"--jq\", \".body\"],"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-plan-record.py:483",
+      "category": "call-or-procedure-step",
+      "text": "                upd = subprocess.run([\"gh\", \"issue\", \"view\", issue, \"--json\", \"updatedAt\",\n                                      \"--jq\", \".updatedAt\"], capture_output=True, text=True)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-plan-record.py:1152",
+      "category": "call-or-procedure-step",
+      "text": "            proc = subprocess.run([\"gh\", \"pr\", \"list\", \"--head\", branch, \"--state\", \"open\",\n                                   \"--json\", \"headRefOid\", \"--jq\", \".[0].headRefOid\"],"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-start-resolve.sh:467",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_STATE=$(cd \"$TARGET_REPO\" && \"$GH\" issue view \"$ISSUE_NUM\" --json state --jq .state 2>/dev/null) || true"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-start-resolve.sh:469",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_TITLE=$(cd \"$TARGET_REPO\" && \"$GH\" issue view \"$ISSUE_NUM\" --json title --jq .title 2>/dev/null | tr '\\n\\t' '  ' | sed 's/[[:space:]]*$//') || true"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-start-resolve.sh:474",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_LABELS=$(cd \"$TARGET_REPO\" && \"$GH\" issue view \"$ISSUE_NUM\" --json labels --jq '.labels[].name' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-start-resolve.sh:569",
+      "category": "call-or-procedure-step",
+      "text": "    PR_HEAD=$(\"$GH\" pr list --repo \"$owner_repo\" --head \"$branch\" --state all --json number,state \\\n      --jq '[.[] | select(.state == \"OPEN\" or .state == \"MERGED\")][0] | if . == null then \"none\" else \"\\(.number):\\(.state)\" end' 2>/dev/null) || true"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-start-resolve.sh:572",
+      "category": "call-or-procedure-step",
+      "text": "    PR_HEAD=$(cd \"$TARGET_REPO\" && \"$GH\" pr list --head \"$branch\" --state all --json number,state \\\n      --jq '[.[] | select(.state == \"OPEN\" or .state == \"MERGED\")][0] | if . == null then \"none\" else \"\\(.number):\\(.state)\" end' 2>/dev/null) || true"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/flow-worktree-claim.sh:476",
+      "category": "call-or-procedure-step",
+      "text": "    [ -n \"$ISSUE_NUM\" ] || usage_fail \"claim requires --issue <N>. Every flow run has an issue: the claim, the plan record (docs/flow-runs/issue-<N>.md) and the counter-model receipt all key on it. For residual or issueless work, file one first (gh issue create), then claim with --issue <that number>.\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/friction-log.sh:51",
+      "category": "comment-or-guidance",
+      "text": "#     --signal 'gh issue view 426 required approval' \\\n#     --fix 'Bash(gh issue view:*)' --scope local \\\n#     --run 'flow:auto #426' --step '1/9 Start' --outcome approved"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/friction-log.sh:52",
+      "category": "comment-or-guidance",
+      "text": "#     --fix 'Bash(gh issue view:*)' --scope local \\\n#     --run 'flow:auto #426' --step '1/9 Start' --outcome approved"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:6",
+      "category": "comment-or-guidance",
+      "text": "#   or a legacy sibling dir - `gh pr merge <N> --squash --delete-branch` fails"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:21",
+      "category": "comment-or-guidance",
+      "text": "#   mergeability, so `gh pr view --json mergeable` returns UNKNOWN for a beat and a"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:22",
+      "category": "comment-or-guidance",
+      "text": "#   raw `gh pr merge` fails with \"Pull Request is not mergeable\". That is a purely"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:33",
+      "category": "comment-or-guidance",
+      "text": "#   with nothing conflicting, while a direct `gh pr view` moments earlier still"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:58",
+      "category": "comment-or-guidance",
+      "text": "#   every owner merge otherwise stalls at a manual `gh pr merge --squash --admin`."
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:83",
+      "category": "comment-or-guidance",
+      "text": "#   roughly 4h of wall-clock, every one ending in a manual `gh pr merge --squash`):"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:84",
+      "category": "comment-or-guidance",
+      "text": "#     1. `gh api` prints the ERROR body on stdout WITHOUT applying --jq, so a 404"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:99",
+      "category": "guidance-or-forbidden-example",
+      "text": "#   posture server-side at squash time, so a plain `gh pr merge --squash` cannot"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:115",
+      "category": "comment-or-guidance",
+      "text": "#   * Linked worktree (cwd's `.git` is a FILE): run `gh pr merge --squash` WITHOUT"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:132",
+      "category": "comment-or-guidance",
+      "text": "#           --admin  force `gh pr merge --admin` from the first attempt - the"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:154",
+      "category": "comment-or-guidance",
+      "text": "#                    EVERY `gh pr merge` this helper makes - the first squash,"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:166",
+      "category": "guidance-or-forbidden-example",
+      "text": "#                    helper with a plain `gh pr merge`, and so lost every"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:235",
+      "category": "comment-or-guidance",
+      "text": "#   NOT a boolean trailer - `gh pr merge --squash` composes the squash body"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:461",
+      "category": "comment-or-guidance",
+      "text": "# stderr of the last `gh pr merge` attempt - inspected by is_protection_block."
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:537",
+      "category": "call-or-procedure-step",
+      "text": "    pr_url=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json url --jq '.url' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:540",
+      "category": "call-or-procedure-step",
+      "text": "    echo \"  Next: approve or merge the PR on GitHub: ${pr_url:-<gh pr view $PR_NUMBER --web>}\" >&2"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:549",
+      "category": "call-or-procedure-step",
+      "text": "    decision=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:559",
+      "category": "comment-or-guidance",
+      "text": "# actor for whom `gh pr merge --admin` can override protection (issue #517)."
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:562",
+      "category": "call-or-procedure-step",
+      "text": "    perm=$(\"$GH_BIN\" repo view --json viewerPermission --jq '.viewerPermission' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:586",
+      "category": "call-or-procedure-step",
+      "text": "        mergeable=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json mergeable --jq '.mergeable' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:619",
+      "category": "call-or-procedure-step",
+      "text": "        mergeable=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json mergeable --jq '.mergeable' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:637",
+      "category": "comment-or-guidance",
+      "text": "# `gh api <path> --jq <filter>`, but ONLY a successful response counts as data"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:644",
+      "category": "call-or-procedure-step",
+      "text": "    out=$(\"$GH_BIN\" api \"$path\" --jq \"$filter\" 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:680",
+      "category": "call-or-procedure-step",
+      "text": "    if out=$(_gh_api_jq \"repos/{owner}/{repo}/branches/${PR_BASE_BRANCH}/protection/required_status_checks\" \\\n                        '((.contexts // []) + ((.checks // []) | map(.context))) | unique | .[]'); then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:688",
+      "category": "call-or-procedure-step",
+      "text": "    if out=$(_gh_api_jq \"repos/{owner}/{repo}/rules/branches/${PR_BASE_BRANCH}\" \\\n                        '[.[] | select(.type == \"required_status_checks\")"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:721",
+      "category": "call-or-procedure-step",
+      "text": "    \"$GH_BIN\" pr view \"$PR_NUMBER\" --json statusCheckRollup \\\n        --jq '.statusCheckRollup[] | \"\\(.context // .name)|\\(.state // .conclusion // .status // \"PENDING\")\"' \\\n        2>/dev/null"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:928",
+      "category": "call-or-procedure-step",
+      "text": "    repo_full=$(\"$GH_BIN\" repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1033",
+      "category": "call-or-procedure-step",
+      "text": "    merge_sha=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json mergeCommit --jq '.mergeCommit.oid' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1034",
+      "category": "comment-or-guidance",
+      "text": "    # THE WHOLE FILE LIST, AND PROOF THAT IT IS WHOLE (issue #1262). `gh pr view"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1041",
+      "category": "call-or-procedure-step",
+      "text": "    files=$(\"$GH_BIN\" api \"repos/{owner}/{repo}/pulls/$PR_NUMBER/files\" --paginate \\\n        --jq '.[].filename' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1047",
+      "category": "call-or-procedure-step",
+      "text": "    expected=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json changedFiles --jq '.changedFiles' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1149",
+      "category": "call-or-procedure-step",
+      "text": "    pr_head=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json headRefName,headRefOid \\\n        --jq '.headRefName + \" \" + .headRefOid' 2>/dev/null) || pr_head=\"\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1217",
+      "category": "call-or-procedure-step",
+      "text": "PR_STATE_BEFORE=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json state,number --jq '.state' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1233",
+      "category": "call-or-procedure-step",
+      "text": "PR_BASE_BRANCH=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json baseRefName --jq '.baseRefName' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1248",
+      "category": "call-or-procedure-step",
+      "text": "    pr_head=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json headRefName,headRefOid \\\n        --jq '.headRefName + \" \" + .headRefOid' 2>/dev/null) || pr_head=\"\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1261",
+      "category": "call-or-procedure-step",
+      "text": "    cross=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json isCrossRepository --jq '.isCrossRepository' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1364",
+      "category": "call-or-procedure-step",
+      "text": "    if ! listed=$(\"$GH_BIN\" pr list --state open --base \"$BRANCH\" --json number \\\n        --jq '.[].number' 2>/dev/null); then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1377",
+      "category": "call-or-procedure-step",
+      "text": "    if ! default_branch=$(\"$GH_BIN\" repo view --json defaultBranchRef \\\n        --jq '.defaultBranchRef.name' 2>/dev/null) || \\\n        [[ -z \"$default_branch\" || \"$default_branch\" == \"null\" ]]; then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1388",
+      "category": "call-or-procedure-step",
+      "text": "        if \"$GH_BIN\" pr edit \"$child\" --base \"$default_branch\" >/dev/null 2>&1; then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1432",
+      "category": "call-or-procedure-step",
+      "text": "    commit_out=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json commits \\\n        --jq '.commits[] | (.oid // \"\") + \"\u001f\" + (.messageHeadline // \"\")' 2>/dev/null) || commit_out=\"\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1750",
+      "category": "comment-or-guidance",
+      "text": "# every `gh pr merge`) closes the last instant between that read and the squash."
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1760",
+      "category": "call-or-procedure-step",
+      "text": "    pr_head=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json headRefName,headRefOid \\\n        --jq '.headRefName + \" \" + .headRefOid' 2>/dev/null) || pr_head=\"\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:1954",
+      "category": "call-or-procedure-step",
+      "text": "        \"$GH_BIN\" pr merge \"$PR_NUMBER\" --squash \"$@\" 2>\"$errfile\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:2020",
+      "category": "call-or-procedure-step",
+      "text": "SQUASH_TITLE=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json title --jq '.title' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:2022",
+      "category": "call-or-procedure-step",
+      "text": "    SQUASH_BODY=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json body --jq '.body' 2>/dev/null) || SQUASH_BODY=\"\""
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh:2090",
+      "category": "call-or-procedure-step",
+      "text": "state=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json state --jq '.state' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/hook-permission-census.sh:20",
+      "category": "comment-or-guidance",
+      "text": "#      `gh issue view 482` -> Bash(gh issue view:*), `git fetch ...` ->"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/nit-store-resolve.sh:17",
+      "category": "comment-or-guidance",
+      "text": "# falling back to `gh repo view`."
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/nit-store-resolve.sh:63",
+      "category": "call-or-procedure-step",
+      "text": "        REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/nit-store-resolve.sh:68",
+      "category": "call-or-procedure-step",
+      "text": "    *) unknown \"could not determine the repository (no github origin, and gh repo view failed)\" ;;"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/nit-store-resolve.sh:84",
+      "category": "call-or-procedure-step",
+      "text": "    if ! got=$(gh issue view \"$MAPPED\" --repo \"$REPO\" --json state,title \\\n                 --jq '.state + \"\\t\" + .title' 2>/dev/null); then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/nit-store-resolve.sh:104",
+      "category": "call-or-procedure-step",
+      "text": "if ! listing=$(gh issue list --repo \"$REPO\" --state open --search 'in:title \"Nit Store\"' \\\n                 --limit \"$LIMIT\" --json number,title \\\n                 --jq '\"TOTAL \\(length)\", (.[] | select(.title == \"Nit Store\") | .number)' 2>/dev/null); then"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/worktree-remove.sh:1208",
+      "category": "comment-or-guidance",
+      "text": "# allow both, leaving the gap where it was. `gh pr merge --delete-branch` makes"
+    },
+    {
+      "source": "codex/skills/flow-auto/scripts/worktree-remove.sh:1273",
+      "category": "call-or-procedure-step",
+      "text": "            echo \"  plain 'gh pr merge') has no record and reads as unpushed here. Check the PR\" >&2"
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:61",
+      "category": "call-or-procedure-step",
+      "text": "gh issue view \"$ISSUE_NUM\" --json number,title,state,body,createdAt,labels,closedAt"
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:62",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_DATE=$(gh issue view \"$ISSUE_NUM\" --json createdAt --jq '.createdAt')"
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:107",
+      "category": "call-or-procedure-step",
+      "text": "gh pr list --state merged --search \"merged:>=${ISSUE_DATE%%T*}\" \\\n    --json number,title,mergedAt"
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:111",
+      "category": "call-or-procedure-step",
+      "text": "gh issue list --state all --search \"<key terms from the issue>\" \\\n    --json number,title,state,closedAt"
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:150",
+      "category": "call-or-procedure-step",
+      "text": "  gh issue close \"$ISSUE_NUM\" --comment \"<evidence-based reason; reference the superseding PR/issue>\""
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:270",
+      "category": "call-or-procedure-step",
+      "text": "`git log --since`, `gh pr list`, `gh issue list` - is answered by the remote,"
+    },
+    {
+      "source": "codex/skills/flow-eli5/reference.md:301",
+      "category": "guidance-or-forbidden-example",
+      "text": "- It never writes implementation code; the only mutating action it suggests is `gh issue close` on a `No longer needed` verdict, and that is a recommendation for the reviewer to run."
+    },
+    {
+      "source": "codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md:28",
+      "category": "call-or-procedure-step",
+      "text": "runs. `gh pr merge --delete-branch` then deletes the remote branch and tries"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:502",
+      "category": "call-or-procedure-step",
+      "text": "  if ! gh issue view \"$N\" --json body --jq .body > \"$CUR\"; then"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:508",
+      "category": "call-or-procedure-step",
+      "text": "      gh issue edit \"$N\" --body-file \"$NEW\" || status=$?"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:532",
+      "category": "call-or-procedure-step",
+      "text": "  nothing. (Concretely: `gh issue view N --json body`, check with a line-match"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:533",
+      "category": "call-or-procedure-step",
+      "text": "  for `Blocked by #M`, and on miss `gh issue edit N --body` with the original"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:548",
+      "category": "call-or-procedure-step",
+      "text": "gh issue list --state all --json number,title,body,state --limit 200 > /tmp/<scratch>/wave-issues.json"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:746",
+      "category": "forbidden-example",
+      "text": "`gh issue create` for a residual during an active wave. Record it instead:"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:907",
+      "category": "forbidden-example",
+      "text": "the audit decision but deliberately does not call `gh issue create`; after a"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:925",
+      "category": "call-or-procedure-step",
+      "text": "not remove them, because `gh pr merge --delete-branch` deletes the remote branch"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:1058",
+      "category": "call-or-procedure-step",
+      "text": "  `gh issue list` snapshot each time; re-running it is the whole cost of the"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh:230",
+      "category": "call-or-procedure-step",
+      "text": "    REPO=\"$(\"$GH_BIN\" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)\""
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh:252",
+      "category": "call-or-procedure-step",
+      "text": "gh_pr_json() { # gh_pr_json <json-fields> <jq-filter>"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh:253",
+      "category": "call-or-procedure-step",
+      "text": "    \"$GH_BIN\" pr view \"$PR_NUMBER\" --repo \"$REPO\" --json \"$1\" --jq \"$2\" 2>/dev/null"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh:265",
+      "category": "call-or-procedure-step",
+      "text": "    gh_pr_json statusCheckRollup \\\n        '.statusCheckRollup[]? | \"\\(.context // .name // \"\")|\\(.targetUrl // .detailsUrl // \"\")|\\(.state // .conclusion // .status // \"PENDING\")\"' \\\n    | {"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh:358",
+      "category": "call-or-procedure-step",
+      "text": "WATCH_HEAD=\"$(gh_pr_json headRefOid '.headRefOid')\""
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh:371",
+      "category": "call-or-procedure-step",
+      "text": "    CURRENT_HEAD=\"$(gh_pr_json headRefOid '.headRefOid')\""
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-wave-plan.py:12",
+      "category": "comment-or-detector-literal",
+      "text": "    gh issue list --state all --json number,title,body,state --limit 200"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-wave-plan.py:646",
+      "category": "comment-or-detector-literal",
+      "text": "            \"  input: gh issue list --state all --json number,title,body,state\\n\""
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-worktree-claim.sh:476",
+      "category": "call-or-procedure-step",
+      "text": "    [ -n \"$ISSUE_NUM\" ] || usage_fail \"claim requires --issue <N>. Every flow run has an issue: the claim, the plan record (docs/flow-runs/issue-<N>.md) and the counter-model receipt all key on it. For residual or issueless work, file one first (gh issue create), then claim with --issue <that number>.\""
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh:6",
+      "category": "comment-or-guidance",
+      "text": "# exists gets there. `gh pr merge --delete-branch` deletes the REMOTE branch and"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh:234",
+      "category": "comment-or-guidance",
+      "text": "# Parsed from the remote URL rather than asked of `gh repo view`, so an offline"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh:315",
+      "category": "call-or-procedure-step",
+      "text": "    out=\"$(gh pr list --repo \"$REPO_SLUG\" --head \"$branch\" --state all --limit 20 \\\n             --json state,headRefOid,number \\\n             --jq '.[] | [.state, .headRefOid, (.number|tostring)] | join(\"|\")' 2>/dev/null)\" || rc=$?"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh:363",
+      "category": "comment-or-guidance",
+      "text": "#               the normal state after `gh pr merge --delete-branch`."
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh:314",
+      "category": "comment-or-guidance",
+      "text": "# ISSUE_FS - the ONE field separator for the `gh issue list` records parsed below"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh:369",
+      "category": "call-or-procedure-step",
+      "text": "inventory_raw=\"$(gh issue list \"${GH_REPO_ARGS[@]}\" --state all --limit \"$LIMIT\" \\\n    --json number,title,body --jq \"$INVENTORY_JQ\" 2>&1)\" || inventory_status=$?"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh:493",
+      "category": "call-or-procedure-step",
+      "text": "            ctx_body=\"$(gh issue view \"${FILED_NUM[$tid]}\" \"${GH_REPO_ARGS[@]}\" --json body --jq '.body' 2>&1)\" || ctx_read_status=$?"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh:559",
+      "category": "call-or-procedure-step",
+      "text": "        url=\"$(gh issue create \"${GH_REPO_ARGS[@]}\" --title \"$title\" --body \"$issue_body\" 2>&1)\""
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh:613",
+      "category": "call-or-procedure-step",
+      "text": "    current_body=\"$(gh issue view \"$number\" \"${GH_REPO_ARGS[@]}\" --json body --jq '.body' 2>&1)\" || {"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh:623",
+      "category": "call-or-procedure-step",
+      "text": "    if printf '%s' \"$new_body\" | gh issue edit \"$number\" \"${GH_REPO_ARGS[@]}\" --body-file - > /dev/null 2>&1; then"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/worktree-remove.sh:1208",
+      "category": "comment-or-guidance",
+      "text": "# allow both, leaving the gap where it was. `gh pr merge --delete-branch` makes"
+    },
+    {
+      "source": "codex/skills/flow-wave/scripts/worktree-remove.sh:1273",
+      "category": "call-or-procedure-step",
+      "text": "            echo \"  plain 'gh pr merge') has no record and reads as unpushed here. Check the PR\" >&2"
+    },
+    {
+      "source": "codex/skills/github-issue-create/docs/agents/issue-contract.md:181",
+      "category": "call-or-procedure-step",
+      "text": "from them, and any explicit post-merge `gh issue close`. Changing the final PR body"
+    },
+    {
+      "source": "codex/skills/github-issue-create/reference.md:11",
+      "category": "call-or-procedure-step",
+      "text": "gh auth status"
+    },
+    {
+      "source": "codex/skills/github-issue-create/reference.md:14",
+      "category": "guidance-or-forbidden-example",
+      "text": "If not authenticated, the user needs to run `gh auth login`."
+    },
+    {
+      "source": "codex/skills/github-issue-create/reference.md:83",
+      "category": "call-or-procedure-step",
+      "text": "gh issue create \\\n  --repo cooneycw/claude-power-pack \\\n  --title \"TITLE\" \\\n  --body \"BODY\" \\\n  --label \"LABELS\""
+    },
+    {
+      "source": "codex/skills/github-issue-create/reference.md:100",
+      "category": "optional-browser-outside-lane",
+      "text": "2. Offer to open in browser: `gh issue view NUMBER --web --repo cooneycw/claude-power-pack`"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:170",
+      "category": "call-or-procedure-step",
+      "text": "`github.com/$(gh api user --jq '.login')/$PROJECT_NAME` as the default. Resolve"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:226",
+      "category": "call-or-procedure-step",
+      "text": "complete and continue with the visibility question and `gh repo create`. If the"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:281",
+      "category": "comment-or-guidance",
+      "text": "    # Ask user for name and email, or use gh auth info"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:282",
+      "category": "call-or-procedure-step",
+      "text": "    GH_USER=$(gh api user --jq '.login' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:283",
+      "category": "call-or-procedure-step",
+      "text": "    GH_EMAIL=$(gh api user --jq '.email // empty' 2>/dev/null)"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:306",
+      "category": "call-or-procedure-step",
+      "text": "gh repo create \"$PROJECT_NAME\" $VISIBILITY --source=. --push"
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:309",
+      "category": "call-or-procedure-step",
+      "text": "If `gh repo create` fails (e.g., repo name taken), report the error and suggest alternatives."
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:645",
+      "category": "guidance-or-forbidden-example",
+      "text": "- **gh not authenticated:** Stop at Step 3, suggest `gh auth login`"
+    },
+    {
+      "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh:314",
+      "category": "comment-or-guidance",
+      "text": "# ISSUE_FS - the ONE field separator for the `gh issue list` records parsed below"
+    },
+    {
+      "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh:369",
+      "category": "call-or-procedure-step",
+      "text": "inventory_raw=\"$(gh issue list \"${GH_REPO_ARGS[@]}\" --state all --limit \"$LIMIT\" \\\n    --json number,title,body --jq \"$INVENTORY_JQ\" 2>&1)\" || inventory_status=$?"
+    },
+    {
+      "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh:493",
+      "category": "call-or-procedure-step",
+      "text": "            ctx_body=\"$(gh issue view \"${FILED_NUM[$tid]}\" \"${GH_REPO_ARGS[@]}\" --json body --jq '.body' 2>&1)\" || ctx_read_status=$?"
+    },
+    {
+      "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh:559",
+      "category": "call-or-procedure-step",
+      "text": "        url=\"$(gh issue create \"${GH_REPO_ARGS[@]}\" --title \"$title\" --body \"$issue_body\" 2>&1)\""
+    },
+    {
+      "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh:613",
+      "category": "call-or-procedure-step",
+      "text": "    current_body=\"$(gh issue view \"$number\" \"${GH_REPO_ARGS[@]}\" --json body --jq '.body' 2>&1)\" || {"
+    },
+    {
+      "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh:623",
+      "category": "call-or-procedure-step",
+      "text": "    if printf '%s' \"$new_body\" | gh issue edit \"$number\" \"${GH_REPO_ARGS[@]}\" --body-file - > /dev/null 2>&1; then"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:243",
+      "category": "comment-or-guidance",
+      "text": "#:   Python - an argv list opening with the tool, `[\"gh\", ...]`, or with git"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:252",
+      "category": "comment-or-detector-literal",
+      "text": "#:            without `_BIN`: `\"$GH_BIN\" api` (gh-pr-merge.sh,"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:253",
+      "category": "comment-or-detector-literal",
+      "text": "#:            flow-ci-status.sh), `\"$GH\" issue view` / `\"$GIT\" fetch`"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:256",
+      "category": "comment-or-detector-literal",
+      "text": "#: A bare `(` is deliberately NOT a command position: `\"... (gh issue create)\"`"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:263",
+      "category": "comment-or-guidance",
+      "text": "#: exactly like `run([\"gh\", \"issue\", \"list\"])` inside a docstring simply does"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:272",
+      "category": "comment-or-detector-literal",
+      "text": "#: `echo \"retry; gh issue list\"` no longer matches: the `;` that used to open"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:276",
+      "category": "comment-or-detector-literal",
+      "text": "#: or a variable named for it, with or without `_BIN`: `\"$GH_BIN\" api`"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:277",
+      "category": "comment-or-detector-literal",
+      "text": "#: (gh-pr-merge.sh, flow-ci-status.sh), `\"$GH\" issue view` / `\"$GIT\" fetch`"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:358",
+      "category": "comment-or-detector-literal",
+      "text": "    double-quoted string - `out=\"$(gh issue list)\"` genuinely runs `gh`, and"
+    },
+    {
+      "source": "scripts/codex-skill-sync.py:362",
+      "category": "comment-or-detector-literal",
+      "text": "    function exists to mask - `echo \"retry; gh issue list\"` - which really"
+    },
+    {
+      "source": "scripts/flow-ci-status.sh:280",
+      "category": "guidance-or-forbidden-example",
+      "text": "# IN THE DECLARED CHECKOUT, never the caller's cwd (issue #1262). `gh repo"
+    },
+    {
+      "source": "scripts/flow-ci-status.sh:287",
+      "category": "call-or-procedure-step",
+      "text": "    REPO=\"$(cd \"$CHECK_PATH\" 2>/dev/null && \"$GH_BIN\" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)\""
+    },
+    {
+      "source": "scripts/flow-ci-status.sh:315",
+      "category": "call-or-procedure-step",
+      "text": "    default_branch=\"$(\"$GH_BIN\" api \"repos/$REPO\" --jq .default_branch 2>/dev/null)\""
+    },
+    {
+      "source": "scripts/flow-ci-status.sh:319",
+      "category": "call-or-procedure-step",
+      "text": "    if ! contexts=\"$(\"$GH_BIN\" api \"repos/$REPO/branches/$default_branch/protection/required_status_checks\" \\\n            --jq '.contexts[]' 2>/dev/null)\"; then"
+    },
+    {
+      "source": "scripts/flow-ci-status.sh:609",
+      "category": "call-or-procedure-step",
+      "text": "    \"$GH_BIN\" run list --repo \"$REPO\" --commit \"$SHA\" \\\n        --json status,conclusion,databaseId,url,event 2>/dev/null"
+    },
+    {
+      "source": "scripts/flow-ci-status.sh:647",
+      "category": "call-or-procedure-step",
+      "text": "            done < <(\"$GH_BIN\" run view \"$PIPELINE\" --repo \"$REPO\" --json jobs \\\n                --jq '.jobs[]? | select(.conclusion!=\"success\" and .conclusion!=\"skipped\" and .conclusion!=\"\") | .name' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/flow-live-driver-guard.sh:18",
+      "category": "comment-or-guidance",
+      "text": "# It COMPLEMENTS `gh pr list --head <branch>` (an already-shipped branch is the"
+    },
+    {
+      "source": "scripts/flow-live-driver-guard.sh:187",
+      "category": "call-or-procedure-step",
+      "text": "echo \"    2. gh pr list --head <branch>   # already-shipped branch is the other hazard.\" >&2"
+    },
+    {
+      "source": "scripts/flow-plan-record.py:284",
+      "category": "call-or-procedure-step",
+      "text": "        proc = subprocess.run([\"gh\", \"issue\", \"view\", issue, \"--json\", \"body\", \"--jq\", \".body\"],"
+    },
+    {
+      "source": "scripts/flow-plan-record.py:483",
+      "category": "call-or-procedure-step",
+      "text": "                upd = subprocess.run([\"gh\", \"issue\", \"view\", issue, \"--json\", \"updatedAt\",\n                                      \"--jq\", \".updatedAt\"], capture_output=True, text=True)"
+    },
+    {
+      "source": "scripts/flow-plan-record.py:1152",
+      "category": "call-or-procedure-step",
+      "text": "            proc = subprocess.run([\"gh\", \"pr\", \"list\", \"--head\", branch, \"--state\", \"open\",\n                                   \"--json\", \"headRefOid\", \"--jq\", \".[0].headRefOid\"],"
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:230",
+      "category": "call-or-procedure-step",
+      "text": "    REPO=\"$(\"$GH_BIN\" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)\""
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:252",
+      "category": "call-or-procedure-step",
+      "text": "gh_pr_json() { # gh_pr_json <json-fields> <jq-filter>"
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:253",
+      "category": "call-or-procedure-step",
+      "text": "    \"$GH_BIN\" pr view \"$PR_NUMBER\" --repo \"$REPO\" --json \"$1\" --jq \"$2\" 2>/dev/null"
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:265",
+      "category": "call-or-procedure-step",
+      "text": "    gh_pr_json statusCheckRollup \\\n        '.statusCheckRollup[]? | \"\\(.context // .name // \"\")|\\(.targetUrl // .detailsUrl // \"\")|\\(.state // .conclusion // .status // \"PENDING\")\"' \\\n    | {"
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:358",
+      "category": "call-or-procedure-step",
+      "text": "WATCH_HEAD=\"$(gh_pr_json headRefOid '.headRefOid')\""
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:371",
+      "category": "call-or-procedure-step",
+      "text": "    CURRENT_HEAD=\"$(gh_pr_json headRefOid '.headRefOid')\""
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:467",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_STATE=$(cd \"$TARGET_REPO\" && \"$GH\" issue view \"$ISSUE_NUM\" --json state --jq .state 2>/dev/null) || true"
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:469",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_TITLE=$(cd \"$TARGET_REPO\" && \"$GH\" issue view \"$ISSUE_NUM\" --json title --jq .title 2>/dev/null | tr '\\n\\t' '  ' | sed 's/[[:space:]]*$//') || true"
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:474",
+      "category": "call-or-procedure-step",
+      "text": "ISSUE_LABELS=$(cd \"$TARGET_REPO\" && \"$GH\" issue view \"$ISSUE_NUM\" --json labels --jq '.labels[].name' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:569",
+      "category": "call-or-procedure-step",
+      "text": "    PR_HEAD=$(\"$GH\" pr list --repo \"$owner_repo\" --head \"$branch\" --state all --json number,state \\\n      --jq '[.[] | select(.state == \"OPEN\" or .state == \"MERGED\")][0] | if . == null then \"none\" else \"\\(.number):\\(.state)\" end' 2>/dev/null) || true"
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:572",
+      "category": "call-or-procedure-step",
+      "text": "    PR_HEAD=$(cd \"$TARGET_REPO\" && \"$GH\" pr list --head \"$branch\" --state all --json number,state \\\n      --jq '[.[] | select(.state == \"OPEN\" or .state == \"MERGED\")][0] | if . == null then \"none\" else \"\\(.number):\\(.state)\" end' 2>/dev/null) || true"
+    },
+    {
+      "source": "scripts/flow-wave-plan.py:12",
+      "category": "comment-or-detector-literal",
+      "text": "    gh issue list --state all --json number,title,body,state --limit 200"
+    },
+    {
+      "source": "scripts/flow-wave-plan.py:646",
+      "category": "comment-or-detector-literal",
+      "text": "            \"  input: gh issue list --state all --json number,title,body,state\\n\""
+    },
+    {
+      "source": "scripts/flow-worktree-claim.sh:476",
+      "category": "call-or-procedure-step",
+      "text": "    [ -n \"$ISSUE_NUM\" ] || usage_fail \"claim requires --issue <N>. Every flow run has an issue: the claim, the plan record (docs/flow-runs/issue-<N>.md) and the counter-model receipt all key on it. For residual or issueless work, file one first (gh issue create), then claim with --issue <that number>.\""
+    },
+    {
+      "source": "scripts/flow-worktree-sweep.sh:6",
+      "category": "comment-or-guidance",
+      "text": "# exists gets there. `gh pr merge --delete-branch` deletes the REMOTE branch and"
+    },
+    {
+      "source": "scripts/flow-worktree-sweep.sh:234",
+      "category": "comment-or-guidance",
+      "text": "# Parsed from the remote URL rather than asked of `gh repo view`, so an offline"
+    },
+    {
+      "source": "scripts/flow-worktree-sweep.sh:315",
+      "category": "call-or-procedure-step",
+      "text": "    out=\"$(gh pr list --repo \"$REPO_SLUG\" --head \"$branch\" --state all --limit 20 \\\n             --json state,headRefOid,number \\\n             --jq '.[] | [.state, .headRefOid, (.number|tostring)] | join(\"|\")' 2>/dev/null)\" || rc=$?"
+    },
+    {
+      "source": "scripts/flow-worktree-sweep.sh:363",
+      "category": "comment-or-guidance",
+      "text": "#               the normal state after `gh pr merge --delete-branch`."
+    },
+    {
+      "source": "scripts/friction-log.sh:51",
+      "category": "comment-or-guidance",
+      "text": "#     --signal 'gh issue view 426 required approval' \\\n#     --fix 'Bash(gh issue view:*)' --scope local \\\n#     --run 'flow:auto #426' --step '1/9 Start' --outcome approved"
+    },
+    {
+      "source": "scripts/friction-log.sh:52",
+      "category": "comment-or-guidance",
+      "text": "#     --fix 'Bash(gh issue view:*)' --scope local \\\n#     --run 'flow:auto #426' --step '1/9 Start' --outcome approved"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:6",
+      "category": "comment-or-guidance",
+      "text": "#   or a legacy sibling dir - `gh pr merge <N> --squash --delete-branch` fails"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:21",
+      "category": "comment-or-guidance",
+      "text": "#   mergeability, so `gh pr view --json mergeable` returns UNKNOWN for a beat and a"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:22",
+      "category": "comment-or-guidance",
+      "text": "#   raw `gh pr merge` fails with \"Pull Request is not mergeable\". That is a purely"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:33",
+      "category": "comment-or-guidance",
+      "text": "#   with nothing conflicting, while a direct `gh pr view` moments earlier still"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:58",
+      "category": "comment-or-guidance",
+      "text": "#   every owner merge otherwise stalls at a manual `gh pr merge --squash --admin`."
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:83",
+      "category": "comment-or-guidance",
+      "text": "#   roughly 4h of wall-clock, every one ending in a manual `gh pr merge --squash`):"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:84",
+      "category": "comment-or-guidance",
+      "text": "#     1. `gh api` prints the ERROR body on stdout WITHOUT applying --jq, so a 404"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:99",
+      "category": "guidance-or-forbidden-example",
+      "text": "#   posture server-side at squash time, so a plain `gh pr merge --squash` cannot"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:115",
+      "category": "comment-or-guidance",
+      "text": "#   * Linked worktree (cwd's `.git` is a FILE): run `gh pr merge --squash` WITHOUT"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:132",
+      "category": "comment-or-guidance",
+      "text": "#           --admin  force `gh pr merge --admin` from the first attempt - the"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:154",
+      "category": "comment-or-guidance",
+      "text": "#                    EVERY `gh pr merge` this helper makes - the first squash,"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:166",
+      "category": "guidance-or-forbidden-example",
+      "text": "#                    helper with a plain `gh pr merge`, and so lost every"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:235",
+      "category": "comment-or-guidance",
+      "text": "#   NOT a boolean trailer - `gh pr merge --squash` composes the squash body"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:461",
+      "category": "comment-or-guidance",
+      "text": "# stderr of the last `gh pr merge` attempt - inspected by is_protection_block."
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:537",
+      "category": "call-or-procedure-step",
+      "text": "    pr_url=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json url --jq '.url' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:540",
+      "category": "call-or-procedure-step",
+      "text": "    echo \"  Next: approve or merge the PR on GitHub: ${pr_url:-<gh pr view $PR_NUMBER --web>}\" >&2"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:549",
+      "category": "call-or-procedure-step",
+      "text": "    decision=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:559",
+      "category": "comment-or-guidance",
+      "text": "# actor for whom `gh pr merge --admin` can override protection (issue #517)."
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:562",
+      "category": "call-or-procedure-step",
+      "text": "    perm=$(\"$GH_BIN\" repo view --json viewerPermission --jq '.viewerPermission' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:586",
+      "category": "call-or-procedure-step",
+      "text": "        mergeable=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json mergeable --jq '.mergeable' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:619",
+      "category": "call-or-procedure-step",
+      "text": "        mergeable=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json mergeable --jq '.mergeable' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:637",
+      "category": "comment-or-guidance",
+      "text": "# `gh api <path> --jq <filter>`, but ONLY a successful response counts as data"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:644",
+      "category": "call-or-procedure-step",
+      "text": "    out=$(\"$GH_BIN\" api \"$path\" --jq \"$filter\" 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:680",
+      "category": "call-or-procedure-step",
+      "text": "    if out=$(_gh_api_jq \"repos/{owner}/{repo}/branches/${PR_BASE_BRANCH}/protection/required_status_checks\" \\\n                        '((.contexts // []) + ((.checks // []) | map(.context))) | unique | .[]'); then"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:688",
+      "category": "call-or-procedure-step",
+      "text": "    if out=$(_gh_api_jq \"repos/{owner}/{repo}/rules/branches/${PR_BASE_BRANCH}\" \\\n                        '[.[] | select(.type == \"required_status_checks\")"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:721",
+      "category": "call-or-procedure-step",
+      "text": "    \"$GH_BIN\" pr view \"$PR_NUMBER\" --json statusCheckRollup \\\n        --jq '.statusCheckRollup[] | \"\\(.context // .name)|\\(.state // .conclusion // .status // \"PENDING\")\"' \\\n        2>/dev/null"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:928",
+      "category": "call-or-procedure-step",
+      "text": "    repo_full=$(\"$GH_BIN\" repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1033",
+      "category": "call-or-procedure-step",
+      "text": "    merge_sha=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json mergeCommit --jq '.mergeCommit.oid' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1034",
+      "category": "comment-or-guidance",
+      "text": "    # THE WHOLE FILE LIST, AND PROOF THAT IT IS WHOLE (issue #1262). `gh pr view"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1041",
+      "category": "call-or-procedure-step",
+      "text": "    files=$(\"$GH_BIN\" api \"repos/{owner}/{repo}/pulls/$PR_NUMBER/files\" --paginate \\\n        --jq '.[].filename' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1047",
+      "category": "call-or-procedure-step",
+      "text": "    expected=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json changedFiles --jq '.changedFiles' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1149",
+      "category": "call-or-procedure-step",
+      "text": "    pr_head=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json headRefName,headRefOid \\\n        --jq '.headRefName + \" \" + .headRefOid' 2>/dev/null) || pr_head=\"\""
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1217",
+      "category": "call-or-procedure-step",
+      "text": "PR_STATE_BEFORE=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json state,number --jq '.state' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1233",
+      "category": "call-or-procedure-step",
+      "text": "PR_BASE_BRANCH=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json baseRefName --jq '.baseRefName' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1248",
+      "category": "call-or-procedure-step",
+      "text": "    pr_head=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json headRefName,headRefOid \\\n        --jq '.headRefName + \" \" + .headRefOid' 2>/dev/null) || pr_head=\"\""
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1261",
+      "category": "call-or-procedure-step",
+      "text": "    cross=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json isCrossRepository --jq '.isCrossRepository' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1364",
+      "category": "call-or-procedure-step",
+      "text": "    if ! listed=$(\"$GH_BIN\" pr list --state open --base \"$BRANCH\" --json number \\\n        --jq '.[].number' 2>/dev/null); then"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1377",
+      "category": "call-or-procedure-step",
+      "text": "    if ! default_branch=$(\"$GH_BIN\" repo view --json defaultBranchRef \\\n        --jq '.defaultBranchRef.name' 2>/dev/null) || \\\n        [[ -z \"$default_branch\" || \"$default_branch\" == \"null\" ]]; then"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1388",
+      "category": "call-or-procedure-step",
+      "text": "        if \"$GH_BIN\" pr edit \"$child\" --base \"$default_branch\" >/dev/null 2>&1; then"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1432",
+      "category": "call-or-procedure-step",
+      "text": "    commit_out=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json commits \\\n        --jq '.commits[] | (.oid // \"\") + \"\u001f\" + (.messageHeadline // \"\")' 2>/dev/null) || commit_out=\"\""
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1750",
+      "category": "comment-or-guidance",
+      "text": "# every `gh pr merge`) closes the last instant between that read and the squash."
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1760",
+      "category": "call-or-procedure-step",
+      "text": "    pr_head=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json headRefName,headRefOid \\\n        --jq '.headRefName + \" \" + .headRefOid' 2>/dev/null) || pr_head=\"\""
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1954",
+      "category": "call-or-procedure-step",
+      "text": "        \"$GH_BIN\" pr merge \"$PR_NUMBER\" --squash \"$@\" 2>\"$errfile\""
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:2020",
+      "category": "call-or-procedure-step",
+      "text": "SQUASH_TITLE=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json title --jq '.title' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:2022",
+      "category": "call-or-procedure-step",
+      "text": "    SQUASH_BODY=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json body --jq '.body' 2>/dev/null) || SQUASH_BODY=\"\""
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:2090",
+      "category": "call-or-procedure-step",
+      "text": "state=$(\"$GH_BIN\" pr view \"$PR_NUMBER\" --json state --jq '.state' 2>/dev/null)"
+    },
+    {
+      "source": "scripts/hook-permission-census.sh:20",
+      "category": "comment-or-guidance",
+      "text": "#      `gh issue view 482` -> Bash(gh issue view:*), `git fetch ...` ->"
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:17",
+      "category": "comment-or-guidance",
+      "text": "# falling back to `gh repo view`."
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:63",
+      "category": "call-or-procedure-step",
+      "text": "        REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:68",
+      "category": "call-or-procedure-step",
+      "text": "    *) unknown \"could not determine the repository (no github origin, and gh repo view failed)\" ;;"
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:84",
+      "category": "call-or-procedure-step",
+      "text": "    if ! got=$(gh issue view \"$MAPPED\" --repo \"$REPO\" --json state,title \\\n                 --jq '.state + \"\\t\" + .title' 2>/dev/null); then"
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:104",
+      "category": "call-or-procedure-step",
+      "text": "if ! listing=$(gh issue list --repo \"$REPO\" --state open --search 'in:title \"Nit Store\"' \\\n                 --limit \"$LIMIT\" --json number,title \\\n                 --jq '\"TOTAL \\(length)\", (.[] | select(.title == \"Nit Store\") | .number)' 2>/dev/null); then"
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:314",
+      "category": "comment-or-guidance",
+      "text": "# ISSUE_FS - the ONE field separator for the `gh issue list` records parsed below"
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:369",
+      "category": "call-or-procedure-step",
+      "text": "inventory_raw=\"$(gh issue list \"${GH_REPO_ARGS[@]}\" --state all --limit \"$LIMIT\" \\\n    --json number,title,body --jq \"$INVENTORY_JQ\" 2>&1)\" || inventory_status=$?"
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:493",
+      "category": "call-or-procedure-step",
+      "text": "            ctx_body=\"$(gh issue view \"${FILED_NUM[$tid]}\" \"${GH_REPO_ARGS[@]}\" --json body --jq '.body' 2>&1)\" || ctx_read_status=$?"
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:559",
+      "category": "call-or-procedure-step",
+      "text": "        url=\"$(gh issue create \"${GH_REPO_ARGS[@]}\" --title \"$title\" --body \"$issue_body\" 2>&1)\""
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:613",
+      "category": "call-or-procedure-step",
+      "text": "    current_body=\"$(gh issue view \"$number\" \"${GH_REPO_ARGS[@]}\" --json body --jq '.body' 2>&1)\" || {"
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:623",
+      "category": "call-or-procedure-step",
+      "text": "    if printf '%s' \"$new_body\" | gh issue edit \"$number\" \"${GH_REPO_ARGS[@]}\" --body-file - > /dev/null 2>&1; then"
+    },
+    {
+      "source": "scripts/worktree-remove.sh:1208",
+      "category": "comment-or-guidance",
+      "text": "# allow both, leaving the gap where it was. `gh pr merge --delete-branch` makes"
+    },
+    {
+      "source": "scripts/worktree-remove.sh:1273",
+      "category": "call-or-procedure-step",
+      "text": "            echo \"  plain 'gh pr merge') has no record and reads as unpushed here. Check the PR\" >&2"
+    }
+  ],
+  "extension_cases": [
+    {
+      "source": "codex/skills/project-init/reference.md:170",
+      "argv": [
+        "api",
+        "user",
+        "--jq",
+        ".login"
+      ]
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:282",
+      "argv": [
+        "api",
+        "user",
+        "--jq",
+        ".login"
+      ]
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:283",
+      "argv": [
+        "api",
+        "user",
+        "--jq",
+        ".email // empty"
+      ]
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:306",
+      "argv": [
+        "repo",
+        "create",
+        "widget",
+        "--private",
+        "--source=.",
+        "--push"
+      ],
+      "note": "VISIBILITY is an explicit user choice. Fixture transport only; configure origin and push must actually occur."
+    },
+    {
+      "source": "codex/skills/project-init/reference.md:306",
+      "argv": [
+        "repo",
+        "create",
+        "widget",
+        "--public",
+        "--source=.",
+        "--push"
+      ],
+      "note": "VISIBILITY is an explicit user choice. Fixture transport only; configure origin and push must actually occur."
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:369",
+      "argv": [
+        "issue",
+        "list",
+        "--repo",
+        "fixture/widget",
+        "--state",
+        "all",
+        "--limit",
+        "1000",
+        "--json",
+        "number,title,body",
+        "--jq",
+        "\n.[] |\n  (.body // \"\") as $b |\n  ($b | capture(\"<!--\\\\s*(?<m>speckit-task:v1:[^>]*?)\\\\s*-->\") // {m:\"\"} | .m) as $marker |\n  ($b | capture(\"Auto-created from (?<p>.+?) \\\\(T[0-9]{3}\\\\) by CPP speckit-tasks-to-issues\") // {p:\"\"} | .p) as $prov |\n  ((.title // \"\") | capture(\"(^|[^A-Za-z0-9])(?<t>T[0-9]{3})([^0-9]|$)\") // {t:\"\"} | .t) as $ltid |\n  ([$b | scan(\"(?im)^\\\\s*[-*]?\\\\s*blocked by[^#\\\\n]*(#[0-9]+)\") | .[0]] | join(\",\")) as $refs |\n  \"\\(.number)\\u001f\\($marker)\\u001f\\($prov)\\u001f\\($ltid)\\u001f\\($refs)\"\n"
+      ],
+      "note": "GH_REPO_ARGS is either absent or --repo OWNER/NAME; LIMIT is caller-configurable."
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:493",
+      "argv": [
+        "issue",
+        "view",
+        "1",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "body",
+        "--jq",
+        ".body"
+      ]
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:613",
+      "argv": [
+        "issue",
+        "view",
+        "1",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "body",
+        "--jq",
+        ".body"
+      ]
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:559",
+      "argv": [
+        "issue",
+        "create",
+        "--repo",
+        "fixture/widget",
+        "--title",
+        "T001: fixture task",
+        "--body",
+        "fixture task body"
+      ]
+    },
+    {
+      "source": "scripts/speckit-tasks-to-issues.sh:623",
+      "argv": [
+        "issue",
+        "edit",
+        "1",
+        "--repo",
+        "fixture/widget",
+        "--body-file",
+        "-"
+      ],
+      "note": "stdin bytes, not a literal body named dash"
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:502",
+      "argv": [
+        "issue",
+        "view",
+        "1",
+        "--json",
+        "body",
+        "--jq",
+        ".body"
+      ]
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:508",
+      "argv": [
+        "issue",
+        "edit",
+        "1",
+        "--body-file",
+        "/tmp/fixture-body.md"
+      ]
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:533",
+      "argv": [
+        "issue",
+        "edit",
+        "1",
+        "--body",
+        "original body\n\nBlocked by #2"
+      ],
+      "note": "Prose explicitly prescribes this repair variant."
+    },
+    {
+      "source": "codex/skills/flow-wave/reference.md:548",
+      "argv": [
+        "issue",
+        "list",
+        "--state",
+        "all",
+        "--json",
+        "number,title,body,state",
+        "--limit",
+        "200"
+      ]
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:230",
+      "argv": [
+        "repo",
+        "view",
+        "--json",
+        "nameWithOwner",
+        "--jq",
+        ".nameWithOwner"
+      ]
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:265",
+      "argv": [
+        "pr",
+        "view",
+        "4",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "statusCheckRollup",
+        "--jq",
+        ".statusCheckRollup[]? | \"\\(.context // .name // \"\")|\\(.targetUrl // .detailsUrl // \"\")|\\(.state // .conclusion // .status // \"PENDING\")\""
+      ],
+      "note": "Expanded gh_pr_json helper at line 253."
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:358",
+      "argv": [
+        "pr",
+        "view",
+        "4",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "headRefOid",
+        "--jq",
+        ".headRefOid"
+      ]
+    },
+    {
+      "source": "scripts/flow-pr-watch.sh:371",
+      "argv": [
+        "pr",
+        "view",
+        "4",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "headRefOid",
+        "--jq",
+        ".headRefOid"
+      ]
+    },
+    {
+      "source": "scripts/flow-worktree-sweep.sh:315",
+      "argv": [
+        "pr",
+        "list",
+        "--repo",
+        "fixture/widget",
+        "--head",
+        "issue-1-fixture",
+        "--state",
+        "all",
+        "--limit",
+        "20",
+        "--json",
+        "state,headRefOid,number",
+        "--jq",
+        ".[] | [.state, .headRefOid, (.number|tostring)] | join(\"|\")"
+      ]
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:84",
+      "argv": [
+        "issue",
+        "view",
+        "1",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "state,title",
+        "--jq",
+        ".state + \"\\t\" + .title"
+      ]
+    },
+    {
+      "source": "scripts/nit-store-resolve.sh:104",
+      "argv": [
+        "issue",
+        "list",
+        "--repo",
+        "fixture/widget",
+        "--state",
+        "open",
+        "--search",
+        "in:title \"Nit Store\"",
+        "--limit",
+        "200",
+        "--json",
+        "number,title",
+        "--jq",
+        "\"TOTAL \\(length)\", (.[] | select(.title == \"Nit Store\") | .number)"
+      ]
+    },
+    {
+      "source": "scripts/gh-pr-merge.sh:1954",
+      "argv": [
+        "pr",
+        "merge",
+        "4",
+        "--squash",
+        "--match-head-commit",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--subject",
+        "fix: fixture (#1)",
+        "--body",
+        "fixture evidence"
+      ],
+      "note": "Forwarded flags are constructed by the guarded helper; stale expected head must refuse without mutation."
+    },
+    {
+      "source": "codex/skills/github-issue-create/reference.md:83",
+      "argv": [
+        "issue",
+        "create",
+        "--repo",
+        "fixture/widget",
+        "--title",
+        "fixture finding",
+        "--body",
+        "fixture evidence",
+        "--label",
+        "bug"
+      ]
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:474",
+      "argv": [
+        "issue",
+        "view",
+        "1",
+        "--json",
+        "labels",
+        "--jq",
+        ".labels[].name"
+      ]
+    },
+    {
+      "source": "scripts/flow-plan-record.py:1152",
+      "argv": [
+        "pr",
+        "list",
+        "--head",
+        "issue-1-fixture",
+        "--state",
+        "open",
+        "--json",
+        "headRefOid",
+        "--jq",
+        ".[0].headRefOid"
+      ]
+    }
+  ],
+  "issue_required_capabilities": [
+    {
+      "source": "skillc#636",
+      "argv": [
+        "label",
+        "list",
+        "--repo",
+        "fixture/widget",
+        "--json",
+        "name,color,description",
+        "--limit",
+        "100"
+      ]
+    },
+    {
+      "source": "skillc#636",
+      "argv": [
+        "label",
+        "create",
+        "bug",
+        "--repo",
+        "fixture/widget",
+        "--color",
+        "d73a4a",
+        "--description",
+        "Fixture bug"
+      ]
+    }
+  ],
+  "negative_controls": [
+    {
+      "argv": [
+        "repo",
+        "create",
+        "other-repository",
+        "--private",
+        "--source=.",
+        "--push"
+      ],
+      "verdict": "refused"
+    },
+    {
+      "argv": [
+        "issue",
+        "create",
+        "--title",
+        "fixture",
+        "--unknown-option"
+      ],
+      "verdict": "unsupported"
+    },
+    {
+      "argv": [
+        "release",
+        "create",
+        "v1"
+      ],
+      "verdict": "unsupported"
+    },
+    {
+      "argv": [
+        "issue",
+        "list",
+        "--jq",
+        ".[].unreviewed_field"
+      ],
+      "verdict": "unsupported"
+    }
+  ]
+}
