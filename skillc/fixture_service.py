@@ -1259,7 +1259,8 @@ class FixtureService:
             value: Any = {"login": SUBJECT_LOGIN, "email": "subject@fixture.invalid"}
         elif path == base:
             value = {"default_branch": self._default, "full_name": self.repository,
-                          "name": self.repository.split("/")[1], "private": True}
+                     "name": self.repository.split("/")[1],
+                     "private": self._state.get("repository", {}).get("visibility", "private") == "private"}
         elif branch_tail:
             body = {"message": "Branch not protected", "status": "404"}
             raise _GhError("simulated-absent", "gh: Branch not protected (HTTP 404)\n",

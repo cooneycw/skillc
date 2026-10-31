@@ -113,7 +113,8 @@ def test_unknown_flags_and_operations_are_recorded(wave: Harness, argv: list[str
     assert record.events[-1]['state_before'] == record.events[-1]['state_after']
 
 
-def test_pending_repository_create_pushes_real_source_and_records_observed_head(tmp_path: Path) -> None:
+@pytest.mark.parametrize("visibility", ["private", "public"])
+def test_pending_repository_create_pushes_real_source_and_records_observed_head(tmp_path: Path, visibility: str) -> None:
     bare = tmp_path / 'remote.git'
     bare.mkdir()
     _git(bare, 'init', '--bare', '-q')
@@ -140,17 +141,19 @@ def test_pending_repository_create_pushes_real_source_and_records_observed_head(
             world = object.__new__(World)
             world.work = source
             h = Harness(world, service, sock)
-            wrong = h.shim('repo', 'create', 'other', '--private', '--source=.', '--push')
+            wrong = h.shim('repo', 'create', 'other', '--' + visibility, '--source=.', '--push')
             assert wrong.returncode != 0
             assert service._remote.resolve('refs/heads/main') is None
-            made = h.shim('repo', 'create', 'widget', '--private', '--source=.', '--push')
+            made = h.shim('repo', 'create', 'widget', '--' + visibility, '--source=.', '--push')
             assert made.returncode == 0, made.stderr
             assert _git(source, 'config', '--get', 'remote.origin.url') == 'https://github.com/fixture/widget.git'
             assert _git(source, 'remote', 'get-url', 'origin') == str(bare)
             assert _git(source, 'rev-parse', '--abbrev-ref', '@{upstream}') == 'origin/main'
             assert service._remote.resolve('refs/heads/main') == head
+            metadata = h.shim('api', 'repos/fixture/widget')
+            assert json.loads(metadata.stdout)['private'] is (visibility == 'private')
             _git(source, 'fetch', 'origin')  # GIT_ALLOW_PROTOCOL=file proves the rewrite is used
-            duplicate = h.shim('repo', 'create', 'widget', '--private', '--source=.', '--push')
+            duplicate = h.shim('repo', 'create', 'widget', '--' + visibility, '--source=.', '--push')
             assert duplicate.returncode != 0
         finally:
             channel.stop_and_finalize()
@@ -312,3 +315,31 @@ def test_project_creation_then_pinned_conversion_uses_fixture_transport(pending:
     # No manual origin substitution between the actual project-init operations.
     _run_pinned_converter(pending, tmp_path, 1)
     assert pending.service.finalize('attempt-1').remote_integrity == 'SATISFIED'
+
+
+@pytest.mark.parametrize('flags', [[], ['--private', '--public'], ['--private']])
+def test_creation_missing_or_ambiguous_required_flags_has_no_effect(pending: Harness, flags: list[str]) -> None:
+    # Last case deliberately omits --push. Other cases include it.
+    argv = ['repo', 'create', 'widget', '--source=.', *flags]
+    if flags != ['--private']:
+        argv.append('--push')
+    assert pending.shim(*argv).returncode != 0
+    record = pending.service.finalize('attempt-1')
+    assert record.events[-1]['reason'] == 'usage'
+    assert record.events[-1]['state_before'] == record.events[-1]['state_after']
+    assert not record.final_state['repository']['exists']
+    assert record.remote_integrity == 'SATISFIED'
+
+
+def test_duplicate_label_and_unreadable_edit_are_atomic(wave: Harness) -> None:
+    assert wave.shim('label', 'create', 'Bug', '--color', 'abcdef').returncode == 0
+    assert wave.shim('label', 'create', 'bug', '--color', '123456').returncode != 0
+    bad_edit = wave.shim('issue', 'edit', '1', '--title', 'changed', '--body-file', 'missing-body.txt')
+    assert bad_edit.returncode != 0
+    view = wave.shim('issue', 'view', '1', '--json', 'title')
+    assert json.loads(view.stdout)['title'] == 'Widget crashes on empty input'
+    record = wave.service.finalize('attempt-1')
+    assert record.events[1]['reason'] == 'duplicate-create'
+    assert record.events[2]['reason'] == 'usage'
+    assert all(e['state_before'] == e['state_after'] for e in record.events[1:3])
+    assert record.final_state['labels']['bug']['color'] == 'abcdef'
