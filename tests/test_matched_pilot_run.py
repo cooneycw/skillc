@@ -23,7 +23,7 @@ import pytest
 from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK
 
-from skillc import cli, trial
+from skillc import cli, trial, trial_bootstrap
 from skillc import collection_conformance as cc
 from skillc import docker_backend as d
 from skillc import matched_pilot as mp
@@ -546,6 +546,15 @@ def _measure_client(monkeypatch: pytest.MonkeyPatch, version: str | None, reason
                         lambda *a, **k: trial_bootstrap.ClientProbe(version, reason))
 
 
+def _historical_recipe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate the requested guard using the historical declaration's recipe.
+
+    These tests simulate the old image/client rather than editing a spent
+    declaration when the current native recipe is deliberately upgraded.
+    """
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: mp.load_declaration().client_version)
+
+
 @pytest.mark.parametrize("measured", ["0.0.1", None])
 def test_548_pilot_run_refuses_an_image_whose_client_is_not_the_declared_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, measured: str | None,
@@ -556,6 +565,7 @@ def test_548_pilot_run_refuses_an_image_whose_client_is_not_the_declared_one(
     from skillc import demo
 
     declaration = mp.load_declaration()
+    _historical_recipe(monkeypatch)
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: declaration.image_digest)
     _measure_client(monkeypatch, measured, "measured" if measured else "`codex --version` exited 125")
     monkeypatch.setattr(cc, "acquire_collection", lambda *a: pytest.fail("acquisition before the client probe"))
@@ -566,11 +576,12 @@ def test_548_pilot_run_refuses_an_image_whose_client_is_not_the_declared_one(
 
 
 def test_pilot_run_refuses_an_image_other_than_the_declared_one(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Review finding: any resolvable image used to pass. The fake docker
     resolves every image to a digest the manifest does not declare."""
     (tmp_path / "ds").mkdir()
+    _historical_recipe(monkeypatch)
     assert cli.cmd_pilot_run(_pilot_run_args(tmp_path)) == 2
     assert "refusing a run on an image other than the declared one" in capsys.readouterr().err
     assert not (tmp_path / "private").exists()  # refused before any run directory was made
@@ -584,6 +595,7 @@ def test_pilot_run_accepts_the_declared_image_and_proceeds(
     from skillc import demo
 
     declared = mp.load_declaration().image_digest
+    _historical_recipe(monkeypatch)
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: declared)
     _measure_client(monkeypatch, mp.load_declaration().client_version)
 
@@ -1113,6 +1125,7 @@ def test_cli_source_modes_reach_the_pilot_attempt_before_discard(
 
     from skillc import demo
 
+    _historical_recipe(monkeypatch)
     acquired = _mode_collection(tmp_path)
     acquired = dataclasses.replace(acquired, subject=dataclasses.replace(
         acquired.subject, revision=DECLARED.subject_revision))

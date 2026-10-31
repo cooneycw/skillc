@@ -40,7 +40,7 @@ FROM node:22-bookworm-slim AS base
 # '@latest'. docker/trial/check_pins.py fails the check when they drift
 # apart, without needing Docker to run.
 ARG CLAUDE_CODE_VERSION=2.1.283
-ARG CODEX_VERSION=0.157.1
+ARG CODEX_VERSION=0.165.0
 
 # apt mirrors fail transiently (#10 lesson D15). Retry a bounded number of
 # times before giving up, so CI turns red for a real build problem, not a

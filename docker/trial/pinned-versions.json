@@ -8,9 +8,9 @@
   },
   "codex": {
     "package": "@openai/codex",
-    "version": "0.157.1",
-    "pinned_on": "2026-09-26",
-    "verified": "resolved against registry.npmjs.org/@openai/codex/0.157.1"
+    "version": "0.165.0",
+    "pinned_on": "2026-10-31",
+    "verified": "resolved against registry.npmjs.org/@openai/codex/0.165.0; protocol schema generated offline for issue #637"
   },
   "uv": {
     "package": "uv",

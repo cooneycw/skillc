@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from skillc import codex_goal, trial_bootstrap
 from skillc.docker_backend import probe_daemon
 
 DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker" / "trial"
@@ -65,6 +66,18 @@ def built_image():
     )
     assert build.returncode == 0, f"image build failed:\n{build.stdout}\n{build.stderr}"
     try:
+        # A recipe pin does not measure the binary the built image contains.
+        # Resolve once and invoke #548's existing no-network image-ID probe.
+        identity = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", TEST_TAG],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert identity.returncode == 0, identity.stderr
+        image_id = identity.stdout.strip()
+        assert image_id.startswith("sha256:") and len(image_id) == 71, image_id
+        measured = trial_bootstrap.probe_image_cli_version(["docker"], image_id, "codex")
+        assert measured.version == codex_goal.CLIENT_VERSION, measured.reason
+        assert measured.version == trial_bootstrap.pinned_cli_version("codex")
         yield TEST_TAG
     finally:
         subprocess.run(["docker", "rmi", "-f", TEST_TAG], capture_output=True, check=False)

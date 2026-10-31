@@ -274,13 +274,13 @@ def check_frozen(manifest: Manifest, root: Path) -> list[str]:
     if pinned.get("revision") != subject["revision"]:
         problems.append(f"subject profile {subject['profile']}: revision {pinned.get('revision')} != frozen")
     client = frozen["client"]
-    pinned_cli = json.loads((root / "docker" / "trial" / "pinned-versions.json").read_text(encoding="utf-8"))
     if client.get("name") != "codex":
         problems.append(f"client {client.get('name')!r}: the campaign runs only the codex surface")
-    for source, version in (("subject pin", pinned.get("client", {}).get("version")),
-                            ("trial image pin", pinned_cli.get("codex", {}).get("version"))):
-        if client.get("version") != version:
-            problems.append(f"client version {client.get('version')!r} != {source} {version!r}")
+    # The executed client is the scripted actor/fake client bound by the
+    # harness digest below, not today's native image-recipe CLI (#548, #637).
+    version = pinned.get("client", {}).get("version")
+    if client.get("version") != version:
+        problems.append(f"client version {client.get('version')!r} != subject pin {version!r}")
     policy = json.loads((root / "skillc" / "runtime-policy.json").read_text(encoding="utf-8"))
     runtime = frozen.get("runtime")
     if runtime_problems := _runtime_problems(runtime):

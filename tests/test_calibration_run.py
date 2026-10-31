@@ -578,11 +578,17 @@ def test_548_malformed_legacy_tags_are_refused_by_existing_approval_before_resol
 
 
 def test_cli_refuses_an_image_other_than_the_declared_one(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The COMMITTED declaration names the real trial image's digest; the fake
     docker resolves its declared tag to another ID. Refused before any run directory."""
     private = tmp_path / "private"
+    from skillc import trial_bootstrap
+
+    # This guard-isolation test models the historical declared client, not
+    # the checkout's newer image recipe. Preserve the frozen declaration.
+    declaration = calibration.load_declaration(MANIFEST)
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: cr.declared_client(declaration)[1])
     tag = cr._shared_str(calibration.load_declaration(MANIFEST), "image", "tag")
     code = cli.main(["calibration-run", str(MANIFEST), "--private-dir", str(private), "--image", tag,
                      "--docker-bin", " ".join(_docker_bin(tmp_path / "docker-state"))])
@@ -597,7 +603,17 @@ def test_cli_refuses_a_subject_other_than_the_declared_one(
     """The image matches; the acquired subject (`test/test` at `v1`) is not
     the declared `claude-power-pack` revision. Refused before any attempt."""
     path = tmp_path / "declaration.json"
-    path.write_text(json.dumps(_declaration_data()), encoding="utf-8")
+    data = _declaration_data()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    from skillc import trial_bootstrap
+
+    # Match the historical fake image/client so this test reaches its
+    # subject guard, independently of deliberate checkout pin upgrades.
+    version = cr.declared_client(calibration.parse_declaration(data))[1]
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: version)
+    docker_state = tmp_path / "docker-state"
+    docker_state.mkdir()
+    (docker_state / ".client-version").write_text(version, encoding="utf-8")
     treatment_source = tmp_path / "treatment"
     treatment_source.mkdir()
     _treatment(treatment_source, monkeypatch)  # installs the fake subject loader
