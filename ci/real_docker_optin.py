@@ -102,6 +102,9 @@ def execute(work: Path, report: Path, policy: OptIn) -> int:
         owned_children()  # Unreadable ownership refuses before any launch.
         report.unlink(missing_ok=True)
         env = dict(os.environ)
+        # This helper runs with PYTHONPATH=$INSTALLED_ROOT for its own `ci`
+        # imports; pytest must import the checkout's skillc, not the pin's (#654).
+        env.pop("PYTHONPATH", None)
         env[policy.env[0]] = policy.env[1]
         env["SKILLC_REAL_DOCKER_RUN_LOCK_HELD"] = "1"
         for key in ("SKILLC_LIVE_TEST_BREAK", "SKILLC_GATE_WITNESS_LIVE_BREAK", "SKILLC_GATE_SHIM_LIVE_BREAK",

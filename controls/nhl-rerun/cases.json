@@ -1,0 +1,7 @@
+[
+  {"mode": "reference", "scenario": "all", "expected": "PASS"},
+  {"mode": "strict", "scenario": "drift", "expected": "FAIL"},
+  {"mode": "drop-fields", "scenario": "drift", "expected": "FAIL"},
+  {"mode": "never-discrepancy", "scenario": "F1-F8", "expected": "FAIL"},
+  {"mode": "alternate-date", "scenario": "clean", "expected": "PASS"}
+]
