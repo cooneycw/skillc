@@ -71,8 +71,10 @@ class Blob:
 
 @dataclass(frozen=True)
 class PokeCount:
+    """A #622 wake-report poke_counts row; attempts, never acknowledgements."""
+
     role: str
-    session_id: str
+    session_id: str | None
     pokes: int | None
 
 

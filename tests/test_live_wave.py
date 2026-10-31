@@ -258,3 +258,21 @@ def test_grader_unavailability_retains_planned_wave() -> None:
 
     result = lw.report([plan], {plan.wave_id: evidence}, unavailable)
     assert result["primary"]["unknown"] == result["primary"]["planned"] == 1
+
+
+def test_agreed_poke_producer_nullable_session_row_is_unobserved() -> None:
+    plan, evidence = fixture([{"path": ["roles", 1, "pokes", "session_id"], "value": None}])
+    result = lw.verdict(plan, evidence, grade)
+    assert result["status"] == "UNKNOWN"
+    assert result["roles"]["worker-a"]["pokes"] is None
+
+
+@pytest.mark.parametrize("attempts", [0, 7])
+def test_poke_attempt_count_never_substitutes_for_protocol_completion(attempts: int) -> None:
+    case = next(c for c in CASES if c["name"] == "unfinished-integration")
+    plan, evidence = fixture([*case["patches"],
+                             {"path": ["roles", 0, "pokes", "pokes"], "value": attempts}])
+    result = lw.verdict(plan, evidence, grade)
+    assert result["status"] == "FAIL"
+    assert result["roles"]["orchestrator"]["pokes"] == attempts
+    assert "orchestrator:unfinished-role" in result["failures"]

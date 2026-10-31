@@ -84,10 +84,14 @@ null, never invented zeroes. Aggregate tokens are present only when every role
 has an observation. Wave wall time includes the completion boundary. Timeout and
 abandonment are reported separately from delivery and infrastructure reasons.
 
-The proposed #622 poke seam is `PokeCount(role, session_id, pokes)`, where
-`pokes` is a nonnegative controller count or null. Missing or mismatched required
-poke capture is UNKNOWN. This seam is fixture-backed until the #622 producer
-interface is agreed; it does not claim that live integration has run.
+The agreed #622 seam is `wake-report.json['poke_counts']`, one
+`PokeCount(role, session_id, pokes)` row per declared role. `session_id` is a
+string or null; `pokes` is a nonnegative count or null. It counts controller-issued
+poke **attempts**, including unconfirmed or suppressed transport, not receipt or
+acknowledgement. Missing or mismatched required poke capture is UNKNOWN; a count
+never substitutes for observed protocol completion. The consumer accepts the
+rows through the typed seam. Integration with the producer remains fixture-only;
+there is no claim that a live integration has run.
 
 Optional #623 handoff timings and #619 clutter count stay null when unobserved;
 their absence does not block PASS. They are separate metrics and provide no
