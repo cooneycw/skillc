@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
@@ -238,7 +240,7 @@ def test_partial_prepare_failure_still_retires_all_allocated_resources(runtime: 
 
 @pytest.mark.parametrize("hold_remote", [False, True], ids=["intact", "remote-refuses-removal"])
 def test_actual_docker_backend_role_lifecycle_through_fake_cli(
-    tmp_path: Path, monkeypatch: Any, hold_remote: bool,
+    tmp_path: Path, monkeypatch: Any, hold_remote: bool, trigger_directory: Path,
 ) -> None:
     """Use real backend prepare/execute/export/destroy, with trusted scripted actors.
 
@@ -280,7 +282,7 @@ def test_actual_docker_backend_role_lifecycle_through_fake_cli(
     def backend(name: str, **kwargs: Any) -> DockerBackend:
         return DockerBackend(image=controller.image, base_dir=controller.root / name,
             docker_bin=controller.docker_bin, witness_io=True,
-            daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, **kwargs)
+            daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, trigger_socket_dir=trigger_directory, **kwargs)
 
     monkeypatch.setattr(controller, "_call", modeled_controller_call)
     monkeypatch.setattr(controller, "_backend", backend)
@@ -305,6 +307,15 @@ def test_actual_docker_backend_role_lifecycle_through_fake_cli(
             state.backend.destroy(state.handle)
     assert not list(state_dir.glob("*.json"))  # All actual fake containers removed.
     assert not list((state_dir / "networks").glob("*.json"))  # Per-role egress networks removed.
+
+
+@pytest.fixture
+def trigger_directory() -> Iterator[Path]:
+    # Parametrized cases run concurrently under xdist. Their logical attempt
+    # IDs are intentionally identical, but their actual sockets must not be.
+    # Keep the directory short enough for AF_UNIX's pathname bound.
+    with tempfile.TemporaryDirectory(prefix="wave621-") as directory:
+        yield Path(directory)
 
 
 def test_close_waits_for_inflight_turn_capture(runtime: Any, monkeypatch: Any) -> None:
