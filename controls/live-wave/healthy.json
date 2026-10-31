@@ -1,0 +1,239 @@
+{
+  "plan": {
+    "wave_id": "wave-1",
+    "roles": [
+      {
+        "role": "orchestrator",
+        "attempt_id": "attempt-orchestrator",
+        "session_id": "session-orchestrator",
+        "task": "integrate",
+        "generation": 0,
+        "revision": 1,
+        "nonce": "nonce-orchestrator",
+        "required_artifacts": [
+          "output.json"
+        ]
+      },
+      {
+        "role": "worker-a",
+        "attempt_id": "attempt-worker-a",
+        "session_id": "session-worker-a",
+        "task": "worker-a",
+        "generation": 0,
+        "revision": 1,
+        "nonce": "nonce-worker-a",
+        "required_artifacts": [
+          "output.json"
+        ]
+      },
+      {
+        "role": "worker-b",
+        "attempt_id": "attempt-worker-b",
+        "session_id": "session-worker-b",
+        "task": "worker-b",
+        "generation": 0,
+        "revision": 1,
+        "nonce": "nonce-worker-b",
+        "required_artifacts": [
+          "output.json"
+        ]
+      }
+    ],
+    "integrator": "orchestrator",
+    "deadline": 10
+  },
+  "evidence": {
+    "wave_id": "wave-1",
+    "roles": [
+      {
+        "role": "orchestrator",
+        "attempt_id": "attempt-orchestrator",
+        "session_id": "session-orchestrator",
+        "transcript": [
+          {
+            "type": "session_meta",
+            "payload": {
+              "id": "session-orchestrator"
+            }
+          },
+          {
+            "type": "event_msg",
+            "payload": {
+              "type": "task_complete"
+            }
+          }
+        ],
+        "protocol": [
+          {
+            "wave_id": "wave-1",
+            "role": "orchestrator",
+            "attempt_id": "attempt-orchestrator",
+            "session_id": "session-orchestrator",
+            "task": "integrate",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-orchestrator",
+            "op": "ack",
+            "elapsed": 1.0
+          },
+          {
+            "wave_id": "wave-1",
+            "role": "orchestrator",
+            "attempt_id": "attempt-orchestrator",
+            "session_id": "session-orchestrator",
+            "task": "integrate",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-orchestrator",
+            "op": "complete",
+            "elapsed": 4
+          }
+        ],
+        "artifacts": {
+          "output.json": "{\"worker-a\": \"alpha\", \"worker-b\": \"beta\"}"
+        },
+        "pokes": {
+          "role": "orchestrator",
+          "session_id": "session-orchestrator",
+          "pokes": 0
+        },
+        "tokens": 100,
+        "wall_seconds": 4.5,
+        "started": true,
+        "capture_complete": true,
+        "stopped": true,
+        "cleanup_confirmed": true,
+        "stop_reason": "exited",
+        "exit_code": 0,
+        "stop_elapsed": 4.5
+      },
+      {
+        "role": "worker-a",
+        "attempt_id": "attempt-worker-a",
+        "session_id": "session-worker-a",
+        "transcript": [
+          {
+            "type": "session_meta",
+            "payload": {
+              "id": "session-worker-a"
+            }
+          },
+          {
+            "type": "event_msg",
+            "payload": {
+              "type": "task_complete"
+            }
+          }
+        ],
+        "protocol": [
+          {
+            "wave_id": "wave-1",
+            "role": "worker-a",
+            "attempt_id": "attempt-worker-a",
+            "session_id": "session-worker-a",
+            "task": "worker-a",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-a",
+            "op": "ack",
+            "elapsed": 1.1
+          },
+          {
+            "wave_id": "wave-1",
+            "role": "worker-a",
+            "attempt_id": "attempt-worker-a",
+            "session_id": "session-worker-a",
+            "task": "worker-a",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-a",
+            "op": "complete",
+            "elapsed": 2.1
+          }
+        ],
+        "artifacts": {
+          "output.json": "\"alpha\""
+        },
+        "pokes": {
+          "role": "worker-a",
+          "session_id": "session-worker-a",
+          "pokes": 1
+        },
+        "tokens": 101,
+        "wall_seconds": 4.5,
+        "started": true,
+        "capture_complete": true,
+        "stopped": true,
+        "cleanup_confirmed": true,
+        "stop_reason": "exited",
+        "exit_code": 0,
+        "stop_elapsed": 4.5
+      },
+      {
+        "role": "worker-b",
+        "attempt_id": "attempt-worker-b",
+        "session_id": "session-worker-b",
+        "transcript": [
+          {
+            "type": "session_meta",
+            "payload": {
+              "id": "session-worker-b"
+            }
+          },
+          {
+            "type": "event_msg",
+            "payload": {
+              "type": "task_complete"
+            }
+          }
+        ],
+        "protocol": [
+          {
+            "wave_id": "wave-1",
+            "role": "worker-b",
+            "attempt_id": "attempt-worker-b",
+            "session_id": "session-worker-b",
+            "task": "worker-b",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-b",
+            "op": "ack",
+            "elapsed": 1.2
+          },
+          {
+            "wave_id": "wave-1",
+            "role": "worker-b",
+            "attempt_id": "attempt-worker-b",
+            "session_id": "session-worker-b",
+            "task": "worker-b",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "nonce-worker-b",
+            "op": "complete",
+            "elapsed": 2.2
+          }
+        ],
+        "artifacts": {
+          "output.json": "\"beta\""
+        },
+        "pokes": {
+          "role": "worker-b",
+          "session_id": "session-worker-b",
+          "pokes": 2
+        },
+        "tokens": 102,
+        "wall_seconds": 4.5,
+        "started": true,
+        "capture_complete": true,
+        "stopped": true,
+        "cleanup_confirmed": true,
+        "stop_reason": "exited",
+        "exit_code": 0,
+        "stop_elapsed": 4.5
+      }
+    ],
+    "completion_elapsed": 5,
+    "cleanup_confirmed": true,
+    "abandonment": false
+  }
+}
