@@ -1,0 +1,13 @@
+{
+  "repository": "cooneycw/claude-power-pack",
+  "commit": "87ecb0970f70aace9e0323feee00c9ca57dda133",
+  "files": {
+    "scripts/speckit-tasks-to-issues.sh": "4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec",
+    "LICENSE": "c6c2630fa5d672358d322509c5c073f87fa89f59157a93fe0b4067edd0260c60"
+  },
+  "context_helper": {
+    "source": "scripts/speckit-context.py",
+    "fixture_path": "tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/scripts/speckit-context.py",
+    "sha256": "0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  }
+}

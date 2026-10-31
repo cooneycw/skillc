@@ -44,7 +44,7 @@ malformed requests - a junk flood - cannot move the point.
 jq IS REAL jq (orchestrator ruling). `--jq` filters run through the
 controller's own `jq` binary (a subprocess, no shell, bounded input and
 time), never a hand-written evaluator, and only filters on `JQ_ALLOWLIST` -
-the exact strings the pinned CPP 86641e8 helpers use - are run at all. A
+the exact strings in the committed pinned inventories - are run at all. A
 missing jq, a jq that is not 1.7.x, or a filter off the allowlist is
 `unsupported`: refused, recorded, and reported as incomplete coverage.
 
@@ -71,6 +71,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from .decide_reply_channel import ChannelRefusal, DecideFn
 from .ordering import Order
@@ -83,59 +84,26 @@ GH_OP = "gh"
 #: The CLOSED top-level request schema. `dispatch()` enforces it before the
 #: service is reached, and `decide()` enforces it again on its own.
 REQUEST_KEYS = frozenset({"op", "argv", "cwd", "context", "body_files"})
-CONTEXT_KEYS = frozenset({"origin_url", "branch"})
+CONTEXT_KEYS = frozenset({"origin_url", "branch", "source_head", "creation_phase", "creation_error"})
 
 #: Every op name, which is also the authority vocabulary. An op missing from
 #: a declaration's `authority` is refused as `unauthorized`.
 OPS = (
     "auth.status", "repo.view", "api.get", "issue.view", "issue.list", "issue.close",
     "issue.comment", "pr.view", "pr.list", "pr.create", "pr.edit", "pr.merge",
-    "pr.merge.admin", "run.list", "run.view",
+    "pr.merge.admin", "run.list", "run.view", "repo.create", "issue.create", "issue.edit",
+    "label.list", "label.create",
 )
 READ_OPS = frozenset({"auth.status", "repo.view", "api.get", "issue.view", "issue.list",
-                      "pr.view", "pr.list", "run.list", "run.view"})
+                      "pr.view", "pr.list", "run.list", "run.view", "label.list"})
 #: #279 PR-2b: the ops that SHIP source; each is stamped with what it ships.
 SHIP_OPS = frozenset({"pr.create", "pr.merge"})
 
-#: The exact `--jq` filters the pinned CPP 86641e8 helpers and command
-#: documents pass (docs/specs/evaluation-facility/fixture-service-gh-inventory.txt).
-#: None of them is assembled at run time, so there are no templates: every
-#: entry is matched byte for byte.
-JQ_ALLOWLIST = frozenset({
-    ".state",
-    ".title",
-    ".body",
-    ".url",
-    ".createdAt",
-    ".updatedAt",
-    ".headRefOid",
-    ".reviewDecision",
-    ".viewerPermission",
-    ".mergeable",
-    ".nameWithOwner",
-    ".mergeCommit.oid",
-    ".changedFiles",
-    ".baseRefName",
-    ".isCrossRepository",
-    ".defaultBranchRef.name",
-    ".default_branch",
-    ".contexts[]",
-    ".[].filename",
-    ".[].number",
-    ".[0].number",
-    ".title, .body",
-    '.headRefName + " " + .headRefOid',
-    '.state + "\\t" + .title',
-    ('[.[] | select(.state == "OPEN" or .state == "MERGED")][0] | if . == null then "none" '
-     'else "\\(.number):\\(.state)" end'),
-    "((.contexts // []) + ((.checks // []) | map(.context))) | unique | .[]",
-    ('[.[] | select(.type == "required_status_checks")\n'
-     '                              | .parameters.required_status_checks[]?.context] | unique | .[]'),
-    '.statusCheckRollup[] | "\\(.context // .name)|\\(.state // .conclusion // .status // "PENDING")"',
-    '.commits[] | (.oid // "") + "\x1f" + (.messageHeadline // "")',
-    '.jobs[]? | select(.conclusion!="success" and .conclusion!="skipped" and .conclusion!="") | .name',
-    '"TOTAL \\(length)", (.[] | select(.title == "Nit Store") | .number)',
-})
+#: Exact jq programs audited in the committed legacy and wave inventories.
+#: Subject-specific policy is packaged data; the controller matches exact bytes.
+JQ_ALLOWLIST = frozenset(json.loads(
+    Path(__file__).with_name("fixture_service_filters.json").read_text(encoding="utf-8")
+))
 
 #: jq versions this service accepts. Anything else reads as unsupported.
 JQ_VERSION_PATTERN = re.compile(r"^jq-1\.7(\.\d+)?$")
@@ -519,6 +487,15 @@ _BODY_FILE = _Flag("body-file", True, ("-F",))
 #: (words) -> (op, flags, (min positionals, max positionals))
 _COMMANDS: dict[tuple[str, ...], tuple[str, tuple[_Flag, ...], tuple[int, int]]] = {
     ("auth", "status"): ("auth.status", (), (0, 0)),
+    ("repo", "create"): ("repo.create", (_Flag("private", False), _Flag("public", False),
+        _Flag("source", True), _Flag("push", False)), (1, 1)),
+    ("label", "list"): ("label.list", (_REPO, _JSON, _JQ, _LIMIT), (0, 0)),
+    ("label", "create"): ("label.create", (_REPO, _Flag("color", True, ("-c",)),
+        _Flag("description", True, ("-d",))), (1, 1)),
+    ("issue", "create"): ("issue.create", (_REPO, _Flag("title", True, ("-t",)),
+        _BODY, _BODY_FILE, _Flag("label", True, ("-l",))), (0, 0)),
+    ("issue", "edit"): ("issue.edit", (_REPO, _Flag("title", True, ("-t",)),
+        _BODY, _BODY_FILE), (1, 1)),
     ("repo", "view"): ("repo.view", (_REPO, _JSON, _JQ), (0, 0)),
     ("api",): ("api.get", (_JQ, _Flag("paginate", False), _Flag("header", True, ("-H",))), (1, 1)),
     ("issue", "view"): ("issue.view", (_REPO, _JSON, _JQ), (1, 1)),
@@ -535,7 +512,7 @@ _COMMANDS: dict[tuple[str, ...], tuple[str, tuple[_Flag, ...], tuple[int, int]]]
                      (1, 1)),
     ("pr", "merge"): ("pr.merge", (_REPO, _Flag("squash", False, ("-s",)), _Flag("subject", True, ("-t",)),
                                    _BODY, _BODY_FILE, _Flag("delete-branch", False, ("-d",)),
-                                   _Flag("admin", False)), (0, 1)),
+                                   _Flag("admin", False), _Flag("match-head-commit", True)), (0, 1)),
     ("run", "list"): ("run.list", (_REPO, _Flag("commit", True, ("-c",)), _Flag("branch", True, ("-b",)),
                                    _LIMIT, _JSON, _JQ), (0, 0)),
     ("run", "view"): ("run.view", (_REPO, _JSON, _JQ), (1, 1)),
@@ -583,8 +560,8 @@ def parse_argv(argv: Sequence[str]) -> Command:
                     value = rest[i]
                 else:
                     raise _GhError("usage", f"flag needs an argument: {name}\n")
-                if flag.name == "header":
-                    values.setdefault("header", []).append(value)
+                if flag.name in ("header", "label"):
+                    values.setdefault(flag.name, []).append(value)
                 else:
                     values[flag.name] = value
             else:
@@ -718,7 +695,7 @@ class FixtureService:
     def _load(self, decl: dict[str, Any]) -> None:
         if decl.get("fixture_service_schema") != SCHEMA_VERSION:
             raise DeclarationRefused("fixture_service_schema must be 1")
-        allowed = {"fixture_service_schema", "repository", "authority", "clock", "issues", "pull_requests", "faults"}
+        allowed = {"fixture_service_schema", "repository", "authority", "clock", "issues", "pull_requests", "faults", "labels"}
         if set(decl) - allowed:
             raise DeclarationRefused(f"unknown declaration key(s): {sorted(set(decl) - allowed)}")
         repo = decl.get("repository")
@@ -733,6 +710,21 @@ class FixtureService:
         if not isinstance(urls, list) or not urls or not all(isinstance(u, str) and u for u in urls):
             raise DeclarationRefused("repository.remote_urls must be a non-empty list of strings")
         self._remote_urls = frozenset(u.rstrip("/") for u in urls)
+        exists = repo.get("exists", True)
+        if not isinstance(exists, bool):
+            raise DeclarationRefused("repository.exists must be boolean")
+        self._creation_enabled = not exists
+        self._creation_url = repo.get("creation_transport_url")
+        self._creation_preparation: tuple[str, str] | None = None
+        if not exists and (not isinstance(self._creation_url, str)
+                           or self._creation_url.rstrip("/") not in self._remote_urls):
+            raise DeclarationRefused("pending repository requires creation_transport_url in remote_urls")
+        if not exists:
+            transport = urlsplit(str(self._creation_url))
+            if not (str(self._creation_url).startswith("/") or
+                    (transport.scheme == "file" and transport.netloc in ("", "localhost")
+                     and transport.path.startswith("/"))):
+                raise DeclarationRefused("creation_transport_url must be an absolute local fixture path")
         self._permission = repo.get("viewer_permission", "WRITE")
         authority = decl.get("authority")
         if not isinstance(authority, list) or set(authority) - set(OPS):
@@ -744,8 +736,10 @@ class FixtureService:
         if self._clock_step <= 0:
             raise DeclarationRefused("clock.step_seconds must be positive")
         tip = self._remote.resolve(f"refs/heads/{self._default}")
-        if tip is None:
+        if tip is None and exists:
             raise DeclarationRefused(f"the remote has no refs/heads/{self._default}")
+        if not exists and (tip is not None or decl.get("issues") or decl.get("pull_requests")):
+            raise DeclarationRefused("pending repository must have empty remote, issues and pull requests")
         self._expected_tip = tip
         self._recorded_merges: list[str] = []
         issues: dict[int, dict[str, Any]] = {}
@@ -768,7 +762,7 @@ class FixtureService:
                 raise DeclarationRefused(f"PR #{n}: only already-MERGED pull requests may be declared")
             merge_commit = str(entry.get("merge_commit", ""))
             if not merge_commit or not self._remote.resolve(merge_commit) \
-                    or not self._remote.is_ancestor(merge_commit, tip):
+                    or tip is None or not self._remote.is_ancestor(merge_commit, tip):
                 raise DeclarationRefused(f"PR #{n}: declared-merge-not-in-remote ({merge_commit!r} is not on "
                                          f"{self._default})")
             parent = self._remote.resolve(f"{merge_commit}^")
@@ -785,6 +779,24 @@ class FixtureService:
             self._recorded_merges.append(merge_commit)
         top = max([*issues, *prs], default=0)
         self._state: dict[str, Any] = {"issues": issues, "prs": prs, "next_number": top + 1, "next_comment": 1}
+        if self._creation_enabled:
+            self._state["repository"] = {"exists": False, "visibility": None}
+        labels = decl.get("labels", [])
+        if not isinstance(labels, list):
+            raise DeclarationRefused("labels must be a list")
+        self._declared_labels: dict[str, dict[str, str]] = {}
+        for raw in labels:
+            if (not isinstance(raw, dict) or set(raw) - {"name", "color", "description"}
+                    or not isinstance(raw.get("name"), str) or not raw["name"].strip()
+                    or not re.fullmatch(r"[0-9a-fA-F]{6}", str(raw.get("color", "")))
+                    or not isinstance(raw.get("description", ""), str)):
+                raise DeclarationRefused("labels require name, six hexadecimal color digits and optional description")
+            if raw["name"].casefold() in self._declared_labels:
+                raise DeclarationRefused("duplicate label name")
+            self._declared_labels[raw["name"].casefold()] = {
+                "name": raw["name"], "color": raw["color"].lower(), "description": raw.get("description", "")}
+        if labels:
+            self._state["labels"] = copy.deepcopy(self._declared_labels)
         self._faults = []
         for raw in decl.get("faults", []):
             kind = raw.get("kind")
@@ -991,6 +1003,16 @@ class FixtureService:
     # -- repository resolution ---------------------------------------------
 
     def _resolve_repository(self, command: Command, context: Mapping[str, Any]) -> str:
+        if command.op in ("auth.status",) or (command.op == "api.get"
+                                                  and command.positionals[0].lstrip("/") == "user"):
+            return self.repository
+        if command.op == "repo.create":
+            target = command.positionals[0]
+            if target not in (self.repository, self.repository.split("/")[1]):
+                raise _GhError("wrong-repository", "repository creation is outside the declared fixture\n")
+            return self.repository
+        if self._creation_enabled and not self._state["repository"]["exists"]:
+            raise _GhError("not-found", "repository has not been created\n")
         named = command.flags.get("repo")
         if command.op == "api.get":
             match = re.match(r"^/?repos/([^/{}]+)/([^/{}]+)(/|$)", command.positionals[0])
@@ -1122,14 +1144,117 @@ class FixtureService:
         return (self._output(command, repo, _REPO_FIELDS, lambda: f"name:\t{self.repository}\ndescription:\t\n"),
                 "read", None)
 
+    def _op_repo_create(self, command: Command, context: Mapping[str, Any], body_files: Any,
+                        at: str) -> tuple[dict[str, Any], str, dict[str, Any] | None]:
+        if not self._creation_enabled or self._state["repository"]["exists"]:
+            raise _GhError("duplicate-create", "repository already exists\n")
+        flags = command.flags
+        if bool(flags.get("private")) == bool(flags.get("public")) or not flags.get("source") \
+                or not flags.get("push"):
+            raise _GhError("usage", "fixture creation requires one visibility, --source and --push\n")
+        head = context.get("source_head")
+        if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+            raise _GhError("usage", "source must have a committed HEAD\n")
+        phase = context.get("creation_phase")
+        preparation = (_digest(list(command.positionals) + sorted(flags.items())), head)
+        if phase == "prepare":
+            if self._remote.resolve(f"refs/heads/{self._default}") is not None:
+                raise _GhError("remote-not-empty", "fixture transport already has a default branch\n")
+            self._creation_preparation = preparation
+            return ({"exit_code": 0, "stdout": "", "stderr": "", "local_git": {
+                "origin_url": self._creation_url, "default_branch": self._default,
+                "source_head": head}}, "read", None)
+        if phase != "complete":
+            raise _GhError("usage", "repository creation requires the fixture transport handshake\n")
+        if self._creation_preparation != preparation:
+            raise _GhError("creation-not-prepared", "creation completion has no matching preparation\n")
+        if context.get("creation_error"):
+            raise _GhError("source-push-failed", "fixture source configuration or push failed\n")
+        actual = self._remote.resolve(f"refs/heads/{self._default}")
+        if actual != head:
+            raise _GhError("source-not-pushed", "fixture transport does not contain the claimed source HEAD\n")
+        visibility = "private" if flags.get("private") else "public"
+        self._state["repository"].update(exists=True, visibility=visibility)
+        self._expected_tip = actual
+        return ({"exit_code": 0, "stdout": f"https://github.com/{self.repository}\n", "stderr": ""},
+                "applied", {"repository": self.repository, "visibility": visibility, "head_oid": actual})
+
+    def _labels(self) -> dict[str, dict[str, str]]:
+        if "labels" in self._state:
+            return self._state["labels"]  # type: ignore[no-any-return]
+        labels = copy.deepcopy(self._declared_labels)
+        for issue in self._state["issues"].values():
+            for name in issue["labels"]:
+                labels.setdefault(name.casefold(), {"name": name, "color": "ededed", "description": ""})
+        return labels
+
+    def _op_label_list(self, command: Command, *_: Any) -> tuple[dict[str, Any], str, None]:
+        items = list(self._labels().values())[:self._limit(command)]
+        return (self._output(command, items, frozenset({"name", "color", "description"}),
+                             lambda: "".join(f"{x['name']}\t{x['description']}\n" for x in items)),
+                "read", None)
+
+    def _op_label_create(self, command: Command, context: Any, body_files: Any, at: str
+                         ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        name = command.positionals[0]
+        color = str(command.flags.get("color", "ededed")).removeprefix("#")
+        if not name.strip() or not re.fullmatch(r"[a-fA-F0-9]{6}", color):
+            raise _GhError("usage", "label requires a name and six hexadecimal color digits\n")
+        labels = self._labels()
+        if name.casefold() in labels:
+            raise _GhError("duplicate-create", "label already exists\n")
+        label = {"name": name, "color": color.lower(),
+                 "description": str(command.flags.get("description", ""))}
+        labels[name.casefold()] = label
+        self._state["labels"] = labels
+        return ({"exit_code": 0, "stdout": "", "stderr": f"Created label {name}\n"}, "applied", dict(label))
+
+    def _op_issue_create(self, command: Command, context: Any, body_files: Mapping[str, str], at: str
+                         ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        title = command.flags.get("title")
+        body = self._body(command, body_files)
+        if not title or body is None:
+            raise _GhError("usage", "--title and --body or --body-file required\n")
+        labels = self._labels()
+        names = [name for group in command.flags.get("label", []) for name in group.split(",")]
+        if any(name.casefold() not in labels for name in names):
+            raise _GhError("unknown-label", "could not add label: label not found\n")
+        names = list(dict.fromkeys(labels[name.casefold()]["name"] for name in names))
+        n = self._state["next_number"]
+        self._state["issues"][n] = {"number": n, "title": str(title), "body": body,
+            "state": "OPEN", "created_at": at, "updated_at": at, "closed_at": None,
+            "labels": names, "comments": [], "closed_by": None}
+        self._state["next_number"] += 1
+        return ({"exit_code": 0, "stdout": self._url("issues", n) + "\n", "stderr": ""},
+                "applied", {"number": n, "title": str(title), "labels": names})
+
+    def _op_issue_edit(self, command: Command, context: Any, body_files: Mapping[str, str], at: str
+                       ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        issue = self._issue(self._int(command.positionals[0]))
+        changes = {}
+        if "title" in command.flags:
+            if not command.flags["title"]:
+                raise _GhError("usage", "title must not be empty\n")
+            changes["title"] = str(command.flags["title"])
+        body = self._body(command, body_files)
+        if body is not None:
+            changes["body"] = body
+        if not changes:
+            raise _GhError("usage", "nothing to edit\n")
+        issue.update(changes, updated_at=at)
+        return ({"exit_code": 0, "stdout": self._url("issues", issue["number"]) + "\n", "stderr": ""},
+                "applied", {"number": issue["number"], **changes})
+
     def _op_api_get(self, command: Command, *_: Any) -> tuple[dict[str, Any], str, None]:
         path = command.positionals[0].lstrip("/").replace("{owner}/{repo}", self.repository)
         base = f"repos/{self.repository}"
         branch_tail = re.fullmatch(re.escape(base) + r"/branches/([^/]+)/protection/required_status_checks", path)
         rules = re.fullmatch(re.escape(base) + r"/rules/branches/([^/]+)", path)
         files = re.fullmatch(re.escape(base) + r"/pulls/(\d+)/files", path)
-        if path == base:
-            value: Any = {"default_branch": self._default, "full_name": self.repository,
+        if path == "user":
+            value: Any = {"login": SUBJECT_LOGIN, "email": "subject@fixture.invalid"}
+        elif path == base:
+            value = {"default_branch": self._default, "full_name": self.repository,
                           "name": self.repository.split("/")[1], "private": True}
         elif branch_tail:
             body = {"message": "Branch not protected", "status": "404"}
@@ -1363,6 +1488,9 @@ class FixtureService:
         if pr["base_ref"] == self._default and base != self._expected_tip:
             self._divergence.append({"kind": "default-branch-moved-outside-service", "ref": base_ref,
                                      "expected": self._expected_tip, "actual": base, "detected_at": at})
+        expected_head = command.flags.get("match-head-commit")
+        if expected_head is not None and head != expected_head:
+            raise _GhError("head-mismatch", "pull request head does not match --match-head-commit\n")
         tree = self._remote.merge_tree(base, head)
         if tree is None:
             raise _GhError("not-mergeable", f"X Pull request {self.repository}#{n} is not mergeable: the merge "
@@ -1440,7 +1568,9 @@ class FixtureService:
             integrity = "SATISFIED"
             try:
                 tip = checked.resolve(f"refs/heads/{self._default}")
-                if tip is None:
+                if tip is None and self._expected_tip is None:
+                    pass  # an uncreated, empty fixture remote is the declared state
+                elif tip is None:
                     divergence.append({"kind": "default-branch-missing", "ref": f"refs/heads/{self._default}",
                                        "expected": self._expected_tip, "actual": None})
                 else:

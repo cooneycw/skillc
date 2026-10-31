@@ -2619,6 +2619,33 @@
         "--label",
         "bug"
       ]
+    },
+    {
+      "source": "scripts/flow-start-resolve.sh:474",
+      "argv": [
+        "issue",
+        "view",
+        "1",
+        "--json",
+        "labels",
+        "--jq",
+        ".labels[].name"
+      ]
+    },
+    {
+      "source": "scripts/flow-plan-record.py:1152",
+      "argv": [
+        "pr",
+        "list",
+        "--head",
+        "issue-1-fixture",
+        "--state",
+        "open",
+        "--json",
+        "headRefOid",
+        "--jq",
+        ".[0].headRefOid"
+      ]
     }
   ],
   "issue_required_capabilities": [
