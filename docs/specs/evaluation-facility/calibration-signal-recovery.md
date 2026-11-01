@@ -30,7 +30,11 @@ The parent saves inspected immutable resource IDs before signalling and invokes
 On the authorized Linux real-Docker runner, execute the ten-case population with
 `uv run pytest -n 0 -m real_docker -q tests/test_calibration_signal_recovery_live.py`
 and retain its JUnit report and private pytest case directories. A prebuilt trial
-image may be selected through `SKILLC_TRIAL_IMAGE`; otherwise the module builds
+image may be selected through `SKILLC_TRIAL_IMAGE`; the controller launches only
+its resolved immutable digest, retaining the tag as provenance. A focused
+stable-tag/retagged-registry control exercises the actual backend run composition
+without a daemon; the retagged case failed before digest-only launch was applied.
+Otherwise the module builds
 and removes its own image using the existing trial-image helper. Image build
 failure is a failure. A missing daemon reports UNAVAILABLE via skips, which the
 certifying floor refuses. Installing a runner with the new floor remains a
