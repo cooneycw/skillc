@@ -1,0 +1,23 @@
+[
+  {
+    "name": "all-stopped",
+    "stop": "confirmed",
+    "expected_capture": true
+  },
+  {
+    "name": "one-stop-unknown",
+    "stop": "unknown",
+    "expected_capture": false
+  },
+  {
+    "name": "one-stop-running",
+    "stop": "not-confirmed",
+    "expected_capture": false
+  },
+  {
+    "name": "planned-writer-unobserved",
+    "stop": "confirmed",
+    "missing_role": true,
+    "expected_capture": false
+  }
+]

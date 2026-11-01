@@ -347,12 +347,18 @@ class DockerWave:
                 except (OSError, BackendUnavailable, HomeTreeTooLarge):
                     state.unknown.append("capture-unavailable")
         if self.remote_backend is not None and self.remote is not None:
-            try:
-                # Controller helper is the sole volume reader after every role stopped.
-                self.remote_backend.export(self.remote, self.root / "shared-state", root=WAVE_ROOT)
-                self.remote_backend.export(self.remote, self.root / "fixture-remote", root="/fixture/repo.git")
-            except (OSError, BackendUnavailable):
-                self.unknown.append("shared-capture-unavailable")
+            writers_stopped = (set(self.states) == {role.name for role in self.roles}
+                               and all(state.stopped is Confirmation.CONFIRMED
+                                       for state in self.states.values()))
+            if not writers_stopped:
+                self.unknown.append("shared-capture-stop-unconfirmed")
+            else:
+                try:
+                    # The helper reads shared state only after every planned writer stopped.
+                    self.remote_backend.export(self.remote, self.root / "shared-state", root=WAVE_ROOT)
+                    self.remote_backend.export(self.remote, self.root / "fixture-remote", root="/fixture/repo.git")
+                except (OSError, BackendUnavailable):
+                    self.unknown.append("shared-capture-unavailable")
             self.remote_backend.end_attempt(self.remote)
             if self.remote_backend.confirm_stopped(self.remote) is not Confirmation.CONFIRMED:
                 self.unknown.append("fixture-stop-unconfirmed")

@@ -211,6 +211,36 @@ def test_cleanup_unreachable_is_unknown_and_prevents_completion(runtime: Any, mo
     assert all("stop-unconfirmed" in s["unknown"] for s in report["roles"].values())
 
 
+@pytest.mark.parametrize("case", json.loads(CONTROLS.with_name("final-capture.json").read_text()),
+                         ids=lambda c: c["name"])
+def test_final_shared_capture_requires_every_role_stop(runtime: Any, case: dict[str, Any]) -> None:
+    controller, _ = runtime
+    controller.prepare()
+    state = controller.states["worker-a"]
+    state.backend.stop_observation = Confirmation(case["stop"])
+    if case.get("missing_role"):
+        # Preserve the independently observed allocation while modelling lost
+        # planned-role accounting; restore it only to avoid leaking test state.
+        del controller.states["worker-a"]
+    try:
+        report = controller.close()
+    finally:
+        controller.states["worker-a"] = state
+    assert controller.remote_backend is not None
+    remote = controller.remote_backend
+    exports = [root for action, root in remote.calls if action == "export"]
+    expected = case["expected_capture"]
+    assert exports == ([WAVE_ROOT, "/fixture/repo.git"] if expected else [])
+    assert ("shared-capture-stop-unconfirmed" in report["unknown"]) is not expected
+    assert (controller.root / "shared-state").exists() is expected
+    assert (controller.root / "fixture-remote").exists() is expected
+    # Refusing capture must not prevent retiring the helper and owned resources.
+    assert any(action == "destroy" for action, _ in remote.calls)
+    assert report["resources"] == {"volume": "confirmed", "network": "confirmed"}
+    if not expected:
+        assert report["completion"]["cleanup_confirmed"] is False
+
+
 def test_capture_and_cleanup_are_idempotent(runtime: Any) -> None:
     controller, calls = runtime
     first = controller.run_scripted()
