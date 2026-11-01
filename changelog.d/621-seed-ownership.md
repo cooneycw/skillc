@@ -1,0 +1,1 @@
+Trust only the controller-owned fixture seed in the disposable fixture helper, so a copied seed with a different owner does not block wave preparation. Host and participant Git ownership checks remain unchanged.

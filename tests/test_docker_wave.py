@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import subprocess
 import tempfile
 import uuid
 from collections.abc import Iterator
@@ -172,6 +175,44 @@ def test_wave_owns_each_role_and_only_declared_shared_surfaces(runtime: Any) -> 
     assert declaration["shared_surfaces"] == ["wave-state-volume", "fixture-git-remote"]
     assert report["resources"] == {"volume": "confirmed", "network": "confirmed"}
     assert report["status"] == "UNKNOWN"  # No real isolation proof was performed by this model.
+
+
+@pytest.mark.parametrize("case", json.loads(CONTROLS.with_name("fixture-git-ownership.json").read_text()),
+                         ids=lambda c: c["name"])
+def test_fixture_clone_trusts_only_the_controller_seed(
+    runtime: Any, tmp_path: Path, case: dict[str, Any],
+) -> None:
+    """Run the actual setup clone command through Git's ownership-check control.
+
+    GIT_TEST_ASSUME_DIFFERENT_OWNER exercises real Git's ownership rejection
+    without requiring a privileged local chown. Actual kernel ownership and
+    Docker staging remain the existing five real-Docker qualification cases.
+    """
+    controller, calls = runtime
+    controller.prepare()
+    setup = next(c for c in calls if "sh" in c and "-c" in c
+                 and "clone --bare /fixture/seed" in c[c.index("-c") + 1])
+    clone = setup[setup.index("-c") + 1].split(" && git --git-dir", 1)[0]
+    fixture_root = tmp_path / "fixture with spaces"
+    seed = fixture_root / "seed"
+    seed.mkdir(parents=True)
+    for args in (["init", "-b", "main"], ["-c", "user.name=Fixture", "-c",
+                 "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "seed"]):
+        subprocess.run(["git", *args], cwd=seed, capture_output=True, check=True, timeout=10)
+    clone = clone.replace("/fixture", shlex.quote(str(fixture_root)))
+    if case["foreign_source"]:
+        foreign = tmp_path / "foreign"
+        subprocess.run(["git", "clone", str(seed), str(foreign)], capture_output=True,
+                       check=True, timeout=10)
+        clone = clone.replace(shlex.quote(str(fixture_root)) + "/seed ",
+                              shlex.quote(str(foreign)) + " ")
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_CONFIG_GLOBAL": str(tmp_path / "controller-gitconfig"),
+           "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1" if case["different_owner"] else "0"}
+    result = subprocess.run(["sh", "-c", clone], capture_output=True, env=env, timeout=10, check=False)
+    assert result.returncode == case["expected_exit"], result.stderr.decode(errors="replace")
+    if case["expected_exit"]:
+        assert b"dubious ownership" in result.stderr
 
 
 def test_role_timeout_does_not_cancel_or_suppress_siblings(runtime: Any) -> None:

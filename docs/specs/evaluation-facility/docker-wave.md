@@ -107,6 +107,17 @@ principles referenced by #621, but copies no source text from another repository
 
 ## Physical qualification cases
 
+The controller's fixture seed is trusted only at `/fixture/seed/.git` inside
+the disposable fixture helper's Git configuration. Docker staging may retain
+a different owner from the root setup clone. This exact-path exception trusts
+controller-supplied fixture bytes without changing their ownership or touching
+host or role Git configuration; it never trusts every repository. The actual
+setup command is exercised against Git's `GIT_TEST_ASSUME_DIFFERENT_OWNER`
+control locally: the copied seed clones, an unrelated repository still fails,
+and an ordinary same-owner seed also clones. This control exercises Git's real
+ownership check but does not substitute for kernel-ownership qualification on
+the real-Docker runner.
+
 `tests/test_docker_wave_live.py` declares five model-free cases: intact, an open
 peer bridge, missing mail, a timed-out role, and a cancelled role. It runs only
 through the existing real-Docker CI selection. A new test file also requires

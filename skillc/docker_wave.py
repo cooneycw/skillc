@@ -198,7 +198,11 @@ class DockerWave:
         self._call(["exec", "-u", "0", "--", self._name(self.remote), "mkdir", "-p", "/fixture/seed"])
         self._call(["cp", str(self.fixture) + "/.", self._name(self.remote) + ":/fixture/seed"])
         self._call(["exec", "-u", "0", "--", self._name(self.remote), "sh", "-c",
-                    ('git clone --bare /fixture/seed /fixture/repo.git && '
+                    # This controller-copied seed may retain a non-root owner.
+                    # Trust only its exact metadata path in this disposable
+                    # controller helper. Host and role Git configs are separate.
+                    ('git config --global --add safe.directory /fixture/seed/.git && '
+                    'git clone --bare /fixture/seed /fixture/repo.git && '
                     'git --git-dir=/fixture/repo.git config daemon.receivepack true && '
                     'chown -R "$1:$2" /fixture "$3"'), "sh",
                     str(CANDIDATE_UID), str(CANDIDATE_GID), WAVE_ROOT])
