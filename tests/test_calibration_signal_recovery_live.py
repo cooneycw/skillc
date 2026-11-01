@@ -145,7 +145,7 @@ def _controller(base: Path, stage: str, image: str, digest: str) -> int:
                     _pause(base, stage, experiment, attempt_id)
                 return result
 
-        backend = ControlledBackend(image=image, base_dir=base / "backend", network="none",
+        backend = ControlledBackend(image=digest, base_dir=base / "backend", network="none",
                                     daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT)
 
         def deliver(backend: Any, handle: object) -> None:
