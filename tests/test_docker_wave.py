@@ -378,3 +378,18 @@ def test_prepared_wave_can_run_scripted_turns_without_reallocation(runtime: Any)
     report = controller.run_scripted()
     assert sum(c[:2] == ['network', 'create'] for c in calls) == before == 1
     assert all(role['exit_codes'] == [0, 0] for role in report['roles'].values())
+
+
+def test_resume_rechecks_expected_session_under_the_role_lock(runtime: Any) -> None:
+    controller, _ = runtime
+    controller.prepare()
+    try:
+        assert controller.turn('worker-a').exit_code == 0
+        state = controller.states['worker-a']
+        before = len(state.backend.calls)
+        with pytest.raises(ValueError, match='stale session'):
+            controller.turn('worker-a', 'continue', expected_session='stale-controller-target')
+        assert len(state.backend.calls) == before
+        assert controller.turn('worker-a', 'continue', expected_session=state.session_id).exit_code == 0
+    finally:
+        controller.close()

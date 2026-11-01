@@ -215,7 +215,7 @@ class DockerWave:
         return name
 
     def turn(self, role: str, text: str | None = None,
-             cancel: Callable[[], bool] | None = None) -> ExecuteResult:
+             cancel: Callable[[], bool] | None = None, *, expected_session: str | None = None) -> ExecuteResult:
         """One caller-scheduled turn. Failure stops this role alone, never siblings."""
         state = self.states[role]
         if not state.busy.acquire(blocking=False):
@@ -223,6 +223,8 @@ class DockerWave:
         try:
             if self.closed or not self._prepared:
                 raise ValueError("wave closed or not fully prepared")
+            if expected_session is not None and state.session_id != expected_session:
+                raise turns.TurnsRefused("stale session: role changed before wake dispatch")
             if not state.executions:
                 if text is not None:
                     raise ValueError("first turn uses the declared prompt")
