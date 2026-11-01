@@ -64,8 +64,11 @@ copy-in and guard accounting contracts per role.
 Retirement proceeds in this order:
 
 1. End every role and independently confirm its stop.
-2. Export confirmed-stopped roles, shared wave state and the fixture remote.
-3. Stop and remove the fixture service. Its endpoints must disappear before role
+2. Export confirmed-stopped roles. Stop and independently confirm the fixture
+   helper too: an accepted Git push can outlive its stopped client. Export shared
+   wave state and raw fixture-remote bytes only when every planned role and the
+   helper are confirmed stopped. Docker copies these stopped-container files.
+3. Remove the fixture service. Its endpoints must disappear before role
    backends can remove their private egress networks.
 4. Destroy each role, including its proxy/network, and independently confirm
    absence. Finalize its guard channel and retain its record.
@@ -78,6 +81,33 @@ status is deliberately `UNKNOWN` and its scope is `runtime-lifecycle-only`:
 this seam does not grade a task, certify transcript coverage or infer CPP peer
 liveness. The raw shared-state snapshot preserves CPP's own readings. No harness
 process observation substitutes for those readings.
+
+### Final byte custody (#623)
+
+`final-snapshots.json` inventories `shared-state/` and `fixture-remote/` separately.
+Each surface is `CAPTURED` or `UNKNOWN`; only two complete surfaces produce an
+overall `CAPTURED`. An empty observed directory is explicit, whereas a missing
+root, failed or partial export, unreadable entry or unconfirmed writer stop is
+UNKNOWN. One failed export does not suppress the other surface's observation.
+Cleanup continues regardless. The inventory records directory membership and
+each regular file's size, permission mode and SHA-256. Symlinks and special files
+are not followed and make that surface UNKNOWN. Each surface is bounded to
+4,096 inventory entries, depth 32, 8 MiB per file and 64 MiB of file bytes.
+The retained manifest reader has a separate 4 MiB limit.
+
+The controller report's `final_snapshots` receipt retains the manifest filename,
+SHA-256 and custody status. `wave_capture.verify(root, receipt['sha256'])` re-reads
+both the manifest and exported byte populations; missing, added, changed or
+deleted evidence yields UNKNOWN. The controller checks again after its leak scan
+before final reporting. Consumers must retain the receipt independently of the
+bytes being checked. This detects changes against that retained receipt; it is
+not authentication against a party able to rewrite both the receipt and capture.
+
+The first-run owner scope accepts raw remote bytes without Git parsing or
+validation. No host Git executes against captured metadata. This final-only
+manifest does not establish earlier mailbox history, genuine acknowledgements,
+listener state, handoff timings or task success. Detailed observations remain
+deferred. `CAPTURED` describes custody, not a wave verdict.
 
 ## Controls and remaining qualification
 

@@ -1,0 +1,11 @@
+[
+  {"name": "intact", "mutation": "none", "expected": "CAPTURED"},
+  {"name": "mailbox-rewritten", "mutation": "rewrite-mail", "expected": "UNKNOWN"},
+  {"name": "registry-deleted", "mutation": "delete-registry", "expected": "UNKNOWN"},
+  {"name": "remote-bytes-changed", "mutation": "rewrite-remote", "expected": "UNKNOWN"},
+  {"name": "unexpected-file", "mutation": "add-file", "expected": "UNKNOWN"},
+  {"name": "shared-export-lost", "mutation": "delete-surface", "expected": "UNKNOWN"},
+  {"name": "manifest-rewritten", "mutation": "rewrite-manifest", "expected": "UNKNOWN"},
+  {"name": "surface-symlink", "mutation": "link-surface", "expected": "UNKNOWN"},
+  {"name": "wrong-receipt", "mutation": "wrong-digest", "expected": "UNKNOWN"}
+]

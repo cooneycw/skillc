@@ -19,5 +19,17 @@
     "stop": "confirmed",
     "missing_role": true,
     "expected_capture": false
+  },
+  {
+    "name": "fixture-stop-unknown",
+    "stop": "confirmed",
+    "fixture_stop": "unknown",
+    "expected_capture": false
+  },
+  {
+    "name": "fixture-stop-running",
+    "stop": "confirmed",
+    "fixture_stop": "not-confirmed",
+    "expected_capture": false
   }
 ]

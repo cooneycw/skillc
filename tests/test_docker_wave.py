@@ -106,6 +106,7 @@ class ModelBackend:
         self.calls.append(("stop", None))
 
     def confirm_stopped(self, handle: object) -> Confirmation:
+        self.calls.append(("confirm-stopped", None))
         return self.stop_observation
 
     def export(self, handle: object, dest: Path, root: str | None = None) -> None:
@@ -218,6 +219,8 @@ def test_final_shared_capture_requires_every_role_stop(runtime: Any, case: dict[
     controller.prepare()
     state = controller.states["worker-a"]
     state.backend.stop_observation = Confirmation(case["stop"])
+    assert controller.remote_backend is not None
+    controller.remote_backend.stop_observation = Confirmation(case.get("fixture_stop", "confirmed"))
     if case.get("missing_role"):
         # Preserve the independently observed allocation while modelling lost
         # planned-role accounting; restore it only to avoid leaking test state.
@@ -232,6 +235,9 @@ def test_final_shared_capture_requires_every_role_stop(runtime: Any, case: dict[
     expected = case["expected_capture"]
     assert exports == ([WAVE_ROOT, "/fixture/repo.git"] if expected else [])
     assert ("shared-capture-stop-unconfirmed" in report["unknown"]) is not expected
+    if expected:
+        actions = [action for action, _ in remote.calls]
+        assert actions.index("stop") < actions.index("confirm-stopped") < actions.index("export")
     assert (controller.root / "shared-state").exists() is expected
     assert (controller.root / "fixture-remote").exists() is expected
     # Refusing capture must not prevent retiring the helper and owned resources.
@@ -239,6 +245,51 @@ def test_final_shared_capture_requires_every_role_stop(runtime: Any, case: dict[
     assert report["resources"] == {"volume": "confirmed", "network": "confirmed"}
     if not expected:
         assert report["completion"]["cleanup_confirmed"] is False
+        assert report["final_snapshots"]["status"] == "UNKNOWN"
+    else:
+        assert report["final_snapshots"]["status"] == "CAPTURED"
+
+
+@pytest.mark.parametrize("case", json.loads((CONTROLS.parents[1] / "wave-capture/exports.json").read_text()),
+                         ids=lambda c: c["name"])
+def test_final_manifest_custody_and_failure_cleanup(runtime: Any, monkeypatch: Any,
+                                                  case: dict[str, Any]) -> None:
+    controller, _ = runtime
+    controller.prepare()
+    remote = controller.remote_backend
+    assert remote is not None
+    export, write, scan = remote.export, controller._write, wave.leak.scan_path
+
+    def partial(handle: object, dest: Path, root: str | None = None) -> None:
+        export(handle, dest, root)
+        if dest.name == case["fault"]:
+            raise OSError("injected partial export")
+
+    def publish(name: str, value: object) -> None:
+        if name == wave.wave_capture.MANIFEST and case["fault"] == "manifest":
+            raise OSError("injected manifest publication loss")
+        write(name, value)
+
+    def corrupt(*args: Any, **kwargs: Any) -> Any:
+        result = scan(*args, **kwargs)
+        if case["fault"] == "integrity":
+            (controller.root / "fixture-remote/captured.json").write_bytes(b"replacement")
+        return result
+
+    monkeypatch.setattr(remote, "export", partial)
+    monkeypatch.setattr(controller, "_write", publish)
+    monkeypatch.setattr(wave.leak, "scan_path", corrupt)
+    report = controller.close()
+    assert report["final_snapshots"]["status"] == case["expected"]
+    assert any(action == "destroy" for action, _ in remote.calls)
+    assert report["resources"] == {"volume": "confirmed", "network": "confirmed"}
+    if case["expected"] == "UNKNOWN":
+        assert report["completion"]["cleanup_confirmed"] is False
+    if case["fault"] in wave.wave_capture.SURFACES:
+        document = json.loads((controller.root / wave.wave_capture.MANIFEST).read_text())
+        assert document["surfaces"][case["fault"]]["status"] == "UNKNOWN"
+        other = next(name for name in wave.wave_capture.SURFACES if name != case["fault"])
+        assert document["surfaces"][other]["status"] == "CAPTURED"
 
 
 def test_capture_and_cleanup_are_idempotent(runtime: Any) -> None:

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from . import controller_turns as turns
-from . import fixture_overlay, leak
+from . import fixture_overlay, leak, wave_capture
 from .backend import BackendUnavailable, Confirmation, ExecuteResult, Limits
 from .codex_guard import CodexGuardSession
 from .completion import CompletionDeadline, CompletionUnavailable
@@ -346,22 +346,30 @@ class DockerWave:
                                                               for rel, data in transcripts.items()})
                 except (OSError, BackendUnavailable, HomeTreeTooLarge):
                     state.unknown.append("capture-unavailable")
+        capture_unavailable = {name: "fixture-unavailable" for name in wave_capture.SURFACES}
         if self.remote_backend is not None and self.remote is not None:
+            # An accepted receive-pack can outlive the role's Git client. Stop
+            # the helper too, then copy its stopped filesystem through Docker.
+            self.remote_backend.end_attempt(self.remote)
+            fixture_stopped = self.remote_backend.confirm_stopped(self.remote)
+            if fixture_stopped is not Confirmation.CONFIRMED:
+                self.unknown.append("fixture-stop-unconfirmed")
             writers_stopped = (set(self.states) == {role.name for role in self.roles}
                                and all(state.stopped is Confirmation.CONFIRMED
-                                       for state in self.states.values()))
+                                       for state in self.states.values())
+                               and fixture_stopped is Confirmation.CONFIRMED)
             if not writers_stopped:
                 self.unknown.append("shared-capture-stop-unconfirmed")
+                capture_unavailable = {name: "writer-stop-unconfirmed" for name in wave_capture.SURFACES}
             else:
-                try:
-                    # The helper reads shared state only after every planned writer stopped.
-                    self.remote_backend.export(self.remote, self.root / "shared-state", root=WAVE_ROOT)
-                    self.remote_backend.export(self.remote, self.root / "fixture-remote", root="/fixture/repo.git")
-                except (OSError, BackendUnavailable):
-                    self.unknown.append("shared-capture-unavailable")
-            self.remote_backend.end_attempt(self.remote)
-            if self.remote_backend.confirm_stopped(self.remote) is not Confirmation.CONFIRMED:
-                self.unknown.append("fixture-stop-unconfirmed")
+                for name, source in (("shared-state", WAVE_ROOT), ("fixture-remote", "/fixture/repo.git")):
+                    try:
+                        self.remote_backend.export(self.remote, self.root / name, root=source)
+                        del capture_unavailable[name]
+                    except (OSError, BackendUnavailable):
+                        capture_unavailable[name] = "export-unavailable"
+                        if "shared-capture-unavailable" not in self.unknown:
+                            self.unknown.append("shared-capture-unavailable")
             self.remote_backend.destroy(self.remote)
             if self.remote_backend.confirm_absent(self.remote) is not Confirmation.CONFIRMED:
                 self.unknown.append("fixture-removal-unconfirmed")
@@ -391,7 +399,18 @@ class DockerWave:
                 cleanup[kind] = "unknown"
         if len(self.states) != len(self.roles):
             self.unknown.append("planned-role-not-started")
+        final_capture: dict[str, Any] = {"status": "UNKNOWN", "manifest": wave_capture.MANIFEST,
+                                         "sha256": None}
+        try:
+            self._write(wave_capture.MANIFEST, wave_capture.manifest(self.root, capture_unavailable))
+            digest = hashlib.sha256((self.root / wave_capture.MANIFEST).read_bytes()).hexdigest()
+            final_capture = wave_capture.verify(self.root, digest)
+        except OSError:
+            pass  # Cleanup has already run; retain explicit unavailable custody.
+        if final_capture["status"] != "CAPTURED":
+            self.unknown.append("final-capture-unavailable")
         report: dict[str, Any] = {"attempt_id": self.attempt_id, "status": "UNKNOWN",
+            "final_snapshots": final_capture,
             "roles": {name: {"session_id": s.session_id, "stop": s.stopped.value,
                 "absent": s.absent.value, "unknown": s.unknown,
                 "turns": len(s.executions), "exit_codes": [e.exit_code for e in s.executions],
@@ -412,6 +431,11 @@ class DockerWave:
         self._write("report.json", report)
         scan = leak.scan_path(self.root, leak.load_denylist(), host_paths=leak.default_host_paths())
         report["leak_check"] = {"findings": len(scan.findings), "skipped": scan.skipped}
+        if final_capture["status"] == "CAPTURED":
+            report["final_snapshots"] = wave_capture.verify(self.root, final_capture["sha256"])
+            if report["final_snapshots"]["status"] != "CAPTURED":
+                self.unknown.append("final-capture-integrity-unavailable")
+                report["completion"]["cleanup_confirmed"] = False
         report["completion"] = self.deadline.qualify(self.deadline.marker(self.attempt_id),
             report["completion"]["cleanup_confirmed"])
         if not report["completion"]["on_time"] and "completion-deadline-exhausted" not in self.unknown:
