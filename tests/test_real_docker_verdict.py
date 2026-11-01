@@ -43,7 +43,10 @@ _UNRELATED_CASE = (
 
 
 def _suite(*cases: str) -> str:
-    return f'<?xml version="1.0"?><testsuites><testsuite name="pytest">{"".join(cases)}</testsuite></testsuites>'
+    # Existing cases vary another prerequisite; the new signal file passes.
+    signal_pass = ('<testcase classname="tests.test_calibration_signal_recovery_live" '
+                   'name="signal-proof-passed"/>')
+    return f'<?xml version="1.0"?><testsuites><testsuite name="pytest">{"".join(cases)}{signal_pass}</testsuite></testsuites>'
 
 
 def test_a_missing_report_raises_oserror(tmp_path: Path) -> None:
@@ -339,6 +342,7 @@ _FLOOR = (
     "tests.test_inventory_oracle_live",
     "tests.test_nhl_rerun_live",
     "tests.test_docker_wave_live",
+    "tests.test_calibration_signal_recovery_live",
 )
 
 
@@ -354,7 +358,7 @@ def test_the_other_eight_floor_files_pass_but_gate_witness_all_skipped_is_failur
     extend this test's fixtures is caught here (as a missing-testcase ERROR,
     not a silent FAILURE/SUCCESS misread) rather than passing by accident."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -402,7 +406,7 @@ def test_the_other_eight_floor_files_pass_but_coldinstall_all_skipped_is_failure
     must give FAILURE, never SUCCESS - a skip counts as failure for a
     floor file, by design."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -424,7 +428,7 @@ def test_the_other_eight_floor_files_pass_but_trial_image_tools_all_skipped_is_f
     other declared file executes and passes; only the trial-image
     tool-probe file goes silent (no reachable Docker daemon)."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -446,7 +450,7 @@ def test_the_other_eight_floor_files_pass_but_closure_preflight_all_skipped_is_f
     this test module's own fixtures just added - every other declared
     file executes and passes; only the new entry goes silent."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -469,7 +473,7 @@ def test_the_other_eight_floor_files_pass_but_cwd_confinement_all_skipped_is_fai
     daemon). Before this entry joined the floor, this exact report read
     SUCCESS - the file was tagged `real_docker` but never certified."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -492,7 +496,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
     joined the floor, this exact report read SUCCESS (counter-model review:
     the file was tagged `real_docker` but never certified)."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -575,7 +579,7 @@ def test_the_other_nine_floor_files_pass_but_cleanup_live_all_skipped_is_failure
     verdict is FAILURE, never a green the new proof did not earn."""
     import tempfile
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     with tempfile.TemporaryDirectory() as td:
         suite = (
             _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
@@ -596,7 +600,7 @@ def test_the_other_ten_floor_files_pass_but_egress_live_all_skipped_is_failure()
     FAILURE, never a green the egress proof did not earn."""
     import tempfile
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     with tempfile.TemporaryDirectory() as td:
         suite = (
             _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
@@ -615,7 +619,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_profile_all_skipped_is_failu
     only the local CI/CD profile proof goes silent. Without its floor entry
     this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -644,7 +648,7 @@ def test_the_other_twelve_floor_files_pass_but_cicd_deploy_verify_all_skipped_is
     only the deploy-verification proof goes silent. Without its floor entry
     this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -670,7 +674,7 @@ def test_the_other_thirteen_floor_files_pass_but_level3_cicd_pipeline_all_skippe
     only the cicd-pipeline grader certification goes silent. Without its floor
     entry this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -696,7 +700,7 @@ def test_the_other_fourteen_floor_files_pass_but_codex_guard_all_skipped_is_fail
     the live nested-codex guard proof goes silent. Without its floor entry this
     exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current nineteen-file floor - update it if the floor changes"
+        "this test assumes the current twenty-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -796,5 +800,21 @@ def test_wave_qualification_floor_discriminates_committed_cases(case: str, expec
     else:
         # Every unrelated prerequisite passes. Removing only this floor entry
         # makes the same known-bad report falsely green, proving attribution.
+        without = tuple(name for name in c.DECLARED_REAL_DOCKER_FILES if name != target)
+        assert c.verdict(str(report), without).status == c.SUCCESS
+
+
+@pytest.mark.parametrize(("case", "expected"), [
+    ("passed", c.SUCCESS), ("missing", c.ERROR), ("skipped", c.FAILURE),
+    ("failed", c.FAILURE), ("error", c.FAILURE),
+])
+def test_signal_recovery_floor_discriminates_committed_cases(case: str, expected: str) -> None:
+    target = "tests.test_calibration_signal_recovery_live"
+    report = Path(__file__).resolve().parents[1] / "controls/calibration-signal-floor" / (case + ".xml")
+    observed = c.verdict(str(report))
+    assert observed.status == expected
+    if case == "passed":
+        assert observed.executed_by_file[target] == 10
+    else:
         without = tuple(name for name in c.DECLARED_REAL_DOCKER_FILES if name != target)
         assert c.verdict(str(report), without).status == c.SUCCESS
