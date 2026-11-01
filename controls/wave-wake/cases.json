@@ -1,0 +1,83 @@
+[
+  {
+    "name": "file-change-idle",
+    "change": "files",
+    "expected": true
+  },
+  {
+    "name": "ref-change-idle",
+    "change": "refs",
+    "expected": true
+  },
+  {
+    "name": "unchanged",
+    "change": "none",
+    "expected": false
+  },
+  {
+    "name": "running-watch",
+    "change": "files",
+    "phase": "running",
+    "expected": false
+  },
+  {
+    "name": "unknown-idleness",
+    "change": "files",
+    "idle": null,
+    "expected": false
+  },
+  {
+    "name": "confirmed-busy",
+    "change": "files",
+    "idle": false,
+    "expected": false
+  },
+  {
+    "name": "wrong-role",
+    "change": "files",
+    "current_role": "worker-b",
+    "expected": false
+  },
+  {
+    "name": "stale-session",
+    "change": "files",
+    "current_session": "00000000-0000-0000-0000-000000000002",
+    "expected": false
+  },
+  {
+    "name": "stale-revision",
+    "change": "files",
+    "stale_revision": true,
+    "expected": false
+  },
+  {
+    "name": "missing-session",
+    "change": "files",
+    "no_session": true,
+    "expected": false
+  },
+  {
+    "name": "nonzero-turn",
+    "change": "files",
+    "exit_code": 7,
+    "expected": false
+  },
+  {
+    "name": "timed-out-turn",
+    "change": "files",
+    "reason": "timeout",
+    "expected": false
+  },
+  {
+    "name": "unknown-liveness",
+    "change": "files",
+    "live": null,
+    "expected": false
+  },
+  {
+    "name": "ended-target",
+    "change": "files",
+    "live": false,
+    "expected": false
+  }
+]
