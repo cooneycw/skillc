@@ -1,0 +1,1 @@
+- Classify byte-matching products from captured delivered commit trees and retain their verifiable Git objects for inventory recovery. Add bounded declaration-bound workspace cache-directory patterns with explicit uninspected paths and independent scope protections (Refs #619, #639).

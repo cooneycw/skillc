@@ -8,6 +8,7 @@ Only the patterns are adapted; this module has no dependency on that project.
 from __future__ import annotations
 
 import ctypes
+import fnmatch
 import hashlib
 import os
 import re
@@ -125,8 +126,12 @@ class Reader:
                 end = matches[index + 1].start() if index + 1 < len(matches) else len(data)
                 self.put(items, 'message:' + path + '#' + match[1].decode('ascii'), data[match.start():end].hex())
 
-    def files(self, roots: list[str], *, family: str = '', allowed_subtrees: frozenset[str] = frozenset()) -> Surface:
+    def files(self, roots: list[str], *, family: str = '', allowed_subtrees: frozenset[str] = frozenset(),
+              cache_rules: list[dict[str, Any]] | None = None, protected: tuple[str, ...] = ()) -> Surface:
         items: dict[str, str] = {}
+        rules = cache_rules or []
+        matches = [0] * len(rules)
+        excluded: list[str] = []
 
         def walk(path: str, depth: int = 0) -> None:
             if depth > MAX_DEPTH:
@@ -137,6 +142,16 @@ class Reader:
             if kind == 'dir':
                 if '/' + path in allowed_subtrees:
                     return  # Explicit declaration-bound blind spot, named in every report.
+                for index, rule in enumerate(rules):
+                    if (0 < depth <= rule['max_depth'] and matches[index] < rule['max_matches']
+                            and fnmatch.fnmatchcase(path.rsplit('/', 1)[-1], rule['name_pattern'])):
+                        absolute = '/' + path
+                        if any(absolute == p or absolute.startswith(p + '/') or p.startswith(absolute + '/')
+                               for p in protected):
+                            raise gs.Unreadable('cache directory overlaps independently required scope or product')
+                        matches[index] += 1
+                        excluded.append(absolute)
+                        return
                 self.put(items, 'directory:/' + path, 'directory')
                 for name, _ in self.tree.listdir(path):
                     # Repository metadata is inventoried as Git, not counted
@@ -156,9 +171,9 @@ class Reader:
         try:
             for path in roots:
                 walk(path.lstrip('/'))
-            return Surface(items)
+            return Surface(items, not_inspected=tuple(excluded))
         except (gs.Unreadable, OSError, ValueError, RecursionError) as exc:
-            return Surface(items, False, f'{type(exc).__name__}: {exc}')
+            return Surface(items, False, f'{type(exc).__name__}: {exc}', not_inspected=tuple(excluded))
 
     def git(self, scope: dict[str, Any], namespace_root: str) -> dict[str, Surface]:
         rows: dict[str, dict[str, str]] = {name: {} for name in ('worktrees', 'local-branches', 'remote-branches', 'stashes')}
@@ -299,8 +314,14 @@ def capture_role(policy: Policy, role: str, root: Path, *, proc_root: Path = Pat
     try:
         reader = Reader(BoundedTree(root), scope['mailbox_marker'])
         rows = reader.git(scope, namespace_root)
+        protected = (scope['gitdir'], *scope['remotes'].values(), *scope['temp_roots'],
+                     *policy.data['shared_roots'], *(p for roots in scope['coordination'].values() for p in roots),
+                     *(key.split(':', 1)[1] for category in ('delivered', 'declared_allowed')
+                       for surface, key in policy.selected(category) if surface == role + '/workspace' and ':' in key))
         rows['workspace'] = reader.files([scope['checkout']], family='workspace',
-                                         allowed_subtrees=policy.allowed_subtrees(role + '/workspace'))
+            allowed_subtrees=policy.allowed_subtrees(role + '/workspace'), protected=protected,
+            cache_rules=[row for row in policy.data.get('allowed_cache_directories', [])
+                         if row['surface'] == role + '/workspace'])
         for family in COORDINATION_KINDS:
             rows['coordination-' + family] = reader.files(scope['coordination'][family], family=family)
         rows['temp'] = reader.files(scope['temp_roots'])
