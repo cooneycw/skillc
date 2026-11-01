@@ -40,6 +40,27 @@ FIXTURE_ALIAS = "skillc-fixture"
 FIXTURE_URL = "git://" + FIXTURE_ALIAS + "/repo.git"
 
 
+def _stderr_tail(raw: bytes) -> str:
+    """Redact the whole diagnostic before taking a bounded printable tail.
+
+    Git errors may echo credentials from URLs. Also suppress named secrets,
+    authorization values and opaque token-shaped words; prefer losing detail
+    over publishing an apparent credential. This is not a general log exporter.
+    """
+    text = raw.decode("utf-8", errors="replace")
+    text = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/?#]*@", r"\1[redacted]@", text)
+    text = re.sub(r"(?i)\b(?:authorization\s*:\s*)?(?:bearer|basic)\s+\S+",
+                  "[redacted]", text)
+    text = re.sub(r"(?i)\b((?:[a-z0-9]+[_-])?(?:password|passwd|token|secret|api[_-]?key))"
+                  r"([\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s&<>]+)",
+                  r"\1\2[redacted]", text)
+    text = re.sub(r"(?<![\w-])(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[\w-]+",
+                  "[redacted]", text)
+    text = re.sub(r"[A-Za-z0-9_+/.=-]{24,}", "[redacted]", text)
+    text = "".join(c if c.isprintable() or c in "\n\t" else "?" for c in text)
+    return text[-2048:].strip()
+
+
 @dataclass(frozen=True)
 class Role:
     name: str
@@ -138,8 +159,9 @@ class DockerWave:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendUnavailable("wave daemon operation unavailable") from exc
         if done.returncode:
-            # Retain diagnostics privately; never embed a host identity in a public error.
-            raise BackendUnavailable("wave daemon operation refused")
+            tail = _stderr_tail(done.stderr)
+            raise BackendUnavailable(f"wave daemon operation refused (exit {done.returncode})"
+                                     + (f": {tail}" if tail else ""))
         return done.stdout
 
     def _backend(self, name: str, **kwargs: Any) -> DockerBackend:

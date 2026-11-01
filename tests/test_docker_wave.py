@@ -393,3 +393,59 @@ def test_resume_rechecks_expected_session_under_the_role_lock(runtime: Any) -> N
         assert controller.turn('worker-a', 'continue', expected_session=state.session_id).exit_code == 0
     finally:
         controller.close()
+
+
+def test_daemon_refusal_retains_exit_status_and_bounded_stderr(monkeypatch: Any) -> None:
+    controller = object.__new__(wave.DockerWave)
+    controller.daemon_timeout = 5.0
+    controller.deadline = wave.CompletionDeadline.after(30)
+    controller.docker_bin, controller.env = ("docker",), {}
+    monkeypatch.setattr(wave.subprocess, "run", lambda *a, **kw: SimpleNamespace(
+        returncode=128, stdout=b"", stderr=b"old output\n" * 500 + b"fatal: unsafe repository"))
+    with pytest.raises(BackendUnavailable) as caught:
+        controller._call(["exec", "fixture", "sh", "-c", "git clone"])
+    message = str(caught.value)
+    assert "exit 128" in message
+    assert message.endswith("fatal: unsafe repository")
+    assert len(message) < 2200
+
+
+@pytest.mark.parametrize("diagnostic", [
+    "fatal: https://operator:tiny-pass@example.invalid/repo.git rejected",
+    "fatal: https://operator:tiny-pass@example.invalid/repo.git?token=tiny-query rejected",
+    "Authorization: Bearer private-bearer-value",
+    "password=tiny-pass api_key=tiny-key secret=tiny-secret",
+    'password="tiny-pass with spaces"',
+    "https://example.invalid/repo?access_token=tiny-query&client_secret=tiny-secret",
+    "token " + "ghp_" + "A" * 36,
+    "token " + "sk-proj-" + "B" * 48,
+    "opaque " + "C" * 40,
+    "prefix " * 400 + "https://operator:tiny-pass@example.invalid/repo.git",
+], ids=["url-userinfo", "url-query", "bearer", "assignments", "quoted", "oauth-query",
+        "github-token", "api-token", "opaque-token", "redact-before-tail"])
+def test_daemon_refusal_never_exposes_credentials(monkeypatch: Any, diagnostic: str) -> None:
+    controller = object.__new__(wave.DockerWave)
+    controller.daemon_timeout = 5.0
+    controller.deadline = wave.CompletionDeadline.after(30)
+    controller.docker_bin, controller.env = ("docker",), {}
+    monkeypatch.setattr(wave.subprocess, "run", lambda *a, **kw: SimpleNamespace(
+        returncode=1, stdout=b"", stderr=diagnostic.encode()))
+    with pytest.raises(BackendUnavailable) as caught:
+        controller._call(["exec", "fixture", "git"])
+    message = str(caught.value)
+    # Require retained diagnostic evidence as well as absence of credentials.
+    assert "[redacted]" in message
+    for private in ("operator", "tiny-pass", "tiny-query", "private-bearer-value",
+                    "tiny-key", "tiny-secret", "with spaces", "A" * 36, "B" * 48, "C" * 40):
+        assert private not in message
+
+
+def test_successful_daemon_call_preserves_stdout(monkeypatch: Any) -> None:
+    controller = object.__new__(wave.DockerWave)
+    controller.daemon_timeout = 5.0
+    controller.deadline = wave.CompletionDeadline.after(30)
+    controller.docker_bin, controller.env = ("docker",), {}
+    output = b"fixture-id\x00\xff"
+    monkeypatch.setattr(wave.subprocess, "run", lambda *a, **kw: SimpleNamespace(
+        returncode=0, stdout=output, stderr=b"warning"))
+    assert controller._call(["volume", "create"]) is output
