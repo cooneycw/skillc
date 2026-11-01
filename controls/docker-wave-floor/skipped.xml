@@ -34,5 +34,6 @@
     <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[cancel]">
       <skipped message="physical qualification did not run" />
     </testcase>
+    <testcase classname="tests.test_calibration_signal_recovery_live" name="other-proof-passed" />
   </testsuite>
 </testsuites>

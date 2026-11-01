@@ -1,0 +1,19 @@
+{
+  "description": "Run only on authorized real Docker; these mutations must FAIL the selected ordinary reproduction assertion. They do not alter production code.",
+  "cases": [
+    {
+      "env": {
+        "SKILLC_SIGNAL_REPRO_CONTROL": "suppress-sigint"
+      },
+      "node": "tests/test_calibration_signal_recovery_live.py::test_pid_sigint_stops_real_docker_schedule_unless_inherited_ignore[default-during-execution]",
+      "expected": "FAIL: controller exits 0 after continuation rather than interrupt exit 130"
+    },
+    {
+      "env": {
+        "SKILLC_SIGNAL_REPRO_CONTROL": "forget-dispatch"
+      },
+      "node": "tests/test_calibration_signal_recovery_live.py::test_sigkill_real_docker_recovery_preserves_durable_dispatch[after-dispatch]",
+      "expected": "FAIL: public report returns not-run instead of inconclusive"
+    }
+  ]
+}
