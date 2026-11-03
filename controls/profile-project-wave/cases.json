@@ -1,0 +1,5 @@
+[
+  {"name": "complete-closure", "remove_dependency": null, "expected": "VALID", "installed_files": 320},
+  {"name": "missing-wave-helpers", "remove_dependency": "helper-project-wave", "expected": "REFUSED"},
+  {"name": "missing-project-data", "remove_dependency": "checkout-project-data", "expected": "REFUSED"}
+]
