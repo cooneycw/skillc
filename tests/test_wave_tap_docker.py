@@ -149,7 +149,7 @@ def test_production_peer_authorizer_observation_controls(peer_model: Any, fault:
         assert peer_model.calls == [["inspect", "--format", "{{.State.Pid}}", "owned-container"]]
 
 
-@pytest.mark.parametrize("fault", ["good", "host", "sibling", "reused", "unreadable"])
+@pytest.mark.parametrize("fault", ["good", "host", "sibling", "reused", "unreadable", "early-close"])
 def test_production_peer_gate_socket_drops_prevent_helper_and_completion(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, peer_model: Any, fault: str) -> None:
     import os
@@ -167,12 +167,21 @@ def test_production_peer_gate_socket_drops_prevent_helper_and_completion(
     # to this unit process; fixed production UID/GID refusals are checked above.
     monkeypatch.setattr(wave_tap_docker, "CANDIDATE_UID", os.getuid())
     monkeypatch.setattr(wave_tap_docker, "CANDIDATE_GID", os.getgid())
-    peer_model.fault = fault
+    peer_model.fault = "host" if fault == "early-close" else fault
     peer_model.peer_pid = os.getpid()
     b = Binding("tap-wave", "worker-a", "attempt-a", SID, "quote-a", 0, 1, "task-nonce")
     executor = LocalHelperExecutor(tmp_path)
     tap = HelperTap((b,), executor.pins, executor, tmp_path / "controller")
     endpoint = tap.open_turn(b.role, HEADER)
+    early_closes: list[bool] = []
+    if fault == "early-close":
+        def closed_send(client: socket.socket, payload: bytes) -> None:
+            # Wait for actual production rejection/EOF, then deterministically
+            # exercise the send-time exception observed by the reviewer.
+            assert client.recv(16384) == b""
+            early_closes.append(True)
+            raise BrokenPipeError("controlled send after actual peer rejection")
+        monkeypatch.setattr(socket.socket, "sendall", closed_send)
     with tempfile.TemporaryDirectory(prefix="peer-gate-") as short:
         path = Path(short) / "role.sock"
         channel = DecideReplyChannel(path, lambda req: tap.request(endpoint, req), b.attempt_id)
@@ -200,6 +209,8 @@ def test_production_peer_gate_socket_drops_prevent_helper_and_completion(
                     assert response == b"", "unauthorized peer reached the helper tap"
         finally:
             channel.stop_and_finalize()
+        if fault == "early-close":
+            assert len(early_closes) == 2
         assert peer_model.calls, "production peer gate was never invoked"
         tap.end_turn(endpoint)
         executor.stopped = True
