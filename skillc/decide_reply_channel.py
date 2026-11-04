@@ -53,6 +53,7 @@ import os
 import socket
 import socketserver
 import stat
+import struct
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -120,6 +121,15 @@ class _Handler(socketserver.BaseRequestHandler):
 
     def _handle_admitted(self, channel: DecideReplyChannel) -> None:
         self.request.settimeout(channel._request_timeout)
+        if channel._peer_authorizer is not None:
+            try:
+                peer = struct.unpack("3i", self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                allowed = channel._peer_authorizer(*peer) is True
+            except Exception:  # noqa: BLE001 - an unavailable peer probe must drop before decide
+                allowed = False
+            if not allowed:
+                channel._note_dropped()
+                return
         chunks: list[bytes] = []
         total = 0
         try:
@@ -254,6 +264,8 @@ class DecideReplyChannel:
         self._max_request_bytes = max_request_bytes
         self._request_timeout = request_timeout
         self._lock = threading.Lock()
+        self._peer_authorizer: Callable[[int, int, int], bool | None] | None = None
+        self._peer_seen = False
         self._log: list[LoggedDecision] = []
         #: #434: connections closed before `decide` saw a request (over
         #: capacity, oversize, a read error, malformed). A caller that must
@@ -412,10 +424,27 @@ class DecideReplyChannel:
         caller that is refused admission must not later call
         `_handler_finished()` for it, or the count would go negative."""
         with self._lock:
+            self._peer_seen = True
             if self._active_handlers >= self._max_concurrent_handlers:
                 return False
             self._active_handlers += 1
             return True
+
+    def set_peer_authorizer(self, authorizer: Callable[[int, int, int], bool | None]) -> None:
+        """Install one kernel-peer gate before any connection is admitted.
+
+        The callback receives SO_PEERCRED's PID/UID/GID, never request fields.
+        False, unknown or unavailable credentials drop before parsing/deciding;
+        callers requiring complete coverage must consume dropped_connections().
+        Existing callers that do not opt in retain their original behavior.
+        """
+        with self._lock:
+            if self._peer_seen or self._peer_authorizer is not None:
+                raise RuntimeError("peer authorization must be fixed before the first connection")
+            self._peer_authorizer = authorizer
+
+    def peer_authentication_configured(self) -> bool:
+        return self._peer_authorizer is not None
 
     def _note_dropped(self) -> None:
         with self._lock:

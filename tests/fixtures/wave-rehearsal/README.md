@@ -42,8 +42,11 @@ verdicts are declarations for the later collector, not prerecorded evidence.
 Lost-poke suppression, deadline enforcement, launch/capture loss and retirement
 faults still need their controller-side injections through the real driver.
 
-Full-path delivery remains blocked on an approved trusted protocol collector.
-Do not normalize actor-written logs or mailbox assertions into controller-owned
+The approved trusted collector is now composed by `docker_rehearsal.py` using
+`skillc.wave_tap`, its Docker executor and the existing driver. See the
+[collection contract](../../../docs/specs/evaluation-facility/wave-rehearsal.md).
+This source composition still needs full-path physical qualification. Do not
+normalize actor-written logs or mailbox assertions into controller-owned
 ack/complete coverage. Registry release leaves historical rows and mailbox state;
 it is not proof of zero clutter or whole-wave retirement. A completed actor's
 local state file is preparation data, not a declared allowed live-task artifact.

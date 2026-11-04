@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -39,7 +40,9 @@ def main(argv: list[str]) -> None:
         if len(turn) != 1 or STATE.exists():
             raise ValueError("one initial declaration required")
         config = json.loads(turn[0])
-        if set(config) != {"wave_id", "bindings"} or set(config["bindings"]) != set(ROLES):
+        if (set(config) not in ({"wave_id", "bindings"}, {"wave_id", "bindings", "tap"})
+                or set(config["bindings"]) != set(ROLES)
+                or ("tap" in config and config["tap"] is not True)):
             raise ValueError("closed role population required")
         state = {"role": role, "mode": mode, "session": str(uuid.uuid4()),
                  "config": config, "assigned": False, "done": False}
@@ -93,22 +96,44 @@ def main(argv: list[str]) -> None:
         return {**config["bindings"][worker], "wave_id": config["wave_id"],
                 "role": worker, "session_id": sid}
 
+    def tap(operation: str, claim: dict[str, Any], commit: str | None = None) -> None:
+        token = json.loads((SCRIPT_DIR / ("turn-" + role + ".json")).read_text())["turn_nonce"]
+        request = {"kind": "wave-helper", "op": operation, "binding": claim, "turn_nonce": token}
+        if commit is not None:
+            request["commit"] = commit
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(20)
+            client.connect("/run/skillc/trigger.sock")
+            client.sendall(json.dumps(request).encode() + b"\n")
+            with client.makefile("rb") as stream:
+                reply = json.loads(stream.readline(16384))
+        if reply.get("ok") is not True or reply.get("result", {}).get("accepted") is not True:
+            raise RuntimeError("trusted helper operation unavailable or refused")
+
     if state["done"]:
         return
     helper("registry", "register", role)
+    if config.get("tap") and turn[0] != "resume":
+        # The controller must observe this bootstrap header before admitting
+        # any measured receipt/completion operation on a later turn.
+        save()
+        return
     task = json.loads((SCRIPT_DIR / "task.json").read_text())
     if role != "orchestrator":
         for revision, message in read():
             expected = binding(role, session)
             if message != {**expected, "op": "assignment"}:
                 raise ValueError("assignment binding mismatch")
-            acknowledge(revision)
             claim = dict(expected)
             if role == "worker-a" and mode == "stale-ack":
                 claim["revision"] += 1
             if role == "worker-a" and mode == "wrong-role-ack":
                 claim["role"] = "worker-b"
-            send("orchestrator", {**claim, "op": "ack"})
+            if config.get("tap"):
+                tap("ack", claim)
+            else:
+                acknowledge(revision)
+                send("orchestrator", {**claim, "op": "ack"})
             if role == "worker-a" and mode == "disappear":
                 raise SystemExit(7)
             if role == "worker-a" and mode == "wait-for-deadline":
@@ -125,14 +150,31 @@ def main(argv: list[str]) -> None:
             run(["git", "push", "origin", "HEAD:refs/heads/" + role], env)
             commit = run(["git", "rev-parse", "HEAD"], env).strip()
             completion = {**expected, "op": "complete", "commit": commit}
-            send("orchestrator", completion)
-            if role == "worker-a" and mode == "duplicate-completion":
+            if config.get("tap"):
+                tap("complete", expected, commit)
+            else:
                 send("orchestrator", completion)
+            if role == "worker-a" and mode == "duplicate-completion":
+                if config.get("tap"):
+                    tap("complete", expected, commit)
+                else:
+                    send("orchestrator", completion)
             state["done"] = True
             if mode != "leave-unretired":
                 helper("registry", "release", role)
             break
     else:
+        if config.get("tap"):
+            state["assigned"] = True  # assignments come from the controller tap
+            if not state.get("own_assignment_received"):
+                for _, message in read("controller"):
+                    if message != {**binding(role, session), "op": "assignment"}:
+                        raise ValueError("integrator assignment binding mismatch")
+                    tap("ack", binding(role, session))
+                    state["own_assignment_received"] = True
+                if not state.get("own_assignment_received"):
+                    save()
+                    return
         if not state["assigned"]:
             sessions = {}
             for worker in ROLES[1:]:
@@ -169,6 +211,8 @@ def main(argv: list[str]) -> None:
                 run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                      "cherry-pick", actual], env)
             run(["git", "push", "origin", "HEAD:refs/heads/delivered"], env)
+            if config.get("tap"):
+                tap("complete", binding(role, session), run(["git", "rev-parse", "HEAD"], env).strip())
             state["done"] = True
             if mode != "leave-unretired":
                 helper("registry", "release", role)

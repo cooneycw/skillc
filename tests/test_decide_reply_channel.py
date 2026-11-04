@@ -1040,3 +1040,92 @@ def test_a_connection_refused_for_capacity_is_counted_as_dropped(tmp_path: Path)
         holder.join(10)
         channel.stop_and_finalize()
     assert channel.dropped_connections() == 1
+
+
+@pytest.mark.parametrize("decision", [False, None, "unavailable"])
+def test_peer_gate_refuses_before_decide(tmp_path: Path, decision: object) -> None:
+    import tempfile
+    calls: list[object] = []
+
+    def authorize(pid: int, uid: int, gid: int) -> bool | None:
+        assert (pid, uid, gid) == (os.getpid(), os.getuid(), os.getgid())
+        if decision == "unavailable":
+            raise LookupError("modeled unavailable kernel probe")
+        return None if decision is None else False
+
+    def decide(row: Mapping[str, object]) -> Mapping[str, object]:
+        calls.append(row)
+        return {}
+
+    with tempfile.TemporaryDirectory(prefix="channel-peer-") as short:
+        channel = DecideReplyChannel(Path(short) / "role.sock", decide, "attempt")
+        channel.set_peer_authorizer(authorize)
+        channel.start()
+        try:
+            with pytest.raises((OSError, ValueError)):
+                _send(Path(short) / "role.sock", {"pid": os.getpid(), "uid": os.getuid(), "op": "forged"})
+            assert calls == []
+            assert channel.trusted_log().status == "no-controller-witness"
+            assert channel.dropped_connections() == 1
+        finally:
+            channel.close()
+
+
+def test_kernel_peer_authority_ignores_forged_payload(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+    import tempfile
+    observed: list[int] = []
+    actor: dict[str, int] = {}
+
+    def authorize(pid: int, uid: int, gid: int) -> bool:
+        observed.append(pid)
+        return pid == actor.get("pid") and uid == os.getuid() and gid == os.getgid()
+
+    source = '''import json,os,socket,sys
+print(os.getpid(),flush=True)
+sys.stdin.readline()
+with socket.socket(socket.AF_UNIX) as client:
+ client.connect(sys.argv[1]);client.sendall(b'{"op":"real-actor"}\\n')
+ with client.makefile('rb') as stream: print(stream.readline().decode(),end='')
+'''
+    with tempfile.TemporaryDirectory(prefix="channel-peer-") as short:
+        path = Path(short) / "role.sock"
+        channel = DecideReplyChannel(path, lambda row: {"accepted": row["op"] == "real-actor"}, "attempt")
+        channel.set_peer_authorizer(authorize)
+        channel.start()
+        child = subprocess.Popen([sys.executable, "-I", "-c", source, str(path)], stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert child.stdout is not None
+            actor["pid"] = int(child.stdout.readline())
+            # The controller process forges the actor PID in JSON. The kernel
+            # still identifies this process and refuses before the decision.
+            with pytest.raises((OSError, ValueError)):
+                _send(path, {"op": "real-actor", "pid": actor["pid"]})
+            out, err = child.communicate("go\n", timeout=5)
+            assert child.returncode == 0, err
+            assert json.loads(out)["result"]["accepted"] is True
+            decisions = channel.log_or_finalize()
+            assert len(decisions) == 1 and decisions[0].request == {"op": "real-actor"}
+            assert observed == [os.getpid(), actor["pid"]]
+            assert channel.dropped_connections() == 1
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            channel.close()
+
+
+def test_peer_gate_cannot_change_after_connection(tmp_path: Path) -> None:
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="channel-peer-") as short:
+        path = Path(short) / "role.sock"
+        channel = DecideReplyChannel(path, lambda row: {}, "attempt")
+        channel.start()
+        try:
+            assert _send(path, {"op": "ordinary"})["ok"]
+            with pytest.raises(RuntimeError, match="first connection"):
+                channel.set_peer_authorizer(lambda *peer: True)
+        finally:
+            channel.close()

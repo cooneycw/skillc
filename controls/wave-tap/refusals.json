@@ -1,0 +1,17 @@
+[
+  {"name": "healthy-ack", "patch": {}, "accepted": true},
+  {"name": "forged-result", "patch": {"result": {"exit_code": 0, "effect": true}}, "accepted": false},
+  {"name": "wrong-role", "binding_patch": {"role": "worker-b"}, "accepted": false},
+  {"name": "wrong-attempt", "binding_patch": {"attempt_id": "other-attempt"}, "accepted": false},
+  {"name": "stale-session", "binding_patch": {"session_id": "obsolete"}, "accepted": false},
+  {"name": "stale-revision", "binding_patch": {"revision": 2}, "accepted": false},
+  {"name": "boolean-revision", "binding_patch": {"revision": true}, "accepted": false},
+  {"name": "wrong-nonce", "binding_patch": {"nonce": "obsolete"}, "accepted": false},
+  {"name": "stale-turn", "patch": {"turn_nonce": "obsolete"}, "accepted": false},
+  {"name": "control-sequence", "patch": {"seq": 1}, "accepted": false},
+  {"name": "control-elapsed", "patch": {"elapsed": 0}, "accepted": false},
+  {"name": "control-event", "patch": {"event": {"op": "complete"}}, "accepted": false},
+  {"name": "control-success", "patch": {"accepted": true}, "accepted": false},
+  {"name": "arbitrary-command", "patch": {"argv": ["sh", "-c", "true"]}, "accepted": false},
+  {"name": "arbitrary-environment", "patch": {"env": {"PATH": "/untrusted"}}, "accepted": false}
+]
