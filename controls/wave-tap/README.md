@@ -43,3 +43,9 @@ replaced in memory with `lambda *args: True`: both fail at the unauthorized-peer
 response assertion after the real helper was incorrectly reached. Restoring the
 production method passes these cases. This mutation control targets the gate,
 not a claim that the pre-existing production implementation was incorrect.
+
+The `early-close` socket case waits for real production rejection and EOF, then
+injects the reviewer's observed send-time `BrokenPipeError`. This deterministic
+case fails with the previous `ConnectionResetError`-only handler and passes with
+the narrow two-exception handler. It still requires two observed drops, zero
+helper requests and UNKNOWN coverage; other socket errors remain unhandled.
