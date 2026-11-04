@@ -192,7 +192,7 @@ def test_production_peer_gate_socket_drops_prevent_helper_and_completion(
                     try:
                         client.sendall(json.dumps(payload).encode() + b"\n")
                         response = client.recv(16384)
-                    except ConnectionResetError:
+                    except (ConnectionResetError, BrokenPipeError):
                         response = b""
                 if fault == "good":
                     assert json.loads(response)["result"]["accepted"] is True
