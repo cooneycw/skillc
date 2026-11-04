@@ -1,0 +1,7 @@
+[
+  {"name": "healthy", "fault": "none", "expected": "CAPTURED"},
+  {"name": "partial-shared-export", "fault": "shared-state", "expected": "UNKNOWN"},
+  {"name": "partial-remote-export", "fault": "fixture-remote", "expected": "UNKNOWN"},
+  {"name": "manifest-publication-lost", "fault": "manifest", "expected": "UNKNOWN"},
+  {"name": "retained-remote-corrupted", "fault": "integrity", "expected": "UNKNOWN"}
+]
