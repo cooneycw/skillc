@@ -59,6 +59,15 @@ command; the missing-service case must report channel failure rather than an
 empty issue population. Native model turns, review and full governance workflow
 are not exercised by these fixed commands.
 
+The image/prewarm layer is a qualification fixture, separate from `docker/trial`.
+It does not repin a study runtime. Each actor retains the baked scaffold lock text
+and its digest, scaffold project digest, source-manifest digest and cache policy;
+the parent binds the resolved immutable image ID. The installed engine must
+produce matching project/lock bytes offline from a fresh writable copy of that
+image's cache. The missing-cache opposite receives no copy. Build-time package
+resolution is therefore identified by the retained lock and image, rather than
+silently represented as a frozen historical study runtime.
+
 One 1800-second budget covers source staging/build, cases, retained evidence and
 cleanup, reserving 120 seconds for cleanup; build commands cap at 300 seconds and
 each container case at 90 seconds. Existing bounded cold-command transport limits

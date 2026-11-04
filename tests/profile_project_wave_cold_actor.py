@@ -35,7 +35,14 @@ def actor(case: str) -> dict[str, Any]:
     logs = Path('/work/commands')
     logs.mkdir()
     budget = Budget(logs, 80)
-    rows: list[Any] = [{'installed_files': 320}]
+    baked_lock = Path('/opt/scaffold-warm/uv.lock').read_bytes()
+    baked_project = Path('/opt/scaffold-warm/pyproject.toml').read_bytes()
+    rows: list[Any] = [{'installed_files': 320,
+        'source_manifest_sha256': hashlib.sha256((root / 'controls/profile-project-wave/source-manifest.json').read_bytes()).hexdigest(),
+        'scaffold_project_sha256': hashlib.sha256(baked_project).hexdigest(),
+        'scaffold_lock_sha256': hashlib.sha256(baked_lock).hexdigest(),
+        'scaffold_lock': baked_lock.decode(),
+        'cache_policy': 'fresh writable copy of image cache; offline; absent in missing-cache case'}]
     tools = Path('/work/tools')
     tools.mkdir()
     (tools / 'gh').write_text('#!/bin/sh\nexec /usr/local/bin/python /opt/controller/gh-shim.py "$@"\n')
@@ -66,8 +73,9 @@ def actor(case: str) -> dict[str, Any]:
     need(rc == 0 and (project / 'pyproject.toml').is_file() and (project / '.git').is_dir(),
          'actual project engine scaffold: ' + output[-300:])
     need(hashlib.sha256((project / 'uv.lock').read_bytes()).digest()
-         == hashlib.sha256(Path('/opt/scaffold-warm/uv.lock').read_bytes()).digest(),
+         == hashlib.sha256(baked_lock).digest(),
          'actual scaffold resolution differs from baked dependency cache')
+    need((project / 'pyproject.toml').read_bytes() == baked_project, 'installed engine produced different scaffold metadata')
     bare = Path('/work/remote.git')
     need(call(['git', 'init', '--bare', '-q', str(bare)], home)[0] == 0, 'fixture remote initialization')
     service = fs.FixtureService({
