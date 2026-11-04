@@ -1,0 +1,132 @@
+[
+  {
+    "id": "healthy",
+    "actor_mode": "healthy",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "PASS"
+  },
+  {
+    "id": "alternative-order",
+    "actor_mode": "healthy",
+    "worker_order": [
+      "worker-b",
+      "worker-a"
+    ],
+    "transport": "normal",
+    "expected_wave": "PASS"
+  },
+  {
+    "id": "lost-poke",
+    "actor_mode": "healthy",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "suppress-worker-a-resume",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "worker-disappears",
+    "actor_mode": "disappear",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "stale-acknowledgement",
+    "actor_mode": "stale-ack",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "wrong-role-acknowledgement",
+    "actor_mode": "wrong-role-ack",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "duplicate-completion",
+    "actor_mode": "duplicate-completion",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "unfinished-integration",
+    "actor_mode": "unfinished-integration",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "missed-deadline",
+    "actor_mode": "wait-for-deadline",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "unretired-wave",
+    "actor_mode": "leave-unretired",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  },
+  {
+    "id": "capture-unavailable",
+    "actor_mode": "healthy",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "drop-capture",
+    "expected_wave": "UNKNOWN"
+  },
+  {
+    "id": "non-start",
+    "actor_mode": "healthy",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "refuse-worker-a-start",
+    "expected_wave": "UNKNOWN"
+  },
+  {
+    "id": "wrong-arithmetic",
+    "actor_mode": "wrong-tax",
+    "worker_order": [
+      "worker-a",
+      "worker-b"
+    ],
+    "transport": "normal",
+    "expected_wave": "FAIL"
+  }
+]
