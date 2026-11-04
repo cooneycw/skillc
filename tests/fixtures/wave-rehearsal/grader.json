@@ -1,0 +1,17 @@
+{
+  "id": "wave-rehearsal-quote",
+  "revision": "1",
+  "criteria": [
+    "delivery",
+    "behavior"
+  ],
+  "probe": {
+    "file": "probe.py",
+    "inputs": "inputs.json",
+    "timeout": 2
+  },
+  "judge": {
+    "file": "judge.py",
+    "timeout": 2
+  }
+}

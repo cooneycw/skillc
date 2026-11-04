@@ -1,0 +1,35 @@
+{
+  "id": "wave-rehearsal-quote",
+  "revision": "1",
+  "domain": {
+    "qty": [
+      0,
+      1,
+      2,
+      4
+    ],
+    "unit": [
+      0,
+      1,
+      7,
+      123,
+      199
+    ],
+    "bp": [
+      0,
+      500,
+      1300,
+      5000,
+      10000
+    ]
+  },
+  "seed": {
+    "src/subtotal.py": "def subtotal(qty, unit):\n    raise NotImplementedError(\"unfinished\")\n",
+    "src/tax.py": "def tax(net, bp):\n    raise NotImplementedError(\"unfinished\")\n",
+    "src/quote.py": "from subtotal import subtotal\nfrom tax import tax\ndef quote(qty, unit, bp):\n    net = subtotal(qty, unit)\n    due = tax(net, bp)\n    return [net, due, net + due]\n"
+  },
+  "implementations": {
+    "worker-a": "def subtotal(qty, unit):\n    return qty * unit\n",
+    "worker-b": "def tax(net, bp):\n    return (net * bp + 5000) // 10000\n"
+  }
+}
