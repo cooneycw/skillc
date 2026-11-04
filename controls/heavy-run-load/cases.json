@@ -1,0 +1,6 @@
+[
+  {"name": "below-threshold", "trace": [[0, 19.9], [120, 19.9]], "abort_after_each_sample": [false, false]},
+  {"name": "continuous-boundary", "trace": [[0, 20], [119.9, 20], [120, 20]], "abort_after_each_sample": [false, false, true]},
+  {"name": "interruption-resets", "trace": [[0, 20], [119, 19.9], [120, 20], [239.9, 20]], "abort_after_each_sample": [false, false, false, false]},
+  {"name": "second-continuous-boundary", "trace": [[0, 20], [119, 19.9], [120, 20], [240, 20]], "abort_after_each_sample": [false, false, false, true]}
+]
