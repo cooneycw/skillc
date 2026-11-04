@@ -1,0 +1,17 @@
+---
+name: session-management
+description: Session resets, context degradation and plan mode practice. Use when a session is degrading or compacting, when deciding whether to reset, or when choosing plan mode.
+trigger: session, reset, plan mode, context degradation, compacting
+metadata:
+  provenance:
+    class: cpp-authored
+---
+
+# Session Management Skill
+
+When the user asks about session management, when to reset, or plan mode:
+
+1. Read `docs/skills/session-management.md`
+2. Provide guidance on session resets and context degradation
+3. Explain plan mode benefits and usage
+4. Include the "single most useful line" tip

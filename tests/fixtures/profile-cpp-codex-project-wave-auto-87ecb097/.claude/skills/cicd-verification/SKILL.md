@@ -1,0 +1,53 @@
+---
+name: cicd-verification
+description: Build system, health check, pipeline and container patterns. Use for CI/CD - a pipeline, Makefile generation, GitHub Actions, a Dockerfile, docker-compose, a smoke test or post-deploy verification.
+trigger: CI/CD, pipeline, health check, smoke test, Makefile generation, GitHub Actions, Dockerfile, docker-compose, verification, post-deploy
+metadata:
+  provenance:
+    class: cpp-authored
+---
+
+# CI/CD & Verification Skill
+
+When the user asks about CI/CD, build systems, health checks, smoke tests, pipelines, containers, or deployment verification, load the full reference:
+
+```
+Read docs/skills/cicd-verification.md
+```
+
+When repeated infrastructure or pipeline failures are detected (same root cause 2+ times), also load:
+
+```
+Read docs/skills/infrastructure-hardening.md
+```
+
+## Quick Reference
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/cicd:init` | Detect framework, generate Makefile and cicd.yml |
+| `/cicd:check` | Validate Makefile against CPP standards |
+| `/cicd:health` | Run health checks (endpoints + processes) |
+| `/cicd:smoke` | Run smoke tests from cicd.yml |
+| `/cicd:container` | Generate Dockerfile and docker-compose.yml |
+| `/cicd:help` | Overview of CI/CD commands |
+
+### The Verification Loop
+
+```
+code → lint/test → deploy → health check → smoke test → report
+```
+
+### CLI Usage
+
+```bash
+PYTHONPATH="$HOME/Projects/claude-power-pack:$PYTHONPATH" uv run --project "$HOME/Projects/claude-power-pack" python -m lib.cicd <command> [options]
+```
+
+Subcommands: `detect`, `check`, `health`, `smoke`, `pipeline`
+
+### Configuration
+
+Health checks and smoke tests are configured in `.claude/cicd.yml`. See `/cicd:help` for full configuration reference.

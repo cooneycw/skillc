@@ -116,6 +116,7 @@ EXCLUDED_PREFIXES = (
     # #279: its re-pin to ca3030d, the same kind of byte-for-byte snapshot.
     "tests/fixtures/profile-cpp-codex-flow-auto-ca3030d/",
     "tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/",
+    "tests/fixtures/profile-cpp-codex-project-wave-auto-87ecb097/",
 )
 
 #: This repository holds several hundred files today. A count far below this

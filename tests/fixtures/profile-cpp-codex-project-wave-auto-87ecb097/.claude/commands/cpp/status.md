@@ -1,0 +1,728 @@
+---
+description: Check Claude Power Pack installation state
+allowed-tools: Bash(ls:*), Bash(test:*), Bash(readlink:*), Bash(uv:*), Bash(python3:*), Bash(PYTHONPATH=*), Bash(claude mcp list:*), Bash(systemctl:*), Bash(grep:*), Bash(docker ps:*), Bash(docker inspect:*)
+---
+
+# CPP Installation Status
+
+Check the current installation state of Claude Power Pack components.
+
+## Step 1: Detect CPP Source Location
+
+Find where claude-power-pack is installed:
+
+```bash
+# Check common locations
+CPP_DIR=""
+for dir in ~/Projects/claude-power-pack /opt/claude-power-pack ~/.claude-power-pack; do
+  if [ -d "$dir" ] && [ -f "$dir/CLAUDE.md" ]; then
+    CPP_DIR="$dir"
+    break
+  fi
+done
+
+if [ -z "$CPP_DIR" ]; then
+  echo "ERROR: claude-power-pack not found"
+  echo "Expected locations: ~/Projects/claude-power-pack, /opt/claude-power-pack, ~/.claude-power-pack"
+fi
+```
+
+## Step 1b: Check Checkout Freshness
+
+The checkout found above is the single source for every CPP helper on this host:
+`~/.claude/scripts` links into its `scripts/`, and kyle session containers mount
+it live. A checkout behind `origin/main` means every session runs superseded
+helpers, and it advances only when something pulls (issue #1282).
+
+**`/cpp:status` now fetches.** The helper runs `git fetch origin main` against
+the checkout, which updates its `origin/main` remote-tracking ref - never the
+working tree, so no helper changes under a running session.
+
+```bash
+if [ -n "$CPP_DIR" ]; then
+  "$CPP_DIR/scripts/cpp-checkout-freshness.sh" --path "$CPP_DIR"
+fi
+```
+
+The last line is the verdict. Report it as written:
+
+- `current` - `[x]`
+- `behind N` - `[~]`, with the listed commits; suggest `/cpp:update`
+- `ahead N` / `diverged (...)` - `[~]`: local commits on the checkout that
+  `origin/main` does not have, a different warning from being behind
+- `unknown: <reason>` - `[~]` with the reason. **Never render it as current.**
+  A read-only checkout (a kyle container's view) reads
+  `unknown: fetch failed (checkout not writable)`, because counting against
+  whatever `origin/main` the host last fetched would be a stale number
+
+A `Branch:` line naming anything other than `main` is its own warning: a primary
+checkout left on a feature branch serves that branch's helpers to every session.
+
+## Step 2: Check Tier 1 (Minimal)
+
+Check if commands and skills are symlinked:
+
+```bash
+# Check commands symlink
+if [ -L ".claude/commands" ]; then
+  COMMANDS_TARGET=$(readlink -f .claude/commands)
+  echo "[x] Commands symlinked → $COMMANDS_TARGET"
+elif [ -d ".claude/commands" ]; then
+  echo "[~] Commands directory exists (not symlinked)"
+else
+  echo "[ ] Commands: not installed"
+fi
+```
+
+## Step 3: Check Tier 2 (Standard)
+
+Check scripts, hooks, and shell prompt:
+
+```bash
+# Check scripts
+SCRIPTS_INSTALLED=0
+SCRIPTS_TOTAL=0
+for script in prompt-context.sh worktree-remove.sh secrets-mask.sh hook-mask-output.sh; do
+  SCRIPTS_TOTAL=$((SCRIPTS_TOTAL + 1))
+  if [ -f ~/.claude/scripts/$script ] || [ -L ~/.claude/scripts/$script ]; then
+    SCRIPTS_INSTALLED=$((SCRIPTS_INSTALLED + 1))
+  fi
+done
+echo "Scripts: $SCRIPTS_INSTALLED/$SCRIPTS_TOTAL installed in ~/.claude/scripts/"
+
+# Check hooks.json
+if [ -f ".claude/hooks.json" ]; then
+  echo "[!] Leftover .claude/hooks.json from an older install (#1206)."
+  echo "    Claude Code does not load this path, so nothing in it runs."
+  echo "    /cpp:update Step 4.7 offers to remove it."
+else
+  echo "[x] No .claude/hooks.json - correct since #1206; CPP registers no hooks here"
+fi
+
+# Check shell prompt integration (look for prompt-context.sh in bashrc/zshrc)
+if grep -q "prompt-context.sh" ~/.bashrc 2>/dev/null || grep -q "prompt-context.sh" ~/.zshrc 2>/dev/null; then
+  echo "[x] Shell prompt: configured"
+else
+  echo "[ ] Shell prompt: not configured"
+fi
+
+# Check the opt-in session-open pending-retro reminder (issue #530)
+if [ -f ~/.claude/settings.json ] && command -v jq >/dev/null 2>&1 && \
+   [ "$(jq -r '[.hooks.SessionStart[]? | (.hooks // [])[]? | select(.command | test("hook-pending-retro"))] | length' ~/.claude/settings.json 2>/dev/null || echo 0)" -gt 0 ]; then
+  echo "[x] Pending-retro reminder: enabled (SessionStart hook in ~/.claude/settings.json)"
+else
+  echo "[ ] Pending-retro reminder: off (opt-in; enable via /cpp:update Step 7.7)"
+fi
+```
+
+## Step 3b: Check Permission Profile (Tier 2+)
+
+Check auto-approval settings in `.claude/settings.local.json`:
+
+```bash
+# Check permission profile
+if [ -f ".claude/settings.local.json" ]; then
+  # Try to detect profile type from allow rules
+  ALLOW_COUNT=$(grep -c '"allow"' .claude/settings.local.json 2>/dev/null || echo "0")
+
+  if grep -q '"Write"' .claude/settings.local.json 2>/dev/null; then
+    if grep -q '"Bash(git:\*)"' .claude/settings.local.json 2>/dev/null; then
+      PROFILE="Trusted"
+    else
+      PROFILE="Custom"
+    fi
+  elif grep -q '"Bash(git status:\*)"' .claude/settings.local.json 2>/dev/null; then
+    PROFILE="Standard"
+  elif grep -q '"Read"' .claude/settings.local.json 2>/dev/null; then
+    if grep -q '"Bash(' .claude/settings.local.json 2>/dev/null; then
+      PROFILE="Custom"
+    else
+      PROFILE="Cautious"
+    fi
+  else
+    PROFILE="Custom"
+  fi
+
+  echo "[x] Permission profile: $PROFILE (.claude/settings.local.json)"
+
+  # Count rules
+  ALLOW_RULES=$(grep -oE '"[^"]+"\s*,' .claude/settings.local.json 2>/dev/null | wc -l || echo "0")
+  DENY_RULES=$(grep -A100 '"deny"' .claude/settings.local.json 2>/dev/null | grep -c '"' || echo "0")
+  echo "    Auto-approve rules: ~$ALLOW_RULES"
+else
+  echo "[ ] Permission profile: not configured"
+  echo "    Run /cpp:init to set up auto-approvals"
+fi
+```
+
+## Step 3c: Check Workstation Tuning (bash-prep)
+
+Check if Linux kernel and swap parameters are optimally configured:
+
+```bash
+# Only check on Linux
+if [ "$(uname)" = "Linux" ]; then
+  echo ""
+  echo "Workstation Tuning (bash-prep):"
+
+  TUNING_ISSUES=0
+
+  # Swap
+  SWAP_MB=$(awk '/SwapTotal/ { printf "%d", $2 / 1024 }' /proc/meminfo)
+  if (( SWAP_MB >= 2048 )); then
+    echo "  [x] Swap: ${SWAP_MB} MB"
+  else
+    echo "  [ ] Swap: ${SWAP_MB} MB (recommended: 2048+ MB)"
+    TUNING_ISSUES=$((TUNING_ISSUES + 1))
+  fi
+
+  # Swappiness
+  VAL=$(sysctl -n vm.swappiness 2>/dev/null || echo "unknown")
+  if [ "$VAL" = "10" ]; then
+    echo "  [x] vm.swappiness = $VAL"
+  else
+    echo "  [ ] vm.swappiness = $VAL (recommended: 10)"
+    TUNING_ISSUES=$((TUNING_ISSUES + 1))
+  fi
+
+  # VFS cache pressure
+  VAL=$(sysctl -n vm.vfs_cache_pressure 2>/dev/null || echo "unknown")
+  if [ "$VAL" = "50" ]; then
+    echo "  [x] vm.vfs_cache_pressure = $VAL"
+  else
+    echo "  [ ] vm.vfs_cache_pressure = $VAL (recommended: 50)"
+    TUNING_ISSUES=$((TUNING_ISSUES + 1))
+  fi
+
+  # Inotify watches
+  VAL=$(sysctl -n fs.inotify.max_user_watches 2>/dev/null || echo "0")
+  if (( VAL >= 524288 )); then
+    echo "  [x] fs.inotify.max_user_watches = $VAL"
+  else
+    echo "  [ ] fs.inotify.max_user_watches = $VAL (recommended: 524288)"
+    TUNING_ISSUES=$((TUNING_ISSUES + 1))
+  fi
+
+  # Inotify instances
+  VAL=$(sysctl -n fs.inotify.max_user_instances 2>/dev/null || echo "0")
+  if (( VAL >= 512 )); then
+    echo "  [x] fs.inotify.max_user_instances = $VAL"
+  else
+    echo "  [ ] fs.inotify.max_user_instances = $VAL (recommended: 512)"
+    TUNING_ISSUES=$((TUNING_ISSUES + 1))
+  fi
+
+  if (( TUNING_ISSUES > 0 )); then
+    echo "  Status: $TUNING_ISSUES issue(s) - run: bash ~/.claude/scripts/bash-prep.sh"
+  else
+    echo "  Status: Optimal"
+  fi
+fi
+```
+
+## Step 4: Check Tier 3 (Full)
+
+Check MCP servers and dependencies:
+
+```bash
+# Check uv
+if command -v uv &>/dev/null; then
+  UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
+  echo "[x] uv: $UV_VERSION"
+else
+  echo "[ ] uv: not installed"
+fi
+
+# CPP ships no local MCP server projects. The second-opinion server is external
+# (the cooneycw/mcp-second-opinion repo), registered at user scope as a
+# streamable-http client (CPP ships no .mcp.json entry for it, #1256). Browser automation is upstream @playwright/mcp (npx/stdio).
+# Tavily web search/extract/crawl/map is upstream tavily-mcp (npx/stdio).
+echo ""
+echo "MCP Server Projects:"
+echo "  [-] none bundled (second-opinion is external, user scope; playwright and tavily via npx/stdio)"
+
+# Check MCP servers registered
+echo ""
+echo "MCP Servers (Claude Code):"
+MCP_LIST=$(claude mcp list 2>/dev/null || echo "")
+for server in second-opinion playwright tavily; do
+  if echo "$MCP_LIST" | grep -q "$server"; then
+    echo "  [x] $server: registered"
+  else
+    echo "  [ ] $server: not registered"
+  fi
+done
+if echo "$MCP_LIST" | grep -q "playwright-persistent"; then
+  echo "  [!] playwright-persistent: legacy registration (retired #423) - run /cpp:update to tear down"
+fi
+
+# Check Codex MCP registrations
+echo ""
+echo "MCP Servers (Codex):"
+if command -v codex &>/dev/null; then
+  CODEX_LIST=$(codex mcp list 2>/dev/null || echo "")
+  for server in second-opinion playwright tavily; do
+    if echo "$CODEX_LIST" | grep -q "$server"; then
+      echo "  [x] $server: registered"
+    else
+      echo "  [ ] $server: not registered"
+    fi
+  done
+else
+  echo "  [ ] Codex CLI: not installed"
+fi
+
+# Capability readiness (issue #1290). Registered is not usable: a playwright
+# registration can fail to connect, and the reachability curl this replaced read
+# `http://127.0.0.1:8080}/mcp` out of `${SECOND_OPINION_URL:-...}/mcp` - brace
+# included - so it could never report a reachable server.
+echo ""
+echo "Capability Readiness:"
+if [ -n "$CPP_DIR" ]; then
+  python3 "$CPP_DIR/scripts/capability-readiness.py" --project-dir "$PWD"
+else
+  echo "  [~] not examined - no CPP checkout found"
+fi
+echo "  [-] tavily: upstream tavily-mcp over npx/stdio (not probed)"
+
+# Check legacy systemd services
+echo ""
+echo "Legacy Systemd:"
+KNOWN_LEGACY_SYSTEMD_UNITS=$(cat <<'EOF'
+mcp-second-opinion
+second-opinion
+mcp-playwright
+mcp-playwright-persistent
+playwright-persistent
+mcp-evaluate
+evaluate
+mcp-coordination
+coordination
+EOF
+)
+DISCOVERED_LEGACY_SYSTEMD_UNITS="$(
+  {
+    printf '%s\n' "$KNOWN_LEGACY_SYSTEMD_UNITS"
+    find "$HOME/.config/systemd/user" /etc/systemd/system -maxdepth 1 -type f \
+      \( -name 'mcp-*.service' -o -name 'nano-*.service' -o -name '*coordination*.service' \) \
+      -printf '%f\n' 2>/dev/null || true
+    systemctl --user list-units --type=service --all --no-legend --no-pager 2>/dev/null | awk '{print $1}' || true
+    systemctl list-units --type=service --all --no-legend --no-pager 2>/dev/null | awk '{print $1}' || true
+  } | sed 's/\.service$//' | grep -E '^(mcp-|nano-|.*coordination|second-opinion|playwright-persistent|evaluate|coordination)$' | sort -u
+)"
+LEGACY_SYSTEMD_FOUND=0
+for unit in $DISCOVERED_LEGACY_SYSTEMD_UNITS; do
+  USER_PATH="$HOME/.config/systemd/user/${unit}.service"
+  SYSTEM_PATH="/etc/systemd/system/${unit}.service"
+
+  USER_ACTIVE=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+  USER_ENABLED=$(systemctl --user is-enabled "$unit" 2>/dev/null || true)
+  if [ -f "$USER_PATH" ] || [ "$USER_ACTIVE" = "active" ] || [ "$USER_ENABLED" = "enabled" ]; then
+    LEGACY_SYSTEMD_FOUND=1
+    if [ "$USER_ACTIVE" = "active" ]; then
+      echo "  [!] user:$unit active, enabled=${USER_ENABLED:-unknown} - run /cpp:update to remove the legacy unit"
+    else
+      echo "  [~] user:$unit active=${USER_ACTIVE:-inactive}, enabled=${USER_ENABLED:-unknown} - run /cpp:update to remove legacy unit"
+    fi
+  fi
+
+  SYSTEM_ACTIVE=$(systemctl is-active "$unit" 2>/dev/null || true)
+  SYSTEM_ENABLED=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+  if [ -f "$SYSTEM_PATH" ] || [ "$SYSTEM_ACTIVE" = "active" ] || [ "$SYSTEM_ENABLED" = "enabled" ]; then
+    LEGACY_SYSTEMD_FOUND=1
+    if [ "$SYSTEM_ACTIVE" = "active" ]; then
+      echo "  [!] system:$unit active, enabled=${SYSTEM_ENABLED:-unknown} - run /cpp:update to remove the legacy unit"
+    else
+      echo "  [~] system:$unit active=${SYSTEM_ACTIVE:-inactive}, enabled=${SYSTEM_ENABLED:-unknown} - run /cpp:update to remove legacy unit"
+    fi
+  fi
+done
+if [ "$LEGACY_SYSTEMD_FOUND" -eq 0 ]; then
+  echo "  none (ok)"
+fi
+
+# Check orphaned Docker MCP servers (removed from compose but still present as a
+# container, mcp-<name>:* image, or claude/codex registration). Driven by the
+# curated .claude/deprecated-mcps.yaml list of record (issue #405). This closes
+# the blind spot where a removed Docker server kept running unreported.
+echo ""
+echo "Orphaned Docker MCP (teardown available via /cpp:update):"
+if command -v docker &>/dev/null && [ -f "$CPP_DIR/scripts/mcp-drift.py" ]; then
+  # Capture the exit code - do NOT swallow it with `|| true`. Exit 3 means the
+  # docker inventory could not be read (permission denied / dead daemon), so an
+  # empty list means "could not look", not "nothing found" (issue #673).
+  ORPHAN_MCPS="$(python3 "$CPP_DIR/scripts/mcp-drift.py" --list-orphans 2>/dev/null)"
+  ORPHAN_RC=$?
+  if [ "$ORPHAN_RC" -eq 3 ]; then
+    echo "  NOT ASSESSED - docker inventory unreadable (permission denied or daemon down)"
+    echo "      this is not 'clean': re-run with docker access, or: python3 $CPP_DIR/scripts/mcp-drift.py --check"
+  elif [ -n "$ORPHAN_MCPS" ]; then
+    while IFS= read -r m; do
+      [ -n "$m" ] && echo "  [!] $m: removed from docker-compose.yml but still present - run /cpp:update to tear down"
+    done <<< "$ORPHAN_MCPS"
+  else
+    echo "  none (ok)"
+  fi
+else
+  echo "  skipped (docker or mcp-drift.py unavailable)"
+fi
+```
+
+**Reading the Capability Readiness table (issue #1290).** One row each for flow,
+second-opinion and browser-qa, and one state per row. Report each state as written:
+
+- `ready` - `[x]`, but only for the operation in the TESTED column; name what the
+  row lists as `unexamined` (for second-opinion, a review request is never made)
+- `disabled` - `[-]`: not installed or not registered; optional, and it does not
+  make any other row less ready
+- `unexamined` - `[~]`: installed, but the layer that would prove it usable was not
+  probed. **Never render it as ready.**
+- `stale-or-unknown` / `conflicting` / `unreachable` - `[!]`, with the row's `next:`
+  line. For `conflicting`, the row shows each scope's handshake; do not guess which
+  one a session reaches, and never run the `claude mcp remove` remedy without the
+  user's say-so
+
+The last line is `CAPABILITY_READINESS: ready|degraded|unknown`; `--json` prints the
+same rows for a machine consumer. The probes call no model and install nothing: a server
+launched through npx or uvx is reported `unexamined` rather than started.
+
+## Step 5: Check Tier 4 (CI/CD)
+
+Check CI/CD build system, health checks, pipeline, and container configuration:
+
+```bash
+echo ""
+echo "Tier 4 (CI/CD):"
+
+# Check cicd.yml
+if [ -f ".claude/cicd.yml" ]; then
+  echo "  [x] cicd.yml: configured"
+else
+  echo "  [ ] cicd.yml: not found"
+fi
+
+# Check framework detection
+if [ -n "$CPP_DIR" ] && [ -f "$CPP_DIR/lib/cicd/__init__.py" ]; then
+  FRAMEWORK=$(PYTHONPATH="$CPP_DIR:$PYTHONPATH" uv run --project "$CPP_DIR" python -m lib.cicd detect --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d.get('framework','unknown')} ({d.get('package_manager','unknown')})\")" 2>/dev/null || echo "detection unavailable")
+  echo "  [x] Framework detected: $FRAMEWORK"
+else
+  echo "  [ ] Framework detection: lib/cicd not available"
+fi
+
+# Check Makefile
+if [ -f "Makefile" ]; then
+  TARGET_COUNT=$(grep -cE '^[a-zA-Z_-]+:' Makefile 2>/dev/null || echo "0")
+  echo "  [x] Makefile: $TARGET_COUNT targets"
+else
+  echo "  [ ] Makefile: not found"
+fi
+
+# Check CI workflow
+if [ -f ".github/workflows/ci.yml" ] || [ -f ".github/workflows/ci.yaml" ]; then
+  echo "  [x] CI pipeline: .github/workflows/ci.yml"
+elif ls .github/workflows/*.yml 2>/dev/null | head -1 > /dev/null 2>&1; then
+  WF_COUNT=$(ls .github/workflows/*.yml 2>/dev/null | wc -l)
+  echo "  [~] CI pipeline: $WF_COUNT workflow(s) found (no ci.yml)"
+else
+  echo "  [ ] CI pipeline: no workflows found"
+fi
+
+# Check Dockerfile
+if [ -f "Dockerfile" ]; then
+  echo "  [x] Dockerfile: present"
+else
+  echo "  [ ] Dockerfile: not found"
+fi
+
+# Check docker-compose
+if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
+  echo "  [x] docker-compose: present"
+else
+  echo "  [ ] docker-compose: not found"
+fi
+```
+
+## Step 6: Check Tier 5 (Codex Orchestration)
+
+Check Codex CLI installation, configuration, and MCP registrations:
+
+```bash
+echo ""
+echo "Tier 5 (Codex):"
+
+# Check Codex CLI
+if command -v codex &>/dev/null; then
+  CODEX_VERSION=$(codex --version 2>/dev/null || echo "unknown")
+  echo "  [x] Codex CLI: $CODEX_VERSION"
+else
+  echo "  [ ] Codex CLI: not installed"
+fi
+
+# Check codex doctor
+if command -v codex &>/dev/null; then
+  DOCTOR_OUTPUT=$(codex doctor 2>&1 || true)
+  if echo "$DOCTOR_OUTPUT" | grep -qi "error\|fail\|missing"; then
+    echo "  [!] codex doctor: issues detected"
+  else
+    echo "  [x] codex doctor: passed"
+  fi
+fi
+
+# Check OpenAI API key
+CODEX_CONFIG="$HOME/.codex/config.toml"
+if [ -n "$OPENAI_API_KEY" ]; then
+  echo "  [x] OpenAI API key: set in environment"
+elif [ -f "$CODEX_CONFIG" ]; then
+  echo "  [x] OpenAI API key: configured in $CODEX_CONFIG"
+else
+  echo "  [ ] OpenAI API key: not configured"
+fi
+
+# Codex's global instructions vs Claude's (issue #1441). Report-only: it never
+# writes. Anything but `current` names its own remedy on the NOTE line above the
+# verdict; relay that line, and never summarise `unknown` or `not-applicable` as
+# "in sync".
+if [ -f "$CPP_DIR/scripts/codex-global-agents.py" ]; then
+  GLOBAL_AGENTS_OUT=$(python3 "$CPP_DIR/scripts/codex-global-agents.py" --check 2>&1)
+  GLOBAL_AGENTS_VERDICT=$(printf '%s\n' "$GLOBAL_AGENTS_OUT" | sed -n 's/^CODEX_GLOBAL_AGENTS: //p')
+  case "$GLOBAL_AGENTS_VERDICT" in
+    current) echo "  [x] ~/.codex/AGENTS.md: current copy of ~/.claude/CLAUDE.md (file freshness, not proof Codex loads it)" ;;
+    not-applicable) echo "  [-] Codex global instructions: no ~/.codex on this host" ;;
+    "") echo "  [?] Codex global instructions: check produced no verdict" ;;
+    *) echo "  [!] Codex global instructions: ${GLOBAL_AGENTS_VERDICT}"
+       printf '%s\n' "$GLOBAL_AGENTS_OUT" | grep -E '^NOTE:' | sed 's/^/      /' ;;
+  esac
+  # Workspace AGENTS.md files are relayed whatever the verdict: they never change
+  # it, and a `current` global file is exactly when they are easiest to miss.
+  printf '%s\n' "$GLOBAL_AGENTS_OUT" | grep -E '^WORKSPACE_AGENTS_MD:' | sed 's/^/      /' || true
+else
+  echo "  [?] Codex global instructions: codex-global-agents.py not in this checkout"
+fi
+
+# Check Codex MCP registrations
+if command -v codex &>/dev/null; then
+  CODEX_MCP=$(codex mcp list 2>/dev/null || echo "")
+  for server in second-opinion playwright tavily; do
+    if echo "$CODEX_MCP" | grep -q "$server"; then
+      echo "  [x] Codex MCP: $server registered"
+    else
+      echo "  [ ] Codex MCP: $server not registered"
+    fi
+  done
+fi
+
+# Check Codex commands available
+if [ -d ".claude/commands/codex" ] || [ -L ".claude/commands" ]; then
+  CODEX_CMDS=0
+  for cmd in auto exec status help; do
+    if [ -f ".claude/commands/codex/${cmd}.md" ]; then
+      CODEX_CMDS=$((CODEX_CMDS + 1))
+    fi
+  done
+  echo "  [x] Codex commands: $CODEX_CMDS/4 available"
+else
+  echo "  [ ] Codex commands: not installed"
+fi
+```
+
+## Step 7: Check Tier 6 (Local Qwen Orchestration)
+
+Tier 6 is OPTIONAL and additive - report it as "not installed (optional)"
+rather than "missing" when absent. It needs the Qwen Code CLI as a harness
+(no cloud API key) plus a reachable Ollama server holding the Qwen model.
+
+```bash
+echo ""
+echo "Tier 6 (Local Qwen - optional):"
+
+QWEN_ENDPOINT="${QWEN_OLLAMA_URL:-http://127.0.0.1:11434}"
+QWEN_MODEL="${QWEN_MODEL:-qwen3.8-code:latest}"
+
+# Harness
+if command -v qwen &>/dev/null && qwen --help 2>&1 | grep -q -- "--output-format"; then
+  echo "  [x] Qwen Code CLI harness with headless stream-json support"
+else
+  echo "  [ ] Qwen Code CLI harness: missing or outdated (npm install -g @qwen-code/qwen-code)"
+fi
+
+# Server
+if curl -sf --max-time 5 "$QWEN_ENDPOINT/api/version" > /dev/null 2>&1; then
+  echo "  [x] Ollama server reachable at $QWEN_ENDPOINT"
+  # Model
+  if curl -sf --max-time 5 "$QWEN_ENDPOINT/api/tags" 2>/dev/null | grep -qF "\"$QWEN_MODEL\""; then
+    echo "  [x] Model present: $QWEN_MODEL"
+  else
+    echo "  [ ] Model '$QWEN_MODEL' not on server"
+  fi
+else
+  echo "  [ ] Ollama server not reachable at $QWEN_ENDPOINT"
+  echo "      (serving machine: start Ollama; consumer machine: set QWEN_OLLAMA_URL)"
+fi
+
+# Commands
+QWEN_CMDS=0
+for cmd in auto exec status help; do
+  [ -f ".claude/commands/qwen/${cmd}.md" ] && QWEN_CMDS=$((QWEN_CMDS + 1))
+done
+echo "  [x] Qwen commands: $QWEN_CMDS/4 available"
+
+# Retired Codex-harness env var (issue #745)
+if [ -n "$QWEN_CODEX_PROFILE" ]; then
+  echo "  [~] QWEN_CODEX_PROFILE set but no longer used (Codex harness retired,"
+  echo "      issue #745) - remote machines need only QWEN_OLLAMA_URL. Unset it."
+fi
+```
+
+## Step 8: Check Tier 7 (Local Gemma Orchestration)
+
+Tier 7 is OPTIONAL and additive - report it as "not installed (optional)"
+rather than "missing" when absent. It needs the OpenCode CLI as a harness
+(no cloud API key), a reachable Ollama server holding the Gemma model, and the
+`gemma-implementer` agent profile that carries the mechanical fence.
+
+```bash
+echo ""
+echo "Tier 7 (Local Gemma - optional):"
+
+GEMMA_ENDPOINT="${GEMMA_OLLAMA_URL:-http://127.0.0.1:11434}"
+GEMMA_MODEL="${GEMMA_MODEL:-gemma4-code:latest}"
+
+# Harness
+if command -v opencode &>/dev/null; then
+  echo "  [x] OpenCode harness: $(opencode --version 2>/dev/null)"
+else
+  echo "  [ ] OpenCode harness: not installed (npm install -g opencode-ai)"
+fi
+
+# Server
+if curl -sf --max-time 5 "$GEMMA_ENDPOINT/api/version" > /dev/null 2>&1; then
+  echo "  [x] Ollama server reachable at $GEMMA_ENDPOINT"
+  # Model
+  if curl -sf --max-time 5 "$GEMMA_ENDPOINT/api/tags" 2>/dev/null | grep -qF "\"$GEMMA_MODEL\""; then
+    echo "  [x] Model present: $GEMMA_MODEL"
+  else
+    echo "  [ ] Model '$GEMMA_MODEL' not on server"
+  fi
+else
+  echo "  [ ] Ollama server not reachable at $GEMMA_ENDPOINT"
+  echo "      (serving machine: start Ollama; consumer machine: set GEMMA_OLLAMA_URL)"
+  echo "      A shared-GPU host may simply have the card claimed by another VM."
+fi
+
+# Provider + mechanical fence. The agent profile is not cosmetic: without it
+# /gemma:auto runs on the textual fence alone, which is a silent downgrade.
+if grep -q '"gemma-ollama"' ~/.config/opencode/opencode.json 2>/dev/null; then
+  echo "  [x] Provider 'gemma-ollama' configured (native /api/chat)"
+else
+  echo "  [ ] Provider 'gemma-ollama' not in ~/.config/opencode/opencode.json"
+fi
+if grep -q '"gemma-implementer"' ~/.config/opencode/opencode.json 2>/dev/null; then
+  echo "  [x] Agent profile 'gemma-implementer' configured (mechanical fence)"
+else
+  echo "  [ ] Agent 'gemma-implementer' missing - install templates/opencode-gemma.json"
+fi
+
+# Commands
+GEMMA_CMDS=0
+for cmd in auto exec status help; do
+  [ -f ".claude/commands/gemma/${cmd}.md" ] && GEMMA_CMDS=$((GEMMA_CMDS + 1))
+done
+echo "  [x] Gemma commands: $GEMMA_CMDS/4 available"
+```
+
+For the full readiness check - including the tool-calling smoke test that
+proves the native-API path works - run `/gemma:status`.
+
+## Step 9: Summary
+
+Based on the checks above, report:
+
+1. **Current tier level** - Which tier is fully installed
+2. **MCP wiring** - second-opinion is external (cooneycw/mcp-second-opinion), registered at user scope; there is no CPP-managed container runtime
+3. **Missing components** - What needs to be installed
+4. **Recommendation** - Suggest running `/cpp:init` if incomplete, or `/cpp:update` if legacy systemd units remain
+
+Example output format:
+
+```
+=================================
+CPP Installation Status
+=================================
+
+Checkout: ~/Projects/claude-power-pack (branch main)
+  [~] Freshness: behind 3 (run /cpp:update)
+
+Tier 1 (Minimal):
+  [x] Commands symlinked
+  Status: Complete
+
+Tier 2 (Standard):
+  [x] Scripts: 5/5 installed
+  [x] Hooks: 2 hooks configured
+  [x] Permission profile: Standard
+      Auto-approve rules: ~22
+  [ ] Shell prompt: not configured
+  Status: Partial
+
+Tier 3 (Full):
+  [x] uv: 0.5.x
+  [x] second-opinion: registered (external cooneycw/mcp-second-opinion, user scope)
+  [x] playwright: registered (upstream @playwright/mcp, npx/stdio)
+  [x] tavily: registered (upstream tavily-mcp, npx/stdio)
+  MCP Server Wiring:
+    [x] second-opinion: registered at user scope (http://127.0.0.1:8080/mcp)
+    [-] playwright: npx/stdio - no port to probe
+    [-] tavily: npx/stdio - no port to probe
+  Legacy Systemd:
+    none (ok)
+  Status: Partial
+
+Tier 4 (CI/CD):
+  [x] cicd.yml: configured
+  [x] Framework detected: python (uv)
+  [x] Makefile: 8 targets
+  [ ] CI pipeline: no workflows found
+  [ ] Dockerfile: not found
+  Status: Partial
+
+Tier 5 (Codex):
+  [x] Codex CLI: 0.137.0
+  [x] codex doctor: passed
+  [x] OpenAI API key: set in environment
+  [x] Codex MCP: second-opinion registered
+  [x] Codex MCP: playwright registered
+  [x] Codex MCP: tavily registered
+  [x] Codex commands: 4/4 available
+  Status: Complete
+
+Tier 6 (Local Qwen - optional):
+  [x] Qwen Code CLI harness with headless stream-json support
+  [x] Ollama server reachable at http://127.0.0.1:11434
+  [x] Model present: qwen3.8-code:latest
+  [x] Qwen commands: 4/4 available
+  Status: Complete
+
+Tier 7 (Local Gemma - optional):
+  [x] OpenCode harness: 1.18.29
+  [x] Ollama server reachable at http://proxvmgemma23:11434
+  [x] Model present: gemma4-code:latest
+  [x] Provider 'gemma-ollama' configured (native /api/chat)
+  [x] Agent profile 'gemma-implementer' configured (mechanical fence)
+  [x] Gemma commands: 4/4 available
+  Status: Complete
+
+---------------------------------
+Current Level: Tier 2 (Standard)
+MCP wiring: second-opinion external, user scope (no CPP container runtime)
+Missing: Shell prompt, CI pipeline, Dockerfile
+
+Run /cpp:init to complete setup
+=================================
+```
+
+## Notes
+
+- `[x]` = Fully installed
+- `[~]` = Partially installed or needs attention
+- `[ ]` = Not installed
+- Symlinks are preferred over copied files for easier updates

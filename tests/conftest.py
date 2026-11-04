@@ -119,7 +119,7 @@ LIVE_DOCKER_DAEMON_TIMEOUT = 30.0
 #: #280: the local CI/CD fixture project carries its OWN unittest suite, run
 #: inside the trial container by `make test`. It imports `calc` from the
 #: project's `src/`, so this repository's collection must never import it.
-collect_ignore_glob = ["fixtures/cicd-local/*"]
+collect_ignore_glob = ["fixtures/cicd-local/*", "fixtures/profile-cpp-codex-project-wave-auto-87ecb097/*"]
 
 
 @pytest.hookimpl(tryfirst=True)
