@@ -26,3 +26,20 @@ child connects successfully, while its parent forging the child's PID in JSON
 is refused before the decision function. False/unknown/unavailable peer probes
 drop and count against coverage. These controls establish the Linux socket
 boundary, not the remote Docker namespace prerequisite.
+
+`tests/test_wave_tap_docker.py` also calls the production
+`DockerHelperExecutor.peer_allowed` against controlled daemon/proc observations:
+matching role namespace accepts; host/sibling namespaces and wrong UID/GID refuse;
+missing, unreadable, malformed, stopped or reused PID observations are unavailable.
+Process stat controls include a command name with spaces and parentheses.
+The actual socket callback uses this production method, with modeled candidate
+UID mapping and namespace observations, then the real helper tap. A good peer
+completes both operations; rejected/unavailable peers execute no helper, increment
+the dropped count and leave final coverage UNKNOWN. This remains model-free
+wiring evidence, not physical Docker authentication.
+
+The committed host/sibling socket cases must fail if the production method is
+replaced in memory with `lambda *args: True`: both fail at the unauthorized-peer
+response assertion after the real helper was incorrectly reached. Restoring the
+production method passes these cases. This mutation control targets the gate,
+not a claim that the pre-existing production implementation was incorrect.
