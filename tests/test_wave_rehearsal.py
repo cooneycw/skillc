@@ -176,3 +176,22 @@ def test_case_declaration_preserves_every_required_fault() -> None:
     assert {"lost-poke", "worker-disappears", "stale-acknowledgement", "wrong-role-acknowledgement",
             "duplicate-completion", "unfinished-integration", "missed-deadline", "unretired-wave",
             "capture-unavailable", "non-start"} <= {c["id"] for c in CASES}
+
+
+@pytest.mark.parametrize("fault", ["none", "changed", "extra"])
+def test_docker_composition_requires_approved_helper_population(tmp_path: Path, fault: str) -> None:
+    spec = importlib.util.spec_from_file_location("rehearsal_composition", SOURCE / "docker_rehearsal.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    scripts = tmp_path / "helpers"
+    shutil.copytree(HELPERS, scripts)
+    if fault == "changed":
+        (scripts / "flow-wave-mailbox.sh").write_text("#!/bin/sh\nexit 0\n")
+    elif fault == "extra":
+        (scripts / "unapproved.sh").write_text("#!/bin/sh\nexit 0\n")
+    if fault == "none":
+        assert module.helper_sources(scripts)
+    else:
+        with pytest.raises(ValueError, match="approved pin"):
+            module.helper_sources(scripts)

@@ -1,0 +1,16 @@
+[
+  {"name": "protected-pinned-bootstrap", "fault": "none", "admitted": true},
+  {"name": "candidate-writable", "fault": "writable", "admitted": false},
+  {"name": "write-permission-unknown", "fault": "unknown-write", "admitted": false},
+  {"name": "source-digest-changed", "fault": "source", "admitted": false},
+  {"name": "wrong-container-attempt", "fault": "attempt", "admitted": false},
+  {"name": "wrong-bootstrap-session", "fault": "session", "admitted": false},
+  {"name": "missing-header-evidence", "fault": "header", "admitted": false},
+  {"name": "missing-bootstrap-execution", "fault": "bootstrap", "admitted": false},
+  {"name": "unknown-container-state", "fault": "liveness", "admitted": false},
+  {"name": "unprotected-actor-launch", "fault": "launch", "admitted": false},
+  {"name": "wrong-role-actor-launch", "fault": "role", "admitted": false},
+  {"name": "unmediated-actor-config", "fault": "config", "admitted": false},
+  {"name": "wrong-wave-config", "fault": "wave", "admitted": false},
+  {"name": "deadline-exhausted", "fault": "deadline", "admitted": false}
+]
