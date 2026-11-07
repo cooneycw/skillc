@@ -20,7 +20,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import clutter, clutter_capture, git_snapshot
+from . import clutter, clutter_capture, clutter_delivery, git_snapshot
+from .backend import Confirmation
 from .clutter import Policy, Snapshot, Surface, canonical, classify
 
 MAX_OUTPUT = 4 * 1024 * 1024
@@ -183,15 +184,13 @@ class Inventory:
     """One controller-owned, declaration-bound inventory across ALL role handles."""
 
     def __init__(self, policy: Policy, role_readers: Mapping[str, Callable[[], Mapping[str, Surface]]],
-                 shared_reader: Callable[[], Surface], daemon_reader: Callable[[], Mapping[str, Surface]], *,
-                 delivered_reader: Callable[[], Mapping[str, Any]] | None = None) -> None:
+                 shared_reader: Callable[[], Surface], daemon_reader: Callable[[], Mapping[str, Surface]]) -> None:
         if set(role_readers) - set(policy.roles):
             raise ValueError('controller role population exceeds declared roles')
         self.policy = policy
         self.role_readers = dict(role_readers)
         self.shared_reader = shared_reader
         self.daemon_reader = daemon_reader
-        self.delivered_reader = delivered_reader
         self.scope_id = secrets.token_hex(16)
 
     def capture(self, phase: str) -> Snapshot:
@@ -229,11 +228,13 @@ class Inventory:
 
 
 class Session:
-    """Setup, controller-witnessed completion, declared settle point, then capture.
+    """Freeze the settled live census, then accept final controller delivery.
 
     Callers must invoke completion from their controller lifecycle for every
     declared role, before namespace teardown. Agent-supplied snapshots or policy
     updates are not accepted. Missing/non-started roles remain UNKNOWN.
+    Final delivered captures require the separate post-stop handoff; this API
+    supplies no production wave wiring (#623/#620).
     """
 
     def __init__(self, inventory: Inventory, *, clock: Callable[[], float] = time.monotonic,
@@ -242,25 +243,36 @@ class Session:
         self.before: Snapshot | None = None
         self.completed: dict[str, float] = {}
         self.finished = False
+        self._before_bytes: bytes | None = None
+        self._after_bytes: bytes | None = None
+        self._source_scope: str | None = None
+        self._delivery_scope: str | None = None
 
     def setup(self) -> Snapshot:
         if self.before is not None:
             raise ValueError('inventory setup already captured')
         self.before = self.inventory.capture('before')
-        return self.before
+        self._source_scope = self.before.scope_id
+        if self.inventory.policy.data.get('delivered_commit_roles'):
+            self._delivery_scope = secrets.token_hex(16)
+            self.before = Snapshot(self._delivery_scope, self.before.phase,
+                                   self.before.policy_digest, self.before.surfaces)
+        self._before_bytes = canonical(self.before.to_json())
+        return clutter.snapshot_from_json(clutter.strict_json(self._before_bytes))
 
     def completion(self, role: str) -> None:
-        if self.before is None or self.finished or role not in self.inventory.policy.roles or role in self.completed:
+        if (self.before is None or self.finished or self._after_bytes is not None
+                or role not in self.inventory.policy.roles or role in self.completed):
             raise ValueError('invalid or duplicate controller completion')
         now = self.clock()
         if type(now) not in (int, float) or not math.isfinite(now):
             raise ValueError('controller completion clock unavailable')
         self.completed[role] = now
 
-    def finish(self) -> dict[str, Any]:
-        if self.finished or self.before is None:
-            raise ValueError('inventory setup required, and finish is single-use')
-        self.finished = True
+    def capture_after(self) -> Snapshot:
+        """Retain the settled live census BEFORE any controller shutdown."""
+        if self.finished or self._before_bytes is None or self._after_bytes is not None:
+            raise ValueError('inventory setup required, and after capture is single-use')
         missing = set(self.inventory.policy.roles) - self.completed.keys()
         if not missing:
             now = self.clock()
@@ -274,28 +286,71 @@ class Session:
             raise ValueError('controller settle clock unavailable')
         unsettled = not missing and settled_at < max(self.completed.values()) + self.inventory.policy.data['settle_seconds']
         after = self.inventory.capture('after')
+        if self._delivery_scope is not None and after.scope_id == self._source_scope:
+            after = Snapshot(self._delivery_scope, after.phase, after.policy_digest, after.surfaces)
         if missing or unsettled:
             rows = dict(after.surfaces)
             for role in missing or set(self.inventory.policy.roles):
                 rows[role + '/processes'] = Surface({}, False, 'controller completion or declared settle point not witnessed')
             after = Snapshot(after.scope_id, after.phase, after.policy_digest, rows)
-        captured: Mapping[str, Any] = {}
+        self._after_bytes = canonical(after.to_json())
+        return clutter.snapshot_from_json(clutter.strict_json(self._after_bytes))
+
+    def _snapshots(self) -> tuple[Snapshot, Snapshot]:
+        if self._before_bytes is None or self._after_bytes is None:
+            raise ValueError('frozen before/after snapshots required before final delivery')
+        return (clutter.snapshot_from_json(clutter.strict_json(self._before_bytes)),
+                clutter.snapshot_from_json(clutter.strict_json(self._after_bytes)))
+
+    def delivery_binding(self) -> dict[str, Any]:
+        before, after = self._snapshots()
+        return clutter_delivery.handoff_binding(self.inventory.policy, before, after)
+
+    def finalize(self, delivered_captures: Mapping[str, Any] | None = None, *,
+                 delivered_commits: Mapping[str, str] | None = None,
+                 role_stops: Mapping[str, Confirmation] | None = None,
+                 helper_stop: Confirmation = Confirmation.UNKNOWN) -> dict[str, Any]:
+        """Classify retained snapshots with a final controller-held capture.
+
+        The controller must confirm every role/helper writer stop before taking
+        the bound capture. This API does not stop roles or authenticate a caller.
+        """
+        if self.finished:
+            raise ValueError('inventory finalization is single-use')
+        before, after = self._snapshots()
+        self.finished = True
+        captures: dict[str, Any] = {}
+        handoff: dict[str, Any] = {}
         if self.inventory.policy.data.get('delivered_commit_roles'):
             try:
-                if self.inventory.delivered_reader is not None:
-                    captured = self.inventory.delivered_reader()
-                if not isinstance(captured, Mapping) or len(canonical(captured)) > clutter.MAX_BYTES:
-                    raise ValueError('delivered capture population or byte bound exceeded')
-                captured = clutter.strict_json(canonical(captured))
+                handoff = {'binding': self.delivery_binding(),
+                           'role_stops': {role: stop.value if isinstance(stop, Confirmation) else None
+                                          for role, stop in (role_stops or {}).items()},
+                           'helper_stop': helper_stop.value if isinstance(helper_stop, Confirmation) else None,
+                           'delivered_commits': dict(delivered_commits or {})}
+                data = canonical([dict(delivered_captures or {}), handoff])
+                if len(data) > clutter.MAX_BYTES:
+                    raise ValueError('delivered capture byte bound exceeded')
+                captures, handoff = clutter.strict_json(data)
             except (OSError, ValueError, TypeError, RecursionError):
-                captured = {}
-        report = classify(self.inventory.policy, self.before, after, delivered_captures=captured)
+                captures, handoff = {}, {}
+        report = classify(self.inventory.policy, before, after,
+                          delivered_captures=captures, delivered_handoff=handoff)
         if self.inventory.policy.data.get('delivered_commit_roles'):
-            report['delivered_captures'] = captured
-        report['before'] = self.before.to_json()
+            report['delivered_captures'] = captures
+            report['delivered_handoff'] = handoff
+        report['before'] = before.to_json()
         report['after'] = after.to_json()
-        report['capture_digest'] = 'sha256:' + hashlib.sha256(canonical([report['before'], report['after']])).hexdigest()
+        report['capture_digest'] = clutter.digest([report['before'], report['after']])
         return report
+
+    def finish(self) -> dict[str, Any]:
+        """Legacy one-phase convenience; opted-in delivery without a handoff is UNKNOWN."""
+        if self.finished:
+            raise ValueError('inventory finish is single-use')
+        if self._after_bytes is None:
+            self.capture_after()
+        return self.finalize()
 
 
 def docker_inventory(policy: Policy, sources: Mapping[str, tuple[RootReader, object]], *,
@@ -400,7 +455,7 @@ class AttemptInventory:
             self.report = unavailable(self.policy, f'final capture unavailable: {type(exc).__name__}')
 
     def summary(self) -> dict[str, Any]:
-        return {key: value for key, value in self.report.items() if key not in ('before', 'after', 'delivered_captures')}
+        return {key: value for key, value in self.report.items() if key not in ('before', 'after', 'delivered_captures', 'delivered_handoff')}
 
 
 def report_from_events(policy: Policy, events: Sequence[Mapping[str, Any]],
@@ -427,7 +482,8 @@ def report_from_events(policy: Policy, events: Sequence[Mapping[str, Any]],
         if not isinstance(stored, dict) or stored.get('before') != clutter.strict_json(before_bytes):
             raise ValueError('controller inventory before snapshot disagrees')
         after = clutter.snapshot_from_json(stored.get('after'))
-        return {**classify(policy, before, after, delivered_captures=stored.get('delivered_captures')),
+        return {**classify(policy, before, after, delivered_captures=stored.get('delivered_captures'),
+                           delivered_handoff=stored.get('delivered_handoff')),
                 'report_digest': end['digest'], 'before_digest': start['digest']}
     except Exception:  # noqa: BLE001 - any unavailable controller evidence is UNKNOWN, never clean
         return unavailable(policy, 'controller journal or captured inventory unavailable')

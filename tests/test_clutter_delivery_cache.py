@@ -12,6 +12,7 @@ from test_clutter_capture import namespace as namespace  # noqa: PLC0414
 from skillc import clutter as c
 from skillc import clutter_capture as capture
 from skillc import git_snapshot as gs
+from skillc.backend import Confirmation
 from skillc.clutter_controller import Session, report_from_events
 
 CONTROL = json.loads((Path(__file__).resolve().parents[1] / 'controls/clutter-inventory/delivery-cache.json').read_text())
@@ -36,12 +37,20 @@ def test_delivered_tree_and_cache_controls(namespace: tuple[Path, c.Policy, Path
     git(repo, 'push', str(root / 'work/fixture.git'), 'main')
     remote = gs.GitDir(capture.BoundedTree(root), 'work/fixture.git')
     commit = remote.refs()['refs/heads/main']
-    evidence = {'agent': capture_commit('agent', remote, commit)}
     cache = repo / 'nhl/__pycache__'
     cache.mkdir()
     (cache / 'api.pyc').write_bytes(b'bytecode remains enabled')
     if case == 'stray':
         (repo / 'leftover.txt').write_text('not delivered')
+    elif case == 'ignored-stray':
+        (repo / 'ignored.log').write_text('ignored is not delivered')
+    elif case in ('unpushed', 'local-index'):
+        (repo / 'local-only.txt').write_text('not in final remote commit')
+        git(repo, 'add', 'local-only.txt')
+        if case == 'unpushed':
+            git(repo, 'commit', '-qm', 'local only')
+    elif case == 'cache-symlink':
+        (repo / '__pycache__').symlink_to('/tmp', target_is_directory=True)
     elif case == 'different-bytes':
         (repo / 'nhl/api.py').write_text('uncommitted replacement')
     elif case == 'outside-checkout':
@@ -55,12 +64,17 @@ def test_delivered_tree_and_cache_controls(namespace: tuple[Path, c.Policy, Path
         (repo / 'nhl/other/__pycache__').mkdir()
     elif case == 'extra-branch':
         git(repo, 'branch', 'stray')
-    elif case == 'missing-capture':
+    after = observer.capture('after')
+    from skillc.clutter_delivery import handoff_binding
+    binding = handoff_binding(policy, before, after)
+    evidence = {'agent': capture_commit('agent', remote, commit, binding=binding)}
+    if case == 'missing-capture':
         evidence = {}
     elif case == 'corrupt-capture':
         evidence['agent']['commit'] = '0' * 40
-    after = observer.capture('after')
-    report = c.classify(policy, before, after, delivered_captures=evidence)
+    handoff = {'binding': binding, 'role_stops': {'agent': 'confirmed'},
+               'helper_stop': 'confirmed', 'delivered_commits': {'agent': commit}}
+    report = c.classify(policy, before, after, delivered_captures=evidence, delivered_handoff=handoff)
     expected = 'CLEAN' if case == 'delivered' else 'UNKNOWN' if case in ('missing-capture', 'corrupt-capture') else 'NOT_CLEAN'
     assert report['status'] == expected, report
     if case == 'delivered':
@@ -70,6 +84,19 @@ def test_delivered_tree_and_cache_controls(namespace: tuple[Path, c.Policy, Path
                                           'reason': 'Declared cache directory; contents are not inspected.'}]
     elif expected == 'NOT_CLEAN':
         assert report['counts']['clutter'] > 0
+        required = {
+            'stray': ('agent/workspace', 'file:/work/repo/leftover.txt'),
+            'ignored-stray': ('agent/workspace', 'file:/work/repo/ignored.log'),
+            'unpushed': ('agent/workspace', 'file:/work/repo/local-only.txt'),
+            'local-index': ('agent/workspace', 'file:/work/repo/local-only.txt'),
+            'cache-symlink': ('agent/workspace', 'symlink:/work/repo/__pycache__'),
+            'different-bytes': ('agent/workspace', 'file:/work/repo/nhl/api.py'),
+            'outside-checkout': ('agent/temp', 'directory:/tmp/__pycache__'),
+            'too-deep': ('agent/workspace', 'directory:/work/repo/nhl/a/b/__pycache__'),
+            'too-many': ('agent/workspace', 'directory:/work/repo/nhl/other/__pycache__'),
+        }
+        if case in required:
+            assert required[case] in {(row['surface'], row['key']) for row in report['additions']['clutter']}
 
 
 @pytest.mark.parametrize('fault', ['healthy', 'blob', 'commit', 'missing-object'])
@@ -96,7 +123,7 @@ def test_retained_objects_rederive_delivery_and_reject_tampering(
             selectors(packet, 'agent', '/work/repo')
 
 
-@pytest.mark.parametrize('protected', ['gitdir', 'coordination', 'shared', 'temp', 'remote'])
+@pytest.mark.parametrize('protected', ['gitdir', 'coordination', 'shared', 'temp', 'remote', 'delivered-product', 'allowed-product'])
 def test_cache_patterns_cannot_exclude_independent_scopes(
         namespace: tuple[Path, c.Policy, Path], protected: str) -> None:
     root, original, proc = namespace
@@ -112,8 +139,11 @@ def test_cache_patterns_cannot_exclude_independent_scopes(
         raw['shared_roots'] = [path + '/shared']
     elif protected == 'temp':
         scope['temp_roots'] = [path + '/temp']
-    else:
+    elif protected == 'remote':
         scope['remotes']['fixture'] = path + '/remote.git'
+    else:
+        category = 'delivered' if protected == 'delivered-product' else 'declared_allowed'
+        raw[category] = [{'surface': 'agent/workspace', 'key': 'file:' + path + '/product.txt'}]
     policy = c.parse_policy(raw)
     (root / path.lstrip('/')).mkdir()
     row = capture.capture_role(policy, 'agent', root, proc_root=proc)['agent/workspace']
@@ -138,10 +168,12 @@ def test_session_persists_raw_objects_and_recovery_ignores_cached_verdict(
     git(repo, 'commit', '-qm', 'delivered')
     git(repo, 'push', str(root / 'work/fixture.git'), 'main')
     remote = gs.GitDir(capture.BoundedTree(root), 'work/fixture.git')
-    packet = capture_commit('agent', remote, remote.refs()['refs/heads/main'])
-    observer.delivered_reader = lambda: {'agent': packet}
+    commit = remote.refs()['refs/heads/main']
     session.completion('agent')
-    report = session.finish()
+    session.capture_after()
+    packet = capture_commit('agent', remote, commit, binding=session.delivery_binding())
+    report = session.finalize({'agent': packet}, delivered_commits={'agent': commit},
+                              role_stops={'agent': Confirmation.CONFIRMED}, helper_stop=Confirmation.CONFIRMED)
     assert report['status'] == 'CLEAN'
     # Recovery must recompute from retained object bytes, not a stale clean flag.
     report['status'] = 'NOT_CLEAN'
