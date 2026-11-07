@@ -68,6 +68,22 @@
     {
       "command": "take_lock() { echo hi; }; take_lock kyle-lock acquire main-merge",
       "kind": "unparseable"
+    },
+    {
+      "command": "env -S 'kyle-lock acquire main-merge'",
+      "kind": "unparseable"
+    },
+    {
+      "command": "env --split-string='kyle-lock acquire main-merge'",
+      "kind": "unparseable"
+    },
+    {
+      "command": "echo \"$(( $(kyle-lock acquire main-merge >/dev/null; printf 0) + 0 ))\"",
+      "kind": "unparseable"
+    },
+    {
+      "command": "echo $(( `kyle-lock acquire main-merge` + 0 ))",
+      "kind": "unparseable"
     }
   ]
 }

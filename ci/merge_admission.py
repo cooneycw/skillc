@@ -30,6 +30,8 @@ finding, exit 1 - rather than scanned or skipped:
   (``xargs kyle-lock``, a function call, ``find -exec``);
 - a Python script, ``python -c`` code, or a non-shell heredoc that names the
   client, the resource, a service route or a credential;
+- ``env -S`` / ``--split-string``, whose value is itself a command line;
+- a ``$(...)`` or backtick substitution inside ``$(( ... ))``;
 - unbalanced quoting or substitution, and inner shells nested past 8 levels.
 
 It does model: function definitions (the header is removed and the body is
@@ -91,7 +93,8 @@ READERS = frozenset({"echo", "printf", ":", "grep", "cat", "test", "[", "true", 
 #: Wrappers that run a command, with (options taking a value, options that do not).
 #: Any other option is UNPARSEABLE: the gate refuses rather than guesses (#2130).
 WRAPPER_OPTIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "env": (frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}),
+    # -S/--split-string take a whole command line as their value: refused below.
+    "env": (frozenset({"-u", "--unset", "-C", "--chdir"}),
             frozenset({"-i", "--ignore-environment", "-0", "--null", "-v", "--debug", "-"})),
     "sudo": (frozenset({"-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir",
                         "-h", "--host", "-p", "--prompt", "-r", "--role", "-t", "--type",
@@ -213,6 +216,8 @@ def _substitutions(line: str) -> tuple[str, list[str]]:
             end = line.find("))", i + 3)
             if end < 0:
                 raise Unmodelled("unbalanced arithmetic expansion")
+            if "$(" in line[i + 3:end] or "`" in line[i + 3:end]:
+                raise Unmodelled("a command substitution inside arithmetic expansion is not modelled")
             out.append(SUBSTITUTED)
             i = end + 2
         elif line.startswith("$(", i):
@@ -250,6 +255,8 @@ def _skip_options(command: list[str], i: int, name: str,
         if token == "--":
             return i + 1
         option = token.split("=", 1)[0]
+        if name == "env" and (option in ("-S", "--split-string") or (token.startswith("-S") and len(token) > 2)):
+            raise Unmodelled("env -S/--split-string runs its value as a command and is not modelled")
         if "=" in token and (option in values or option in flags):
             i += 1
         elif token in values:

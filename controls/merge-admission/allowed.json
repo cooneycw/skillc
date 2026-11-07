@@ -11,6 +11,8 @@
     "cat scripts/merge-lock.sh",
     "make test \\\n  PYTEST_ARGS=-q",
     "cleanup() { rm -rf \"$scratch\"; }; trap cleanup EXIT",
-    "function log { echo \"$@\"; }"
+    "function log { echo \"$@\"; }",
+    "echo $(( 1 + 2 ))",
+    "env -u FOO -C /tmp true"
   ]
 }
