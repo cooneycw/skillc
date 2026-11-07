@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 from test_codex_guard_live import SANDBOX, _trial_image
+from wave_role_diagnostics import write_role_summary
 
 from skillc import docker_wave as dw
 from skillc import egress, leak
@@ -198,11 +199,15 @@ def test_physical_wave_transport_protections_and_retirement(
             report = wave.run_scripted()
     finally:
         report = wave.close()
-    assert report['completion']['cleanup_confirmed'], report
-    assert report['completion']['on_time'], report
-    assert all(x['stop'] == x['absent'] == 'confirmed' for x in report['roles'].values())
+    summary = write_role_summary(wave.root, report, ROLES)
+    # Include the diagnostic file in the scan even when an outcome assertion fails.
+    scan = leak.scan_path(wave.root, frozenset(), host_paths=leak.default_host_paths())
+    assert not scan.findings, 'captured role evidence contains a machine identity or credential'
+    assert report['completion']['cleanup_confirmed'], summary
+    assert report['completion']['on_time'], summary
+    assert all(x['stop'] == x['absent'] == 'confirmed' for x in report['roles'].values()), summary
     if mode in ('intact', 'peer-open'):
-        assert all(x['exit_codes'] == [0, 0] for x in report['roles'].values()), report
+        assert all(x['exit_codes'] == [0, 0] for x in report['roles'].values()), summary
         assert len({x['session_id'] for x in report['roles'].values()}) == 3
         for name in ROLES:
             artifacts = wave.root / name / 'artifacts'
@@ -215,11 +220,9 @@ def test_physical_wave_transport_protections_and_retirement(
             transcripts = list((wave.root / name).glob('transcript-*.jsonl'))
             assert transcripts and len(transcripts[0].read_text().splitlines()) == 2
     if mode == 'omit-mail':
-        assert all(x['exit_codes'] == [7] for x in report['roles'].values()), report
+        assert all(x['exit_codes'] == [7] for x in report['roles'].values()), summary
     if mode == 'timeout':
-        assert report['roles']['worker-a']['reasons'] == ['timeout']
-        assert report['roles']['orchestrator']['exit_codes'] == report['roles']['worker-b']['exit_codes'] == [0, 0]
+        assert report['roles']['worker-a']['reasons'] == ['timeout'], summary
+        assert report['roles']['orchestrator']['exit_codes'] == report['roles']['worker-b']['exit_codes'] == [0, 0], summary
     # No credential directory is exported, even while captured transcripts exist.
     assert not list(wave.root.glob('*/artifacts/.codex/auth.json'))
-    scan = leak.scan_path(wave.root, frozenset(), host_paths=leak.default_host_paths())
-    assert not scan.findings, 'captured role evidence contains a machine identity or credential'

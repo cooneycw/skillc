@@ -24,11 +24,12 @@ ONE TEST FUNCTION PER PROPERTY, SKILLC_TRIAL_IMAGE_BREAK SELECTS THE BUILD
 TARGET - same shape as `test_gate_overlay_live.py`'s own `SKILLC_GATE_SHIM_
 LIVE_BREAK`: `none` builds the normal `trial` stage; `no-uv` builds the
 deliberately broken `no-uv` stage (`docker/trial/Dockerfile`), where the uv
-probe must fail.
+probe must fail. The dedicated `no-jq` stage retains uv and removes jq;
+only its jq JSON probe receives a property-scoped expected failure.
 
 `_UvPropertyHeld` is a DEDICATED, PROPERTY-SCOPED exception (issue #341's
-design, adopted here from the START even though this file targets only one
-property today): a future second targeted property (e.g. a pinned `make`/
+design, adopted here from the START for the independent uv and jq
+properties): a future second targeted property (e.g. a pinned `make`/
 `bash` version) must get its OWN subtype, so a break that fails to violate
 the uv property can never be masked by an unrelated property's failure
 satisfying the same `xfail`. The uv-version assertion raises
@@ -45,6 +46,7 @@ Built under a DISTINCT tag, never `:latest`, same convention as
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -60,14 +62,15 @@ DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker" / "trial"
 TEST_TAG = f"skillc-trial-test:343-tools-check-{int(time.time())}"
 
 BREAK_MODE = os.environ.get("SKILLC_TRIAL_IMAGE_BREAK", "none")
-_VALID_BREAK_MODES = ("none", "no-uv")
+_VALID_BREAK_MODES = ("none", "no-uv", "no-jq")
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_TRIAL_IMAGE_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")
 
 #: `none` builds the normal, working stage; `no-uv` builds the break mode's
 #: own negative control (docker/trial/Dockerfile's deliberately uv-less
-#: stage) - mirrors break-lib.sh's own `trialimage:no-uv` mode exactly.
-_BUILD_TARGET = "trial" if BREAK_MODE == "none" else "no-uv"
+#: stage); `no-jq` builds its own stage - mirrors break-lib.sh's modes.
+_BUILD_TARGET = "trial" if BREAK_MODE == "none" else BREAK_MODE
+SYSTEM_TOOLS = json.loads((DOCKERFILE_DIR / "system-tools.json").read_text())
 
 #: Pinned uv version this image installs (docker/trial/pinned-versions.json)
 #: - the property under test asserts the EXACT pinned version is what `uv
@@ -123,7 +126,7 @@ def _require_uv(condition: bool, message: str) -> None:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_UvPropertyHeld,
+    condition=BREAK_MODE == "no-uv", strict=True, raises=_UvPropertyHeld,
     reason=f"SKILLC_TRIAL_IMAGE_BREAK={BREAK_MODE} deliberately removes uv from the built image",
 )
 def test_uv_is_present_at_the_pinned_version(built_image: str) -> None:
@@ -141,7 +144,7 @@ def test_uv_is_present_at_the_pinned_version(built_image: str) -> None:
 
 def test_python3_satisfies_the_profiles_version_floor(built_image: str) -> None:
     """Plain `assert`, not the targeted property for any declared break
-    mode - python3 is unaffected by `trialimage:no-uv` (it is installed on
+    mode - python3 is unaffected by either trial-image break (it is installed on
     the shared `base` stage, before the uv/no-uv split), so an unrelated
     failure here must surface as an ordinary hard FAILURE rather than
     interact with the xfail marker above."""
@@ -154,7 +157,7 @@ def test_python3_satisfies_the_profiles_version_floor(built_image: str) -> None:
     assert result.stdout.strip() == "OK", f"python3 version too old: {result.stdout!r}"
 
 
-@pytest.mark.parametrize("tool", ["make", "bash", "git"])
+@pytest.mark.parametrize("tool", [tool for tool in SYSTEM_TOOLS if tool not in ("python3", "jq")])
 def test_declared_tool_dependency_is_present(built_image: str, tool: str) -> None:
     """`cpp-codex-flow-check-86641e8/profile.json`'s own `tool-make-git-
     bash` dependency, by probe command - plain `assert`, same reasoning as
@@ -162,7 +165,24 @@ def test_declared_tool_dependency_is_present(built_image: str, tool: str) -> Non
     of `trialimage:no-uv`, and all three are installed on the shared `base`
     stage before the uv/no-uv split."""
     result = subprocess.run(
-        ["docker", "run", "--rm", built_image, tool, "--version"],
+        ["docker", "run", "--rm", built_image, *SYSTEM_TOOLS[tool]],
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, f"{tool} --version failed: {result.stderr!r}"
+
+
+class _JqPropertyHeld(Exception):
+    """Only the missing-jq property can satisfy the no-jq control."""
+
+
+@pytest.mark.xfail(
+    condition=BREAK_MODE == "no-jq", strict=True, raises=_JqPropertyHeld,
+    reason="SKILLC_TRIAL_IMAGE_BREAK=no-jq deliberately removes jq from the built image",
+)
+def test_jq_supports_the_wave_registration_json_dependency(built_image: str) -> None:
+    result = subprocess.run(
+        ["docker", "run", "--rm", built_image, *SYSTEM_TOOLS["jq"]],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode != 0 or result.stdout.strip() != '{"wave_registration":true}':
+        raise _JqPropertyHeld(f"jq dependency unavailable: exit={result.returncode}, stdout={result.stdout!r}")

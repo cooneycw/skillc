@@ -1,0 +1,7 @@
+{
+  "bash": ["bash", "--version"],
+  "git": ["git", "--version"],
+  "jq": ["jq", "-cn", "{\"wave_registration\":true}"],
+  "make": ["make", "--version"],
+  "python3": ["python3", "--version"]
+}

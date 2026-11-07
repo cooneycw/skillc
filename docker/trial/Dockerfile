@@ -77,6 +77,7 @@ RUN set -eu; \
     until apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
+        jq \
         python3 \
         make \
         bash \
@@ -185,7 +186,7 @@ RUN chmod 755 /usr/local/bin/skillc-disrupt-tool
 COPY flow-check-gate-shim.py /usr/local/share/skillc/flow-check-gate-shim.py
 RUN chmod 755 /usr/local/share/skillc/flow-check-gate-shim.py
 
-# TWO NAMED STAGES from here (issue #343), the same pattern
+# THREE NAMED STAGES from here (#343, #621), the same pattern
 # docker/profile-cold-install/Dockerfile already uses for its own
 # cached/uncached split: one `base` with everything common, branching only
 # on the ONE layer under test. `no-uv` is the `trialimage:no-uv` break
@@ -205,6 +206,15 @@ FROM base AS no-uv
 USER candidate
 WORKDIR /work
 
+LABEL org.skillc.image=trial-image
+
+# Dedicated jq negative control. Keep uv and every other tool intact so only
+# the jq property can satisfy its property-scoped expected failure.
+FROM base AS no-jq
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
+RUN rm /usr/bin/jq
+USER candidate
+WORKDIR /work
 LABEL org.skillc.image=trial-image
 
 FROM base AS trial
