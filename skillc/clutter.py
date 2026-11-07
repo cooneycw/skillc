@@ -271,7 +271,8 @@ def _cache_exclusions_problem(policy: Policy, surface: str, paths: tuple[str, ..
 
 
 def classify(policy: Policy, before: Snapshot, after: Snapshot, *,
-             delivered_captures: Mapping[str, Any] | None = None) -> dict[str, Any]:
+             delivered_captures: Mapping[str, Any] | None = None,
+             delivered_handoff: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Classify additions exactly once; preservation and uncertainty stay visible."""
     unknown: list[dict[str, str]] = []
     bins: dict[str, list[dict[str, str]]] = {key: [] for key in ('delivered', 'declared-allowed', 'clutter')}
@@ -290,8 +291,13 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot, *,
     derived: dict[str, dict[str, str]] = {}
     commits: dict[str, dict[str, str]] = {}
     missing_delivery: set[str] = set()
-    from .clutter_delivery import selectors
-    captures = delivered_captures if isinstance(delivered_captures, Mapping) else {}
+    from .clutter_delivery import selectors, validate_handoff
+    captures: Mapping[str, Any] = {}
+    if policy.data.get('delivered_commit_roles'):
+        try:
+            captures = validate_handoff(policy, before, after, delivered_captures, delivered_handoff)
+        except (Refused, ValueError, KeyError, TypeError, RecursionError) as exc:
+            unknown.append({'surface': '*', 'reason': str(exc)})
     for role in policy.data.get('delivered_commit_roles', []):
         surface = role + '/workspace'
         try:

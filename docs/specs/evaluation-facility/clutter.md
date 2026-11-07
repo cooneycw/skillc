@@ -26,14 +26,45 @@ unpushed file, or local bytes different from the delivered blob, cannot acquire
 delivered status through this mechanism. Independent Git, coordination and
 shared-state inventories remain required.
 
-`Inventory(..., delivered_reader=...)` accepts the controller's captured-object
-provider. `Session.finish()` freezes its result in the retained report; journal
-recovery replays these raw objects rather than trusting a cached verdict or
-derived selector list. Missing/invalid capture makes the affected workspace
-classification UNKNOWN; independently observed clutter on other surfaces still
-fails. The caller must bind this capture to the independently graded delivered
-remote, under controller custody. A hash does not authenticate agent-supplied
-objects, and this API never selects a local role HEAD on the caller's behalf.
+Delivery uses two distinct controller phases. First call `Session.capture_after()`
+while every required namespace remains live, after controller completion and the
+declared settle delay. The session retains canonical before/after bytes; returned
+snapshot objects cannot mutate those retained inputs. `delivery_binding()` then
+names that session, policy and both snapshot digests. Each opted-in session gets
+a fresh scope identity even when the same Inventory object is reused. Completion/capture cannot
+be repeated after this boundary.
+
+Only after the controller independently confirms every role and helper writer
+stopped does it take the final delivered remote capture. Pass the binding to
+`clutter_delivery.capture_commit(..., binding=...)`, then call:
+
+```python
+report = session.finalize(
+    {"agent": captured_commit},
+    delivered_commits={"agent": independently_selected_final_commit},
+    role_stops={"agent": Confirmation.CONFIRMED},
+    helper_stop=Confirmation.CONFIRMED,
+)
+```
+
+The identities and confirmations above come from trusted controller lifecycle
+observations, never participant output. `finalize` does not stop a process or
+recapture the now-stopped namespaces. A watcher present in the frozen pre-stop
+census stays NOT_CLEAN even if shutdown later removes it. Missing, stale,
+wrong-role or unbound delivery and incomplete stop evidence cannot earn CLEAN;
+independently observed clutter still takes precedence over UNKNOWN. Merely
+setting a flag or hashing an agent-supplied packet authenticates nothing.
+
+The retained report includes raw commit objects and the stop/binding handoff.
+Journal recovery revalidates bindings and object identities, then re-derives the
+verdict from the frozen snapshots. It ignores a cached verdict. The legacy
+`finish()` convenience remains for declarations without delivered-commit roles;
+it cannot authorize opted-in delivery through a one-phase callback.
+
+This is a generic API. **Refs #619; wiring deferred to #623/#620.** The production
+wave must bind its real final remote capture and stop receipts there. This API
+alone supplies neither that wiring nor physical qualification, and ticks no
+acceptance box requiring those observations.
 
 Selectors are disjoint `(surface, key)` pairs. There are no implicit CPP exemptions
 or unrestricted wildcard allowances. `CLEAN` means zero added clutter and complete
