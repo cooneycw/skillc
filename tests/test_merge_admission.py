@@ -122,3 +122,30 @@ def test_cli_exit_codes(capsys: pytest.CaptureFixture[str]) -> None:
     assert gate.main([str(CONTROLS / "good" / "ci.yml")]) == 0
     assert gate.main([str(gate.ROOT / ".woodpecker" / "ci.yml")]) == 0
     capsys.readouterr()
+
+
+@pytest.mark.parametrize("command", [
+    "bash -c 'kyle-lock acquire main-merge --request-key ci'",
+    "sh -euc 'echo x; kyle-lock run main-merge -- make test'",
+    "eval kyle-lock acquire main-merge",
+    "kyle-lock --url http://127.0.0.1:8000 acquire main-merge",
+    "true && kyle-lock acquire main-merge",
+])
+def test_wrapped_and_chained_routes_are_findings(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)), command
+
+
+@pytest.mark.parametrize("command", [
+    "kyle-lock acquire full-suite --purpose main-merge",
+    "kyle-lock acquire full-suite; echo main-merge acquire",
+    "bash -c 'kyle-lock acquire full-suite'",
+])
+def test_a_neighbouring_resource_is_not_a_finding(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)) == [], command
+
+
+@pytest.mark.parametrize("text", ["", "{}", "steps: []", "steps:\n  - name: plugin\n    image: x\n"])
+def test_an_empty_population_is_not_a_pass(text: str) -> None:
+    assert gate.pipeline_findings(text), repr(text)

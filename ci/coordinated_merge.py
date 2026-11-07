@@ -56,6 +56,7 @@ unknown (rerun with ``--resume``, or tier-3 resolution); 10 queued; 11 frozen;
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -158,11 +159,20 @@ class Merger:
         return self.s.state_dir / f"{REPO.replace('/', '__')}-pr{self.s.pr}.json"
 
     def _save(self, **changes: Any) -> None:
+        """Durable before it returns: the merge call trusts it."""
         self.state.update(changes)
         self.s.state_dir.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.state, sort_keys=True), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(self.state, sort_keys=True))
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, self.state_path)
+        directory = os.open(self.s.state_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     def _fence(self) -> list[str]:
         return ["--request-id", str(self.state["request_id"]),
@@ -172,6 +182,18 @@ class Merger:
     # -- steps ---------------------------------------------------------------
 
     def run(self) -> int:
+        """One process per PR record: a concurrent resume would otherwise
+        read the same phase and issue the same merge twice."""
+        self.s.state_dir.mkdir(parents=True, exist_ok=True)
+        with self.state_path.with_suffix(".lock").open("a") as guard:
+            try:
+                fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                _log(f"another merger process holds {self.state_path}; refusing")
+                return EXIT_REFUSED
+            return self._run_locked()
+
+    def _run_locked(self) -> int:
         if self.state_path.exists():
             if not self.s.resume:
                 _log(f"{self.state_path} records an unfinished merge; rerun with --resume")
@@ -196,15 +218,33 @@ class Merger:
                 self._release()
                 self.state_path.unlink(missing_ok=True)
                 return code
+            # From here an intent may exist, so the record is never deleted.
+            self._save(phase="begin_pending")
             code = self._begin()
             if code:
                 return code
             phase = "begun"
+        elif phase == "begin_pending":
+            # The begin response was lost: re-ask the idempotent begin, then
+            # validate again, since the head may have moved meanwhile.
+            code = self._begin()
+            if code:
+                return code
+            code = self._validate_head()
+            if code:
+                _log(f"barrier {self.state.get('barrier_id')} records intent with no merge sent; "
+                     "it stays blocked until tier 3 resolves it (resolve-barrier --outcome closed)")
+                return EXIT_UNKNOWN
+            phase = "begun"
         if phase == "begun":
-            # Mark BEFORE the call: from here on a rerun never merges again.
-            self._save(phase="merge_sent")
+            # Mark BEFORE the call, durably: from here a rerun never merges again.
+            try:
+                self._save(phase="merge_sent")
+            except OSError as exc:
+                _log(f"could not persist the merge marker ({exc}); not merging")
+                return EXIT_UNAVAILABLE
             merged, _ = self.gh(["pr", "merge", str(self.s.pr), "--repo", REPO, "--squash",
-                                      "--match-head-commit", self.s.head])
+                                 "--match-head-commit", self.s.head])
             if merged:
                 _log(f"gh pr merge exited {merged}; reading the outcome back from GitHub")
             phase = "merge_sent"
@@ -308,11 +348,16 @@ class Merger:
         deadline = self.clock() + self.s.ci_timeout
         while True:
             code, _ = self.lock(["renew", RESOURCE, *self._fence()])
-            if code != EXIT_OK:
+            if code == EXIT_LOST:
                 # The barrier still blocks successors; it closes on Kyle's own
                 # reading of this push, never because this process went away.
-                _log(f"lease renewal failed (exit {code}); the barrier keeps main-merge blocked")
-                return EXIT_LOST if code == EXIT_LOST else EXIT_UNAVAILABLE
+                # Nothing is left for this record to do, so it is retired.
+                self.state_path.unlink(missing_ok=True)
+                _log("lease lost; the recorded barrier keeps main-merge blocked until Kyle reads the push")
+                return EXIT_LOST
+            if code != EXIT_OK:
+                _log(f"lease renewal unconfirmed (exit {code}); rerun with --resume")
+                return EXIT_UNAVAILABLE
             code, _ = self.lock(["ci", "--repo", REPO, "--sha", sha, "--event", "push", "--branch", "main"])
             if code in (EXIT_OK, EXIT_RED):
                 self._release()
@@ -320,9 +365,9 @@ class Merger:
                 _log(f"main push {sha} is {'green' if code == EXIT_OK else 'RED'}")
                 return code
             if self.clock() >= deadline:
-                self._release()
+                # Keep the lease and the record: a resume renews and keeps reading.
                 _log(f"main push {sha} not terminal within {self.s.ci_timeout:g}s; "
-                     "lease released, barrier still blocks")
+                     "lease kept, rerun with --resume")
                 return EXIT_UNAVAILABLE
             self.sleep(self.s.poll)
 

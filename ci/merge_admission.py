@@ -46,27 +46,82 @@ SERVICE_ROUTES = ("coordination_acquire", "coordination_begin_merge",
                   f"/api/coordination/{RESOURCE}/")
 
 
+SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+OPERATORS = frozenset({";", "&&", "||", "|", "&", "(", ")", ";;", "|&"})
+#: kyle-lock's own options that take a value, before the action.
+CLIENT_VALUE_OPTIONS = frozenset({"--url"})
+
+
 def _tokens(line: str) -> list[str]:
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|()")
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
     try:
-        return shlex.split(line, comments=True)
+        return list(lexer)
     except ValueError:
         # Unbalanced quoting: fall back to whitespace, still without comments.
         return line.split("#", 1)[0].split()
 
 
-def _line_findings(line: str, where: str) -> list[str]:
-    tokens = _tokens(line)
+def _commands(tokens: list[str]) -> list[list[str]]:
+    """Split at shell operators, so one command's arguments never satisfy
+    another command's test."""
+    commands: list[list[str]] = [[]]
+    for token in tokens:
+        if token in OPERATORS:
+            commands.append([])
+        else:
+            commands[-1].append(token)
+    return [command for command in commands if command]
+
+
+def _client_call(command: list[str]) -> tuple[str, str] | None:
+    """(action, resource) of a kyle-lock invocation, read by position."""
+    for i, token in enumerate(command):
+        if Path(token).name != "kyle-lock":
+            continue
+        rest = command[i + 1:]
+        j = 0
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 2 if rest[j] in CLIENT_VALUE_OPTIONS else 1
+        if j < len(rest):
+            return rest[j], rest[j + 1] if j + 1 < len(rest) else ""
+    return None
+
+
+def _inner_scripts(command: list[str]) -> list[str]:
+    """Shell text a command runs: ``sh -c '<text>'`` (any flag cluster
+    holding ``c``) and ``eval <words>``."""
+    inner: list[str] = []
+    for i, token in enumerate(command):
+        name = Path(token).name
+        if name == "eval":
+            inner.append(" ".join(command[i + 1:]))
+        elif name in SHELLS:
+            for k in range(i + 1, len(command) - 1):
+                flag = command[k]
+                if flag.startswith("-") and not flag.startswith("--") and "c" in flag[1:]:
+                    inner.append(command[k + 1])
+                    break
+    return inner
+
+
+def _line_findings(line: str, where: str, depth: int = 0) -> list[str]:
     found: list[str] = []
-    for i, token in enumerate(tokens):
-        if Path(token).name == "kyle-lock":
-            rest = tokens[i + 1:]
-            if RESOURCE in rest and LEASE_ACTIONS.intersection(rest):
-                found.append(f"{where}: kyle-lock {' '.join(rest)} - CI must never take {RESOURCE}")
-        if any(route in token for route in SERVICE_ROUTES):
-            found.append(f"{where}: {token} - CI must never take {RESOURCE}")
-        if any(token == name or token.startswith(f"{name}=") or f"${name}" in token
-               or f"${{{name}}}" in token for name in CREDENTIALS):
-            found.append(f"{where}: {token} - CI must not hold a coordination credential")
+    for command in _commands(_tokens(line)):
+        call = _client_call(command)
+        if call and call[1] == RESOURCE and call[0] in LEASE_ACTIONS:
+            found.append(f"{where}: kyle-lock {call[0]} {call[1]} - CI must never take {RESOURCE}")
+        for token in command:
+            if any(route in token for route in SERVICE_ROUTES):
+                found.append(f"{where}: {token} - CI must never take {RESOURCE}")
+            if any(token == name or token.startswith(f"{name}=") or f"${name}" in token
+                   or f"${{{name}}}" in token for name in CREDENTIALS):
+                found.append(f"{where}: {token} - CI must not hold a coordination credential")
+        if depth < 8:
+            for text in _inner_scripts(command):
+                for inner in text.splitlines():
+                    found += _line_findings(inner, f"{where} (inner shell)", depth + 1)
     return found
 
 
@@ -122,7 +177,8 @@ def _strings(value: Any) -> Iterable[str]:
             yield from _strings(item)
 
 
-def pipeline_findings(ci_yml: str, root: Path = ROOT, followed: set[Path] | None = None) -> list[str]:
+def pipeline_findings(ci_yml: str, root: Path = ROOT, followed: set[Path] | None = None,
+                      counts: dict[str, int] | None = None) -> list[str]:
     """``followed``, when given, receives every script the scan read, so a
     zero can be told apart from a scan that reached nothing."""
     config = yaml.safe_load(ci_yml) or {}
@@ -130,7 +186,10 @@ def pipeline_findings(ci_yml: str, root: Path = ROOT, followed: set[Path] | None
     if isinstance(steps, dict):
         steps = [dict(step, name=name) for name, step in steps.items()]
     found: list[str] = []
+    if not isinstance(steps, list) or not steps:
+        return ["pipeline has no steps - nothing was examined, which is not a pass"]
     seen: set[Path] = set() if followed is None else followed
+    examined = 0
     for step in steps:
         name = step.get("name", "?")
         for key in ("environment", "secrets"):
@@ -141,8 +200,13 @@ def pipeline_findings(ci_yml: str, root: Path = ROOT, followed: set[Path] | None
         if isinstance(commands, str):
             commands = [commands]
         lines = [part for command in commands for part in str(command).splitlines()]
+        examined += len(lines)
         found += _scan(lines, f"step {name}", root, seen)
-    return found
+    if counts is not None:
+        counts.update(steps=len(steps), lines=examined)
+    if not examined:
+        found.append("pipeline has no step commands - nothing was examined, which is not a pass")
+    return list(dict.fromkeys(found))
 
 
 def transcript_findings(calls: list[dict[str, Any]], pr: int) -> list[str]:
@@ -180,10 +244,12 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     path = Path(args[0]) if args else ROOT / ".woodpecker" / "ci.yml"
     followed: set[Path] = set()
-    found = pipeline_findings(path.read_text(encoding="utf-8"), followed=followed)
+    counts: dict[str, int] = {}
+    found = pipeline_findings(path.read_text(encoding="utf-8"), followed=followed, counts=counts)
     for finding in found:
         print(finding)
-    print(f"merge-admission: {len(found)} finding(s) in {path}, {len(followed)} script(s) followed")
+    print(f"merge-admission: {len(found)} finding(s) in {path}: {counts.get('steps', 0)} step(s), "
+          f"{counts.get('lines', 0)} command line(s), {len(followed)} script(s) followed")
     return 1 if found else 0
 
 

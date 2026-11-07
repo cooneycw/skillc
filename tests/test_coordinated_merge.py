@@ -163,7 +163,7 @@ def test_coordinated_merge_records_intent_before_merging_and_holds_through_main(
     assert all(a[a.index("--sha") + 1] == SQUASH and "push" in a and "main" in a for a in main)
     assert kyle.barrier == {"id": 3, "state": "open", "pr": PR, "squash_sha": SQUASH}
     assert gate.transcript_findings(calls, PR) == []
-    assert not (tmp_path / "state").exists() or not any((tmp_path / "state").iterdir())
+    assert not list((tmp_path / "state").glob("*.json")), "a finished merge leaves no recovery record"
 
 
 @pytest.mark.parametrize("mode, code", [
@@ -367,3 +367,83 @@ def test_a_planted_inner_acquire_is_the_deadlock_and_the_gate_names_it(tmp_path:
     assert code == cm.EXIT_RED, "a pipeline waiting on its own merger is never green"
     assert gate.pipeline_findings((CONTROLS / "bad" / "ci.yml").read_text(encoding="utf-8"),
                                   CONTROLS / "bad")
+
+
+# -- review hardening: concurrency, durability, lost begin, timeout ---------------
+
+
+def test_a_concurrent_run_on_the_same_record_is_refused(tmp_path: Path) -> None:
+    import fcntl
+
+    calls: list[dict[str, Any]] = []
+    state = tmp_path / "state"
+    state.mkdir()
+    lock = (state / f"{cm.REPO.replace('/', '__')}-pr{PR}.lock").open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        github = FakeGitHub(calls)
+        assert merge(tmp_path, FakeKyle(calls), github) == cm.EXIT_REFUSED
+        assert calls == [], "a second process must not even acquire"
+    finally:
+        lock.close()
+
+
+def test_an_unpersistable_merge_marker_means_no_merge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    kyle, github = FakeKyle(calls), FakeGitHub(calls)
+    real_fsync = cm.os.fsync
+    saves = {"n": 0}
+
+    def failing_fsync(fd: int) -> None:
+        # held, begin_pending and begun persist; the merge_sent marker does not.
+        saves["n"] += 1
+        if saves["n"] > 6:
+            raise OSError(5, "I/O error")
+        real_fsync(fd)
+
+    monkeypatch.setattr(cm.os, "fsync", failing_fsync)
+    assert merge(tmp_path, kyle, github) == cm.EXIT_UNAVAILABLE
+    assert github.merge_calls == 0
+
+
+class LostBeginKyle(FakeKyle):
+    """Kyle records the intent, but the first begin response never arrives."""
+
+    lost = True
+
+    def _answer(self, argv: list[str]) -> tuple[int, Any]:
+        code, answer = super()._answer(argv)
+        if argv[0] == "begin-merge" and self.lost:
+            self.lost = False
+            return cm.EXIT_UNAVAILABLE, None
+        return code, answer
+
+
+def test_a_lost_begin_response_keeps_the_record_when_the_head_moved(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    kyle, github = LostBeginKyle(calls), FakeGitHub(calls)
+    assert merge(tmp_path, kyle, github) == cm.EXIT_UNAVAILABLE
+    assert kyle.barrier is not None and kyle.barrier["state"] == "unknown"
+    github.head = "c" * 40
+    assert merge(tmp_path, kyle, github, resume=True) == cm.EXIT_UNKNOWN
+    assert github.merge_calls == 0
+    assert any((tmp_path / "state").glob("*.json")), "the only record of the intent was deleted"
+
+
+def test_a_lost_begin_response_resumes_through_the_same_intent(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    kyle, github = LostBeginKyle(calls), FakeGitHub(calls)
+    assert merge(tmp_path, kyle, github) == cm.EXIT_UNAVAILABLE
+    assert merge(tmp_path, kyle, github, resume=True) == cm.EXIT_OK
+    assert github.merge_calls == 1
+    assert actions(calls).count("acquire") == 1, "resume keeps the original fence"
+
+
+def test_a_timed_out_wait_keeps_the_lease_and_resumes(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    kyle, github = FakeKyle(calls, main_ci=[75]), FakeGitHub(calls)
+    assert merge(tmp_path, kyle, github, ci_timeout=30.0) == cm.EXIT_UNAVAILABLE
+    assert not kyle.released
+    kyle.main_ci = [0]
+    assert merge(tmp_path, kyle, github, resume=True) == cm.EXIT_OK
+    assert kyle.released and github.merge_calls == 1
