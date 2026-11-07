@@ -178,6 +178,61 @@ def test_wave_owns_each_role_and_only_declared_shared_surfaces(runtime: Any) -> 
     assert report["status"] == "UNKNOWN"  # No real isolation proof was performed by this model.
 
 
+def test_fixture_network_allows_later_role_network_connections(
+    runtime: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model Docker's none-mode refusal against the real fixture create argv."""
+    from skillc.docker_backend import DockerBackend
+
+    controller, calls = runtime
+    original_call = controller._call
+    fixture_argv: list[str] = []
+
+    def docker_call(argv: Any, **kwargs: Any) -> bytes:
+        if argv[:4] == ["network", "connect", "--alias", wave.FIXTURE_ALIAS]:
+            fixture = controller.remote_backend
+            assert fixture is not None
+            backend = DockerBackend(**fixture.config)
+            fixture_argv[:] = backend._keepalive_run_argv("fixture", "fixture")
+            if fixture_argv[fixture_argv.index("--network") + 1] == "none":
+                raise BackendUnavailable(
+                    "container cannot be connected to multiple networks with one "
+                    "of the networks in private (none) mode"
+                )
+        return original_call(argv, **kwargs)
+
+    monkeypatch.setattr(controller, "_call", docker_call)
+    try:
+        controller.prepare()
+        assert fixture_argv[fixture_argv.index("--network") + 1] == controller.network
+        assert ["network", "create", "--internal", "--opt",
+                "com.docker.network.bridge.enable_icc=false"] == calls[0][:5]
+        assert all(state.backend.config["egress"] for state in controller.states.values())
+    finally:
+        controller.close()
+
+
+def test_wave_does_not_publish_fixture_backend_isolation_description(
+    runtime: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _ = runtime
+    descriptions: list[str] = []
+    marker = "fixture-description-egress-OPEN"
+
+    def describe(backend: ModelBackend) -> dict[str, str]:
+        descriptions.append(backend.name)
+        return {"isolation": marker}
+
+    monkeypatch.setattr(ModelBackend, "describe", describe, raising=False)
+    report = controller.run_scripted()
+    assert "test-wave-fixture" not in descriptions
+    assert report["scope"] == "runtime-lifecycle-only"
+    assert report["status"] == "UNKNOWN"
+    evidence = list(controller.root.rglob("*.json"))
+    assert evidence
+    assert all(marker not in path.read_text() for path in evidence)
+
+
 @pytest.mark.parametrize("case", json.loads(CONTROLS.with_name("fixture-git-ownership.json").read_text()),
                          ids=lambda c: c["name"])
 def test_fixture_clone_trusts_only_the_controller_seed(
