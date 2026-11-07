@@ -197,6 +197,7 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break coldinstall:secret-mount      # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break coldinstall:cold-cache        # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break trialimage:no-uv              # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break trialimage:no-jq              # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:missing-closure      # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:tampered-closure     # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:empty-runtime-cache  # expect FAILURE
@@ -581,3 +582,11 @@ Offline controls exercise the actual poller, shell, installed helper, real tiny
 pytest reports and private retention with external Docker/GitHub I/O replaced.
 They do not establish the operator's physical cold-profile positive; that remains
 an explicitly authorized post-merge run after re-pin.
+
+
+`trialimage:no-jq` builds the dedicated jq-less stage while retaining uv and
+other tools. Only the jq JSON probe has a property-scoped expected failure;
+Python, Make, Bash, Git and uv failures remain independent hard failures. Both
+trial-image break modes must post the control context, never certify the intact
+image. The shared trial image must be rebuilt from the changed recipe before
+rerunning #621; a stale prebuilt image does not acquire jq from a source update.

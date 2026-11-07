@@ -108,7 +108,7 @@ def test_namespaced_coldinstall_modes_set_only_the_coldinstall_value(mode: str) 
     ]
 
 
-@pytest.mark.parametrize("mode", ["no-uv"])
+@pytest.mark.parametrize("mode", ["no-uv", "no-jq"])
 def test_namespaced_trialimage_modes_set_only_the_trialimage_value(mode: str) -> None:
     result = _resolve(f"trialimage:{mode}")
     assert result.returncode == 0
@@ -384,6 +384,7 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "coldinstall:secret-mount",
         "coldinstall:cold-cache",
         "trialimage:no-uv",
+        "trialimage:no-jq",
         "closure:missing-closure",
         "closure:tampered-closure",
         "closure:empty-runtime-cache",
@@ -439,6 +440,7 @@ def test_the_real_runner_refuses_an_unknown_break_spec_before_touching_any_confi
         "gateshim:drops-cwd",
         "coldinstall:cold-cache",
         "trialimage:no-uv",
+        "trialimage:no-jq",
         "closure:missing-closure",
         "closure:empty-runtime-cache",
         "closure:runtime-cache-permissions",

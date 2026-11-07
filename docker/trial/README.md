@@ -69,6 +69,22 @@ reachable from here, so the Dockerfile is authored and reviewed but its
 build-time claims above are unverified by this PR's own gates. `check_pins.py`
 and `skillc/trial_bootstrap.py`'s tests are the parts this PR actually proves.
 
+## Shared system-tool contract
+
+[system-tools.json](system-tools.json) declares the common system tools and
+image-level probes: Bash, Git, jq, Make and Python. jq is needed by the actual
+wave registry helper before a scripted role can register. The recipe installs
+these for every role and both arms; #639's equal-image pin binds the shared tool
+set. Adding jq does not select a CPP-only image.
+
+The ordinary suite checks the recipe against that contract and runs the real
+trusted actor with and without jq on a disposable local PATH. Physical probes
+remain in `tests/test_trial_image_tools_live.py`. The dedicated `no-jq` image
+stage removes jq while retaining uv; `trialimage:no-jq` must fail the jq property.
+A missing tool is named by its probe instead of first appearing as actor exit 1.
+These local checks do not build an image or qualify the Docker transport. Rebuild
+the actual image from this recipe before the next physical #621 run.
+
 ## Identity and data transfer (owner ruling, 2026-09-26)
 
 The image creates a real `candidate` user and group, `10001:10001`, with a

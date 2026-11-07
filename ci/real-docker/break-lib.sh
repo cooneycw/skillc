@@ -41,7 +41,8 @@ _BREAK_COLDINSTALL_MODES="skill-mount home-mount mcp-mount secret-mount cold-cac
 #: selects the `no-uv` Dockerfile stage (docker/trial/Dockerfile), where
 #: the uv probe must fail - the negative control proving the pinned
 #: multi-stage COPY is what makes the intact image's uv probe work.
-_BREAK_TRIALIMAGE_MODES="no-uv"
+#: #621 adds no-jq, which removes jq only and retains the pinned uv.
+_BREAK_TRIALIMAGE_MODES="no-uv no-jq"
 
 #: #334's installed-closure break modes - no bare form, same as witness.
 #: missing-closure omits one closure-only file from delivery entirely;

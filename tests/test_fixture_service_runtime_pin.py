@@ -1,4 +1,4 @@
-"""Pin the current reviewed flow-check build inputs (#276, #637).
+"""Pin the current reviewed flow-check build inputs (#276, #637, #621).
 
 `docker/profile-trial/build.py` builds the flow-check image from EVERY file
 under `docker/trial/` plus a fixed set of subject and fixture inputs, so any
@@ -6,7 +6,7 @@ file added there moves `build_context_sha256`. The fixture-service shim
 therefore lives in `docker/fixture-service/`. #637 deliberately upgrades the
 shared native Codex recipe to 0.165.0, under the recorded ruling, without
 rewriting historical image IDs, receipts or declarations. The values below
-pin that new reviewed recipe. The check reads working files, not git, so it
+pin the #621 shared jq recipe/tool-contract update to that reviewed baseline. The check reads working files, not git, so it
 runs in CI's shallow clone. `build.py` copies itself into the context as
 `runtime-build.py`; an edit there also changes the context.
 
@@ -27,9 +27,9 @@ build: Any = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(build)
 
 GOLDEN = {
-    "build_context_sha256": "4177260e9058a2e8f7118a7e8cf169a79d616576e8020eacade6bf51bb8501f6",
-    "base_recipe_sha256": "23e9583d0c4498d37851d2d2cce8b7cb72ecf873fd4ce306e3b81739d78d8a85",
-    "recipe_sha256": "1c8731b14c097db59b9daa3faef89d39340e369fee1f01b80e2ed5586e93a9a9",
+    "build_context_sha256": "720e38c4b3ed4c9ffddab46d1c0ae657f3043bccb3a3a898af4e65043ad940d9",
+    "base_recipe_sha256": "6dd97277edd7b9a12733614a6297bcd579b137471520babcd5c5c93b48280645",
+    "recipe_sha256": "a3d69010f30c242c3af0b95fa260187b29c9f93b9300f5153cea1d02938c0a03",
 }
 
 
