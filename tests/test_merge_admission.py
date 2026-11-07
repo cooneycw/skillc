@@ -208,3 +208,39 @@ def test_only_an_executed_script_is_followed(command: str, caught: bool) -> None
     """Against the committed bad script: reading it is not running it."""
     ci = {"steps": [{"name": "gate", "commands": [command]}]}
     assert bool(gate.pipeline_findings(json.dumps(ci), CONTROLS / "bad")) is caught, command
+
+
+def _cases(name: str) -> list[object]:
+    data = json.loads((CONTROLS / name).read_text(encoding="utf-8"))
+    cases = data["cases"]
+    assert isinstance(cases, list)
+    return cases
+
+
+@pytest.mark.parametrize("case", _cases("refused.json"), ids=lambda c: c["command"][:40])  # type: ignore[index]
+def test_every_refused_form_is_a_finding(case: dict[str, str]) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [case["command"]]}]}
+    found = gate.pipeline_findings(json.dumps(ci), CONTROLS / "bad")
+    assert found, case["command"]
+    if case["kind"] == "unparseable":
+        assert any("UNPARSEABLE" in f for f in found), found
+    else:
+        assert any("CI must never take main-merge" in f for f in found), found
+
+
+@pytest.mark.parametrize("command", _cases("allowed.json"), ids=lambda c: str(c)[:40])
+def test_no_refusal_fires_on_an_ordinary_form(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci), CONTROLS / "bad") == [], command
+
+
+def test_the_refusals_do_not_fire_on_todays_pipeline() -> None:
+    text = (gate.ROOT / ".woodpecker" / "ci.yml").read_text(encoding="utf-8")
+    found = gate.pipeline_findings(text)
+    assert not [f for f in found if "UNPARSEABLE" in f], found
+
+
+def test_a_continuation_inside_a_followed_script_is_joined(tmp_path: Path) -> None:
+    (tmp_path / "s.sh").write_text("#!/usr/bin/env bash\nkyle-lock \\\n  acquire main-merge\n", encoding="utf-8")
+    ci = {"steps": [{"name": "gate", "commands": ["bash s.sh"]}]}
+    assert gate.pipeline_findings(json.dumps(ci), tmp_path)
