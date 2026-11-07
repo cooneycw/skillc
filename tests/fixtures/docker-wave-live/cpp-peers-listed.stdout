@@ -1,0 +1,145 @@
+{
+  "orchestrator": {
+    "socket": "unknown",
+    "self_socket": "unknown",
+    "pid": 4842,
+    "pid_started": "128278294",
+    "session": "4928903b-6672-4631-b90f-c903d64b556b",
+    "host": "fixture",
+    "cwd": "",
+    "repo": "",
+    "issue": "",
+    "branch": "",
+    "registered_ts": 1794078225,
+    "verified": false,
+    "address_mismatch": false,
+    "address_filled": false,
+    "released": false,
+    "model": "",
+    "permission_mode": "",
+    "files": "",
+    "capacity": "",
+    "driver": "",
+    "vantage": "unavailable",
+    "vantage_source": "-",
+    "vantage_basis": "-",
+    "pr": "",
+    "base": "",
+    "diff": "",
+    "obs_repo": "",
+    "overtaken": 0,
+    "policy_rev": 0,
+    "liveness": "stale",
+    "liveness_basis": "pid-gone"
+  },
+  "worker-a": {
+    "socket": "unknown",
+    "self_socket": "unknown",
+    "pid": 4846,
+    "pid_started": "128278295",
+    "session": "592f6e86-c50a-4545-9722-0ee02a4d4512",
+    "host": "fixture",
+    "cwd": "",
+    "repo": "",
+    "issue": "",
+    "branch": "",
+    "registered_ts": 1794078225,
+    "verified": false,
+    "address_mismatch": false,
+    "address_filled": false,
+    "released": false,
+    "model": "",
+    "permission_mode": "",
+    "files": "",
+    "capacity": "",
+    "driver": "",
+    "vantage": "unavailable",
+    "vantage_source": "-",
+    "vantage_basis": "-",
+    "pr": "",
+    "base": "",
+    "diff": "",
+    "obs_repo": "",
+    "overtaken": 0,
+    "policy_rev": 0,
+    "liveness": "stale",
+    "liveness_basis": "pid-gone"
+  },
+  "worker-b": {
+    "socket": "unknown",
+    "self_socket": "unknown",
+    "pid": 4855,
+    "pid_started": "128278297",
+    "session": "634e951e-99ee-4c4a-bf17-eb0cef42e909",
+    "host": "fixture",
+    "cwd": "",
+    "repo": "",
+    "issue": "",
+    "branch": "",
+    "registered_ts": 1794078225,
+    "verified": false,
+    "address_mismatch": false,
+    "address_filled": false,
+    "released": false,
+    "model": "",
+    "permission_mode": "",
+    "files": "",
+    "capacity": "",
+    "driver": "",
+    "vantage": "unavailable",
+    "vantage_source": "-",
+    "vantage_basis": "-",
+    "pr": "",
+    "base": "",
+    "diff": "",
+    "obs_repo": "",
+    "overtaken": 0,
+    "policy_rev": 0,
+    "liveness": "stale",
+    "liveness_basis": "pid-gone"
+  },
+  "merge_starvation": {
+    "merge_strict": "unknown",
+    "merge_strict_age": "-",
+    "merge_strict_stale": "-",
+    "suppressing": "no",
+    "starving": 0,
+    "observed": 0,
+    "live_roles": 0,
+    "threshold": 2
+  }
+}
+FLOW_WAVE_POLICY=absent
+FLOW_WAVE_POLICY_REV=0
+FLOW_WAVE_POLICY_DRIVER=-
+FLOW_WAVE_POLICY_DRIVER_SCOPE=-
+FLOW_WAVE_POLICY_DRIVER_WEB=-
+FLOW_WAVE_POLICY_DRIVER_CONTAINER=-
+FLOW_WAVE_POLICY_DRIVER_META=-
+FLOW_WAVE_POLICY_DRIVER_CANNOT=-
+FLOW_WAVE_POLICY_AUTHORITY=-
+FLOW_WAVE_POLICY_AUTHORITY_MODEL=-
+FLOW_WAVE_POLICY_GATE=-
+FLOW_WAVE_POLICY_LEDGER=-
+FLOW_WAVE_POLICY_MERGE_AUTHORITY=-
+FLOW_WAVE_POLICY_MERGE_STRICT=-
+FLOW_WAVE_POLICY_MERGE_STRICT_TS=-
+FLOW_WAVE_POLICY_MERGE_STRICT_AGE=-
+FLOW_WAVE_POLICY_MERGE_STRICT_STALE=-
+FLOW_WAVE_POLICY_DEPLOY=-
+FLOW_WAVE_POLICY_REPO=-
+FLOW_WAVE_POLICY_TS=-
+FLOW_WAVE_MERGE_STRICT=unknown
+FLOW_WAVE_MERGE_STRICT_SUPPRESSING=no
+FLOW_WAVE_STARVATION=0
+FLOW_WAVE_STARVATION_OBSERVED=0
+FLOW_WAVE_STARVATION_LIVE=0
+FLOW_WAVE_WATCH_UNARMED=0
+FLOW_WAVE_UNREAD=0
+FLOW_WAVE_BOOTSTRAP=ok
+FLOW_WAVE_OVERLAP_UNSCOPED=0
+FLOW_WAVE_DRIVER_UNDECLARED=-
+FLOW_WAVE_DRIVER_POPULATION=-
+FLOW_WAVE_LIVENESS_UNDETERMINED=0
+FLOW_WAVE_CLAIM_SCAN_SKIPPED=0
+FLOW_WAVE: listed

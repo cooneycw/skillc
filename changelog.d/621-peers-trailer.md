@@ -1,0 +1,1 @@
+- Parse the physical wave's CPP peer listing as leading JSON followed by its documented detail and listed verdict lines, and require a successful helper exit.
