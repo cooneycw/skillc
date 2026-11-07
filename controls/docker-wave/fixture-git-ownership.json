@@ -1,0 +1,5 @@
+[
+  {"name": "same-owner", "different_owner": false, "foreign_source": false, "expected_exit": 0},
+  {"name": "different-owner-controller-seed", "different_owner": true, "foreign_source": false, "expected_exit": 0},
+  {"name": "different-owner-untrusted-source", "different_owner": true, "foreign_source": true, "expected_exit": 128}
+]
