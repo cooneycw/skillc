@@ -28,6 +28,7 @@ prints each finding, or 0.
 
 from __future__ import annotations
 
+import re
 import shlex
 import sys
 from collections.abc import Iterable
@@ -75,39 +76,74 @@ def _commands(tokens: list[str]) -> list[list[str]]:
     return [command for command in commands if command]
 
 
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+#: Programs that run their first non-option argument as the command.
+WRAPPERS = frozenset({"env", "exec", "command", "nohup", "time", "sudo", "nice"})
+
+
+def _program(command: list[str]) -> tuple[int, str] | None:
+    """Index and name of the program a command actually runs: assignments
+    and wrappers are skipped, and ``python3 x`` / ``bash x`` / ``uv run x``
+    run ``x``. An argument to some other program is never an invocation."""
+    i = 0
+    while i < len(command):
+        token = command[i]
+        name = Path(token).name
+        if ASSIGNMENT.match(token):
+            i += 1
+        elif name in WRAPPERS or (name == "uv" and command[i + 1:i + 2] == ["run"]):
+            i += 2 if name == "uv" else 1
+            while i < len(command) and (command[i].startswith("-") or ASSIGNMENT.match(command[i])):
+                i += 1
+        elif name in SHELLS or re.fullmatch(r"python[0-9.]*", name):
+            j = i + 1
+            while j < len(command) and command[j].startswith("-"):
+                if name in SHELLS and "c" in command[j].lstrip("-"):
+                    return i, name
+                j += 1
+            if j >= len(command):
+                return i, name
+            i = j
+        else:
+            return i, name
+    return None
+
+
 def _client_call(command: list[str]) -> tuple[str, str] | None:
     """(action, resource) of a kyle-lock invocation, read by position."""
-    for i, token in enumerate(command):
-        if Path(token).name != "kyle-lock":
-            continue
-        rest = command[i + 1:]
-        j = 0
-        while j < len(rest) and rest[j].startswith("-"):
-            j += 2 if rest[j] in CLIENT_VALUE_OPTIONS else 1
-        if j < len(rest):
-            return rest[j], rest[j + 1] if j + 1 < len(rest) else ""
+    program = _program(command)
+    if program is None or program[1] != "kyle-lock":
+        return None
+    rest = command[program[0] + 1:]
+    j = 0
+    while j < len(rest) and rest[j].startswith("-"):
+        j += 2 if rest[j] in CLIENT_VALUE_OPTIONS else 1
+    if j < len(rest):
+        return rest[j], rest[j + 1] if j + 1 < len(rest) else ""
     return None
 
 
 def _inner_scripts(command: list[str]) -> list[str]:
-    """Shell text a command runs: ``sh -c '<text>'`` (any flag cluster
-    holding ``c``) and ``eval <words>``."""
-    inner: list[str] = []
-    for i, token in enumerate(command):
-        name = Path(token).name
-        if name == "eval":
-            inner.append(" ".join(command[i + 1:]))
-        elif name in SHELLS:
-            for k in range(i + 1, len(command) - 1):
-                flag = command[k]
-                if flag.startswith("-") and not flag.startswith("--") and "c" in flag[1:]:
-                    inner.append(command[k + 1])
-                    break
-    return inner
+    """Shell text the command's program runs: ``sh -c '<text>'`` (any flag
+    cluster holding ``c``) and ``eval <words>``."""
+    program = _program(command)
+    if program is None:
+        return []
+    i, name = program
+    if name == "eval":
+        return [" ".join(command[i + 1:])]
+    if name in SHELLS:
+        for k in range(i + 1, len(command) - 1):
+            flag = command[k]
+            if flag.startswith("-") and not flag.startswith("--") and "c" in flag[1:]:
+                return [command[k + 1]]
+    return []
 
 
-def _line_findings(line: str, where: str, depth: int = 0) -> list[str]:
+def _line_findings(line: str, where: str) -> tuple[list[str], list[str]]:
+    """Findings on one line, and the inner shell texts it runs."""
     found: list[str] = []
+    inner: list[str] = []
     for command in _commands(_tokens(line)):
         call = _client_call(command)
         if call and call[1] == RESOURCE and call[0] in LEASE_ACTIONS:
@@ -118,11 +154,8 @@ def _line_findings(line: str, where: str, depth: int = 0) -> list[str]:
             if any(token == name or token.startswith(f"{name}=") or f"${name}" in token
                    or f"${{{name}}}" in token for name in CREDENTIALS):
                 found.append(f"{where}: {token} - CI must not hold a coordination credential")
-        if depth < 8:
-            for text in _inner_scripts(command):
-                for inner in text.splitlines():
-                    found += _line_findings(inner, f"{where} (inner shell)", depth + 1)
-    return found
+        inner += _inner_scripts(command)
+    return found, inner
 
 
 SCRIPT_SUFFIXES = frozenset({".sh", ".bash", ".py"})
@@ -153,15 +186,23 @@ def _scripts(line: str, root: Path) -> Iterable[Path]:
             continue
 
 
-def _scan(lines: Iterable[str], where: str, root: Path, seen: set[Path]) -> list[str]:
+def _scan(lines: Iterable[str], where: str, root: Path, seen: set[Path], depth: int = 0) -> list[str]:
+    """Inline findings, the repository scripts a line names, and the shell
+    text it runs, each scanned the same way (a script run inside ``sh -c``
+    is followed too)."""
     found: list[str] = []
     for number, line in enumerate(lines, 1):
-        found += _line_findings(line, f"{where}:{number}")
+        here = f"{where}:{number}"
+        inline, inner = _line_findings(line, here)
+        found += inline
         for script in _scripts(line, root):
             if script not in seen:
                 seen.add(script)
                 text = script.read_text(encoding="utf-8", errors="replace")
-                found += _scan(text.splitlines(), str(script.relative_to(root.resolve())), root, seen)
+                found += _scan(text.splitlines(), str(script.relative_to(root.resolve())), root, seen, depth)
+        if depth < 8:
+            for text in inner:
+                found += _scan(text.splitlines(), f"{here} (inner shell)", root, seen, depth + 1)
     return found
 
 
@@ -220,7 +261,9 @@ def transcript_findings(calls: list[dict[str, Any]], pr: int) -> list[str]:
         ok = call.get("exit") == 0
         if call.get("tool") == "lock" and argv[:2] == ["acquire", RESOURCE] and ok:
             held = True
-        elif call.get("tool") == "lock" and argv[:2] == ["release", RESOURCE]:
+        elif call.get("tool") == "lock" and (argv[:2] == ["release", RESOURCE]
+                                             or (argv[:2] == ["renew", RESOURCE] and not ok)):
+            # A released or unconfirmed lease admits no merge until a new grant and begin.
             held = begun = False
         elif call.get("tool") == "lock" and argv[:2] == ["begin-merge", RESOURCE] and ok:
             if not held:

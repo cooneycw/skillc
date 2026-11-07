@@ -149,3 +149,37 @@ def test_a_neighbouring_resource_is_not_a_finding(command: str) -> None:
 @pytest.mark.parametrize("text", ["", "{}", "steps: []", "steps:\n  - name: plugin\n    image: x\n"])
 def test_an_empty_population_is_not_a_pass(text: str) -> None:
     assert gate.pipeline_findings(text), repr(text)
+
+
+def test_a_script_run_inside_an_inner_shell_is_followed() -> None:
+    ci = {"steps": [{"name": "gate", "commands": ["bash -c 'bash scripts/merge-lock.sh'"]}]}
+    found = gate.pipeline_findings(json.dumps(ci), CONTROLS / "bad")
+    assert found and found[0].startswith("scripts/merge-lock.sh:4:")
+
+
+@pytest.mark.parametrize("command", [
+    "echo kyle-lock acquire main-merge",
+    "echo bash -c 'kyle-lock acquire main-merge'",
+    "grep -n kyle-lock scripts/x.sh main-merge acquire",
+])
+def test_kyle_lock_as_an_argument_is_not_an_invocation(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)) == [], command
+
+
+@pytest.mark.parametrize("command", [
+    "FOO=1 env -i kyle-lock acquire main-merge",
+    "python3 scripts/kyle-lock run main-merge -- make test",
+    "uv run --no-sync python3 /opt/kyle/scripts/kyle-lock acquire main-merge",
+])
+def test_kyle_lock_behind_a_wrapper_is_an_invocation(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)), command
+
+
+def test_a_merge_after_a_lost_renewal_is_caught() -> None:
+    calls, pr = _transcript("good")
+    merge_at = next(i for i, c in enumerate(calls) if c["argv"][:2] == ["pr", "merge"])  # type: ignore[index]
+    lost = {"tool": "lock", "argv": ["renew", "main-merge", "--request-id", "7", "--lease-id", "lease-7",
+                                     "--generation", "1"], "exit": 12}
+    assert gate.transcript_findings([*calls[:merge_at], lost, *calls[merge_at:]], pr)

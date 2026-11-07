@@ -236,6 +236,12 @@ class Merger:
                      "it stays blocked until tier 3 resolves it (resolve-barrier --outcome closed)")
                 return EXIT_UNKNOWN
             phase = "begun"
+        elif phase == "begun":
+            # Resumed: time has passed since the begin. Merge only if the
+            # lease, its barrier and the exact head all still hold.
+            code = self._reconfirm()
+            if code:
+                return code
         if phase == "begun":
             # Mark BEFORE the call, durably: from here a rerun never merges again.
             try:
@@ -257,6 +263,23 @@ class Merger:
             return self._await_main()
         _log(f"unreadable recorded phase {phase!r}; refusing")
         return EXIT_REFUSED
+
+    def _reconfirm(self) -> int:
+        code, _ = self.lock(["renew", RESOURCE, *self._fence()])
+        if code != EXIT_OK:
+            _log(f"the recorded lease no longer holds (exit {code}); not merging. Barrier "
+                 f"{self.state.get('barrier_id')} stays blocked until tier 3 resolves it")
+            return EXIT_UNKNOWN
+        code = self._begin()
+        if code:
+            _log("the recorded barrier could not be re-confirmed; not merging")
+            return EXIT_UNKNOWN
+        code = self._validate_head()
+        if code:
+            _log(f"barrier {self.state.get('barrier_id')} records intent with no merge sent; "
+                 "it stays blocked until tier 3 resolves it (resolve-barrier --outcome closed)")
+            return EXIT_UNKNOWN
+        return EXIT_OK
 
     def _acquire(self) -> int:
         key = f"skillc-merge-pr{self.s.pr}-{uuid.uuid4().hex[:12]}"

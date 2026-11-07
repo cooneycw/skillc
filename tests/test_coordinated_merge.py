@@ -447,3 +447,49 @@ def test_a_timed_out_wait_keeps_the_lease_and_resumes(tmp_path: Path) -> None:
     kyle.main_ci = [0]
     assert merge(tmp_path, kyle, github, resume=True) == cm.EXIT_OK
     assert kyle.released and github.merge_calls == 1
+
+
+class StopAfterBegin(Exception):
+    pass
+
+
+def _record_stopped_after_begin(tmp_path: Path, calls: list[dict[str, Any]], kyle: FakeKyle) -> None:
+    """A merger killed right after begin-merge was confirmed and saved."""
+    github = FakeGitHub(calls)
+
+    def die_before_merge(argv: list[str]) -> tuple[int, str]:
+        if argv[:2] == ["pr", "merge"]:
+            raise StopAfterBegin
+        return github(argv)
+
+    with pytest.raises(StopAfterBegin):
+        merge(tmp_path, kyle, die_before_merge)  # type: ignore[arg-type]
+    record = json.loads(next((tmp_path / "state").glob("*.json")).read_text())
+    record["phase"] = "begun"  # the marker write is what the kill pre-empted
+    next((tmp_path / "state").glob("*.json")).write_text(json.dumps(record))
+
+
+@pytest.mark.parametrize("break_it", ["lease-expired", "barrier-resolved", "head-moved"])
+def test_a_resumed_begun_record_never_merges_once_its_fence_or_head_lapsed(
+        tmp_path: Path, break_it: str) -> None:
+    calls: list[dict[str, Any]] = []
+    kyle = FakeKyle(calls)
+    _record_stopped_after_begin(tmp_path, calls, kyle)
+    github = FakeGitHub(calls)
+    if break_it == "lease-expired":
+        kyle.renew_exit = cm.EXIT_LOST
+    elif break_it == "barrier-resolved":
+        kyle.begin_exit = cm.EXIT_REFUSED
+    else:
+        github.head = "c" * 40
+    assert merge(tmp_path, kyle, github, resume=True) == cm.EXIT_UNKNOWN
+    assert github.merge_calls == 0
+
+
+def test_a_resumed_begun_record_with_a_live_fence_merges_once(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    kyle = FakeKyle(calls)
+    _record_stopped_after_begin(tmp_path, calls, kyle)
+    github = FakeGitHub(calls)
+    assert merge(tmp_path, kyle, github, resume=True) == cm.EXIT_OK
+    assert github.merge_calls == 1
