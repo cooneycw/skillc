@@ -9,17 +9,20 @@ from typing import Any
 
 
 def parse_cpp_peers(stdout: str, *, exit_code: str) -> dict[str, Any]:
-    """Read CPP's leading roster JSON and its documented listed trailer."""
+    """Read CPP's roster and exact LF trailer; allow one terminal LF at EOF."""
     if exit_code.strip() != '0':
         raise ValueError('CPP peer listing did not exit successfully')
-    text = stdout.strip()
-    peers, end = json.JSONDecoder().raw_decode(text)
+    peers, end = json.JSONDecoder().raw_decode(stdout)
     if not isinstance(peers, dict) or not peers:
         raise ValueError('CPP peer listing must contain a nonempty JSON object')
-    remainder = text[end:]
-    if not remainder.startswith(('\n', '\r\n')):
+    remainder = stdout[end:]
+    if not remainder.startswith('\n'):
         raise ValueError('CPP peer listing is missing its line trailer')
-    lines = remainder.strip().splitlines()
+    # jq prints one LF after the JSON. Do not normalize any trailer bytes:
+    # echo emits LF, while CRLF, padding and blank detail lines are invalid.
+    trailer = remainder[1:]
+    trailer = trailer.removesuffix('\n')
+    lines = trailer.split('\n')
     if not lines or lines[-1] != 'FLOW_WAVE: listed':
         raise ValueError('CPP peer listing must end with FLOW_WAVE: listed')
     if any(re.fullmatch(r'FLOW_WAVE_[A-Z][A-Z0-9_]*=[^\r\n]*', line) is None

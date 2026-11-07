@@ -213,7 +213,7 @@ def test_physical_wave_transport_protections_and_retirement(
             artifacts = wave.root / name / 'artifacts'
             assert json.loads((artifacts / 'delivery.json').read_text())['status'] == 'delivered'
             assert json.loads((artifacts / 'git-delivery.json').read_text()) == {'status': 'delivered'}
-            peers = parse_cpp_peers((artifacts / 'cpp-peers.stdout').read_text(),
+            peers = parse_cpp_peers((artifacts / 'cpp-peers.stdout').read_bytes().decode('utf-8'),
                                     exit_code=(artifacts / 'cpp-peers.exit').read_text())
             assert set(ROLES) <= peers.keys()
             assert all('liveness' in peers[peer] and 'liveness_basis' in peers[peer] for peer in ROLES)
