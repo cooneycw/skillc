@@ -5,7 +5,7 @@ Two claims, each with a committed case that makes it report the other verdict:
 1. The flow-check runtime's build inputs match its reviewed recipe.
    `docker/profile-trial/build.py`'s `prepare()` hashes every input a
    flow-check profile-runtime receipt is bound to. The current goldens were
-   measured after #637's deliberate Codex 0.165.0 pin upgrade; historical
+   measured after #621's deliberate shared jq recipe/tool-contract update; historical
    declarations and runtime receipts are not rewritten. A one-byte change to
    any docker/trial input must move them (the negative control), so a pass
    here means "matches the reviewed inputs", not "not looked at".
@@ -32,11 +32,12 @@ from skillc import runtime_supply as rs
 ROOT = Path(__file__).resolve().parents[1]
 from test_runtime_supply import DESCRIPTOR, RECEIPT
 
-#: `prepare()` after #637's Codex 0.165.0 recipe/manifest pin upgrade.
+#: `prepare()` after #621's shared jq recipe, no-jq stage and system-tool contract.
+#: check_pins.py remains context-only; historical receipts are unchanged.
 GOLDEN_FLOW_CHECK_INPUTS = {
-    "build_context_sha256": "4177260e9058a2e8f7118a7e8cf169a79d616576e8020eacade6bf51bb8501f6",
-    "base_recipe_sha256": "23e9583d0c4498d37851d2d2cce8b7cb72ecf873fd4ce306e3b81739d78d8a85",
-    "recipe_sha256": "1c8731b14c097db59b9daa3faef89d39340e369fee1f01b80e2ed5586e93a9a9",
+    "build_context_sha256": "720e38c4b3ed4c9ffddab46d1c0ae657f3043bccb3a3a898af4e65043ad940d9",
+    "base_recipe_sha256": "6dd97277edd7b9a12733614a6297bcd579b137471520babcd5c5c93b48280645",
+    "recipe_sha256": "a3d69010f30c242c3af0b95fa260187b29c9f93b9300f5153cea1d02938c0a03",
 }
 SUBJECT = "evals/subjects/cpp-codex-flow-check-86641e8"
 FIXTURE = "tests/fixtures/profile-cpp-codex-flow-check-86641e8"

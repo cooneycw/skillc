@@ -44,8 +44,8 @@ def test_recipe_check_distinguishes_missing_jq_from_working_packages() -> None:
 def test_recipe_tools_let_the_real_wave_actor_reach_its_hang(
     tmp_path: Path, provide_jq: bool,
 ) -> None:
-    if shutil.which('jq') is None:
-        pytest.skip('trusted local jq required; actual image tools need physical qualification')
+    local_jq = shutil.which('jq')
+    assert local_jq is not None, 'trusted local jq required for the positive dependency control'
     repo, home, state, tools = [tmp_path / name for name in ('repo', 'home', 'state', 'bin')]
     for path in (repo, home, state, tools):
         path.mkdir()
@@ -53,15 +53,17 @@ def test_recipe_tools_let_the_real_wave_actor_reach_its_hang(
     for name in ('flow-wave-registry.sh', 'flow-wave-mailbox.sh', 'flow-wave-lexicon.sh'):
         shutil.copyfile(SCRIPTS / name, repo / name)
     commands = ('bash', 'id', 'dirname', 'readlink', 'date', 'hostname', 'git', 'stat',
-                'uname', 'ps', 'cat', 'tr', 'grep', 'sed', 'awk', 'realpath', 'sort',
+                'uname', 'cat', 'tr', 'grep', 'sed', 'awk', 'realpath', 'sort',
                 'mktemp', 'mkdir', 'flock', 'sleep', 'head', 'tail', 'cut', 'basename',
-                'touch', 'chmod', 'rm', 'mv', 'kill', 'wc', 'find')
+                'touch', 'chmod', 'rm', 'mv', 'wc', 'find')
     for name in commands:
         source = shutil.which(name)
-        assert source is not None, f'local fixture tool missing: {name}'
-        (tools / name).symlink_to(source)
+        # Optional helper facilities are not prerequisites of this jq assay.
+        # The actual actor must still register and reach hang, even without ps.
+        if source is not None:
+            (tools / name).symlink_to(source)
     if provide_jq and 'jq' in apt_packages(DOCKERFILE.read_text()):
-        (tools / 'jq').symlink_to(shutil.which('jq') or '')
+        (tools / 'jq').symlink_to(local_jq)
     env = {**os.environ, 'HOME': str(home), 'PATH': str(tools),
            'FLOW_WAVE_REGISTRY_DIR': str(state), 'FLOW_WAVE_MAILBOX_DIR': str(state),
            'FLOW_WAVE_HOST': 'fixture', 'HOSTNAME': 'fixture', 'FLOW_WAVE_NOW': '1',
