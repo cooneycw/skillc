@@ -1,0 +1,4 @@
+{
+  "cache_rule": {"surface": "agent/workspace", "name_pattern": "__pycache__", "max_depth": 3, "max_matches": 2},
+  "cases": ["delivered", "stray", "different-bytes", "outside-checkout", "too-deep", "too-many", "extra-branch", "missing-capture", "corrupt-capture"]
+}

@@ -14,6 +14,27 @@ Each added surviving logical item belongs to exactly one bin:
 - `declared-allowed`: an exact permitted-product selector, such as a friction log;
 - `clutter`: every other addition.
 
+The [2026-11-01 owner ruling](https://github.com/cooneycw/skillc/issues/619#issuecomment-6557884202)
+also permits `delivered_commit_roles`, a list of declared role names. For each
+selected role the controller supplies an exact commit from its independently
+captured delivered fixture remote. `clutter_delivery.capture_commit` reads that
+captured `GitDir` without running Git, retaining the commit/tree/blob objects.
+The report binds commit, tree and capture digests. Recovery verifies object
+identities and re-derives workspace file, symlink and ancestor-directory
+selectors, including exact bytes and executable modes. A merely tracked or
+unpushed file, or local bytes different from the delivered blob, cannot acquire
+delivered status through this mechanism. Independent Git, coordination and
+shared-state inventories remain required.
+
+`Inventory(..., delivered_reader=...)` accepts the controller's captured-object
+provider. `Session.finish()` freezes its result in the retained report; journal
+recovery replays these raw objects rather than trusting a cached verdict or
+derived selector list. Missing/invalid capture makes the affected workspace
+classification UNKNOWN; independently observed clutter on other surfaces still
+fails. The caller must bind this capture to the independently graded delivered
+remote, under controller custody. A hash does not authenticate agent-supplied
+objects, and this API never selects a local role HEAD on the caller's behalf.
+
 Selectors are disjoint `(surface, key)` pairs. There are no implicit CPP exemptions
 or unrestricted wildcard allowances. `CLEAN` means zero added clutter and complete
 before/after coverage. Known clutter gives `NOT_CLEAN`; incomplete evidence without
@@ -101,6 +122,26 @@ their contents. A file or symlink at an allowed directory path is still recorded
 as an item; targets are never followed. There are no default cache exclusions.
 The example list above is illustrative only; the actual study list requires
 owner approval in the frozen declaration (#639), equally for both arms.
+
+`allowed_cache_directories` optionally declares workspace directory basename
+patterns, for example:
+
+```json
+[{"surface": "agent/workspace", "name_pattern": "__pycache__",
+  "max_depth": 8, "max_matches": 256}]
+```
+
+The policy digest binds every pattern and its depth/match limits. Patterns use
+ASCII basename characters with `*` and `?`; they cannot match `.git`. Only real
+directories strictly beneath the checkout are eligible. A symlink is inventoried
+without following it. Depth counts components beneath the checkout; matches are
+consumed in sorted traversal order per rule. Beyond a rule's depth or match bound,
+directories are inspected and remain clutter candidates. There are no implicit
+cache allowances, and bytecode production is not disabled. Every observed excluded
+directory is named under `not_inspected`, stating that its contents were not
+inspected. Protected-scope/product overlap refuses coverage rather than suppressing
+the independent surface. Identically named directories outside the checkout are
+never excluded. These controls retain outside clutter even on a realistic project.
 
 Allowances cannot name the whole checkout, another surface, a declared product,
 or overlap declared Git metadata, fixture remotes, CPP roots, shared wave state or
