@@ -60,6 +60,27 @@ def test_actual_backend_composes_only_the_closed_wave_mount(tmp_path: Path, monk
     assert "no shared volume" in default.isolation[-1]
 
 
+@pytest.mark.parametrize(
+    "case", json.loads(CONTROLS.with_name("fixture-network-description.json").read_text()),
+    ids=lambda case: case["name"],
+)
+def test_backend_network_description_controls(
+    case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import fields
+
+    from skillc import docker_backend
+
+    monkeypatch.setattr(docker_backend, "probe_daemon", lambda *args: "scripted")
+    config = {key: case[key] for key in ("network", "egress")}
+    # Old code can construct the same backend, so its red case exposes the
+    # misleading OPEN description rather than an unknown-constructor error.
+    if any(f.name == "controller_owned_internal_network" for f in fields(docker_backend.DockerBackend)):
+        config["controller_owned_internal_network"] = case["controller_owned_internal_network"]
+    backend = docker_backend.DockerBackend(image="scripted", base_dir=tmp_path, **config)
+    assert backend.describe().isolation[1] == case["expected"]
+
+
 def test_role_cancellation_is_independent(runtime: Any) -> None:
     controller, _ = runtime
     controller.prepare()
@@ -205,6 +226,7 @@ def test_fixture_network_allows_later_role_network_connections(
     try:
         controller.prepare()
         assert fixture_argv[fixture_argv.index("--network") + 1] == controller.network
+        assert controller.remote_backend.config["controller_owned_internal_network"] is True
         assert ["network", "create", "--internal", "--opt",
                 "com.docker.network.bridge.enable_icc=false"] == calls[0][:5]
         assert all(state.backend.config["egress"] for state in controller.states.values())

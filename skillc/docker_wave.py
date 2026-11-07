@@ -193,6 +193,7 @@ class DockerWave:
         self._call(["volume", "create", *labels, self.attachment.volume])
         # Docker cannot attach more networks to a container created in none mode.
         remote_backend = self._backend("remote", network=self.network,
+                                       controller_owned_internal_network=True,
                                        wave_attachment=self.attachment)
         self.remote_backend = remote_backend
         self.remote = remote_backend.prepare(self.attempt_id + "-fixture")

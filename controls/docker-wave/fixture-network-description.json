@@ -1,0 +1,37 @@
+[
+  {
+    "name": "none-default",
+    "network": "none",
+    "egress": false,
+    "controller_owned_internal_network": false,
+    "expected": "network=none by default"
+  },
+  {
+    "name": "provider-proxy",
+    "network": "none",
+    "egress": true,
+    "controller_owned_internal_network": false,
+    "expected": "network: a per-attempt --internal network, no DNS; egress only through the per-attempt proxy to auth.openai.com, chatgpt.com:443 (#442; client-side fetches only - server-side tools are closed by the client's declared flags and the transcript census)"
+  },
+  {
+    "name": "ordinary-network",
+    "network": "fixture-network",
+    "egress": false,
+    "controller_owned_internal_network": false,
+    "expected": "network=fixture-network: egress OPEN (no egress policy set)"
+  },
+  {
+    "name": "wave-name-without-signal",
+    "network": "skillc-wave-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "egress": false,
+    "controller_owned_internal_network": false,
+    "expected": "network=skillc-wave-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: egress OPEN (no egress policy set)"
+  },
+  {
+    "name": "controller-owned-internal",
+    "network": "fixture-network",
+    "egress": false,
+    "controller_owned_internal_network": true,
+    "expected": "network=fixture-network: controller-owned internal network, no external route; composed/unverified until physical qualification"
+  }
+]
