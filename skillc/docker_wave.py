@@ -191,7 +191,10 @@ class DockerWave:
                     "com.docker.network.bridge.enable_icc=false", *labels, self.network])
         self.created.append(("volume", self.attachment.volume))
         self._call(["volume", "create", *labels, self.attachment.volume])
-        remote_backend = self._backend("remote", wave_attachment=self.attachment)
+        # Docker cannot attach more networks to a container created in none mode.
+        remote_backend = self._backend("remote", network=self.network,
+                                       controller_owned_internal_network=True,
+                                       wave_attachment=self.attachment)
         self.remote_backend = remote_backend
         self.remote = remote_backend.prepare(self.attempt_id + "-fixture")
         # No host bind mount; fixture bytes enter this controller-owned container by cp.

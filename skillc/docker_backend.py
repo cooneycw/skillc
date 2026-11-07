@@ -968,6 +968,9 @@ class DockerBackend:
     agent_exec_env: Callable[[], Mapping[str, str]] | None = field(default=None, repr=False)
     #: #621: one closed named-volume mount, created and retired by the wave controller.
     wave_attachment: WaveAttachment | None = None
+    #: Explicit controller assertion about the network it created with --internal.
+    #: Description only, not a probe or permission to infer isolation from a name.
+    controller_owned_internal_network: bool = False
 
     def describe(self) -> BackendDescription:
         version = probe_daemon(self.docker_bin, self.daemon_timeout, _docker_env())
@@ -980,6 +983,9 @@ class DockerBackend:
                  f"per-attempt proxy to {', '.join(self.egress_hosts)}:443 (#442; client-side fetches only - "
                  "server-side tools are closed by the client's declared flags and the transcript census)"
                  if self.egress else
+                 (f"network={self.network}: controller-owned internal network, no external route; "
+                  "composed/unverified until physical qualification")
+                 if self.controller_owned_internal_network else
                  f"network={self.network} by default" if self.network == "none"
                  else f"network={self.network}: egress OPEN (no egress policy set)"),
                 f"fixed non-root user {_container_user()} ({CANDIDATE_USER_NAME}), independent of the host caller",
