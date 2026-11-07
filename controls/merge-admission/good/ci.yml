@@ -1,0 +1,10 @@
+when:
+  - event: push
+    branch: main
+steps:
+  - name: gate
+    image: python:3.12-slim
+    commands:
+      # kyle-lock acquire main-merge is the merger's job, never a step's.
+      - echo gate   # kyle-lock run main-merge -- would deadlock here
+      - bash scripts/build.sh

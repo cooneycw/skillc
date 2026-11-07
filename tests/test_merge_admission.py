@@ -1,0 +1,124 @@
+"""Merge-admission wiring gate (Kyle #2130, ADR 0011 D3).
+
+The committed cases are ``controls/merge-admission/``. ``bad/ci.yml`` reaches
+``main-merge`` only through a script it runs; the frozen blind anchor (the
+same check without script-following) must miss it, so the case exercises the
+feature that catches it. ``good/ci.yml`` names the acquire only in comments, so
+a grep would call it bad and this gate must not.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+from ci import merge_admission as gate
+
+CONTROLS = gate.ROOT / "controls" / "merge-admission"
+
+
+def _blind() -> ModuleType:
+    path = CONTROLS / "blind" / "merge_admission_blind.py"
+    spec = importlib.util.spec_from_file_location("merge_admission_blind", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _pipeline(case: str) -> str:
+    return (CONTROLS / case / "ci.yml").read_text(encoding="utf-8")
+
+
+def _transcript(case: str) -> tuple[list[dict[str, object]], int]:
+    data = json.loads((CONTROLS / case / "transcript.json").read_text(encoding="utf-8"))
+    return data["calls"], data["pr"]
+
+
+def test_the_real_pipeline_never_takes_main_merge() -> None:
+    followed: set[Path] = set()
+    assert gate.pipeline_findings((gate.ROOT / ".woodpecker" / "ci.yml").read_text(encoding="utf-8"),
+                                  followed=followed) == []
+    # A zero from a scan that read nothing would look the same: prove it read the scripts.
+    assert gate.ROOT / "ci" / "negative-control.sh" in followed
+    assert len(followed) >= 10
+
+
+def test_the_bad_pipeline_is_caught_through_the_script_it_runs() -> None:
+    found = gate.pipeline_findings(_pipeline("bad"), CONTROLS / "bad")
+    assert len(found) == 1 and found[0].startswith("scripts/merge-lock.sh:4:")
+
+
+def test_the_good_pipeline_with_only_comment_mentions_passes() -> None:
+    text = _pipeline("good")
+    assert "kyle-lock acquire main-merge" in text, "the good case must keep its comment mention"
+    assert gate.pipeline_findings(text, CONTROLS / "good") == []
+
+
+def test_the_frozen_blind_anchor_misses_the_bad_case() -> None:
+    blind = _blind()
+    assert blind.pipeline_findings(_pipeline("bad")) == [], (
+        "the blind anchor caught bad/ci.yml: the bad case no longer needs script-following")
+    assert blind.pipeline_findings(_pipeline("good")) == []
+
+
+@pytest.mark.parametrize("command", [
+    "kyle-lock acquire main-merge --request-key ci",
+    "/opt/kyle/scripts/kyle-lock run main-merge -- make test",
+    "python3 scripts/kyle-lock begin-merge main-merge --request-id 1 --lease-id x --generation 1",
+    "curl -X POST $URL/api/coordination/main-merge/acquire/",
+    "export KYLE_LOCK_TOKEN_FILE=/run/secret",
+])
+def test_inline_routes_to_main_merge_are_findings(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": ["echo ok", command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)), command
+
+
+@pytest.mark.parametrize("command", [
+    "kyle-lock acquire full-suite --request-key ci",
+    "kyle-lock ci --repo cooneycw/skillc --pr 3",
+    "echo 'kyle-lock acquire main-merge'",
+    "true  # kyle-lock acquire main-merge",
+])
+def test_non_merge_lock_use_and_quoted_mentions_are_not(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)) == [], command
+
+
+@pytest.mark.parametrize("step", [
+    {"name": "gate", "environment": {"KYLE_LOCK_TOKEN": {"from_secret": "kyle_lock_token"}}},
+    {"name": "gate", "secrets": ["kyle_lock_token_file"]},
+])
+def test_a_coordination_credential_handed_to_ci_is_a_finding(step: dict[str, object]) -> None:
+    assert gate.pipeline_findings(json.dumps({"steps": [step]}))
+
+
+def test_the_uncoordinated_merge_transcript_is_caught() -> None:
+    calls, pr = _transcript("bad")
+    found = gate.transcript_findings(calls, pr)
+    assert found and "without a held lease" in found[0]
+
+
+def test_the_coordinated_merge_transcript_passes() -> None:
+    calls, pr = _transcript("good")
+    assert gate.transcript_findings(calls, pr) == []
+
+
+def test_merge_before_begin_and_a_repeated_merge_are_caught() -> None:
+    calls, pr = _transcript("good")
+    begin = next(i for i, c in enumerate(calls) if c["argv"][0] == "begin-merge")  # type: ignore[index]
+    swapped = list(calls)
+    swapped[begin], swapped[begin + 1] = swapped[begin + 1], swapped[begin]
+    assert gate.transcript_findings(swapped, pr)
+    merge = next(c for c in calls if c["argv"][:2] == ["pr", "merge"])  # type: ignore[index]
+    assert any("second" in f for f in gate.transcript_findings([*calls[:-1], merge, calls[-1]], pr))
+
+
+def test_cli_exit_codes(capsys: pytest.CaptureFixture[str]) -> None:
+    assert gate.main([str(CONTROLS / "good" / "ci.yml")]) == 0
+    assert gate.main([str(gate.ROOT / ".woodpecker" / "ci.yml")]) == 0
+    capsys.readouterr()

@@ -1,0 +1,12 @@
+{"pr": 101, "calls": [
+  {"tool": "lock", "argv": ["acquire", "main-merge", "--request-key", "skillc-merge-pr101-000000000000", "--pr", "101", "--purpose", "merge cooneycw/skillc#101"], "exit": 0},
+  {"tool": "gh", "argv": ["pr", "view", "101", "--repo", "cooneycw/skillc", "--json", "state,headRefOid,isDraft"], "exit": 0},
+  {"tool": "lock", "argv": ["ci", "--repo", "cooneycw/skillc", "--pr", "101"], "exit": 0},
+  {"tool": "lock", "argv": ["begin-merge", "main-merge", "--request-id", "7", "--lease-id", "lease-7", "--generation", "1", "--repo", "cooneycw/skillc", "--pr", "101"], "exit": 0},
+  {"tool": "gh", "argv": ["pr", "merge", "101", "--repo", "cooneycw/skillc", "--squash", "--match-head-commit", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], "exit": 0},
+  {"tool": "gh", "argv": ["pr", "view", "101", "--repo", "cooneycw/skillc", "--json", "state,mergeCommit"], "exit": 0},
+  {"tool": "lock", "argv": ["record-merge", "main-merge", "--request-id", "7", "--lease-id", "lease-7", "--generation", "1", "--barrier-id", "3", "--squash-sha", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "exit": 0},
+  {"tool": "lock", "argv": ["renew", "main-merge", "--request-id", "7", "--lease-id", "lease-7", "--generation", "1"], "exit": 0},
+  {"tool": "lock", "argv": ["ci", "--repo", "cooneycw/skillc", "--sha", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--event", "push", "--branch", "main"], "exit": 0},
+  {"tool": "lock", "argv": ["release", "main-merge", "--request-id", "7", "--lease-id", "lease-7", "--generation", "1"], "exit": 0}
+]}
