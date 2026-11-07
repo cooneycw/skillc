@@ -184,5 +184,7 @@ def test_jq_supports_the_wave_registration_json_dependency(built_image: str) -> 
         ["docker", "run", "--rm", built_image, *SYSTEM_TOOLS["jq"]],
         capture_output=True, text=True, timeout=30, check=False,
     )
-    if result.returncode != 0 or result.stdout.strip() != '{"wave_registration":true}':
-        raise _JqPropertyHeld(f"jq dependency unavailable: exit={result.returncode}, stdout={result.stdout!r}")
+    if result.returncode == 127 and not result.stdout.strip():
+        raise _JqPropertyHeld("jq executable missing (exit 127)")
+    assert result.returncode == 0, f"jq probe execution failed: exit={result.returncode}"
+    assert result.stdout.strip() == '{"wave_registration":true}', f"jq probe disagrees: {result.stdout!r}"

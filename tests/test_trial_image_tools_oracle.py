@@ -54,7 +54,7 @@ def _observe(version: str, *, returncode: int = 0, rejected: bool = False) -> No
 
 @pytest.mark.parametrize(('stdout', 'returncode', 'rejected'), [
     ('{"wave_registration":true}\n', 0, False),
-    ('{"wave_registration":true}\n', 127, True),
+    ('', 127, True),
     ('{"wave_registration":false}\n', 0, True),
     ('', 0, True),
 ])
@@ -65,7 +65,7 @@ def test_jq_property_accepts_only_the_json_probe(stdout: str, returncode: int, r
     observation = subprocess.CompletedProcess([], returncode, stdout, 'jq probe diagnostic')
     with patch('subprocess.run', return_value=observation) as run:
         if rejected:
-            with pytest.raises(ns['_JqPropertyHeld']):
+            with pytest.raises(ns['_JqPropertyHeld'] if returncode == 127 else AssertionError):
                 ns['test_jq_supports_the_wave_registration_json_dependency']('unused-image')
         else:
             ns['test_jq_supports_the_wave_registration_json_dependency']('unused-image')
@@ -88,3 +88,15 @@ def test_tool_breaks_match_only_their_own_property(mode: str) -> None:
         assert len(markers) == 1
         assert markers[0].kwargs['condition'] == (mode == selected)
         assert markers[0].kwargs['strict'] is True
+
+
+@pytest.mark.parametrize(('returncode', 'stdout'), [(125, ''), (127, '{"wave_registration":true}\n')])
+def test_no_jq_control_cannot_mask_an_infrastructure_or_conflicting_result(
+    returncode: int, stdout: str,
+) -> None:
+    with patch.dict('os.environ', {'SKILLC_TRIAL_IMAGE_BREAK': 'no-jq'}), \
+            patch('shutil.which', return_value=None):
+        ns = runpy.run_path(str(SOURCE))
+    observation = subprocess.CompletedProcess([], returncode, stdout, 'probe unavailable')
+    with patch('subprocess.run', return_value=observation), pytest.raises(AssertionError):
+        ns['test_jq_supports_the_wave_registration_json_dependency']('unused-image')
