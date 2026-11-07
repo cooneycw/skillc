@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 from test_codex_guard_live import SANDBOX, _trial_image
-from wave_role_diagnostics import write_role_summary
+from wave_role_diagnostics import parse_cpp_peers, write_role_summary
 
 from skillc import docker_wave as dw
 from skillc import egress, leak
@@ -213,7 +213,8 @@ def test_physical_wave_transport_protections_and_retirement(
             artifacts = wave.root / name / 'artifacts'
             assert json.loads((artifacts / 'delivery.json').read_text())['status'] == 'delivered'
             assert json.loads((artifacts / 'git-delivery.json').read_text()) == {'status': 'delivered'}
-            peers = json.loads((artifacts / 'cpp-peers.stdout').read_text())
+            peers = parse_cpp_peers((artifacts / 'cpp-peers.stdout').read_text(),
+                                    exit_code=(artifacts / 'cpp-peers.exit').read_text())
             assert set(ROLES) <= peers.keys()
             assert all('liveness' in peers[peer] and 'liveness_basis' in peers[peer] for peer in ROLES)
             assert 'git://skillc-fixture/repo.git' in (artifacts / '.git/config').read_text()
