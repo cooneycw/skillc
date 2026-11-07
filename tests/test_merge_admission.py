@@ -183,3 +183,28 @@ def test_a_merge_after_a_lost_renewal_is_caught() -> None:
     lost = {"tool": "lock", "argv": ["renew", "main-merge", "--request-id", "7", "--lease-id", "lease-7",
                                      "--generation", "1"], "exit": 12}
     assert gate.transcript_findings([*calls[:merge_at], lost, *calls[merge_at:]], pr)
+
+
+@pytest.mark.parametrize("command", [
+    "if kyle-lock acquire main-merge; then true; fi",
+    "while kyle-lock acquire main-merge; do sleep 1; done",
+    "until ! kyle-lock run main-merge -- make test; do :; done",
+    "{ kyle-lock acquire main-merge; }",
+])
+def test_a_command_in_a_shell_condition_or_group_is_an_invocation(command: str) -> None:
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert gate.pipeline_findings(json.dumps(ci)), command
+
+
+@pytest.mark.parametrize("command, caught", [
+    ("cat scripts/merge-lock.sh", False),
+    ("echo scripts/merge-lock.sh", False),
+    ("grep -n acquire scripts/merge-lock.sh", False),
+    ("./scripts/merge-lock.sh", True),
+    ("source scripts/merge-lock.sh", True),
+    (". scripts/merge-lock.sh", True),
+])
+def test_only_an_executed_script_is_followed(command: str, caught: bool) -> None:
+    """Against the committed bad script: reading it is not running it."""
+    ci = {"steps": [{"name": "gate", "commands": [command]}]}
+    assert bool(gate.pipeline_findings(json.dumps(ci), CONTROLS / "bad")) is caught, command

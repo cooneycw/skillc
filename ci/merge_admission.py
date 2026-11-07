@@ -79,6 +79,10 @@ def _commands(tokens: list[str]) -> list[list[str]]:
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: Programs that run their first non-option argument as the command.
 WRAPPERS = frozenset({"env", "exec", "command", "nohup", "time", "sudo", "nice"})
+#: Shell words that precede the command they govern (``if kyle-lock ...``).
+SHELL_KEYWORDS = frozenset({"if", "then", "elif", "else", "while", "until", "do", "!", "{"})
+#: Builtins that run their argument as shell text in the current shell.
+SOURCES = frozenset({"source", "."})
 
 
 def _program(command: list[str]) -> tuple[int, str] | None:
@@ -89,7 +93,7 @@ def _program(command: list[str]) -> tuple[int, str] | None:
     while i < len(command):
         token = command[i]
         name = Path(token).name
-        if ASSIGNMENT.match(token):
+        if ASSIGNMENT.match(token) or token in SHELL_KEYWORDS or token in SOURCES:
             i += 1
         elif name in WRAPPERS or (name == "uv" and command[i + 1:i + 2] == ["run"]):
             i += 2 if name == "uv" else 1
@@ -172,11 +176,16 @@ def _is_script(path: Path) -> bool:
 
 
 def _scripts(line: str, root: Path) -> Iterable[Path]:
-    """Repository scripts a command line runs: path-like tokens only, so prose
-    and data files a script merely names are never followed."""
+    """Repository scripts a command line EXECUTES: the program position of
+    each command (``./x.sh``, ``bash x.sh``, ``python3 x.py``, ``source x``).
+    A script a command merely names (``cat x.sh``) is not run, so not followed."""
     base = root.resolve()
-    for token in _tokens(line):
-        if "/" not in token or len(token) > 255 or token.startswith(("-", "$")):
+    for command in _commands(_tokens(line)):
+        program = _program(command)
+        if program is None:
+            continue
+        token = command[program[0]]
+        if len(token) > 255 or token.startswith(("-", "$")):
             continue
         try:
             candidate = (root / token).resolve()
