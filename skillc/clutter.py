@@ -7,6 +7,7 @@ empty successful scan. No arm name or CPP-presence preference enters grading.
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import math
@@ -89,7 +90,8 @@ def parse_policy(raw: object) -> Policy:
         'schema_version', 'roles', 'shared_roots', 'settle_point', 'settle_seconds',
         'delivered', 'declared_allowed', 'daemon_scope',
     }
-    if (not isinstance(raw, dict) or not fields <= set(raw) <= fields | {'allowed_subtrees'}
+    if (not isinstance(raw, dict) or not fields <= set(raw) <= fields | {
+            'allowed_subtrees', 'allowed_cache_directories', 'delivered_commit_roles'}
             or type(raw.get('schema_version')) is not int or raw['schema_version'] != SCHEMA_VERSION):
         raise Refused('clutter must follow the closed inventory schema version 1')
     if raw['settle_point'] != SETTLE_POINT:
@@ -180,6 +182,28 @@ def parse_policy(raw: object) -> Policy:
                 if selected_surface == surface and ':' in product_key and overlaps(path, product_key.split(':', 1)[1]):
                     raise Refused('allowed subtrees must not overlap declared products')
         seen_subtrees.add((surface, path))
+    delivered_roles = policy.data.get('delivered_commit_roles', [])
+    if (not isinstance(delivered_roles, list) or len(delivered_roles) != len(set(map(str, delivered_roles)))
+            or any(not isinstance(role, str) or role not in policy.roles for role in delivered_roles)):
+        raise Refused('delivered commit roles must be distinct declared roles')
+    rules = policy.data.get('allowed_cache_directories', [])
+    if not isinstance(rules, list) or len(rules) > 64:
+        raise Refused('cache directory rules must be a bounded list')
+    seen_rules: set[tuple[str, str]] = set()
+    for rule in rules:
+        if (not isinstance(rule, dict) or set(rule) != {'surface', 'name_pattern', 'max_depth', 'max_matches'}
+                or not isinstance(rule['surface'], str)
+                or rule['surface'] not in {role + '/workspace' for role in policy.roles}
+                or not isinstance(rule['name_pattern'], str) or not 1 <= len(rule['name_pattern']) <= 128
+                or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.*?-' for c in rule['name_pattern'])
+                or fnmatch.fnmatchcase('.git', rule['name_pattern'])
+                or type(rule['max_depth']) is not int or not 1 <= rule['max_depth'] <= MAX_DEPTH
+                or type(rule['max_matches']) is not int or not 1 <= rule['max_matches'] <= MAX_ITEMS):
+            raise Refused('cache rules require a workspace basename pattern and finite depth/match bounds')
+        identity = (rule['surface'], rule['name_pattern'])
+        if identity in seen_rules:
+            raise Refused('duplicate cache directory rule')
+        seen_rules.add(identity)
     return policy
 
 
@@ -189,10 +213,12 @@ class Surface:
     complete: bool = True
     error: str | None = None
     deleted_cwds: tuple[str, ...] = ()
+    not_inspected: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, object]:
         return {'items': dict(self.items), 'complete': self.complete, 'error': self.error,
-                'deleted_cwds': list(self.deleted_cwds)}
+                'deleted_cwds': list(self.deleted_cwds),
+                **({'not_inspected': list(self.not_inspected)} if self.not_inspected else {})}
 
 
 @dataclass(frozen=True)
@@ -218,7 +244,34 @@ def _surface_problem(row: Surface) -> str | None:
     return None
 
 
-def classify(policy: Policy, before: Snapshot, after: Snapshot) -> dict[str, Any]:
+def _cache_exclusions_problem(policy: Policy, surface: str, paths: tuple[str, ...]) -> str | None:
+    if not paths:
+        return None
+    rules = [r for r in policy.data.get('allowed_cache_directories', []) if r['surface'] == surface]
+    if not rules or len(paths) != len(set(paths)):
+        return 'undeclared or duplicated cache exclusion'
+    scope = policy.data['roles'][surface.removesuffix('/workspace')]
+    counts = [0] * len(rules)
+    for path in paths:
+        if not isinstance(path, str) or not path.startswith(scope['checkout'] + '/'):
+            return 'cache exclusion outside checkout'
+        relative = path[len(scope['checkout']) + 1:]
+        if any(p in ('', '.', '..') for p in relative.split('/')):
+            return 'cache exclusion has an unsafe path'
+        matched = False
+        for index, rule in enumerate(rules):
+            if (relative.count('/') + 1 <= rule['max_depth'] and counts[index] < rule['max_matches']
+                    and fnmatch.fnmatchcase(relative.rsplit('/', 1)[-1], rule['name_pattern'])):
+                counts[index] += 1
+                matched = True
+                break
+        if not matched:
+            return 'cache exclusion outside declared pattern/depth/match bounds'
+    return None
+
+
+def classify(policy: Policy, before: Snapshot, after: Snapshot, *,
+             delivered_captures: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Classify additions exactly once; preservation and uncertainty stay visible."""
     unknown: list[dict[str, str]] = []
     bins: dict[str, list[dict[str, str]]] = {key: [] for key in ('delivered', 'declared-allowed', 'clutter')}
@@ -234,21 +287,37 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot) -> dict[str, Any
     if extra:
         unknown.append({'surface': '*', 'reason': 'capture contains undeclared surfaces'})
     delivered, allowed = policy.selected('delivered'), policy.selected('declared_allowed')
+    derived: dict[str, dict[str, str]] = {}
+    commits: dict[str, dict[str, str]] = {}
+    missing_delivery: set[str] = set()
+    from .clutter_delivery import selectors
+    captures = delivered_captures if isinstance(delivered_captures, Mapping) else {}
+    for role in policy.data.get('delivered_commit_roles', []):
+        surface = role + '/workspace'
+        try:
+            derived[surface], commits[role] = selectors(
+                captures.get(role), role, policy.data['roles'][role]['checkout'])
+        except (Refused, ValueError, KeyError, TypeError, UnicodeError, RecursionError) as exc:
+            missing_delivery.add(surface)
+            unknown.append({'surface': surface, 'reason': 'delivered commit capture unavailable: ' + type(exc).__name__})
     for surface in sorted(policy.surfaces):
         left, right = before.surfaces.get(surface), after.surfaces.get(surface)
         if left is None or right is None:
             unknown.append({'surface': surface, 'reason': 'required before/after surface absent'})
             continue
-        problems = [p for p in (_surface_problem(left), _surface_problem(right)) if p]
+        problems = [p for p in (_surface_problem(left), _surface_problem(right),
+                               _cache_exclusions_problem(policy, surface, left.not_inspected),
+                               _cache_exclusions_problem(policy, surface, right.not_inspected)) if p]
         if problems:
             unknown.append({'surface': surface, 'reason': '; '.join(problems)})
             continue
         if not identity_ok:
             continue
-        for key in sorted(right.items.keys() - left.items.keys()):
+        for key in sorted(right.items.keys() - left.items.keys()) if surface not in missing_delivery else []:
             item = {'surface': surface, 'key': key, 'value': right.items[key]}
             selected = (surface, key)
-            category = 'delivered' if selected in delivered else 'declared-allowed' if selected in allowed else 'clutter'
+            matches_tree = key in derived.get(surface, {}) and right.items[key] == derived[surface][key]
+            category = 'delivered' if selected in delivered or matches_tree else 'declared-allowed' if selected in allowed else 'clutter'
             bins[category].append(item)
         for key in sorted(left.items.keys() - right.items.keys()):
             preservation['removed'].append({'surface': surface, 'key': key, 'before': left.items[key]})
@@ -259,13 +328,19 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot) -> dict[str, Any
         for key in right.deleted_cwds:
             preservation['deleted-cwd'].append({'surface': surface, 'key': key})
     status = 'NOT_CLEAN' if bins['clutter'] else 'UNKNOWN' if unknown else 'CLEAN'
-    return {'schema_version': SCHEMA_VERSION, 'policy_digest': policy.identity, 'scope_id': before.scope_id,
+    cache_paths = {(surface, path) for snapshot in (before, after) for surface, row in snapshot.surfaces.items()
+                   for path in row.not_inspected}
+    return {**({'delivered_commits': commits} if policy.data.get('delivered_commit_roles') else {}),
+            'schema_version': SCHEMA_VERSION, 'policy_digest': policy.identity, 'scope_id': before.scope_id,
             'status': status, 'clean': False if status == 'NOT_CLEAN' else None if status == 'UNKNOWN' else True,
             'counts': {key: len(items) for key, items in bins.items()}, 'additions': bins,
             'preservation': preservation, 'unknown': unknown,
             'not_inspected': [{'surface': row['surface'], 'path': row['path'],
                                'reason': 'Declared allowed subtree; contents are not inspected.'}
-                              for row in policy.data.get('allowed_subtrees', [])],
+                              for row in policy.data.get('allowed_subtrees', [])] + [
+                                  {'surface': surface, 'path': path,
+                                   'reason': 'Declared cache directory; contents are not inspected.'}
+                                  for surface, path in sorted(cache_paths)],
             'blind_spots': ['Final snapshots cannot see state created and removed between observations.',
                            'Declared allowed workspace subtree contents are not inspected; see not_inspected.',
                            'Process evidence covers only the declared, controller-visible namespaces.',
@@ -304,13 +379,17 @@ def snapshot_from_json(raw: object) -> Snapshot:
     surfaces: dict[str, Surface] = {}
     for name, row in raw['surfaces'].items():
         if (not isinstance(name, str) or not isinstance(row, dict)
-                or set(row) != {'items', 'complete', 'error', 'deleted_cwds'}
+                or not {'items', 'complete', 'error', 'deleted_cwds'} <= set(row) <= {
+                    'items', 'complete', 'error', 'deleted_cwds', 'not_inspected'}
                 or type(row['complete']) is not bool or not isinstance(row['items'], dict)
                 or row['error'] is not None and not isinstance(row['error'], str)
                 or not isinstance(row['deleted_cwds'], list)
-                or not all(isinstance(key, str) for key in row['deleted_cwds'])):
+                or not all(isinstance(key, str) for key in row['deleted_cwds'])
+                or not isinstance(row.get('not_inspected', []), list)
+                or not all(isinstance(key, str) for key in row.get('not_inspected', []))):
             raise Refused('malformed controller surface')
-        surface = Surface(row['items'], row['complete'], row['error'], tuple(row['deleted_cwds']))
+        surface = Surface(row['items'], row['complete'], row['error'], tuple(row['deleted_cwds']),
+                          tuple(row.get('not_inspected', [])))
         if surface.complete and _surface_problem(surface):
             raise Refused('malformed controller surface items')
         surfaces[name] = surface

@@ -141,13 +141,17 @@ def _decode_surfaces(data: bytes, expected: set[str]) -> dict[str, Surface]:
         raise ValueError('role capture surface population disagrees')
     out: dict[str, Surface] = {}
     for name, row in raw.items():
-        if (not isinstance(row, dict) or set(row) != {'items', 'complete', 'error', 'deleted_cwds'}
+        if (not isinstance(row, dict) or not {'items', 'complete', 'error', 'deleted_cwds'} <= set(row) <= {
+                'items', 'complete', 'error', 'deleted_cwds', 'not_inspected'}
                 or not isinstance(row['items'], dict) or type(row['complete']) is not bool
                 or row['error'] is not None and not isinstance(row['error'], str)
                 or not isinstance(row['deleted_cwds'], list)
-                or not all(isinstance(k, str) for k in row['deleted_cwds'])):
+                or not all(isinstance(k, str) for k in row['deleted_cwds'])
+                or not isinstance(row.get('not_inspected', []), list)
+                or not all(isinstance(k, str) for k in row.get('not_inspected', []))):
             raise ValueError('role capture protocol malformed')
-        surface = Surface(row['items'], row['complete'], row['error'], tuple(row['deleted_cwds']))
+        surface = Surface(row['items'], row['complete'], row['error'], tuple(row['deleted_cwds']),
+                          tuple(row.get('not_inspected', [])))
         if clutter._surface_problem(surface) and surface.complete:
             raise ValueError('role capture items malformed')
         out[name] = surface
@@ -179,13 +183,15 @@ class Inventory:
     """One controller-owned, declaration-bound inventory across ALL role handles."""
 
     def __init__(self, policy: Policy, role_readers: Mapping[str, Callable[[], Mapping[str, Surface]]],
-                 shared_reader: Callable[[], Surface], daemon_reader: Callable[[], Mapping[str, Surface]]) -> None:
+                 shared_reader: Callable[[], Surface], daemon_reader: Callable[[], Mapping[str, Surface]], *,
+                 delivered_reader: Callable[[], Mapping[str, Any]] | None = None) -> None:
         if set(role_readers) - set(policy.roles):
             raise ValueError('controller role population exceeds declared roles')
         self.policy = policy
         self.role_readers = dict(role_readers)
         self.shared_reader = shared_reader
         self.daemon_reader = daemon_reader
+        self.delivered_reader = delivered_reader
         self.scope_id = secrets.token_hex(16)
 
     def capture(self, phase: str) -> Snapshot:
@@ -213,7 +219,7 @@ class Inventory:
         except (OSError, ValueError):
             rows.update({name: Surface({}, False, 'controller daemon capture unavailable')
                          for name in ('containers', 'networks')})
-        frozen = {name: Surface(dict(row.items), row.complete, row.error, tuple(row.deleted_cwds))
+        frozen = {name: Surface(dict(row.items), row.complete, row.error, tuple(row.deleted_cwds), tuple(row.not_inspected))
                   if isinstance(row, Surface) and isinstance(row.items, Mapping)
                   else Surface({}, False, 'controller returned malformed surface') for name, row in rows.items()}
         if (sum(len(row.items) for row in frozen.values()) > clutter.MAX_ITEMS
@@ -273,7 +279,19 @@ class Session:
             for role in missing or set(self.inventory.policy.roles):
                 rows[role + '/processes'] = Surface({}, False, 'controller completion or declared settle point not witnessed')
             after = Snapshot(after.scope_id, after.phase, after.policy_digest, rows)
-        report = classify(self.inventory.policy, self.before, after)
+        captured: Mapping[str, Any] = {}
+        if self.inventory.policy.data.get('delivered_commit_roles'):
+            try:
+                if self.inventory.delivered_reader is not None:
+                    captured = self.inventory.delivered_reader()
+                if not isinstance(captured, Mapping) or len(canonical(captured)) > clutter.MAX_BYTES:
+                    raise ValueError('delivered capture population or byte bound exceeded')
+                captured = clutter.strict_json(canonical(captured))
+            except (OSError, ValueError, TypeError, RecursionError):
+                captured = {}
+        report = classify(self.inventory.policy, self.before, after, delivered_captures=captured)
+        if self.inventory.policy.data.get('delivered_commit_roles'):
+            report['delivered_captures'] = captured
         report['before'] = self.before.to_json()
         report['after'] = after.to_json()
         report['capture_digest'] = 'sha256:' + hashlib.sha256(canonical([report['before'], report['after']])).hexdigest()
@@ -382,7 +400,7 @@ class AttemptInventory:
             self.report = unavailable(self.policy, f'final capture unavailable: {type(exc).__name__}')
 
     def summary(self) -> dict[str, Any]:
-        return {key: value for key, value in self.report.items() if key not in ('before', 'after')}
+        return {key: value for key, value in self.report.items() if key not in ('before', 'after', 'delivered_captures')}
 
 
 def report_from_events(policy: Policy, events: Sequence[Mapping[str, Any]],
@@ -409,6 +427,7 @@ def report_from_events(policy: Policy, events: Sequence[Mapping[str, Any]],
         if not isinstance(stored, dict) or stored.get('before') != clutter.strict_json(before_bytes):
             raise ValueError('controller inventory before snapshot disagrees')
         after = clutter.snapshot_from_json(stored.get('after'))
-        return {**classify(policy, before, after), 'report_digest': end['digest'], 'before_digest': start['digest']}
+        return {**classify(policy, before, after, delivered_captures=stored.get('delivered_captures')),
+                'report_digest': end['digest'], 'before_digest': start['digest']}
     except Exception:  # noqa: BLE001 - any unavailable controller evidence is UNKNOWN, never clean
         return unavailable(policy, 'controller journal or captured inventory unavailable')
