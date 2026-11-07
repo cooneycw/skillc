@@ -147,10 +147,6 @@ real-daemon stop/recovery; no scripted or local-only result substitutes for
 physical evidence. #620 binds verdicts to actual captures and #626 rehearses the
 complete path, including missing/forged/wrong-role evidence refusals.
 
-Q13B and Q13C applicability and authoritative source: UNRESOLVED PLACEHOLDER.
-Authoritative ruling text has been requested; no recalled wording is incorporated
-here. Resolve applicability and record the source before final declaration freeze.
-
 ## Remaining inputs and approval stages
 
 The November 7 order is: #621 physical qualification, this #639 reconciliation,
