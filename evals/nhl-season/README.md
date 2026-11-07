@@ -13,6 +13,10 @@ The declaration must freeze the exact goal bytes and SHA-256 before attempts;
 changing this contract requires a new identity and cannot retroactively change
 an attempt's requirements. No model calls or paid runs are authorized here.
 
+The unapproved [declaration draft](declaration-draft.md) reconciles #639 with
+current owner rulings and lists the evidence still needed before sizing and
+freeze. It is not an executable declaration or a run approval.
+
 ## Source verification boundary
 
 Issue #632 records verification of the five public endpoint families on
