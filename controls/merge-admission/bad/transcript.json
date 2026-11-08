@@ -1,0 +1,4 @@
+{"pr": 101, "calls": [
+  {"tool": "gh", "argv": ["pr", "view", "101", "--repo", "cooneycw/skillc", "--json", "state,headRefOid,isDraft"], "exit": 0},
+  {"tool": "gh", "argv": ["pr", "merge", "101", "--repo", "cooneycw/skillc", "--squash", "--match-head-commit", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], "exit": 0}
+]}

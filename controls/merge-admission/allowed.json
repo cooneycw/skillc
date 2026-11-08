@@ -1,0 +1,18 @@
+{
+  "_note": "Each command must NOT be a finding: the refusals must not fire on ordinary CI forms or mere mentions.",
+  "cases": [
+    "bash -c 'echo $HOME'",
+    "env -u FOO true",
+    "echo kyle-lock acquire main-merge",
+    "kyle-lock acquire full-suite --purpose main-merge",
+    "HERE=\"$(cd \"$(dirname \"$0\")\" && pwd)\"",
+    "\"$HERE/check.py\" --strict",
+    "python3 - <<'PY'\nprint('hello')\nPY",
+    "cat scripts/merge-lock.sh",
+    "make test \\\n  PYTEST_ARGS=-q",
+    "cleanup() { rm -rf \"$scratch\"; }; trap cleanup EXIT",
+    "function log { echo \"$@\"; }",
+    "echo $(( 1 + 2 ))",
+    "env -u FOO -C /tmp true"
+  ]
+}

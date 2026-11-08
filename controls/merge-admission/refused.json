@@ -1,0 +1,89 @@
+{
+  "_note": "Each command must be a finding. 'kind' is 'acquire' (a modelled main-merge call) or 'unparseable' (a form the gate refuses rather than models). The first three are the reviewer inputs that passed at 25818ec. Function bodies are scanned where written, so an acquiring body is a finding whether or not it is called.",
+  "cases": [
+    {
+      "command": "kyle-lock \\\n  acquire main-merge",
+      "kind": "acquire"
+    },
+    {
+      "command": "env -u UNUSED kyle-lock acquire main-merge",
+      "kind": "acquire"
+    },
+    {
+      "command": "function take_lock { kyle-lock acquire main-merge; }; take_lock",
+      "kind": "acquire"
+    },
+    {
+      "command": "bash \\\n  scripts/merge-lock.sh",
+      "kind": "acquire"
+    },
+    {
+      "command": "take_lock() { kyle-lock acquire main-merge; }; take_lock",
+      "kind": "acquire"
+    },
+    {
+      "command": "env --frobnicate kyle-lock acquire main-merge",
+      "kind": "unparseable"
+    },
+    {
+      "command": "eval \"$CMD\"",
+      "kind": "unparseable"
+    },
+    {
+      "command": "bash -c \"$CMD\"",
+      "kind": "unparseable"
+    },
+    {
+      "command": "xargs kyle-lock acquire",
+      "kind": "unparseable"
+    },
+    {
+      "command": "python3 -c 'import subprocess; subprocess.run([\"kyle-lock\", \"acquire\", \"main-merge\"])'",
+      "kind": "unparseable"
+    },
+    {
+      "command": "echo \"$(kyle-lock acquire main-merge)\"",
+      "kind": "acquire"
+    },
+    {
+      "command": "timeout -s KILL 30 kyle-lock acquire main-merge",
+      "kind": "acquire"
+    },
+    {
+      "command": "stdbuf -oL kyle-lock acquire main-merge",
+      "kind": "acquire"
+    },
+    {
+      "command": "sudo -u ci nice -n 5 kyle-lock acquire main-merge",
+      "kind": "acquire"
+    },
+    {
+      "command": "$CLIENT_DIR/kyle-lock acquire main-merge",
+      "kind": "acquire"
+    },
+    {
+      "command": "( cd /tmp && exec kyle-lock run main-merge -- make test )",
+      "kind": "acquire"
+    },
+    {
+      "command": "take_lock() { echo hi; }; take_lock kyle-lock acquire main-merge",
+      "kind": "unparseable"
+    },
+    {
+      "command": "env -S 'kyle-lock acquire main-merge'",
+      "kind": "unparseable"
+    },
+    {
+      "command": "env --split-string='kyle-lock acquire main-merge'",
+      "kind": "unparseable"
+    },
+    {
+      "command": "echo \"$(( $(kyle-lock acquire main-merge >/dev/null; printf 0) + 0 ))\"",
+      "kind": "unparseable"
+    },
+    {
+      "command": "echo $(( `kyle-lock acquire main-merge` + 0 ))",
+      "kind": "unparseable"
+    }
+  ]
+}

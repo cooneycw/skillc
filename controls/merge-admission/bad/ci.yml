@@ -1,0 +1,9 @@
+when:
+  - event: push
+    branch: main
+steps:
+  - name: gate
+    image: python:3.12-slim
+    commands:
+      - echo gate
+      - bash scripts/merge-lock.sh
