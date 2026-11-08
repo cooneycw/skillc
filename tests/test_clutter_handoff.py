@@ -46,7 +46,7 @@ def test_one_phase_reader_cannot_authorize_unbound_delivery(
     def read() -> dict[str, Any]:
         calls.append('called')
         return {'agent': capture_commit('agent', remote, commit)}
-    # The old WIP callback could mark this clean before any writer-stop evidence.
+    # A one-phase reader cannot establish post-stop delivered-capture custody.
     monkeypatch.setattr(session.inventory, 'delivered_reader', read, raising=False)
     assert session.finish()['status'] == 'UNKNOWN'
     assert not calls

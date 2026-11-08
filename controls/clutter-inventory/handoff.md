@@ -11,7 +11,7 @@ and missing/unconfirmed role or helper stops, return UNKNOWN. Rewriting the cach
 verdict to CLEAN does not change any replay result. The reused-inventory control
 rejects a previous session packet even when all observed state is identical; its
 fresh-session twin is CLEAN. The separate one-phase callback
-regression refuses delivery without a bound post-stop handoff. The direct classifier
+control refuses delivery without a bound post-stop handoff. The direct classifier
 also requires that handoff, so it cannot bypass Session validation.
 
 These are trusted synthetic Git and namespace fixtures, not physical qualification.
