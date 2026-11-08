@@ -1,0 +1,1 @@
+- Add explicit operator-receipt admission at the existing calibration approval gate, with declaration-bound policy, per-wave nonstart UNKNOWN records and synthetic provenance, clock, lifecycle and blind-admitter controls; no host observer or executor is added (Refs #630).

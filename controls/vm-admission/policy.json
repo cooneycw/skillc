@@ -1,0 +1,20 @@
+{
+  "purpose": "Synthetic values for tests only; not operational owner policy.",
+  "operator_admission": {
+    "version": 1,
+    "planned_waves": [
+      "synthetic-wave-1",
+      "synthetic-wave-2"
+    ],
+    "policy": {
+      "max_receipt_age_seconds": 30,
+      "max_clock_sample_age_seconds": 20,
+      "max_clock_offset_seconds": 0.5,
+      "collection_timeout_seconds": 60,
+      "firewall_policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "allowed_workloads": [
+        "synthetic-base-service"
+      ]
+    }
+  }
+}

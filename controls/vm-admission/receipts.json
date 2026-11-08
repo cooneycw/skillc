@@ -1,0 +1,36 @@
+{
+  "purpose": "Synthetic facts and timestamp only; no host observed.",
+  "payloads": {
+    "verified-key": {
+      "verified": true,
+      "fingerprint": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    "time-sync": {
+      "synchronized": true,
+      "packet_count": 1,
+      "restarted": true,
+      "fresh_exchange": true,
+      "offset_seconds": 0.1,
+      "sampled_at": 1767226200.0
+    },
+    "firewall-isolation": {
+      "policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "firewall_complete": true,
+      "isolation_complete": true,
+      "management_allowed": true,
+      "provider_egress": true,
+      "forbidden_egress_blocked": true,
+      "workloads": [
+        "synthetic-base-service"
+      ]
+    },
+    "runner-drain": {
+      "timer_state": "inactive",
+      "service_state": "inactive",
+      "service_substate": "dead",
+      "jobs": [],
+      "processes": [],
+      "complete": true
+    }
+  }
+}

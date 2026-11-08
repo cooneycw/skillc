@@ -317,3 +317,10 @@ def test_discrimination_refuses_vm_execution_environment() -> None:
     data['execution_environment'] = {}
     with pytest.raises(calibration.DeclarationRefused, match='execution_environment'):
         calibration.parse_discrimination_declaration(data)
+
+
+def test_discrimination_refuses_operator_admission() -> None:
+    data = _declaration()
+    data['operator_admission'] = {}
+    with pytest.raises(calibration.DeclarationRefused, match='operator_admission'):
+        calibration.parse_discrimination_declaration(data)
