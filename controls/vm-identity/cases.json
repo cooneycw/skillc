@@ -1,0 +1,123 @@
+{
+  "cases": [
+    {
+      "name": "clean",
+      "action": "none",
+      "expected": "MATCH"
+    },
+    {
+      "name": "changed-installed-module",
+      "action": "write",
+      "path": "skillc/calibration.py",
+      "value": "SCHEMA = 2\n",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "missing-kernel",
+      "action": "delete",
+      "path": [
+        "vm",
+        "kernel"
+      ],
+      "expected": "REFUSED"
+    },
+    {
+      "name": "missing-host_key_fingerprint",
+      "action": "delete",
+      "path": [
+        "vm",
+        "host_key_fingerprint"
+      ],
+      "expected": "REFUSED"
+    },
+    {
+      "name": "missing-id",
+      "action": "delete",
+      "path": [
+        "vm",
+        "id"
+      ],
+      "expected": "REFUSED"
+    },
+    {
+      "name": "absent-vm",
+      "action": "delete",
+      "path": [
+        "vm"
+      ],
+      "expected": "REFUSED"
+    },
+    {
+      "name": "changed-host_key_fingerprint",
+      "action": "observed-vm",
+      "field": "host_key_fingerprint",
+      "value": "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "changed-base_image_digest",
+      "action": "observed-vm",
+      "field": "base_image_digest",
+      "value": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "dirty-influential-extra",
+      "action": "write",
+      "path": "skillc/extra.py",
+      "value": "EXTRA = 1\n",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "changed-runtime-data",
+      "action": "write",
+      "path": "skillc/runtime.json",
+      "value": "{\"version\":2}\n",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "wrong-origin",
+      "action": "wrong-origin",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "missing-origin",
+      "action": "missing-origin",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "mode",
+      "action": "mode",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "symlink",
+      "action": "symlink",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "empty",
+      "action": "empty",
+      "expected": "REFUSED"
+    },
+    {
+      "name": "closed-bookkeeping-exclusions",
+      "action": "excluded-directories",
+      "expected": "MATCH"
+    },
+    {
+      "name": "excluded-file-masquerade",
+      "action": "write",
+      "path": ".venv",
+      "value": "not a directory",
+      "expected": "REFUSED"
+    }
+  ],
+  "qualification_controls": [
+    {
+      "verifier": "always-match",
+      "expected": "REFUSED",
+      "witness": "changed-installed-module"
+    }
+  ]
+}

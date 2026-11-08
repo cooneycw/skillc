@@ -861,3 +861,88 @@ def test_both_primary_endpoint_branches_combine_after_raw_criteria() -> None:
         # A fresh, separate endpoint for the next branch avoids backwards fake time.
         deadline = completion.CompletionDeadline.after(10, lambda: clock[0])
         marker = deadline.marker("a")
+
+
+# #630: VM fields must reach the existing approval gate, never be ignored.
+def _vm_environment() -> dict[str, object]:
+    return json.loads((ROOT / "controls/vm-identity/environment.json").read_text())
+
+
+@pytest.mark.parametrize("field", ["kernel", "host_key_fingerprint", "id"])
+def test_vm_environment_missing_identity_is_refused(field: str) -> None:
+    environment = _vm_environment()
+    del environment["vm"][field]  # type: ignore[attr-defined]
+    with pytest.raises(calibration.DeclarationRefused, match="execution_environment"):
+        calibration.parse_declaration({**_approved(), "execution_environment": environment})
+
+
+def test_vm_environment_missing_whole_vm_is_refused() -> None:
+    environment = _vm_environment()
+    del environment["vm"]
+    with pytest.raises(calibration.DeclarationRefused, match="execution_environment"):
+        calibration.parse_declaration({**_approved(), "execution_environment": environment})
+
+
+def test_vm_environment_requires_observation_at_existing_approval_gate() -> None:
+    data = stamp_approval({**_approved(), "execution_environment": _vm_environment()})
+    with pytest.raises(calibration.DeclarationRefused, match="observation"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+def test_vm_environment_matches_at_existing_approval_gate(tmp_path: Path) -> None:
+    from test_vm_identity import observation
+
+    env = _vm_environment()
+    observed = observation(tmp_path, env)
+    data = stamp_approval({**_approved(), 'execution_environment': env})
+    original = copy.deepcopy(data)
+    calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)
+    assert data == original
+
+
+@pytest.mark.parametrize('change', ['vm-id', 'revision', 'window', 'whole-environment'])
+def test_vm_post_approval_edits_and_replayed_window_are_refused(tmp_path: Path, change: str) -> None:
+    from test_vm_identity import observation
+
+    env = _vm_environment()
+    observed = observation(tmp_path, env)
+    data = stamp_approval({**_approved(), 'execution_environment': env})
+    calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)
+    if change == 'vm-id':
+        env['vm']['id'] = 'synthetic-vm-edited'  # type: ignore[index]
+    elif change == 'revision':
+        env['skillc']['revision'] = 'b' * 40  # type: ignore[index]
+    elif change == 'window':
+        # Replay the old approval on a new declared window, with unchanged VM/source.
+        env['window']['id'] = 'synthetic-window-2'  # type: ignore[index]
+    else:
+        del data['execution_environment']
+    with pytest.raises(calibration.DeclarationRefused, match='does not bind this exact declaration'):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)
+
+
+def test_vm_observation_cannot_downgrade_to_non_vm_declaration(tmp_path: Path) -> None:
+    from test_vm_identity import observation
+
+    with pytest.raises(calibration.DeclarationRefused, match='requires execution_environment'):
+        calibration.require_approved(calibration.parse_declaration(_approved()), ROOT,
+                                     vm_observation=observation(tmp_path, _vm_environment()))
+
+
+def test_legacy_non_vm_approval_keeps_original_two_argument_behavior() -> None:
+    data = _manifest()
+    before = t.canonical(data)
+    declaration = calibration.parse_declaration(data)
+    calibration.require_approved(declaration, ROOT)
+    assert t.canonical(data) == before
+
+
+def test_vm_runtime_install_change_refuses_through_existing_approval_gate(tmp_path: Path) -> None:
+    from test_vm_identity import observation
+
+    env = _vm_environment()
+    observed = observation(tmp_path, env)
+    data = stamp_approval({**_approved(), 'execution_environment': env})
+    (observed.install_root / 'skillc/calibration.py').write_text('DIRTY = True\n')
+    with pytest.raises(calibration.DeclarationRefused, match='installed population'):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)

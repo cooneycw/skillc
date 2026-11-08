@@ -1,0 +1,1 @@
+- Add opt-in VM identity and reviewed-install binding at the existing calibration approval gate, with synthetic drift, missing-evidence and blind-verifier controls; this checks binding and content match only, with no host or credential access (Refs #630).

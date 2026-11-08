@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "kind": "dedicated-vm",
+  "vm": {
+    "id": "synthetic-vm",
+    "host_key_fingerprint": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "base_image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "kernel": "synthetic-kernel-1",
+    "docker_version": "synthetic-engine-1"
+  },
+  "skillc": {
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "install_manifest": {
+      "skillc/__init__.py": {
+        "mode": 420,
+        "bytes": 52,
+        "sha256": "sha256:56454ff485f2fb8299c3a4d993477ffa38d1720c4ae5d0bf19cb761806f56304"
+      },
+      "skillc/calibration.py": {
+        "mode": 420,
+        "bytes": 11,
+        "sha256": "sha256:e8e0f583d6bc24ded8dd1c427119b5c20da7814f08e0e64c77334e12cd840220"
+      },
+      "skillc/vm_identity.py": {
+        "mode": 420,
+        "bytes": 11,
+        "sha256": "sha256:e8e0f583d6bc24ded8dd1c427119b5c20da7814f08e0e64c77334e12cd840220"
+      },
+      "skillc/fixture_service.py": {
+        "mode": 420,
+        "bytes": 16,
+        "sha256": "sha256:d148c67ba56ee7e9eb74e99bd19f4719f1b3ad9622a6af135f3731ff17ba243f"
+      },
+      "docker/fixture-service/skillc-gh-shim.py": {
+        "mode": 420,
+        "bytes": 9,
+        "sha256": "sha256:af20bc2f60e9dc1ca8f9dd21924673a01999b4a575a92b9639e9f207fe8faf1c"
+      },
+      "skillc/runtime.json": {
+        "mode": 420,
+        "bytes": 14,
+        "sha256": "sha256:50208d78350a7a160dec59a82df1499b6ca7da33e54c5eb11c97e342118e68bb"
+      }
+    }
+  },
+  "window": {
+    "id": "synthetic-window-1",
+    "starts_at": "2026-01-01T00:00:00Z",
+    "ends_at": "2026-01-01T01:00:00Z"
+  }
+}
