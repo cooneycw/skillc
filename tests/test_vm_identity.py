@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,10 @@ def environment() -> dict[str, Any]:
 def observation(tmp_path: Path, env: dict[str, Any]) -> vm.Observation:
     root = tmp_path / 'install'
     shutil.copytree(CONTROLS / 'install', root)
+    # Git controls the executable class, not checkout group/other write bits.
+    # Materialize the declared synthetic artifact before observing any drift.
+    for rel, entry in env['skillc']['install_manifest'].items():
+        (root / rel).chmod(entry['mode'])
     return vm.Observation(copy.deepcopy(env['vm']), env['skillc']['revision'], root,
                           {name: root / path for name, path in vm.REQUIRED_IMPORTS.items()})
 
@@ -189,3 +194,27 @@ def test_byte_depth_and_population_bounds(tmp_path: Path, monkeypatch: pytest.Mo
             patch.setattr(vm, name, value)
             with pytest.raises(vm.IdentityRefused):
                 vm.install_manifest(obs.install_root)
+
+
+@pytest.mark.parametrize('checkout_mode', [0o664, 0o666])
+def test_fixture_materialization_is_checkout_mode_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkout_mode: int,
+) -> None:
+    env = environment()
+    checkout = tmp_path / 'synthetic-checkout'
+    shutil.copytree(CONTROLS, checkout)
+    for path in (checkout / 'install').rglob('*'):
+        if path.is_file():
+            path.chmod(checkout_mode)
+    monkeypatch.setattr(sys.modules[__name__], 'CONTROLS', checkout)
+    observed = observation(tmp_path / 'materialized', env)
+    assert vm.install_manifest(observed.install_root) == env['skillc']['install_manifest']
+    assert vm.verify(env, observed)['status'] == 'MATCH'
+
+
+def test_installed_write_bit_drift_is_still_refused(tmp_path: Path) -> None:
+    env = environment()
+    observed = observation(tmp_path, env)
+    (observed.install_root / 'skillc/calibration.py').chmod(0o666)
+    with pytest.raises(vm.IdentityRefused, match='installed population'):
+        vm.verify(env, observed)

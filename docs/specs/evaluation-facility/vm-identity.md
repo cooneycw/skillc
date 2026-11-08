@@ -63,3 +63,11 @@ source and altered VM key/image. Its committed blind-verifier control runs the
 same cases through an always-match verifier; qualification must reject it on
 the changed-module input. The tests also retain calibration's exact approval
 backstop, omitted-observation refusal and legacy non-VM behavior.
+
+The synthetic test artifact is materialized with each manifest entry's explicit
+mode before drift is introduced. Git checkouts preserve the executable class,
+but other permission bits vary with checkout umask; those source checkout bits
+are not the synthetic artifact's declared modes. This is test materialization,
+not verifier normalization: the production verifier continues comparing full
+permission bits. Both an executable-bit flip and an added write bit in the
+installed artifact remain refused, as do changed data and extra modules.
