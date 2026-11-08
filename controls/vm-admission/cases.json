@@ -1,0 +1,135 @@
+{
+  "purpose": "Planted controls, not historical host or regression evidence.",
+  "cases": [
+    {
+      "name": "same-window-complete",
+      "action": "none",
+      "expected": "ADMITTED"
+    },
+    {
+      "name": "inactive-timer-activating-service",
+      "action": "payload",
+      "check": "runner-drain",
+      "field": "service_state",
+      "value": "activating",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "zero-packets-after-restart",
+      "action": "payload",
+      "check": "time-sync",
+      "field": "packet_count",
+      "value": 0,
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "unexpected-workload",
+      "action": "payload",
+      "check": "firewall-isolation",
+      "field": "workloads",
+      "value": [
+        "synthetic-unexpected-job"
+      ],
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "incomplete-firewall",
+      "action": "payload",
+      "check": "firewall-isolation",
+      "field": "firewall_complete",
+      "value": false,
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "bad-clock-offset",
+      "action": "payload",
+      "check": "time-sync",
+      "field": "offset_seconds",
+      "value": 2.0,
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "stale-clock-sample",
+      "action": "payload",
+      "check": "time-sync",
+      "field": "sampled_at",
+      "value": 1767226179.0,
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-firewall-policy",
+      "action": "payload",
+      "check": "firewall-isolation",
+      "field": "policy_digest",
+      "value": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-key",
+      "action": "payload",
+      "check": "verified-key",
+      "field": "fingerprint",
+      "value": "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "stale-receipt",
+      "action": "receipt",
+      "field": "observed_at",
+      "value": 1767226169.0,
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "future-receipt",
+      "action": "receipt",
+      "field": "observed_at",
+      "value": 1767226201.0,
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-window",
+      "action": "receipt",
+      "field": "window_id",
+      "value": "synthetic-other-window",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-wave",
+      "action": "receipt",
+      "field": "wave_id",
+      "value": "synthetic-other-wave",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-approval",
+      "action": "receipt",
+      "field": "declaration_digest",
+      "value": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-vm",
+      "action": "receipt",
+      "field": "vm_binding_digest",
+      "value": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "no-host-observation",
+      "action": "no-observation",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "alternative-check-order",
+      "action": "reverse-order",
+      "expected": "ADMITTED"
+    }
+  ],
+  "qualification_controls": [
+    {
+      "admitter": "always-admit",
+      "expected": "REFUSED",
+      "witness": "inactive-timer-activating-service"
+    }
+  ]
+}

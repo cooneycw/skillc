@@ -67,6 +67,7 @@ from . import (
     schedule_budget,
     trial,
     verify,
+    vm_admission,
     vm_identity,
 )
 from . import materialize as m
@@ -570,6 +571,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    if "operator_admission" in data:
+        try:
+            vm_admission.validate(data)
+        except vm_admission.AdmissionRefused as exc:
+            raise _refuse(str(exc)) from exc
     if "execution_environment" in data:
         try:
             vm_identity.validate(data["execution_environment"])
@@ -934,6 +940,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     `_parse_schedule_and_identities`, never a copy of it."""
     if "execution_environment" in data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
+    if "operator_admission" in data:
+        raise _refuse("operator_admission is supported only for calibration-declaration")
     clutter_policy(data)
     if data.get("kind") != DISCRIMINATION_KIND:
         raise _refuse(f"kind is {data.get('kind')!r}, not {DISCRIMINATION_KIND!r}")
@@ -1179,7 +1187,8 @@ def _require_profile_approval(subject: Mapping[str, object], approval: Mapping[s
 
 
 def require_approved(declaration: CalibrationDeclaration, root: Path, *,
-                     vm_observation: vm_identity.Observation | None = None) -> None:
+                     vm_observation: vm_identity.Observation | None = None,
+                     operator_admission: vm_admission.ApprovalInput | None = None) -> None:
     """Refuse to authorize a run of this declaration unless its approval is
     recorded (who and when, and the exact schedule size approved), every
     `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
@@ -1220,6 +1229,16 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
             raise _refuse(str(exc)) from exc
     elif vm_observation is not None:
         raise _refuse("VM/install observation requires execution_environment")
+    if "operator_admission" in declaration.data:
+        if (not isinstance(operator_admission, vm_admission.ApprovalInput)
+                or not isinstance(operator_admission.session, vm_admission.WindowSession)):
+            raise _refuse("operator_admission requires controller/operator receipts")
+        try:
+            operator_admission.session.require_ready(declaration, vm_observation, operator_admission.wave_id)
+        except (vm_admission.AdmissionRefused, vm_identity.IdentityRefused) as exc:
+            raise _refuse(str(exc)) from exc
+    elif operator_admission is not None:
+        raise _refuse("operator_admission input requires a declared admission policy")
 
 
 #: skillc#287: a discrimination declaration's own identity fields - parallel
@@ -1259,6 +1278,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
     declaration digest."""
     if "execution_environment" in declaration.data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
+    if "operator_admission" in declaration.data:
+        raise _refuse("operator_admission is supported only for calibration-declaration")
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     if approval.get("mutated_digest") != declaration.mutation.get("mutated_digest"):
         raise _refuse("approval.mutated_digest does not match the declared mutation")
@@ -1279,6 +1300,8 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     degraded file, never "whatever this field says now")."""
     if "execution_environment" in declaration.data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
+    if "operator_admission" in declaration.data:
+        raise _refuse("operator_admission is supported only for calibration-declaration")
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     approved_digest = approval.get("mutated_digest")
     declared_digest = declaration.mutation.get("mutated_digest")

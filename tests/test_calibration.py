@@ -946,3 +946,25 @@ def test_vm_runtime_install_change_refuses_through_existing_approval_gate(tmp_pa
     (observed.install_root / 'skillc/calibration.py').write_text('DIRTY = True\n')
     with pytest.raises(calibration.DeclarationRefused, match='installed population'):
         calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)
+
+
+# #630 slice 2: these fields must not be silently ignored by approval.
+def _operator_policy() -> dict[str, object]:
+    return json.loads((ROOT / 'controls/vm-admission/policy.json').read_text())['operator_admission']
+
+
+@pytest.mark.parametrize('value', [None, {}, {'version': 1}])
+def test_operator_admission_invalid_policy_is_refused(value: object) -> None:
+    with pytest.raises(calibration.DeclarationRefused, match='operator_admission'):
+        calibration.parse_declaration({**_approved(), 'operator_admission': value})
+
+
+def test_operator_admission_missing_host_receipts_refuses_at_existing_gate(tmp_path: Path) -> None:
+    from test_vm_identity import observation
+
+    env = _vm_environment()
+    observed = observation(tmp_path, env)
+    data = stamp_approval({**_approved(), 'execution_environment': env,
+                           'operator_admission': _operator_policy()})
+    with pytest.raises(calibration.DeclarationRefused, match='operator_admission'):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)
