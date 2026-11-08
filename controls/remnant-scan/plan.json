@@ -1,0 +1,11 @@
+{
+  "purpose": "Synthetic detector scope; not an operating VM policy.",
+  "remnant_scan": {
+    "version": 1,
+    "waves": [
+      {"wave_id": "synthetic-wave-1", "roles": ["integrator", "worker"]},
+      {"wave_id": "synthetic-wave-2", "roles": ["integrator", "worker"]}
+    ],
+    "limits": {"entries": 4096, "depth": 32, "file_bytes": 8388608, "total_bytes": 67108864}
+  }
+}

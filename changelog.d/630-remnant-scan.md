@@ -1,0 +1,1 @@
+- Add a detector-only, memory-reference VM remnant scan over complete declared surfaces with bounded exact encoding coverage, sanitized class/count results and committed planted/blind-checker/privacy controls; custody, cleanup and export composition remain later work (Refs #630).
