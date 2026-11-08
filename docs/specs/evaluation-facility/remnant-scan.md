@@ -149,7 +149,16 @@ Qualification must refuse both an always-CLEAN checker and a checker whose
 expected census and input mapping omit staging. Good complete scans preserve
 all benign bytes and modes. A deliberate assertion failure captures its traceback
 with locals in memory and proves that its output contains no generated reference;
-the failing frame uses opaque fixture/result representations.
+the failing frame uses opaque fixture/result representations. The private audit
+covers raw bytes, Python bytes/string repr and escaped interiors (both quote
+styles), JSON escaping and every fixed detector encoding, independently of the
+production pattern compiler. Every test's captured stdout, stderr and logs are
+audited against its generated references. Captured tracebacks use an opaque
+container so even a rejected witness is never printed. Committed unsafe twins
+put raw bytes or a decoded string in the failing frame: the audit must reject
+both, while accepting the redacted twin. The two witnesses failed the literal-only
+audit on `5e44f55` (no refusal); an explicit literal-only blind mutant reproduces
+that acceptance and is rejected by the strengthened audit.
 
 Eight declaration ignored-field cases were run unchanged on parent `e597de2d`:
 all eight failed because no refusal occurred. Two additional unsupported-kind

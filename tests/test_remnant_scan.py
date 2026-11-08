@@ -7,7 +7,8 @@ import json
 import os
 import secrets
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,15 +59,82 @@ def encode(value: bytes, kind: str) -> bytes:
     return value.decode().encode('utf-16le' if kind == 'utf16le' else 'utf-16be')
 
 
-def references(*, binary: bool = False) -> rs.References:
+@dataclass(repr=False)
+class OutputAudit:
+    refs: list[rs.References] = field(default_factory=list, repr=False)
+
+    def __repr__(self) -> str:
+        return '<OutputAudit redacted>'
+
+
+ACTIVE_AUDIT: ContextVar[OutputAudit | None] = ContextVar('remnant_test_output_audit', default=None)
+
+
+@pytest.fixture(autouse=True)
+def audit_captured_output(capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture) -> Iterator[None]:
+    """Audit every test's captured stdout, stderr and logs against its references."""
+    audit = OutputAudit()
+    token = ACTIVE_AUDIT.set(audit)
+    try:
+        yield
+    finally:
+        output = PrivateOutput(''.join(capsys.readouterr()).encode() + caplog.text.encode())
+        ACTIVE_AUDIT.reset(token)
+        for refs in audit.refs:
+            no_marker(output.data, refs)
+
+
+def references(*, binary: bool = False, filename: bool = False) -> rs.References:
     # Random values are not test IDs, assertion parameters, files or diagnostics.
-    value = b'SYNTHETIC_ONLY_' + secrets.token_hex(20).encode() + b'"/\\\x00'
-    value += b'\xff\xfb' if binary else '\u00e9'.encode()
-    return rs.References((value,))
+    value = b'SYNTHETIC_ONLY_' + secrets.token_hex(20).encode()
+    value += b'\xff' if filename else b'"/\\\x00' + (b'\xff\xfb' if binary else '\u00e9'.encode())
+    refs = rs.References((value,))
+    audit = ACTIVE_AUDIT.get()
+    if audit is not None:
+        audit.refs.append(refs)
+    return refs
+
+
+def _contains_marker(output: bytes, refs: rs.References) -> bool:
+    # Independent of rs._compile: this audit must also see Python's diagnostic
+    # renderings, and must not share a production compiler blind spot.
+    for value in refs._values:
+        variants = {value}
+        for kind in ENCODINGS:
+            try:
+                variants.add(encode(value, kind))
+            except UnicodeError:
+                pass  # JSON/UTF-16 require a valid UTF-8 reference.
+        for variant in variants:
+            forms = {variant, repr(variant).encode(), repr(variant)[2:-1].encode()}
+            # Both Python quote styles and ASCII escaping of bytes/text.
+            escaped_bytes = variant.decode('latin-1').encode('unicode_escape').decode()
+            for quote in ("'", '"'):
+                interior = escaped_bytes.replace(quote, '\\' + quote)
+                forms.update((interior.encode(), ('b' + quote + interior + quote).encode()))
+            for decoding in ('utf-8', 'latin-1'):
+                try:
+                    text = variant.decode(decoding)
+                except UnicodeError:
+                    continue
+                forms.update((repr(text).encode(), repr(text)[1:-1].encode(),
+                              ascii(text).encode(), ascii(text)[1:-1].encode(),
+                              text.encode('unicode_escape')))
+                for quote in ("'", '"'):
+                    interior = text.encode('unicode_escape').decode().replace(quote, '\\' + quote)
+                    forms.update((interior.encode(), (quote + interior + quote).encode()))
+                for ascii_only in (True, False):
+                    escaped = json.dumps(text, ensure_ascii=ascii_only)
+                    forms.update((escaped.encode(), escaped[1:-1].encode()))
+            if any(form and form in output for form in forms):
+                return True
+    return False
 
 
 def no_marker(output: bytes, refs: rs.References) -> None:
-    if any(value in output for value in refs._values):
+    leaked = _contains_marker(output, refs)
+    output = b''  # The rejecting assertion's own traceback must stay sanitized.
+    if leaked:
         raise AssertionError('privacy control refused')
 
 
@@ -208,7 +276,7 @@ def test_known_remnant_takes_precedence_over_missing_coverage(tmp_path: Path) ->
 @pytest.mark.parametrize('encoding', ['raw', 'hex-lower'])
 def test_filename_bytes_are_scanned_in_memory(tmp_path: Path, encoding: str) -> None:
     f = fixture(tmp_path)
-    f.refs = rs.References((b'SYNTHETIC_FILENAME_' + secrets.token_hex(20).encode() + b'\xff',))
+    f.refs = references(filename=True)
     f.planted_key = 'staging';f.filename = True;f.planted_encoding = encoding
     assert f.run().status == 'NOT_CLEAN'
 
@@ -271,13 +339,26 @@ def test_committed_blind_checker_controls(tmp_path: Path, control: dict[str, str
         qualify(blind, tmp_path)
 
 
-def force_failure(f: Fixture) -> str:
-    """Only opaque/redacted objects occupy the failing frame's locals."""
+@dataclass(repr=False)
+class PrivateOutput:
+    data: bytes = field(repr=False)
+
+    def __repr__(self) -> str:
+        return '<PrivateOutput redacted>'
+
+
+def force_failure(f: Fixture, *, leak: str | None = None) -> PrivateOutput:
+    """A clean twin and intentional unsafe locals, always captured in memory."""
+    private_local = (f.refs._values[0] if leak == 'bytes' else
+                     f.refs._values[0].decode() if leak == 'str' else '<redacted>')
     result = f.run()
     try:
         assert result.status == 'CLEAN', 'intentional privacy-control failure'
     except AssertionError as error:
-        return ''.join(traceback.TracebackException.from_exception(error, capture_locals=True).format())
+        captured = PrivateOutput(''.join(traceback.TracebackException.from_exception(
+            error, capture_locals=True).format()).encode())
+        del private_local  # Do not retain the raw witness in an escaping frame.
+        return captured
     raise AssertionError('privacy control did not fail')
 
 
@@ -285,13 +366,62 @@ def test_forced_assertion_failure_cannot_disclose_marker(tmp_path: Path) -> None
     f = fixture(tmp_path)
     f.planted_key = 'staging'
     output = force_failure(f)
-    assert 'intentional privacy-control failure' in output
-    no_marker(output.encode(), f.refs)
+    assert b'intentional privacy-control failure' in output.data
+    no_marker(output.data, f.refs)
     no_marker(repr(f.refs).encode(), f.refs)
     no_marker(repr(rs._compile(f.refs)).encode(), f.refs)
-    assert 'ScanResult NOT_CLEAN' in output and 'SyntheticFixture redacted' in output
+    assert b'ScanResult NOT_CLEAN' in output.data and b'SyntheticFixture redacted' in output.data
     with pytest.raises(AssertionError, match='privacy control refused'):
         no_marker(f.refs._values[0], f.refs)
+
+
+@pytest.mark.parametrize('leak', ['bytes', 'str'])
+def test_private_output_audit_rejects_captured_local_disclosure(tmp_path: Path, leak: str) -> None:
+    f = fixture(tmp_path);f.planted_key = 'staging'
+    output = force_failure(f, leak=leak)
+    with pytest.raises(AssertionError, match='privacy control refused'):
+        no_marker(output.data, f.refs)
+    no_marker(force_failure(f).data, f.refs)
+
+
+@pytest.mark.parametrize('encoding', ENCODINGS)
+def test_private_output_audit_rejects_all_detector_encodings(encoding: str) -> None:
+    refs = references()
+    output = PrivateOutput(encode(refs._values[0], encoding))
+    with pytest.raises(AssertionError, match='privacy control refused'):
+        no_marker(output.data, refs)
+
+
+@pytest.mark.parametrize('kind', ['bytes-repr', 'str-repr', 'str-ascii', 'str-unicode-escape',
+                                 'bytes-double-quote', 'str-double-quote'])
+def test_private_output_audit_rejects_python_diagnostic_forms(kind: str) -> None:
+    refs = references()
+    if kind == 'bytes-repr':
+        output = PrivateOutput(repr(refs._values[0]).encode())
+    elif kind == 'str-repr':
+        output = PrivateOutput(repr(refs._values[0].decode()).encode())
+    elif kind == 'str-ascii':
+        output = PrivateOutput(ascii(refs._values[0].decode()).encode())
+    elif kind == 'str-unicode-escape':
+        output = PrivateOutput(refs._values[0].decode().encode('unicode_escape'))
+    elif kind == 'bytes-double-quote':
+        output = PrivateOutput(b'b"' + refs._values[0].decode('latin-1').encode(
+            'unicode_escape').replace(b'"', b'\\"') + b'"')
+    else:
+        output = PrivateOutput(b'"' + refs._values[0].decode().encode(
+            'unicode_escape').replace(b'"', b'\\"') + b'"')
+    with pytest.raises(AssertionError, match='privacy control refused'):
+        no_marker(output.data, refs)
+
+
+def test_literal_only_audit_blind_mutant_accepts_the_leaked_witness(tmp_path: Path) -> None:
+    f = fixture(tmp_path);f.planted_key = 'staging'
+    output = force_failure(f, leak='bytes')
+    # Exact old no_marker predicate. No leak output or value enters an assertion.
+    accepted_by_old_audit = not any(value in output.data for value in f.refs._values)
+    assert accepted_by_old_audit
+    with pytest.raises(AssertionError, match='privacy control refused'):
+        no_marker(output.data, f.refs)
 
 
 def test_overlay_never_persists_references(tmp_path: Path) -> None:
