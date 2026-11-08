@@ -1,0 +1,107 @@
+{
+  "purpose": "Planted synthetic arrivals; no actual transport or host evidence.",
+  "cases": [
+    {
+      "name": "exact-including-empty-and-unknown",
+      "action": "none",
+      "expected": "VERIFIED"
+    },
+    {
+      "name": "missing-transcript",
+      "action": "missing-transcript",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "omitted-role",
+      "action": "omitted-role",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "omitted-nonstart",
+      "action": "omitted-nonstart",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "missing-record",
+      "action": "missing-record",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "corrupt-bytes",
+      "action": "corrupt-bytes",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "file-mode",
+      "action": "file-mode",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "directory-mode",
+      "action": "directory-mode",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "truncated",
+      "action": "truncated",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "wrong-wave",
+      "action": "wrong-wave",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "extra-entry",
+      "action": "extra-entry",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "extra-envelope",
+      "action": "extra-envelope",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "replaced-manifest-and-bytes",
+      "action": "replaced-manifest-and-bytes",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "symlink",
+      "action": "symlink",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "missing-empty-surface",
+      "action": "missing-empty-surface",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "unreachable",
+      "action": "unreachable",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "manifest-mode",
+      "action": "manifest-mode",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "missing-turn",
+      "action": "missing-turn",
+      "expected": "UNKNOWN"
+    },
+    {
+      "name": "missing-stream",
+      "action": "missing-stream",
+      "expected": "UNKNOWN"
+    }
+  ],
+  "qualification_controls": [
+    {
+      "checker": "always-verified",
+      "expected": "REFUSED",
+      "witness": "missing-transcript"
+    }
+  ]
+}

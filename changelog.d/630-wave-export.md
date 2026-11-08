@@ -1,0 +1,1 @@
+- Add transport-independent complete-wave export sealing and arrival integrity verification with independently retained manifest identity, approved wave/role population, preserved NONSTART/UNKNOWN records and committed corruption/blind-checker controls; approval provenance remains separate from dispatch admission (Refs #630).

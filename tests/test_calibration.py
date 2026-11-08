@@ -968,3 +968,19 @@ def test_operator_admission_missing_host_receipts_refuses_at_existing_gate(tmp_p
                            'operator_admission': _operator_policy()})
     with pytest.raises(calibration.DeclarationRefused, match='operator_admission'):
         calibration.require_approved(calibration.parse_declaration(data), ROOT, vm_observation=observed)
+
+
+@pytest.mark.parametrize('value', [None, {}, {'version': 1}])
+def test_wave_export_metadata_is_not_silently_ignored(value: object) -> None:
+    with pytest.raises(calibration.DeclarationRefused, match='wave_export'):
+        calibration.parse_declaration({**_approved(), 'wave_export': value})
+
+
+def test_provenance_refactor_does_not_serialize_unchecked_approval_annotations() -> None:
+    data = _approved()
+    approval = data['approval']
+    assert isinstance(approval, dict)
+    marker = object()
+    approval['auxiliary_annotation'] = marker
+    calibration.require_approved(calibration.parse_declaration(data), ROOT)
+    assert approval['auxiliary_annotation'] is marker

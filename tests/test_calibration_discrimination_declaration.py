@@ -324,3 +324,10 @@ def test_discrimination_refuses_operator_admission() -> None:
     data['operator_admission'] = {}
     with pytest.raises(calibration.DeclarationRefused, match='operator_admission'):
         calibration.parse_discrimination_declaration(data)
+
+
+def test_discrimination_refuses_wave_export() -> None:
+    data = _declaration()
+    data['wave_export'] = {}
+    with pytest.raises(calibration.DeclarationRefused, match='wave_export'):
+        calibration.parse_discrimination_declaration(data)

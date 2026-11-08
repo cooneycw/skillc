@@ -1,0 +1,27 @@
+{
+  "purpose": "Synthetic export population only, not a live declaration.",
+  "wave_export": {
+    "version": 1,
+    "waves": [
+      {
+        "wave_id": "synthetic-wave-1",
+        "roles": [
+          "integrator",
+          "worker"
+        ],
+        "empty_capture_roles": [
+          "integrator",
+          "worker"
+        ]
+      },
+      {
+        "wave_id": "synthetic-wave-2",
+        "roles": [
+          "integrator",
+          "worker"
+        ],
+        "empty_capture_roles": []
+      }
+    ]
+  }
+}
