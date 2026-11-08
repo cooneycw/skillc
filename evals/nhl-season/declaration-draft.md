@@ -107,9 +107,12 @@ Permit only bounded, digest-bound cache-directory **name patterns** below the
 declared checkout, such as directories named `__pycache__` in agent-chosen
 packages. Exact permitted names, checkout bounds and item/depth/byte limits
 are PLACEHOLDER declaration inputs. They must be common to both arms and
-bound into the approved declaration/configuration digests. Do not silently
-substitute the current exact-path `allowed_subtrees` interface for the required
-name-pattern policy; #619 delivery/qualification is pending.
+bound into the approved declaration/configuration digests. The generic #619
+policy API provides `delivered_commit_roles` and `allowed_cache_directories`
+with explicit workspace basename patterns and depth/match limits. Exact-path
+`allowed_subtrees` remain a separate mechanism and are not a substitute for
+name patterns. These API fields do not freeze the study's list or qualify its
+actual deployment; #619 acceptance and #623/#620 production wiring remain pending.
 
 Every report names each excluded directory and explicitly says its contents
 were not inspected. No implicit cache exclusion or blanket checkout allowance
@@ -117,6 +120,15 @@ is permitted. Preserve existing protections against overlap with Git metadata,
 fixture remotes, coordination, shared state, temporary scope or other surfaces;
 independent collectors still inspect their own scopes. **Bytecode is not
 suppressed**: do not set `PYTHONDONTWRITEBYTECODE` to avoid measuring caches.
+
+Retain the pre-stop after/settle snapshot before any namespace shutdown. Once
+all role/helper writers are confirmed stopped, bind the controller-held final
+delivered commit to that frozen census using the generic two-phase handoff.
+Classification and recovery use those retained inputs without recapturing
+processes after stop. A pre-stop survivor remains clutter; missing, stale,
+wrong-role or unbound delivery is UNKNOWN. Actual wave wiring is deferred to
+#623/#620, and physical qualification remains separate. The API alone does not
+satisfy those dependencies or authorize a run.
 
 Required committed negative controls before policy acceptance:
 

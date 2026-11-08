@@ -1,0 +1,50 @@
+[
+  {
+    "name": "healthy",
+    "expected": "CLEAN"
+  },
+  {
+    "name": "pre-stop-survivor",
+    "expected": "NOT_CLEAN"
+  },
+  {
+    "name": "missing-capture",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "unbound-capture",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "stale-session",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "wrong-role",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "stale-commit",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "role-not-stopped",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "helper-not-stopped",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-stop",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "extra-role",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "malformed-binding",
+    "expected": "UNKNOWN"
+  }
+]

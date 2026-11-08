@@ -1,0 +1,6 @@
+[
+  {"name": "delivered-tree", "expected": "CLEAN"},
+  {"name": "cache-pattern", "expected": "CLEAN"},
+  {"name": "undelivered-stray", "expected": "NOT_CLEAN"},
+  {"name": "out-of-bounds-cache", "expected": "NOT_CLEAN"}
+]
