@@ -58,7 +58,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import clutter, completion, degrade, profile, records, schedule_budget, trial, verify
+from . import (
+    clutter,
+    completion,
+    degrade,
+    profile,
+    records,
+    schedule_budget,
+    trial,
+    verify,
+    vm_identity,
+)
 from . import materialize as m
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -560,6 +570,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    if "execution_environment" in data:
+        try:
+            vm_identity.validate(data["execution_environment"])
+        except vm_identity.IdentityRefused as exc:
+            raise _refuse(str(exc)) from exc
     clutter_policy(data)
     _outcome_endpoint(data)
     _discrimination_endpoint(data)  # refused on this kind
@@ -917,6 +932,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
+    if "execution_environment" in data:
+        raise _refuse("execution_environment is supported only for calibration-declaration")
     clutter_policy(data)
     if data.get("kind") != DISCRIMINATION_KIND:
         raise _refuse(f"kind is {data.get('kind')!r}, not {DISCRIMINATION_KIND!r}")
@@ -1161,7 +1178,8 @@ def _require_profile_approval(subject: Mapping[str, object], approval: Mapping[s
         )
 
 
-def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
+def require_approved(declaration: CalibrationDeclaration, root: Path, *,
+                     vm_observation: vm_identity.Observation | None = None) -> None:
     """Refuse to authorize a run of this declaration unless its approval is
     recorded (who and when, and the exact schedule size approved), every
     `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
@@ -1195,6 +1213,13 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     # Last, as the backstop every narrower check above sits in front of: any
     # field changed after approval that no specific check names still fails here.
     _require_whole_declaration_approval(declaration.data, approval)
+    if "execution_environment" in declaration.data:
+        try:
+            vm_identity.verify(declaration.data["execution_environment"], vm_observation)
+        except vm_identity.IdentityRefused as exc:
+            raise _refuse(str(exc)) from exc
+    elif vm_observation is not None:
+        raise _refuse("VM/install observation requires execution_environment")
 
 
 #: skillc#287: a discrimination declaration's own identity fields - parallel
@@ -1232,6 +1257,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
     grader, fixture or profile files changing the answer: who/when and the
     schedule size, the approved mutated_digest, and (D-P2a) the whole
     declaration digest."""
+    if "execution_environment" in declaration.data:
+        raise _refuse("execution_environment is supported only for calibration-declaration")
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     if approval.get("mutated_digest") != declaration.mutation.get("mutated_digest"):
         raise _refuse("approval.mutated_digest does not match the declared mutation")
@@ -1250,6 +1277,8 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     `removed_text` on the same file produces a different degraded file,
     hence a different `mutated_digest`, and an approval is for one exact
     degraded file, never "whatever this field says now")."""
+    if "execution_environment" in declaration.data:
+        raise _refuse("execution_environment is supported only for calibration-declaration")
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     approved_digest = approval.get("mutated_digest")
     declared_digest = declaration.mutation.get("mutated_digest")

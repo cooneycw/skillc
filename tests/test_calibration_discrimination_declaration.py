@@ -310,3 +310,10 @@ def test_a_discrimination_approval_that_explicitly_names_the_matching_fixture_is
     data["approval"]["task_fixture"] = "wrong/pipeline-red"
     stamp_approval(data)
     calibration.require_approved_discrimination(calibration.parse_discrimination_declaration(data), ROOT)
+
+
+def test_discrimination_refuses_vm_execution_environment() -> None:
+    data = _declaration()
+    data['execution_environment'] = {}
+    with pytest.raises(calibration.DeclarationRefused, match='execution_environment'):
+        calibration.parse_discrimination_declaration(data)
