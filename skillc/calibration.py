@@ -69,6 +69,7 @@ from . import (
     verify,
     vm_admission,
     vm_identity,
+    wave_export,
 )
 from . import materialize as m
 
@@ -292,6 +293,27 @@ def _require_whole_declaration_approval(data: Mapping[str, object], approval: Ma
     if approval.get("declaration_digest") != digest:
         raise _refuse(f"approval.declaration_digest {approval.get('declaration_digest')!r} does not bind this "
                       f"exact declaration ({digest}); any field changed after approval needs its own approval")
+
+
+@dataclass(frozen=True)
+class ApprovalProvenance:
+    """Recorded digest join only; not a dispatch capability or eligibility flag."""
+
+    declaration_digest: str
+
+
+def approval_record_binding(declaration: CalibrationDeclaration) -> ApprovalProvenance:
+    """Verify stored approval provenance, NOT dispatch admission or current VM eligibility.
+
+    Export must retain NONSTART evidence even when host admission was never
+    possible. This only shares the existing schedule and whole-declaration
+    checks; its result is not accepted as an input to any dispatch path.
+    """
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    _require_whole_declaration_approval(declaration.data, approval)
+    # Do not serialize or impose new constraints on unchecked approval extras.
+    # The complete approval snapshot is separately sealed in export manifests.
+    return ApprovalProvenance(declaration_digest(declaration.data))
 
 
 def require_outcome_approval(declaration: CalibrationDeclaration) -> None:
@@ -571,6 +593,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    if "wave_export" in data:
+        try:
+            wave_export.validate_plan(data)
+        except wave_export.ExportRefused as exc:
+            raise _refuse(str(exc)) from exc
     if "operator_admission" in data:
         try:
             vm_admission.validate(data)
@@ -942,6 +969,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in data:
         raise _refuse("operator_admission is supported only for calibration-declaration")
+    if "wave_export" in data:
+        raise _refuse("wave_export is supported only for calibration-declaration")
     clutter_policy(data)
     if data.get("kind") != DISCRIMINATION_KIND:
         raise _refuse(f"kind is {data.get('kind')!r}, not {DISCRIMINATION_KIND!r}")
@@ -1221,7 +1250,7 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
             raise _refuse("outcome_endpoint selects criteria absent from the declared grader")
     # Last, as the backstop every narrower check above sits in front of: any
     # field changed after approval that no specific check names still fails here.
-    _require_whole_declaration_approval(declaration.data, approval)
+    approval_record_binding(declaration)
     if "execution_environment" in declaration.data:
         try:
             vm_identity.verify(declaration.data["execution_environment"], vm_observation)
@@ -1280,6 +1309,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in declaration.data:
         raise _refuse("operator_admission is supported only for calibration-declaration")
+    if "wave_export" in declaration.data:
+        raise _refuse("wave_export is supported only for calibration-declaration")
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     if approval.get("mutated_digest") != declaration.mutation.get("mutated_digest"):
         raise _refuse("approval.mutated_digest does not match the declared mutation")
@@ -1302,6 +1333,8 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in declaration.data:
         raise _refuse("operator_admission is supported only for calibration-declaration")
+    if "wave_export" in declaration.data:
+        raise _refuse("wave_export is supported only for calibration-declaration")
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     approved_digest = approval.get("mutated_digest")
     declared_digest = declaration.mutation.get("mutated_digest")
