@@ -13,9 +13,9 @@ import pytest
 from conftest import stamp_approval
 from test_calibration import ROOT
 from test_remnant_scan import Fixture as ScanFixture
+from test_remnant_scan import PrivateOutput, no_marker
 from test_remnant_scan import audit_captured_output as audit_captured_output  # noqa: PLC0414
 from test_remnant_scan import fixture as scan_fixture
-from test_remnant_scan import no_marker
 from test_vm_admission import NOW, WAVE, Clocks, collect_all, dispatch, payloads
 from test_vm_admission import session as legacy_session
 from test_vm_credential_window_declaration import data
@@ -241,10 +241,10 @@ def test_all_public_sinks_exclude_synthetic_material(tmp_path: Path, fault: str)
         else:
             run_turns(b)
     report = b.close()
-    output = (json.dumps(report).encode() + json.dumps(f.window.report()).encode()
+    output = PrivateOutput(json.dumps(report).encode() + json.dumps(f.window.report()).encode()
               + repr(b).encode() + repr(f.source).encode()
               + b''.join(repr(driver).encode() for driver in b._drivers.values()))
-    no_marker(output, f.scan.refs)
+    no_marker(output.data, f.scan.refs)
     for path in tmp_path.rglob('*'):
         if path.is_file():
             no_marker(path.read_bytes(), f.scan.refs)
@@ -409,6 +409,31 @@ def test_committed_always_release_variant_is_detected(tmp_path: Path, monkeypatc
             'status': 'CLEAN', 'runner_held': False, 'exported': True, 'scan_status': 'CLEAN'})
         with pytest.raises(AssertionError):
             test_cleanup_release_is_load_bearing(tmp_path, 'missing')
+
+
+def test_committed_leaking_renderer_variant_is_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert CASES['qualification_controls'][1]['name'] == 'leaking-repr'
+    with monkeypatch.context() as patch:
+        patch.setattr(cs.CredentialSteward, '__repr__', lambda driver: repr(driver.final_vault))
+        with pytest.raises(AssertionError, match='privacy control refused'):
+            test_all_public_sinks_exclude_synthetic_material(tmp_path, 'none')
+
+
+@pytest.mark.parametrize('kind', [KeyboardInterrupt, SystemExit], ids=['keyboard-interrupt', 'system-exit'])
+def test_preparation_interrupt_diagnostics_exclude_private_adapter_message(tmp_path: Path, kind: Any) -> None:
+    f = synthetic(tmp_path)
+    b = bridge(f)
+
+    def interrupted() -> Any:
+        raise kind(f.scan.refs._values[0])
+
+    object.__setattr__(next(iter(b._bindings.values())), 'prepare', interrupted)
+    with pytest.raises(kind) as caught:
+        b.prepare()
+    rendered = PrivateOutput(''.join(traceback.TracebackException.from_exception(
+        caught.value, capture_locals=True).format()).encode())
+    no_marker(rendered.data, f.scan.refs)
+    assert 'scan' in f.calls and b.close()['runner_held']
 
 
 def test_logout_latches_window_held_immediately(tmp_path: Path) -> None:
