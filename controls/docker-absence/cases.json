@@ -1,0 +1,25 @@
+{
+  "purpose": "Synthetic Docker CLI replies; no daemon or physical resource is queried.",
+  "inspect": [
+    {"name": "container-pre29", "kind": "container", "code": 1, "stdout": "", "stderr": "Error: No such object: {id}\n", "present": false},
+    {"name": "container-29", "kind": "container", "code": 1, "stdout": "", "stderr": "error: no such object: {id}\n", "present": false},
+    {"name": "network-pre29", "kind": "network", "code": 1, "stdout": "", "stderr": "Error response from daemon: network {id} not found\n", "present": false},
+    {"name": "network-lowercase", "kind": "network", "code": 1, "stdout": "", "stderr": "error response from daemon: network {id} not found\n", "present": false},
+    {"name": "present", "kind": "container", "code": 0, "stdout": "{id}\n", "stderr": "", "present": true},
+    {"name": "wrong-success-identity", "kind": "container", "code": 0, "stdout": "other-id\n", "stderr": "", "present": null},
+    {"name": "unreachable", "kind": "container", "code": 1, "stdout": "", "stderr": "Cannot connect to the Docker daemon\n", "present": null},
+    {"name": "unrelated-error", "kind": "container", "code": 1, "stdout": "", "stderr": "Error response from daemon: permission denied\n", "present": null},
+    {"name": "wrong-absence-identity", "kind": "container", "code": 1, "stdout": "", "stderr": "error: no such object: other-id\n", "present": null},
+    {"name": "mixed-error", "kind": "container", "code": 1, "stdout": "", "stderr": "error: no such object: {id}\nCannot connect to the Docker daemon\n", "present": null},
+    {"name": "network-unrelated-error", "kind": "network", "code": 1, "stdout": "", "stderr": "Error response from daemon: plugin not found\n", "present": null}
+  ],
+  "remove": [
+    {"name": "pre29", "code": 1, "stderr": "Error response from daemon: No such container: {id}\n", "clean": true},
+    {"name": "docker29", "code": 1, "stderr": "error response from daemon: no such container: {id}\n", "clean": true},
+    {"name": "legacy-short", "code": 1, "stderr": "Error: No such container: {id}\n", "clean": true},
+    {"name": "legacy-short-lowercase", "code": 1, "stderr": "error: no such container: {id}\n", "clean": true},
+    {"name": "success", "code": 0, "stderr": "", "clean": true},
+    {"name": "unrelated-error", "code": 1, "stderr": "Error response from daemon: permission denied\n", "clean": false},
+    {"name": "unreachable", "code": 1, "stderr": "Cannot connect to the Docker daemon\n", "clean": false}
+  ]
+}

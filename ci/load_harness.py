@@ -229,7 +229,7 @@ def cleanup(cfg):
                 # the daemon's own `--rm` can be removing it already, or have
                 # just finished, which is not a failure (the next listing,
                 # which must settle empty, verifies it); any other reply is.
-                benign = ("is already in progress", "No such container")
+                benign = ("is already in progress", "no such container")
                 stalled = False
                 for cid in ids:
                     # Each removal gets at most what is left of the budget.
@@ -251,7 +251,7 @@ def cleanup(cfg):
                         errors.append(f"docker rm failed: {exc!r}")
                         stalled = True
                         break
-                    if rr.returncode != 0 and not any(b in rr.stderr for b in benign):
+                    if rr.returncode != 0 and not any(b in rr.stderr.casefold() for b in benign):
                         errors.append(f"docker rm exit {rr.returncode}: {rr.stderr.strip()[:200]}")
                 if stalled:
                     break

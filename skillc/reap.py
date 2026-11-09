@@ -256,7 +256,10 @@ def _target_present(
         return True if p.stdout == identity + "\n" else None
     absent = (f"Error: No such object: {identity}" if kind == "container" else
               f"Error response from daemon: network {identity} not found")
-    return False if p.stderr.strip() == absent else None
+    # Docker uses the same error exit status for missing objects and daemon
+    # failures. Keep the whole target-specific reply check; Docker 29 changed
+    # its capitalization, not that distinction.
+    return False if p.stderr.strip().casefold() == absent.casefold() else None
 
 
 def reap(
