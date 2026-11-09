@@ -632,7 +632,7 @@ def schedule_trigger(record: Mapping[str, Any], *, allowlist_digest: str, nested
 
 
 def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
-                        nested_policy: str | None = None) -> str | None:
+                        nested_policy: str | None = None, nhl_policy: object = None) -> str | None:
     """Why this attempt stops the schedule, or `None`. Only a DISPATCHED
     attempt is read (an attempt that never launched reached nothing); for one,
     every unknown is a stop, never a pass. Under a declared `refusal-expected`
@@ -694,9 +694,18 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
         # never an empty one (counter-model review).
         return (f"the egress connection census is incomplete (unparsed_lines={summary.get('unparsed_lines')!r}, "
                 f"allowed is {type(allowed).__name__})")
-    outside = sorted(str(t) for t in allowed if not _within_allowlist(str(t)))
-    if outside:
-        return f"an allowed connection outside #442's allowlist ({', '.join(outside)})"
+    if nhl_policy is not None:
+        from . import nhl_egress_policy as nhl
+        try:
+            blocked = not isinstance(nhl_policy, nhl.Policy) or nhl.violation(summary, nhl_policy) is not None
+        except nhl.PolicyRefused:
+            blocked = True
+        if blocked:
+            return "the declaration-bound NHL egress policy stopped this attempt"
+    else:
+        outside = sorted(str(t) for t in allowed if not _within_allowlist(str(t)))
+        if outside:
+            return f"an allowed connection outside #442's allowlist ({', '.join(outside)})"
     fixture = record.get("fixture")
     guard = fixture.get("codex_guard") if isinstance(fixture, Mapping) else None
     status = guard.get("status") if isinstance(guard, Mapping) else None

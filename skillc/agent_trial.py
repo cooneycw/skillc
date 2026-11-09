@@ -2716,11 +2716,17 @@ def run_one_attempt(
         if gate_entrypoint is None and not fixture_baseline:
             raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required "
                                               "(only a declared baseline route, #640, carries none)")
-        if isinstance(backend, DockerBackend) and backend.egress and tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS:
-            raise ServerSideChannelRefused(
-                "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
-                f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
-            )
+        if isinstance(backend, DockerBackend) and backend.egress:
+            from . import nhl_egress_policy as nhl
+            try:
+                policy = nhl.require_backend(backend, attempt_id)
+            except nhl.PolicyRefused as exc:
+                raise ServerSideChannelRefused(str(exc)) from None
+            if tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS and policy is None:
+                raise ServerSideChannelRefused(
+                    "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
+                    f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
+                )
     if gate_state_protocol is not None:
         expected = {"flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
                     "flow-check-summary": ("--check-summary",)}
@@ -3022,16 +3028,27 @@ def run_one_attempt(
         observe_without_egress = observe_before_teardown
 
         def observe_before_teardown(observed_backend: ExecutionBackend, handle: object) -> Mapping[str, object]:
+            from . import nhl_egress_policy as nhl
             summary: dict[str, object]
+            permit = getattr(observed_backend, 'nhl_egress_permit', None)
             raw = observed_backend.egress_log(handle) if isinstance(observed_backend, DockerBackend) else None
-            if raw is None:
+            if raw is None or (isinstance(permit, nhl.Permit) and not isinstance(raw, bytes)):
                 summary = {"status": "unread", "reason": "the egress proxy log could not be read before teardown"}
             else:
                 log_path = base / f"{attempt_id}.{eg.PROXY_LOG_STREAM}.jsonl"
                 log_path.write_bytes(raw)
                 digest = trial.sha256_bytes(raw)
                 egress_imports.append(trial.Import(log_path, eg.PROXY_LOG_STREAM, "observed", digest))
-                summary = {"status": "read", "digest": digest, **eg.summarize_log(raw)}
+                if isinstance(permit, nhl.Permit):
+                    try:
+                        parsed = nhl.summarize_log(raw)
+                    except nhl.PolicyRefused:
+                        parsed = {'unparsed_lines': 1}
+                else:
+                    parsed = eg.summarize_log(raw)
+                summary = {"status": "read", "digest": digest, **parsed}
+            if isinstance(permit, nhl.Permit) and permit.stopped:
+                summary['controller_policy_stop'] = True
             observed = dict(observe_without_egress(observed_backend, handle))
             observed["egress"] = summary
             return observed

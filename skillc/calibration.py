@@ -595,6 +595,12 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    from . import nhl_egress_policy as nhl
+    try:
+        if nhl.parse(data) is not None:
+            _require_agent_network(data)
+    except nhl.PolicyRefused as exc:
+        raise _refuse(str(exc)) from None
     if "credential_window" in data:
         try:
             vm_credential_window.validate_plan(data)
@@ -825,7 +831,10 @@ def _require_agent_network(data: Mapping[str, object]) -> None:
     network = shared.get("agent_network") if isinstance(shared, dict) else None
     if not isinstance(network, dict):
         raise _refuse("shared.agent_network is required: this declaration must bind provider-only egress (#442)")
-    expected = {"policy": cc.AGENT_NETWORK_POLICY, "allowlist_digest": egress.allowlist_digest(),
+    from . import nhl_egress_policy as nhl
+    policy = nhl.parse(data)
+    expected = {"policy": "nhl-declaration-egress" if policy else cc.AGENT_NETWORK_POLICY,
+                "allowlist_digest": policy.digest if policy else egress.allowlist_digest(),
                 "codex_server_side_off": list(egress.CODEX_SERVER_SIDE_OFF)}
     wrong = [k for k, v in expected.items() if network.get(k) != v]
     if wrong:
@@ -977,6 +986,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
+    if "nhl_egress" in data:
+        raise _refuse("nhl_egress is supported only for calibration-declaration")
     if "credential_window" in data:
         raise _refuse("credential_window is supported only for calibration-declaration")
     if "remnant_scan" in data:
@@ -1239,6 +1250,11 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
     `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
     still says `UNKNOWN`, and the declared task's grader is the one on disk.
     A declaration that validates is still only a plan (ADR 0005)."""
+    from . import nhl_egress_policy as nhl
+    try:
+        nhl.require_live_authority(declaration.data)
+    except nhl.PolicyRefused as exc:
+        raise _refuse(str(exc)) from None
     if "credential_window" in declaration.data:
         try:
             vm_credential_window.validate_plan(declaration.data)

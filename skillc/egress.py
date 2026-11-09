@@ -78,9 +78,13 @@ def allowlist_document(hosts: Sequence[str] = ALLOWED_HOSTS) -> dict[str, object
             "measurement": dict(MEASUREMENT)}
 
 
-def allowlist_digest(hosts: Sequence[str] = ALLOWED_HOSTS) -> str:
-    raw = json.dumps(allowlist_document(hosts), sort_keys=True, separators=(",", ":")).encode()
+def document_digest(document: Mapping[str, object]) -> str:
+    raw = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def allowlist_digest(hosts: Sequence[str] = ALLOWED_HOSTS) -> str:
+    return document_digest(allowlist_document(hosts))
 
 
 #: The proxy itself: stdlib only, run by the trial image's own `python3`, so
@@ -237,6 +241,7 @@ def create_network_argv(docker_bin: Sequence[str], network: str, labels: Mapping
 def proxy_run_argv(
     docker_bin: Sequence[str], *, image: str, name: str, labels: Mapping[str, str], container_user: str,
     subnet: str, hosts: Sequence[str] = ALLOWED_HOSTS,
+    policy_document: Mapping[str, object] | None = None,
 ) -> list[str]:
     """The proxy container, started detached on the default bridge (it needs
     DNS and egress to reach the allowed hosts); `network connect` then joins it
@@ -244,13 +249,14 @@ def proxy_run_argv(
     argv = [*docker_bin, "run", "-d", "--name", name]
     for key, value in labels.items():
         argv += ["--label", f"{key}={value}"]
-    allow = json.dumps(allowlist_document(hosts), sort_keys=True)
+    document = allowlist_document(hosts) if policy_document is None else policy_document
+    allow = json.dumps(document, sort_keys=True)
     return [
         *argv, "--label", f"{ROLE_LABEL_KEY}={PROXY_ROLE}",
         "--network", "bridge", "--user", container_user, "--init",
         "--memory", "256m", "--memory-swap", "256m", "--pids-limit", "64", "--cpus", "0.5",
         "--", image, "python3", "-c", PROXY_SOURCE, str(PROXY_PORT), PROXY_LOG_PATH, allow,
-        allowlist_digest(hosts), subnet,
+        document_digest(document), subnet,
     ]
 
 

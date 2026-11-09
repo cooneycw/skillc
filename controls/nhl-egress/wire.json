@@ -1,0 +1,11 @@
+[
+  {"name":"null-root","entries":[null],"stop":true},
+  {"name":"false-root","entries":[false],"stop":true},
+  {"name":"integer-root","entries":[0],"stop":true},
+  {"name":"array-root","entries":[[]],"stop":true},
+  {"name":"string-root","entries":["text"],"stop":true},
+  {"name":"empty-object","entries":[{}],"stop":true},
+  {"name":"mixed-null","entries":[{"decision":"allowed","target":"api.nhle.com:443"},null],"stop":true},
+  {"name":"mixed-array","entries":[{"decision":"allowed","target":"api.nhle.com:443"},[]],"stop":true},
+  {"name":"healthy-twin","entries":[{"decision":"allowed","target":"api.nhle.com:443"}],"stop":false}
+]

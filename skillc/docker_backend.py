@@ -971,6 +971,8 @@ class DockerBackend:
     #: the default IS the measured allowlist. Only the real-Docker control's
     #: `allow-all` break widens it, to prove the denial check can fail.
     egress_hosts: tuple[str, ...] = eg.ALLOWED_HOSTS
+    #: A registered declaration-bound policy permit; controls cannot prepare Docker.
+    nhl_egress_permit: object | None = field(default=None, repr=False, kw_only=True)
     #: #460: how long `prepare()` waits for the egress proxy to accept
     #: connections before refusing the attempt. Without the wait, a proxy slower
     #: to start than the agent container refuses the agent's first CONNECTs.
@@ -1124,6 +1126,11 @@ class DockerBackend:
         call cannot confirm the state of. After a timeout, that cleanup waits
         for the daemon's answer first (`_run_awaiting_answer`, issue #540), so
         a create still in flight cannot land behind it."""
+        from . import nhl_egress_policy as nhl
+        try:
+            nhl.require_backend(self, attempt_id, live=True)
+        except nhl.PolicyRefused as exc:
+            raise BackendUnavailable(str(exc)) from None
         env = _docker_env()
         if probe_daemon(self.docker_bin, self.daemon_timeout, env) is None:
             raise BackendUnavailable(f"docker daemon unreachable via {' '.join(self.docker_bin)!r}")
@@ -1224,6 +1231,8 @@ class DockerBackend:
         joined to it. Returns `(network, proxy container, proxy address on the
         network)`. Whatever this call created is removed again before it
         raises - a refused prepare() leaves no network and no proxy behind."""
+        from . import nhl_egress_policy as nhl
+        policy = nhl.require_backend(self, attempt_id, live=True)
         network, proxy = eg.network_name(name), eg.proxy_name(name)
         labels = {OWNER_LABEL_KEY: OWNER_LABEL_VALUE, ATTEMPT_LABEL_KEY: attempt_id}
         # Marked BEFORE each call: a create that takes effect but whose answer is
@@ -1243,7 +1252,8 @@ class DockerBackend:
             created_proxy = True  # `run -d` can create a container even when it fails to start
             self._egress_call(eg.proxy_run_argv(self.docker_bin, image=self.image, name=proxy, labels=labels,
                                                 container_user=_container_user(), subnet=subnet,
-                                                hosts=self.egress_hosts),
+                                                hosts=self.egress_hosts,
+                                                policy_document=policy.document() if policy else None),
                               env, f"start egress proxy {proxy}")
             self._egress_call(eg.network_connect_argv(self.docker_bin, network, proxy), env,
                               f"connect {proxy} to {network}")
@@ -2194,6 +2204,27 @@ class DockerBackend:
 
         return proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread, reason
 
+    def _nhl_egress_stop(self, handle: object, policy: object) -> bool:
+        from . import nhl_egress_policy as nhl
+        if not isinstance(policy, nhl.Policy) or not isinstance(handle, _Handle):
+            return True
+        permit = self.nhl_egress_permit
+        if not isinstance(permit, nhl.Permit):
+            return True
+        permit.require(self, handle.attempt_id)
+        if permit.stopped:
+            return True
+        raw = self.egress_log(handle)
+        try:
+            summary = {'status': 'read', **nhl.summarize_log(raw)}
+            blocked = nhl.violation(summary, policy) is not None
+        except nhl.PolicyRefused:
+            blocked = True
+        if blocked:
+            permit.stop()
+            return True
+        return False
+
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
@@ -2294,6 +2325,24 @@ class DockerBackend:
         from the host side, never a claim about what happened inside the
         container - see that field's own docstring for the forgeability
         reasoning."""
+        from . import nhl_egress_policy as nhl
+        try:
+            policy = nhl.require_backend(self, handle.attempt_id, live=True) if isinstance(handle, _Handle) else None
+        except nhl.PolicyRefused as exc:
+            raise BackendUnavailable(str(exc)) from None
+        if policy is not None:
+            prior_cancel = cancel
+            checked_at = float('-inf')
+            def policy_cancel() -> bool:
+                nonlocal checked_at
+                if prior_cancel and prior_cancel():
+                    return True
+                now = time.monotonic()
+                if now - checked_at < 0.25:
+                    return False
+                checked_at = now
+                return self._nhl_egress_stop(handle, policy)
+            cancel = policy_cancel
         assert isinstance(handle, _Handle)
         if limits.completion_deadline is not None and limits.execution_deadline is None:
             limits = replace(limits, execution_deadline=time.monotonic() + limits.timeout)

@@ -1,0 +1,1 @@
+- Add a declaration-bound NHL egress policy and synthetic registered-permit controls, with strict denied-request stopping and launch-bound recovery; real Docker use remains held until the owner-approved frozen declaration and live authority join exist (Refs #638).
