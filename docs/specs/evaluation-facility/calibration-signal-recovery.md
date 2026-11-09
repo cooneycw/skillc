@@ -70,3 +70,20 @@ so continuation must fail the interrupt-exit assertion. Set the variable to
 only that private fixture journal's dispatched event before public recovery,
 which must fail the inconclusive assertion. Keep sabotage receipts distinct
 from intact observations. Never enable either mode in an intact qualification.
+
+
+Before each operator run expected to exceed ten minutes, record started UTC,
+expected-finish UTC and the durable result/receipt path in the started report.
+At the expected finish the operator independently checks that file and the owned
+process state, even if no completion notification arrived. A missing overdue
+receipt is UNKNOWN and requires investigation, never an assumption of progress.
+Run only in an authorized quiet window, at low priority, with fresh load5 below
+12 and no competing heavy work. Retain peak load5; a sustained load abort is an
+incomplete run, not a signal/recovery verdict.
+
+Count the exact ten node identities independently of the per-file runner floor:
+all ten must execute without skips. Keep the two single-node expected-red control
+runs separate. Retain private case directories with a fresh `--basetemp` outside
+the runner checkout, since the normal runner does not preserve them by default.
+The automatic full-floor wrapper's aggregate green cannot replace these focused
+case and evidence checks. No real daemon was used to prepare this probe.
