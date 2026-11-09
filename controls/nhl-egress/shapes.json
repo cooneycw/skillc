@@ -1,0 +1,61 @@
+{
+  "wrong": {
+    "null": null,
+    "integer": 7,
+    "boolean": false,
+    "list": [],
+    "string": "",
+    "missing": {},
+    "extra": {
+      "unexpected": true
+    }
+  },
+  "levels": [
+    "session-declaration",
+    "policy-block",
+    "stored-config",
+    "stored-binding",
+    "stored-declaration",
+    "summary",
+    "summary-policy",
+    "allowed",
+    "denied",
+    "upstream-failed",
+    "unparsed-lines",
+    "stop-flag",
+    "bind-permit",
+    "bind-backend",
+    "backend-input",
+    "issue-attempt",
+    "require-attempt",
+    "live-selector",
+    "permit-policy",
+    "permit-stopped",
+    "permit-stop",
+    "permit-issuer",
+    "backend-hosts",
+    "backend-egress",
+    "peer-rejected",
+    "count-value",
+    "optional-digest",
+    "connect-target",
+    "policy-purpose",
+    "require-permit",
+    "policy-version",
+    "policy-purpose-json",
+    "policy-hosts",
+    "policy-port",
+    "policy-stop",
+    "declared-network",
+    "network-policy",
+    "network-digest",
+    "network-flags",
+    "approval",
+    "bind-hosts",
+    "bind-egress"
+  ],
+  "wrong_counts": {
+    "negative": -1,
+    "fractional": 1.5
+  }
+}

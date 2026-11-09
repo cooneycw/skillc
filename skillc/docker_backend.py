@@ -2216,7 +2216,11 @@ class DockerBackend:
             return True
         raw = self.egress_log(handle)
         summary = ({'status': 'read', **eg.summarize_log(raw)} if raw is not None else None)
-        if nhl.violation(summary, policy) is not None:
+        try:
+            blocked = nhl.violation(summary, policy) is not None
+        except nhl.PolicyRefused:
+            blocked = True
+        if blocked:
             permit.stop()
             return True
         return False

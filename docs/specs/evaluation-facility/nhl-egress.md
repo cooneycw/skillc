@@ -79,9 +79,9 @@ declaration, not a hidden allowlist addition.
 
 ## Evidence and remaining scope
 
-The unchanged existing-consumer behavior file gives 13 meaningful failures and
+The unchanged existing-consumer behavior file gives 14 meaningful failures and
 eight passing preservation controls on pre-fix main e22a436. Failures concern
-allowed NHL scheduling, denied-request continuation, ignored closed-policy
+allowed NHL scheduling, undeclared-request continuation, ignored closed-policy
 fields and unfrozen approval. New-API import failures are not red evidence.
 The schedule harness replaces approval and expensive attempt/backend boundaries
 only for synthetic observations; separate unpatched checks refuse every NHL
@@ -100,3 +100,15 @@ owner-run headroom helper are PR-C. Credential validity/coverage and any auth
 material remain separate #630 work; no credential code is changed here.
 Physical proxy/deny/cancellation qualification, actual VM and role wiring,
 approved sizing and the final frozen execution declaration remain deferred.
+
+## Complete input-shape qualification
+
+The committed 42-level table covers null, scalar, list, string and missing/extra
+object shapes at all new fixed-data and permit/session boundaries. Invalid
+observations raise PolicyRefused at the validator; execution, scheduling and
+fixture observers convert that to a retained unavailable-evidence stop. No
+TypeError/AttributeError/KeyError is treated as a valid policy verdict. Optional
+summary fields and connection counters have explicit types; legacy config
+dictionaries without the NHL opt-in remain extensible. The table distinguishes
+new explicit error contracts from older fail-closed diagnostic returns. It also
+qualifies the top-level and nested stored-declaration refusal guards.

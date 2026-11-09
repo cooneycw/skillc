@@ -80,13 +80,15 @@ def test_declared_nhl_does_not_trigger_global_provider_only_stop(
     assert all('containment_violation' not in row for row in rows)
 
 
-@pytest.mark.parametrize('traffic', ['denied-request', 'off-list-success'])
+@pytest.mark.parametrize('traffic', ['denied-request', 'off-list-success', 'upstream-failed-request'])
 def test_strict_nhl_policy_stops_schedule_and_recovery_binds_the_same_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, traffic: str,
 ) -> None:
     off_list = {'undeclared.invalid:443': 1}
     observation = summary(off_list if traffic == 'off-list-success' else {},
                           off_list if traffic == 'denied-request' else {})
+    if traffic == 'upstream-failed-request':
+        observation['upstream_failed'] = off_list
     experiment, outcomes, calls = run_control(tmp_path, monkeypatch, observation)
     assert len(calls) == 1
     assert all(o.record['disposition'] == 'not-run' for o in outcomes[1:])

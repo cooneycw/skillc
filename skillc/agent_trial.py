@@ -2716,13 +2716,13 @@ def run_one_attempt(
         if gate_entrypoint is None and not fixture_baseline:
             raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required "
                                               "(only a declared baseline route, #640, carries none)")
-        if isinstance(backend, DockerBackend) and backend.egress and tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS:
+        if isinstance(backend, DockerBackend) and backend.egress:
             from . import nhl_egress_policy as nhl
             try:
                 policy = nhl.require_backend(backend, attempt_id)
             except nhl.PolicyRefused as exc:
                 raise ServerSideChannelRefused(str(exc)) from None
-            if policy is None:
+            if tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS and policy is None:
                 raise ServerSideChannelRefused(
                     "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
                     f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"

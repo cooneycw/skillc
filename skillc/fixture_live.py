@@ -696,7 +696,11 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str,
                 f"allowed is {type(allowed).__name__})")
     if nhl_policy is not None:
         from . import nhl_egress_policy as nhl
-        if not isinstance(nhl_policy, nhl.Policy) or nhl.violation(summary, nhl_policy) is not None:
+        try:
+            blocked = not isinstance(nhl_policy, nhl.Policy) or nhl.violation(summary, nhl_policy) is not None
+        except nhl.PolicyRefused:
+            blocked = True
+        if blocked:
             return "the declaration-bound NHL egress policy stopped this attempt"
     else:
         outside = sorted(str(t) for t in allowed if not _within_allowlist(str(t)))

@@ -1030,7 +1030,10 @@ def containment_evidence(record: Mapping[str, object], *, nhl_policy: nhl.Policy
     network = obs.get("egress")
     allowed = network.get("allowed") if isinstance(network, Mapping) else None
     if nhl_policy is not None:
-        evidence.update(nhl.violation(network, nhl_policy) or {})
+        try:
+            evidence.update(nhl.violation(network, nhl_policy) or {})
+        except nhl.PolicyRefused:
+            evidence['nhl_policy_unavailable'] = True
     elif isinstance(allowed, Mapping):
         targets = sorted(target for target, count in allowed.items()
                          if isinstance(target, str) and type(count) is int and count > 0
