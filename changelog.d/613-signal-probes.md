@@ -1,0 +1,1 @@
+- Prepare model-free real-Docker calibration signal and recovery probes, with immutable image binding, certification-floor and load-policy controls. Physical qualification remains a separate operator step.

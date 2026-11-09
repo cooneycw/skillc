@@ -19,5 +19,6 @@
     <testcase classname="tests.test_step6_oracle_live" name="other-proof-passed" />
     <testcase classname="tests.test_inventory_oracle_live" name="other-proof-passed" />
     <testcase classname="tests.test_nhl_rerun_live" name="other-proof-passed" />
+    <testcase classname="tests.test_calibration_signal_recovery_live" name="other-proof-passed" />
   </testsuite>
 </testsuites>

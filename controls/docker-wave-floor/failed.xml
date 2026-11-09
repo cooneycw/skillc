@@ -26,5 +26,6 @@
     <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[omit-mail]" />
     <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[timeout]" />
     <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[cancel]" />
+    <testcase classname="tests.test_calibration_signal_recovery_live" name="other-proof-passed" />
   </testsuite>
 </testsuites>

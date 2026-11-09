@@ -275,10 +275,10 @@ while the manual evidence run is still being prepared.
 ### Retaining and interpreting campaign evidence
 
 Run the final merged floor and all declared break modes at one tested SHA,
-using one explicitly installed reviewed runner SHA. The floor is the eleven
-files in `ci/check_real_docker_ran.py` (including #338's cwd-confinement
-file, #393's nested-directory ownership file, #414's runner-cleanup
-file and #442's provider-only egress file); also include the merged #348 production path in the final inventory. Report
+using one explicitly installed reviewed runner SHA. Read the exact floor from
+`DECLARED_REAL_DOCKER_FILES` in the installed `ci/check_real_docker_ran.py`;
+recompute expected campaign totals from the tested commit's collected population.
+Report
 each issue's remaining acceptance separately; an aggregate green does not
 alone establish another issue's acceptance. #334's real-script byte identity
 and complete witness coverage are asserted by the `none` run of
