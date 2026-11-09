@@ -1,0 +1,5 @@
+[
+  {"name":"allow-all","witness":"off-list-success"},
+  {"name":"ignore-denied","witness":"denied-request"},
+  {"name":"always-issue","witness":"unapproved-live"}
+]

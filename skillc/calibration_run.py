@@ -97,6 +97,9 @@ from . import collection_conformance as cc
 from . import fixture_attempt as fa
 from . import matched_pilot as mp
 from . import materialize as m
+from . import (
+    nhl_egress_policy as nhl,
+)
 from .spec import FrontmatterError
 
 ROOT = mp.ROOT
@@ -696,6 +699,8 @@ def plan_calibration(
         content = snapshot["task_content"]
         if grader_identity["digest"] != content["grader_digest"]:
             raise CalibrationRefused("planned grader differs from approved task_content")
+    nhl_binding = ({'declaration': json.loads(trial.canonical(declaration.data))}
+                   if nhl.parse(declaration.data) is not None else None)
     inventory_policy = calibration.clutter_policy(declaration.data)
     inventory_binding = ({'policy': inventory_policy.data,
                           'declaration_digest': calibration.declaration_digest(declaration.data)}
@@ -716,6 +721,7 @@ def plan_calibration(
             "config": {"arm": arm, "repeat": counts[arm], "position": position,
                        **({"calibration_declaration": snapshot} if snapshot is not None else {}),
                        **({"clutter_inventory": inventory_binding} if inventory_binding is not None else {}),
+                       **({"nhl_egress": nhl_binding} if nhl_binding is not None else {}),
                        **({"fixture": fixture.planned(FIXTURE_ROUTE_BASELINE if arm == calibration.BASELINE_ARM
                                                       else FIXTURE_ROUTE_GATED)} if fixture is not None else {})},
             "attempts": 1,
@@ -862,7 +868,7 @@ def run_calibration(
     write_outcomes(run_dir, experiment, outcomes, declaration)
 
     guarded = guard_kwargs(client_name, model)
-    stop = GuardStop()
+    stop = GuardStop(nhl_policy=nhl.parse(declaration.data))
 
     def run_attempt(scheduled: mp.ScheduledAttempt, budget: float,
                     deadline: completion.CompletionDeadline) -> dict[str, object]:
@@ -1006,7 +1012,7 @@ def guard_entry(record: Mapping[str, object], obs: Mapping[str, object], declare
     return out
 
 
-def containment_evidence(record: Mapping[str, object]) -> dict[str, object] | None:
+def containment_evidence(record: Mapping[str, object], *, nhl_policy: nhl.Policy | None = None) -> dict[str, object] | None:
     """Positive observed containment violations, including historical attempts.
 
     A violation is not evidence that an old runner stopped its schedule. Only
@@ -1023,7 +1029,9 @@ def containment_evidence(record: Mapping[str, object]) -> dict[str, object] | No
         evidence["server_side_tool_uses"] = uses
     network = obs.get("egress")
     allowed = network.get("allowed") if isinstance(network, Mapping) else None
-    if isinstance(allowed, Mapping):
+    if nhl_policy is not None:
+        evidence.update(nhl.violation(network, nhl_policy) or {})
+    elif isinstance(allowed, Mapping):
         targets = sorted(target for target, count in allowed.items()
                          if isinstance(target, str) and type(count) is int and count > 0
                          and not egress.target_allowed(target))
@@ -1061,6 +1069,7 @@ class GuardStop:
 
     trigger: str | None = None
     at_attempt: str | None = None
+    nhl_policy: nhl.Policy | None = None
 
     def skip(self, experiment: trial.Experiment, attempt_id: str) -> dict[str, object] | None:
         if self.trigger is None:
@@ -1070,7 +1079,7 @@ class GuardStop:
     def observe(self, outcome: mp.AttemptOutcome, guarded: bool) -> None:
         if self.trigger is not None:
             return
-        evidence = containment_evidence(outcome.record)
+        evidence = containment_evidence(outcome.record, nhl_policy=self.nhl_policy)
         if evidence is not None:
             self.trigger, self.at_attempt = str(evidence["trigger"]), outcome.scheduled.attempt_id
             outcome.record["schedule_containment_stop"] = evidence
@@ -1989,6 +1998,29 @@ def fixture_symmetry(entries: Sequence[Mapping[str, object]]) -> dict[str, objec
             "symmetric": planned_identical and digest is not None and handed and every_arm_dispatched}
 
 
+def _report_nhl_policy(experiment: trial.Experiment) -> nhl.Policy | None:
+    configs = []
+    for planned, _attempt in experiment.attempts():
+        config = planned['config']
+        assert isinstance(config, dict)
+        configs.append(json.loads(trial._read_object(experiment.root, str(config['digest']))))
+    if not any('nhl_egress' in row for row in configs):
+        return None
+    binding = configs[0].get('nhl_egress')
+    if (not isinstance(binding, dict) or set(binding) != {'declaration'}
+            or any(row.get('nhl_egress') != binding for row in configs)):
+        raise CalibrationRefused('partial or mixed NHL declaration bindings')
+    try:
+        declaration = calibration.parse_declaration(binding['declaration'])
+        calibration.approval_record_binding(declaration)  # provenance, never live authority
+        policy = nhl.parse(declaration.data)
+    except (calibration.DeclarationRefused, nhl.PolicyRefused):
+        raise CalibrationRefused('unverified launch-bound NHL declaration') from None
+    if policy is None or tuple(s.arm for s in schedule_from_ledger(experiment)) != declaration.arm_order:
+        raise CalibrationRefused('NHL declaration differs from launch-bound schedule')
+    return policy
+
+
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome], *,
     declared_model: str, declared_effort: str, named_skills: Mapping[str, Sequence[str]] | None = None,
@@ -2004,6 +2036,7 @@ def build_report(
     counts toward the value comparison."""
     # A mutable outcomes checkpoint cannot select the report's endpoint.
     experiment = trial.Experiment.open(experiment.root)
+    nhl_policy = _report_nhl_policy(experiment)
     declaration = _report_declaration(experiment)
     endpoint = calibration.outcome_endpoint(declaration) if declaration is not None else None
     if declaration is not None and (declared_model, declared_effort) != (
@@ -2072,7 +2105,7 @@ def build_report(
         fixture_entry = _fixture_entry(experiment, outcome.scheduled.attempt_id, record)
         if fixture_entry is not None:
             entries[-1]["fixture"] = fixture_entry
-        evidence = containment_evidence(record)
+        evidence = containment_evidence(record, nhl_policy=nhl_policy)
         marker = record.get("schedule_containment_stop")
         if marker is not None:
             if marker != evidence:

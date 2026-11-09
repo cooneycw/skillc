@@ -1,0 +1,1 @@
+{"version":1,"purpose":"synthetic-control","hosts":["api-web.nhle.com","api.nhle.com"],"port":443,"stop_on_denied":true}

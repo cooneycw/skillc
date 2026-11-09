@@ -2717,10 +2717,16 @@ def run_one_attempt(
             raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required "
                                               "(only a declared baseline route, #640, carries none)")
         if isinstance(backend, DockerBackend) and backend.egress and tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS:
-            raise ServerSideChannelRefused(
-                "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
-                f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
-            )
+            from . import nhl_egress_policy as nhl
+            try:
+                policy = nhl.require_backend(backend, attempt_id)
+            except nhl.PolicyRefused as exc:
+                raise ServerSideChannelRefused(str(exc)) from None
+            if policy is None:
+                raise ServerSideChannelRefused(
+                    "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
+                    f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
+                )
     if gate_state_protocol is not None:
         expected = {"flow-check-plan": ("--plan", "check", "--evidence", "flow-check"),
                     "flow-check-summary": ("--check-summary",)}
@@ -3032,6 +3038,10 @@ def run_one_attempt(
                 digest = trial.sha256_bytes(raw)
                 egress_imports.append(trial.Import(log_path, eg.PROXY_LOG_STREAM, "observed", digest))
                 summary = {"status": "read", "digest": digest, **eg.summarize_log(raw)}
+            from . import nhl_egress_policy as nhl
+            permit = getattr(observed_backend, 'nhl_egress_permit', None)
+            if isinstance(permit, nhl.Permit) and permit.stopped:
+                summary['controller_policy_stop'] = True
             observed = dict(observe_without_egress(observed_backend, handle))
             observed["egress"] = summary
             return observed
