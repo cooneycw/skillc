@@ -64,6 +64,7 @@ from . import (
     degrade,
     profile,
     records,
+    remnant_scan,
     schedule_budget,
     trial,
     verify,
@@ -593,6 +594,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    if "remnant_scan" in data:
+        try:
+            remnant_scan.validate_plan(data)
+        except remnant_scan.ScanRefused as exc:
+            raise _refuse(str(exc)) from exc
     if "wave_export" in data:
         try:
             wave_export.validate_plan(data)
@@ -965,6 +971,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
+    if "remnant_scan" in data:
+        raise _refuse("remnant_scan is supported only for calibration-declaration")
     if "execution_environment" in data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in data:
@@ -1305,6 +1313,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
     grader, fixture or profile files changing the answer: who/when and the
     schedule size, the approved mutated_digest, and (D-P2a) the whole
     declaration digest."""
+    if "remnant_scan" in declaration.data:
+        raise _refuse("remnant_scan is supported only for calibration-declaration")
     if "execution_environment" in declaration.data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in declaration.data:
@@ -1329,6 +1339,8 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     `removed_text` on the same file produces a different degraded file,
     hence a different `mutated_digest`, and an approval is for one exact
     degraded file, never "whatever this field says now")."""
+    if "remnant_scan" in declaration.data:
+        raise _refuse("remnant_scan is supported only for calibration-declaration")
     if "execution_environment" in declaration.data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in declaration.data:

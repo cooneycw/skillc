@@ -1,0 +1,31 @@
+{
+  "purpose": "Placement descriptors only. Synthetic references and planted bytes exist only in a memory overlay.",
+  "cases": [
+    {"name": "complete-benign", "action": "clean", "expected": "CLEAN"},
+    {"name": "staging-after-teardown", "action": "plant", "class": "staging", "encoding": "raw", "expected": "NOT_CLEAN"},
+    {"name": "role-home", "action": "plant", "class": "home", "encoding": "raw", "expected": "NOT_CLEAN"},
+    {"name": "role-vault", "action": "plant", "class": "vault", "encoding": "raw", "expected": "NOT_CLEAN"},
+    {"name": "stdout", "action": "plant", "class": "stdout", "encoding": "raw", "expected": "NOT_CLEAN"},
+    {"name": "transcript-json-escaped", "action": "plant", "class": "transcript", "encoding": "json-ascii", "expected": "NOT_CLEAN"},
+    {"name": "binary-cache-log", "action": "plant", "class": "cache-log", "encoding": "raw", "binary": true, "expected": "NOT_CLEAN"},
+    {"name": "export-payload", "action": "plant", "class": "export-payload", "encoding": "raw", "expected": "NOT_CLEAN"},
+    {"name": "omitted-required-surface", "action": "omit", "expected": "UNKNOWN"},
+    {"name": "zero-readable-files", "action": "empty", "expected": "UNKNOWN"},
+    {"name": "unreadable-surface", "action": "unreadable", "expected": "UNKNOWN"},
+    {"name": "partial-listing-error", "action": "partial", "expected": "UNKNOWN"},
+    {"name": "empty-references", "action": "empty-references", "expected": "UNKNOWN"},
+    {"name": "missing-root", "action": "missing", "expected": "UNKNOWN"},
+    {"name": "extra-root", "action": "extra", "expected": "UNKNOWN"},
+    {"name": "aliased-root", "action": "alias", "expected": "UNKNOWN"},
+    {"name": "symlink", "action": "symlink", "expected": "UNKNOWN"},
+    {"name": "fifo", "action": "fifo", "expected": "UNKNOWN"},
+    {"name": "over-file-bound", "action": "file-bound", "expected": "UNKNOWN"},
+    {"name": "over-total-bound", "action": "total-bound", "expected": "UNKNOWN"},
+    {"name": "over-entry-bound", "action": "entry-bound", "expected": "UNKNOWN"},
+    {"name": "over-depth-bound", "action": "depth-bound", "expected": "UNKNOWN"}
+  ],
+  "qualification_controls": [
+    {"checker": "always-clean", "witness": "staging-after-teardown", "expected": "REFUSED"},
+    {"checker": "omit-staging", "witness": "staging-after-teardown", "expected": "REFUSED"}
+  ]
+}
