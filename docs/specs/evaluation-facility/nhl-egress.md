@@ -1,4 +1,4 @@
-# Declaration-bound NHL egress, policy slice (Refs #638)
+# Declaration-bound NHL egress (Refs #638)
 
 This slice is infrastructure and synthetic qualification only. The current
 `APPROVED_LIVE_DECLARATIONS` registry is empty, and the live permit/window join
@@ -94,8 +94,8 @@ are pinned byte for byte in a parent-derived fixture. Public recovery, checkpoin
 immutability and refusal controls accompany those policy cases.
 
 HTTP request counts and response codes are **not measured** by encrypted CONNECT
-tunnels. This slice adds no byte telemetry; that is PR-B. No TLS interception
-or fetch seam is added. Declared limit modes, long-window parameters and the
+tunnels. The byte telemetry below observes encrypted transport only. No TLS
+interception or fetch seam is added. Declared limit modes, long-window parameters and the
 owner-run headroom helper are PR-C. Credential validity/coverage and any auth
 material remain separate #630 work; no credential code is changed here.
 Physical proxy/deny/cancellation qualification, actual VM and role wiring,
@@ -112,3 +112,62 @@ summary fields and connection counters have explicit types; legacy config
 dictionaries without the NHL opt-in remain extensible. The table distinguishes
 new explicit error contracts from older fail-closed diagnostic returns. It also
 qualifies the top-level and nested stored-declaration refusal guards.
+
+
+## CONNECT bytes observed (PR-B)
+
+The strict NHL proxy observes bytes at each directional read boundary, before
+write/drain, including TLS overhead. These are **bytes observed**, not bytes
+confirmed delivered. A connection can carry many application requests. Every
+byte report states: **HTTP request counts and response codes not measured**.
+CONNECT denials/upstream failures remain distinct from application failures.
+
+Each strict proxy process gets a generation ID. Successful tunnels get ordered
+connection IDs, independent cumulative directional counters and monotone
+connection sequences. A one-second progress checkpoint preserves lower bounds
+for an active long tunnel; EOF closes it with a final record. Read/write errors
+or cancellation mark the tunnel incomplete. Every strict log line carries a
+monotone global sequence and SHA256 of its predecessor's exact bytes.
+
+At the existing pre-teardown observation boundary, the controller sends
+`docker kill --signal SIGUSR1` to its owned proxy. The handler closes the
+listener, briefly allows pending handlers to finish, then cancels remaining
+handlers and writes one trailer containing the record count, last hash,
+generation and final connection census. It remains alive solely for capture
+until ordinary teardown removes it. A second signal or a late connection cannot
+extend or erase the sealed log. The whole controller signal/read wait has a
+three-second budget. Signal failure, missing handler, timeout, unreadable or
+oversized capture never prevents existing destroy/absence confirmation.
+
+Only a verified chain, matching policy document/digest and generation, complete
+connection sequence/census and matching shutdown trailer can yield COMPLETE.
+A complete zero-byte tunnel or a complete empty connection population can
+truthfully report zero. Missing finals/trailer, counter regression, overflow,
+malformed fields, broken/reordered/replayed records or truncated evidence yield
+UNKNOWN with null totals. Valid pre-interruption checkpoints can remain as
+explicit lower bounds, never as complete totals. No mid-run byte total admits
+work or controls the policy stop. Policy observation retains its existing
+strict deny/bypass rules separately from byte completeness.
+
+Strict capture reads at most 8 MiB, with an extra byte to detect overflow;
+oversized logs become unavailable rather than a partial zero. This is a
+technical capture bound, not an approved study traffic budget. Logs are still
+retained only in the owned proxy and capture store; this does not establish a
+disk reservation or a multi-hour storage budget. Legacy provider-only proxy
+source, argv, logs and report shape remain unchanged.
+
+The committed existing-consumer controls on actual pre-fix main f16112e give
+10 failures (missing measurement outputs and stream records) and three
+preservation passes. They import only existing APIs. The new parser tests also
+qualify malformed raw JSON, nested field shapes, every prefix truncation of a
+fixed stream and four blind variants. Loopback subprocess tests drive the
+shipped script with fixed/chopped streams and repeated signals. They are not
+proof of Docker signal forwarding.
+
+Two real-Docker cases live in `tests/test_agent_egress_live.py`, already in the
+scheduled runner's declared file floor: actual `--init` forwarding and an
+absent-handler negative twin. They make no external requests and use no client
+or credential. Local Docker absence is an honest skip. After merge, the
+scheduled real-Docker certification on the merge commit must execute the new
+nodes (the previous 49-node population grows by two); only that run qualifies
+actual init forwarding. Live NHL admission remains held by PR-A and #630.

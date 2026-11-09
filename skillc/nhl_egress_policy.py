@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import egress
+from . import egress, egress_bytes
 
 NHL_HOSTS = ('api-web.nhle.com', 'api.nhle.com')
 APPROVED_LIVE_DECLARATIONS: frozenset[str] = frozenset()
@@ -202,14 +202,19 @@ def summarize_log(raw: object) -> dict[str, object]:
     """
     if not isinstance(raw, bytes):
         raise PolicyRefused('nhl_egress: proxy log bytes unavailable')
+    policy_lines = []
     for line in raw.decode('utf-8', 'replace').splitlines():
         try:
             entry = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise PolicyRefused('nhl_egress: malformed proxy log line') from None
         if not isinstance(entry, dict):
             raise PolicyRefused('nhl_egress: proxy log object required')
-    return egress.summarize_log(raw)
+        if entry.get('event') not in ('bytes', 'bytes-end'):
+            policy_lines.append(line)
+    result = egress.summarize_log('\n'.join(policy_lines).encode())
+    result['bytes_observed'] = egress_bytes.summarize(raw, result['allowlist_digest'])
+    return result
 
 
 def violation(summary: object, policy: Policy) -> dict[str, object] | None:
@@ -221,7 +226,7 @@ def violation(summary: object, policy: Policy) -> dict[str, object] | None:
     if not isinstance(policy, Policy) or policy.purpose not in ('synthetic-control', 'sizing', 'live'):
         raise PolicyRefused('nhl_egress: compiled policy required')
     required = {'status', 'allowlist_digest', 'unparsed_lines', 'allowed', 'denied'}
-    optional = {'digest', 'upstream_failed', 'peer_rejected', 'controller_policy_stop'}
+    optional = {'digest', 'upstream_failed', 'peer_rejected', 'controller_policy_stop', 'bytes_observed'}
     if (not isinstance(summary, Mapping) or not required <= summary.keys()
             or set(summary) - required - optional or summary['status'] != 'read'
             or summary['allowlist_digest'] != policy.digest

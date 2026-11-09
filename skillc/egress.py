@@ -251,11 +251,15 @@ def proxy_run_argv(
         argv += ["--label", f"{key}={value}"]
     document = allowlist_document(hosts) if policy_document is None else policy_document
     allow = json.dumps(document, sort_keys=True)
+    source = PROXY_SOURCE
+    if document.get('policy') == 'nhl-declaration-egress':
+        from . import egress_bytes
+        source = egress_bytes.proxy_source()
     return [
         *argv, "--label", f"{ROLE_LABEL_KEY}={PROXY_ROLE}",
         "--network", "bridge", "--user", container_user, "--init",
         "--memory", "256m", "--memory-swap", "256m", "--pids-limit", "64", "--cpus", "0.5",
-        "--", image, "python3", "-c", PROXY_SOURCE, str(PROXY_PORT), PROXY_LOG_PATH, allow,
+        "--", image, "python3", "-c", source, str(PROXY_PORT), PROXY_LOG_PATH, allow,
         document_digest(document), subnet,
     ]
 

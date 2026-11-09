@@ -49,6 +49,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -58,6 +59,8 @@ from egress_diagnostics import describe_observation
 
 from skillc import docker_backend as d
 from skillc import egress as eg
+from skillc import egress_bytes as eb
+from skillc import nhl_egress_policy as nhl
 
 LIVE_TEST_IMAGE = os.environ.get("SKILLC_LIVE_TEST_IMAGE", "python:3.12-slim")
 BREAK_MODE = os.environ.get("SKILLC_EGRESS_LIVE_BREAK", "none")
@@ -111,6 +114,57 @@ def _image_available(image: str) -> bool:
         return True
     pull = subprocess.run(["docker", "pull", image], capture_output=True, timeout=120, check=False)
     return pull.returncode == 0
+
+
+@pytest.mark.parametrize('handler', [True, False], ids=['signal-forwarded', 'missing-handler'])
+def test_nhl_byte_trailer_signal_reaches_python_under_init(handler: bool) -> None:
+    """#638: actual --init forwarding, with an absent-handler negative twin.
+
+    Proxy only, no client/model/credential and no external request. This file
+    already belongs to the scheduled runner's declared certification floor.
+    """
+    assert _image_available(LIVE_TEST_IMAGE), 'setup: live test image unavailable'
+    name = f'skillc-byte-signal-{os.getpid()}-{int(handler)}'
+    policy = nhl.Policy('synthetic-control')
+    argv = eg.proxy_run_argv(['docker'], image=LIVE_TEST_IMAGE, name=name,
+                             labels={d.OWNER_LABEL_KEY: d.OWNER_LABEL_VALUE,
+                                     d.ATTEMPT_LABEL_KEY: name}, container_user='0:0',
+                             subnet='127.0.0.0/8', policy_document=policy.document())
+    if not handler:
+        index = argv.index('-c') + 1
+        assert argv[index].count('signal.SIGUSR1') == 1
+        argv[index] = argv[index].replace('signal.SIGUSR1', 'signal.SIGUSR2')
+    started = subprocess.run(argv, capture_output=True, timeout=30, check=False)
+    try:
+        assert started.returncode == 0, 'setup: proxy failed to start'
+        with tempfile.TemporaryDirectory() as directory:
+            backend = d.DockerBackend(image=LIVE_TEST_IMAGE, base_dir=Path(directory))
+            backend._await_proxy_ready(name, dict(os.environ))
+        sent = subprocess.run(['docker', 'kill', '--signal', 'SIGUSR1', name],
+                              capture_output=True, timeout=5, check=False)
+        assert sent.returncode == 0, 'setup: signal delivery command failed'
+        raw = None
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            done = subprocess.run(['docker', 'exec', name, 'python3', '-c', eb.READ_SOURCE, eg.PROXY_LOG_PATH],
+                                  capture_output=True, timeout=max(0.01, deadline - time.monotonic()), check=False)
+            raw = done.stdout if done.returncode == 0 else None
+            if raw and json.loads(raw.splitlines()[-1]).get('event') == 'bytes-end':
+                break
+            if not handler and done.returncode != 0:
+                break
+            time.sleep(0.02)
+        observed = eb.summarize(raw, policy.digest)
+        assert observed['status'] == ('COMPLETE' if handler else 'UNKNOWN')
+        if handler:
+            assert observed['client_to_upstream'] == observed['upstream_to_client'] == 0
+        else:
+            state = subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', name],
+                                   capture_output=True, timeout=5, check=False)
+            assert state.returncode == 0 and state.stdout.strip() == b'false'
+    finally:
+        removed = subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=30, check=False)
+        assert removed.returncode == 0, 'cleanup: owned proxy removal failed'
 
 
 @pytest.fixture

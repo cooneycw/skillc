@@ -87,6 +87,7 @@ from . import (
     completion,
     demo,
     egress,
+    egress_bytes,
     gate_state,
     profile,
     trial,
@@ -2106,6 +2107,12 @@ def build_report(
             "runner_note": outcome.runner_note,
             **guard_entry(record, obs, declared_model),
         })
+        if nhl_policy is not None:
+            network = obs.get('egress')
+            value = (network.get('bytes_observed') if isinstance(network, dict)
+                     and network.get('status') == 'read'
+                     and network.get('allowlist_digest') == nhl_policy.digest else None)
+            entries[-1]['bytes_observed'] = egress_bytes.report(value)
         primary = entries[-1]["primary_endpoint"]
         entries[-1]["accounting"] = accounting_class(record, primary.get("status") if isinstance(primary, Mapping) else None)
         entries[-1]["disposition_reason"] = record.get("reason")  # #640: why a non-start or failure did not run

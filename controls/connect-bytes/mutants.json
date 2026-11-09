@@ -1,0 +1,26 @@
+[
+  {
+    "name": "always-zero",
+    "before": "sent = sum(c['client_to_upstream'] for c in connections.values())",
+    "after": "sent = 0",
+    "witness": "nonzero"
+  },
+  {
+    "name": "ignore-missing-trailer",
+    "before": "complete = False",
+    "after": "complete = True",
+    "witness": "no-trailer"
+  },
+  {
+    "name": "ignore-chain",
+    "before": "if _integer(entry.get('seq'), 1) != index or entry.get('prev') != previous:",
+    "after": "if False:",
+    "witness": "middle-change"
+  },
+  {
+    "name": "ignore-regression",
+    "before": "or sent < prior['client_to_upstream'] or received < prior['upstream_to_client']",
+    "after": "or False",
+    "witness": "regressed"
+  }
+]
