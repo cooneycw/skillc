@@ -26,6 +26,7 @@ import hashlib
 import json
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -157,6 +158,14 @@ def _warm_context(project: Path, context: Path) -> bytes:
         if not (project / name).is_dir():
             raise BuildError(f"the project has no {name}/")
         shutil.copytree(project / name, warm / name)
+    # docker cp preserves modes but defaults to root ownership. The smoke
+    # command runs as candidate, so make this private staged copy readable,
+    # with search/execute bits on directories and already executable files.
+    # Equivalent to chmod -R a+rX; never change the source project's modes.
+    for path in (warm, *warm.rglob("*")):
+        mode = stat.S_IMODE(path.stat().st_mode)
+        search = 0o111 if path.is_dir() or mode & 0o111 else 0
+        path.chmod(mode | 0o444 | search)
     return (project / "uv.lock").read_bytes()
 
 
