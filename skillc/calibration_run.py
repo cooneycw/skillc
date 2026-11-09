@@ -2011,6 +2011,7 @@ def _report_nhl_policy(experiment: trial.Experiment) -> nhl.Policy | None:
         return None
     binding = configs[0].get('nhl_egress')
     if (not isinstance(binding, dict) or set(binding) != {'declaration'}
+            or not isinstance(binding['declaration'], dict)
             or any(row.get('nhl_egress') != binding for row in configs)):
         raise CalibrationRefused('partial or mixed NHL declaration bindings')
     try:

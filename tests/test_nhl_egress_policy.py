@@ -232,6 +232,19 @@ def test_recovery_refuses_mixed_binding_changed_approval_or_forged_stop(
         cr.build_report(experiment, outcomes, declared_model='gpt-6-astra', declared_effort='high')
 
 
+@pytest.mark.parametrize('declaration', [None, 0, False, [], 'not-a-declaration'])
+def test_nested_stored_declaration_shape_is_refused_without_parser_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declaration: object,
+) -> None:
+    experiment = SimpleNamespace(root=tmp_path, attempts=lambda: iter([
+        ({'config': {'digest': 'a' * 64}}, {})]))
+    monkeypatch.setattr(trial.Experiment, 'open', lambda _root: experiment)
+    row = {'nhl_egress': {'declaration': declaration}}
+    monkeypatch.setattr(trial, '_read_object', lambda *_a: json.dumps(row).encode())
+    with pytest.raises(cr.CalibrationRefused):
+        cr.build_report(cast(trial.Experiment, experiment), [], declared_model='fixed', declared_effort='fixed')
+
+
 @pytest.mark.parametrize('control', json.loads((ROOT / 'controls/nhl-egress/mutants.json').read_text()),
                          ids=lambda row: row['name'])
 def test_committed_blind_policy_and_authority_mutants_lose(
