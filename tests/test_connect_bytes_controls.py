@@ -180,7 +180,8 @@ def test_final_capture_failures_are_unavailable_without_touching_destroy(
     assert clock[0] <= 3.01 and all('rm' not in argv for argv in calls)
 
 
-@pytest.mark.parametrize('raw', [None, False, 0, [], {}, 'not-bytes', b'x' * (eb.MAX_CAPTURE + 1)])
+@pytest.mark.parametrize('raw', [None, False, 0, [], {}, 'not-bytes', b'x' * (eb.MAX_CAPTURE + 1)],
+                         ids=['null', 'boolean', 'integer', 'array', 'object', 'text', 'oversized-bytes'])
 def test_bounded_backend_capture_refuses_bad_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: object,
 ) -> None:

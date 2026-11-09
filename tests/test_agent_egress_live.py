@@ -138,7 +138,8 @@ def test_nhl_byte_trailer_signal_reaches_python_under_init(handler: bool) -> Non
     try:
         assert started.returncode == 0, 'setup: proxy failed to start'
         with tempfile.TemporaryDirectory() as directory:
-            backend = d.DockerBackend(image=LIVE_TEST_IMAGE, base_dir=Path(directory))
+            backend = d.DockerBackend(image=LIVE_TEST_IMAGE, base_dir=Path(directory),
+                                      daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT)
             backend._await_proxy_ready(name, dict(os.environ))
         sent = subprocess.run(['docker', 'kill', '--signal', 'SIGUSR1', name],
                               capture_output=True, timeout=5, check=False)
