@@ -490,7 +490,7 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: path/nonce-shaped forgery, silently misdirect cleanup.
 _DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
                   "clutter-before", "clutter-after",
-                  "controller-turn", "transcript-retained", "gate-witness-retained",
+                  "controller-turn", "transcript-retained", "gate-witness-retained", "egress-bytes-retained",
                   "prompt-inputs", "prompt-input", "prompt-inputs-ended",
                   "completion-opt-in", "completion-qualified", "owned-attempt", "owned-attempt-cleanup", "launch-suppressed")
 

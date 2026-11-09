@@ -1,0 +1,516 @@
+[
+  {
+    "path": [
+      "root"
+    ],
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      "bad",
+      []
+    ]
+  },
+  {
+    "path": [
+      "start",
+      "byte_telemetry"
+    ],
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      "bad",
+      []
+    ]
+  },
+  {
+    "path": [
+      "start",
+      "byte_telemetry",
+      "version"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      0,
+      2
+    ]
+  },
+  {
+    "path": [
+      "start",
+      "byte_telemetry",
+      "generation"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "start",
+      "digest"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "connection"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      9223372036854775808
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "sequence"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      9223372036854775808
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "client_to_upstream"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      9223372036854775808
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "upstream_to_client"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      9223372036854775808
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "generation"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "state"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "connection",
+      "target"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      ""
+    ]
+  },
+  {
+    "path": [
+      "chain",
+      "seq"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      -1
+    ]
+  },
+  {
+    "path": [
+      "chain",
+      "prev"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "final"
+    ],
+    "invalid": [
+      null,
+      false,
+      0,
+      1,
+      "true",
+      [],
+      {}
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "records"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      0,
+      9223372036854775808
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "generation"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "last_hash"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals"
+    ],
+    "invalid": [
+      null,
+      false,
+      0,
+      "bad",
+      {},
+      [],
+      [
+        false
+      ],
+      [
+        {}
+      ]
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "connection"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {}
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "sequence"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {}
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "client_to_upstream"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {}
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "upstream_to_client"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {}
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "event"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "generation"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "target"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "end",
+      "finals",
+      0,
+      "state"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "raw"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      "bad",
+      [],
+      {}
+    ]
+  },
+  {
+    "path": [
+      "expected_digest"
+    ],
+    "invalid": [
+      null,
+      false,
+      true,
+      0,
+      1.5,
+      [],
+      {},
+      "",
+      "bad"
+    ]
+  },
+  {
+    "path": [
+      "start",
+      "allowlist"
+    ],
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      "bad",
+      [],
+      {}
+    ]
+  }
+]

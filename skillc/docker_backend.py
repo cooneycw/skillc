@@ -1327,12 +1327,67 @@ class DockerBackend:
         assert isinstance(handle, _Handle)
         if handle.egress_proxy is None:
             return None
+        from . import nhl_egress_policy as nhl
+        if isinstance(self.nhl_egress_permit, nhl.Permit):
+            return self._nhl_log(handle, self.daemon_timeout)
         try:
             done = subprocess.run(eg.proxy_log_argv(self.docker_bin, handle.egress_proxy), capture_output=True,
                                   env=handle.env, check=False, timeout=self.daemon_timeout)
         except (OSError, subprocess.TimeoutExpired):
             return None
         return done.stdout if done.returncode == 0 else None
+
+    def _nhl_log(self, handle: _Handle, timeout: float) -> bytes | None:
+        from . import egress_bytes
+        try:
+            done = subprocess.run(
+                [*self.docker_bin, 'exec', str(handle.egress_proxy), 'python3', '-c',
+                 egress_bytes.READ_SOURCE, eg.PROXY_LOG_PATH], capture_output=True,
+                env=handle.env, check=False, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return (done.stdout if done.returncode == 0 and isinstance(done.stdout, bytes)
+                and len(done.stdout) <= egress_bytes.MAX_CAPTURE else None)
+
+    def finalize_egress_log(self, handle: object) -> bytes | None:
+        """Strict-only quiesce at pre-teardown; a three-second total budget.
+
+        Neither missing evidence nor a failed signal skips lifecycle teardown.
+        The proxy remains alive solely for bounded capture until destroy().
+        """
+        from . import nhl_egress_policy as nhl
+        if not isinstance(self.nhl_egress_permit, nhl.Permit):
+            return self.egress_log(handle)
+        if not isinstance(handle, _Handle) or handle.egress_proxy is None:
+            return None
+        try:
+            nhl.require_backend(self, handle.attempt_id)
+        except nhl.PolicyRefused:
+            return None
+        if not isinstance(handle.name, str) or handle.egress_proxy != eg.proxy_name(handle.name):
+            return None
+        deadline = time.monotonic() + 3
+        try:
+            done = subprocess.run(
+                [*self.docker_bin, 'kill', '--signal', 'SIGUSR1', handle.egress_proxy],
+                capture_output=True, env=handle.env, check=False,
+                timeout=min(self.daemon_timeout, 3))
+            if done.returncode != 0:
+                return None
+            last = None
+            while (remaining := deadline - time.monotonic()) > 0:
+                last = self._nhl_log(handle, min(self.daemon_timeout, remaining))
+                if last:
+                    try:
+                        tail = json.loads(last.splitlines()[-1])
+                    except (ValueError, IndexError, RecursionError):
+                        return last
+                    if isinstance(tail, dict) and tail.get('event') == 'bytes-end':
+                        return last
+                time.sleep(max(0, min(0.05, deadline - time.monotonic())))
+            return last  # No trailer remains UNKNOWN; retain available checkpoints.
+        except (OSError, subprocess.TimeoutExpired):
+            return None
 
     def _run_awaiting_answer(
         self, argv: list[str], env: Mapping[str, str],

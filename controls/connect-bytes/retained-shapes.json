@@ -1,0 +1,92 @@
+[
+  {
+    "field": "event",
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      [],
+      {},
+      ""
+    ]
+  },
+  {
+    "field": "at",
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      [],
+      {},
+      ""
+    ]
+  },
+  {
+    "field": "attempt",
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      [],
+      {},
+      ""
+    ]
+  },
+  {
+    "field": "policy_digest",
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      [],
+      {},
+      ""
+    ]
+  },
+  {
+    "field": "digest",
+    "invalid": [
+      null,
+      false,
+      0,
+      1.5,
+      [],
+      {},
+      ""
+    ]
+  },
+  {
+    "field": "version",
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      0,
+      9223372036854775808
+    ]
+  },
+  {
+    "field": "size",
+    "invalid": [
+      null,
+      false,
+      true,
+      -1,
+      1.5,
+      "bad",
+      [],
+      {},
+      0,
+      9223372036854775808
+    ]
+  }
+]

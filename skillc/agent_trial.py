@@ -3030,11 +3030,20 @@ def run_one_attempt(
         def observe_before_teardown(observed_backend: ExecutionBackend, handle: object) -> Mapping[str, object]:
             from . import nhl_egress_policy as nhl
             summary: dict[str, object]
+            byte_retention_error = None
             permit = getattr(observed_backend, 'nhl_egress_permit', None)
-            raw = observed_backend.egress_log(handle) if isinstance(observed_backend, DockerBackend) else None
+            raw = (observed_backend.finalize_egress_log(handle)
+                   if isinstance(observed_backend, DockerBackend) and isinstance(permit, nhl.Permit)
+                   else observed_backend.egress_log(handle) if isinstance(observed_backend, DockerBackend) else None)
             if raw is None or (isinstance(permit, nhl.Permit) and not isinstance(raw, bytes)):
                 summary = {"status": "unread", "reason": "the egress proxy log could not be read before teardown"}
             else:
+                if isinstance(permit, nhl.Permit):
+                    from . import egress_bytes
+                    try:
+                        egress_bytes.retain(experiment, attempt_id, raw, permit.policy.digest)
+                    except Exception as exc:  # noqa: BLE001 - storage refusal must never skip lifecycle teardown
+                        byte_retention_error = f'raw byte retention failed ({type(exc).__name__})'
                 log_path = base / f"{attempt_id}.{eg.PROXY_LOG_STREAM}.jsonl"
                 log_path.write_bytes(raw)
                 digest = trial.sha256_bytes(raw)
@@ -3043,9 +3052,13 @@ def run_one_attempt(
                     try:
                         parsed = nhl.summarize_log(raw)
                     except nhl.PolicyRefused:
-                        parsed = {'unparsed_lines': 1}
+                        from . import egress_bytes
+                        parsed = {'unparsed_lines': 1,
+                                  'bytes_observed': egress_bytes.summarize(raw, permit.policy.digest)}
                 else:
                     parsed = eg.summarize_log(raw)
+                if byte_retention_error is not None:
+                    parsed['bytes_observed'] = egress_bytes.unknown(byte_retention_error)
                 summary = {"status": "read", "digest": digest, **parsed}
             if isinstance(permit, nhl.Permit) and permit.stopped:
                 summary['controller_policy_stop'] = True
