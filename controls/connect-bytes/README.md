@@ -21,7 +21,7 @@ not missing new helpers/imports. Partial malformed JSON already produced the
 controlled unavailable refusal; legacy summary and default report shape also
 already pass. These are preservation controls, not new safety-failure claims.
 
-Local byte/control files: 443 passing controls. Prior 377 policy controls remain
+Local byte/control files: 450 passing controls. Prior 377 policy controls remain
 green. Real-Docker forwarding and absent-handler controls are in the existing
 certification-floor file, skipped here because Docker is absent; the scheduled
 merge-commit run is owed before forwarding can be called physically verified.
@@ -42,3 +42,13 @@ reader/writer identity types and write-once retention. Recovery selects the
 scheduled attempt's unique journal binding, rechecks bounded no-follow object
 bytes against size and digest, and reruns chain/trailer completeness. Edited
 outcome summaries are ignored. Absent or unverifiable capture stays UNKNOWN.
+
+
+The loopback fixture waits for the parsed matching start record and a live
+process under a fixed five-second deadline. File creation is not readiness:
+the proxy opens its log before binding the listener. Committed controls reject
+empty/partial/wrong-root/wrong-digest logs and a dead process; a file-exists
+mutant loses the positive transition witness. This test-only correction follows
+a real ConnectionRefusedError during startup on head 0d6deaa, before any byte
+measurement assertions. Three isolated repeats passed, exposing the race rather
+than a product byte-counter failure; the failed full gate remains a failure.

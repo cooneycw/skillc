@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,63 @@ from test_egress import _free_port
 
 from skillc import egress as eg
 from skillc import nhl_egress_policy as nhl
+
+
+def await_proxy_start(
+    log: Path, digest: str, alive: Callable[[], bool], *,
+    clock: Callable[[], float] = time.monotonic, pause: Callable[[float], None] = time.sleep,
+) -> None:
+    """The proxy's start record means bound; mere log creation does not."""
+    deadline = clock() + 5
+    while clock() < deadline:
+        assert alive(), 'proxy exited before recording its listening start'
+        try:
+            with log.open('rb') as stream:
+                entry = json.loads(stream.readline(65536))
+        except (OSError, ValueError):
+            entry = None
+        if isinstance(entry, dict) and entry.get('event') == 'start' and entry.get('digest') == digest:
+            assert alive(), 'proxy exited after recording its listening start'
+            return
+        pause(min(0.01, max(0, deadline - clock())))
+    raise AssertionError('proxy did not record its listening start within 5 seconds')
+
+
+@pytest.mark.parametrize('kind', ['empty', 'partial', 'wrong-root', 'wrong-digest', 'dead'])
+def test_start_guard_refuses_created_log_without_live_bound_start(tmp_path: Path, kind: str) -> None:
+    log = tmp_path / 'proxy.log'
+    log.write_bytes({'empty': b'', 'partial': b'{', 'wrong-root': b'null\n',
+                     'wrong-digest': b'{"event":"start","digest":"wrong"}\n',
+                     'dead': b'{"event":"start","digest":"expected"}\n'}[kind])
+    clock = [0.0]
+    def pause(seconds: float) -> None:
+        clock[0] += seconds
+    with pytest.raises(AssertionError, match='proxy (exited|did not record)'):
+        await_proxy_start(log, 'expected', lambda: kind != 'dead', clock=lambda: clock[0], pause=pause)
+    assert clock[0] <= 5
+
+
+def test_start_guard_waits_past_empty_log_until_live_start(tmp_path: Path) -> None:
+    log = tmp_path / 'proxy.log'
+    log.touch()
+    clock = [0.0]
+    pauses = []
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        clock[0] += seconds
+        log.write_text('{"event":"start","digest":"expected"}\n')
+    await_proxy_start(log, 'expected', lambda: True, clock=lambda: clock[0], pause=pause)
+    assert pauses == [0.01]  # A blind file-exists guard would return before this.
+
+
+def test_start_guard_control_defeats_the_old_file_exists_mutant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def blind(log: Path, *_args: object, **_kwargs: object) -> None:
+        assert log.exists()
+    monkeypatch.setitem(globals(), 'await_proxy_start', blind)
+    with pytest.raises(AssertionError):
+        test_start_guard_waits_past_empty_log_until_live_start(tmp_path)
 
 
 @pytest.mark.parametrize('chunks', [[], [b'\x16\x03\x03one', b'two\x00'], [b'a' * 65537]])
@@ -58,9 +116,7 @@ def test_shipped_proxy_counts_chopped_streams_and_quiesces_once(tmp_path: Path, 
     proc = subprocess.Popen([sys.executable, '-c', source, str(port), str(log), json.dumps(document),
                              eg.document_digest(document), '127.0.0.0/8'])
     try:
-        deadline = time.monotonic() + 5
-        while not log.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
+        await_proxy_start(log, eg.document_digest(document), lambda: proc.poll() is None)
         with socket.create_connection(('127.0.0.1', port), timeout=5) as client:
             client.sendall(f'CONNECT 127.0.0.1:{up_port} HTTP/1.1\r\n\r\n'.encode())
             assert client.recv(200).startswith(b'HTTP/1.1 200')
