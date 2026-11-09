@@ -1,0 +1,1 @@
+- Exclude credential-steward state, holder links, managed handles and judge key providers from repr/str and traceback-local diagnostics without changing credential delivery or use.

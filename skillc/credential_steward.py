@@ -167,7 +167,7 @@ class StewardFailed(Exception):
     """The steward could not be placed, started, re-armed or restored."""
 
 
-@dataclass
+@dataclass(repr=False)
 class CredentialSteward:
     """Drives one attempt's steward and holds its record. Each step is
     confirmed by the steward's OWN event over the trigger socket, never by a
@@ -182,7 +182,10 @@ class CredentialSteward:
     failure: str | None = None
     arms_requested: int = 0
     stopped: bool = False
-    final_vault: bytes | None = None
+    final_vault: bytes | None = field(default=None, repr=False)
+
+    def __repr__(self) -> str:
+        return '<CredentialSteward redacted>'
 
     def _await(self, event: str, after: int) -> bool:
         deadline = self.clock() + self.wait_s

@@ -144,7 +144,7 @@ class FixtureSession:
     turn_records: list[dict[str, Any]] | None = None
     #: #518: the credential steward's record and driver.
     steward: cs.CredentialStewardSession = field(init=False)
-    steward_driver: cs.CredentialSteward | None = None
+    steward_driver: cs.CredentialSteward | None = field(default=None, repr=False)
     _steward_record: dict[str, Any] | None = None
     _finishing: bool = False
     finalization: dict[str, object] = field(default_factory=lambda: {

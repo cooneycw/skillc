@@ -168,8 +168,10 @@ def test_full_lifecycle_through_the_stub(stub: _Stub, tmp_path: Path) -> None:
 def test_a_neutral_identity_produces_no_leak_finding(stub: _Stub) -> None:
     backend = stub.backend()
     handle = backend.prepare("a-neutral")
+    assert isinstance(handle, mb._Handle)
     readiness = backend.install(handle, {})
-    text = f"{handle}\n{readiness['image_digest']}\n"
+    # Validate the explicit wire identity, independent of diagnostic redaction.
+    text = f"{handle.token}\n{readiness['image_digest']}\n"
     findings = list(leak.scan_text(text, leak.load_denylist(None), host_paths=leak.default_host_paths()))
     assert findings == []
 
@@ -183,12 +185,34 @@ def test_a_leaking_platform_identity_is_caught_by_leak_check(stub: _Stub) -> Non
     stub.set_control(leak_value=PLANTED_IDENTIFIER)
     backend = stub.backend()
     handle = backend.prepare("a-leaking")
+    assert isinstance(handle, mb._Handle)
     readiness = backend.install(handle, {})
-    assert PLANTED_IDENTIFIER in str(handle)  # sanity: the plant landed
-    text = f"{handle}\n{readiness['image_digest']}\n"
+    assert PLANTED_IDENTIFIER in handle.token  # sanity: the wire plant landed
+    assert PLANTED_IDENTIFIER not in str(handle)  # diagnostics are separate
+    text = f"{handle.token}\n{readiness['image_digest']}\n"
     findings = list(leak.scan_text(text, leak.load_denylist(None), host_paths=leak.default_host_paths()))
     kinds = {kind for _lineno, kind, _detail in findings}
     assert "private-ip" in kinds
+
+
+def _require_neutral_wire_token(handle: object) -> None:
+    """The actual wire value, never the redacted diagnostic representation."""
+    assert isinstance(handle, mb._Handle)
+    findings = list(leak.scan_text(handle.token, leak.load_denylist(None), host_paths=leak.default_host_paths()))
+    if findings:
+        raise AssertionError('wire identity is not neutral')
+
+
+@pytest.mark.parametrize('leaking', [False, True], ids=['neutral-wire', 'planted-wire'])
+def test_wire_token_neutrality_control_is_load_bearing(stub: _Stub, leaking: bool) -> None:
+    if leaking:
+        stub.set_control(leak_value=PLANTED_IDENTIFIER)
+    handle = stub.backend().prepare('synthetic-wire-control')
+    if leaking:
+        with pytest.raises(AssertionError, match='wire identity is not neutral'):
+            _require_neutral_wire_token(handle)
+    else:
+        _require_neutral_wire_token(handle)
 
 
 # --------------------------------------------------------------------------
