@@ -1,0 +1,42 @@
+{
+  "purpose": "Synthetic target-bound inspect replies, not a real-daemon qualification.",
+  "cases": [
+    {"name":"container-legacy", "kind":"container", "code":1, "format_out":"", "plain_out":"[]\n", "stderr":"Error: No such object: {target}\n", "formatted":"ABSENT", "plain":"ABSENT"},
+    {"name":"container-docker29", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: {target}", "formatted":"ABSENT", "plain":"ABSENT"},
+    {"name":"container-empty-envelope", "kind":"container", "code":1, "format_out":"", "plain_out":"", "stderr":"Error: No such object: {target}", "formatted":"ABSENT", "plain":"ABSENT"},
+    {"name":"network-legacy-synthetic", "kind":"network", "code":1, "plain_out":"[]\n", "stderr":"Error response from daemon: network {target} not found\n", "plain":"ABSENT"},
+    {"name":"network-lowercase-synthetic", "kind":"network", "code":1, "plain_out":"[]", "stderr":"error response from daemon: network {target} not found", "plain":"ABSENT"},
+    {"name":"network-empty-envelope-synthetic", "kind":"network", "code":1, "plain_out":"", "stderr":"Error response from daemon: network {target} not found", "plain":"ABSENT"},
+    {"name":"present-running", "kind":"container", "code":0, "format_out":"running\n", "plain_out":"[{\"Id\":\"present\"}]", "stderr":"", "formatted":"PRESENT", "plain":"PRESENT"},
+    {"name":"present-exited", "kind":"container", "code":0, "format_out":"exited\n", "plain_out":"[{\"Id\":\"present\"}]", "stderr":"", "formatted":"PRESENT", "plain":"PRESENT"},
+    {"name":"connect-no-such-file", "kind":"container", "code":1, "format_out":"", "plain_out":"", "stderr":"error during connect: no such file or directory", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"connect-context-not-found", "kind":"container", "code":1, "format_out":"", "plain_out":"", "stderr":"error during connect: context not found", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"network-context-not-found", "kind":"network", "code":1, "plain_out":"", "stderr":"error during connect: context not found", "plain":"UNKNOWN"},
+    {"name":"network-connect-no-such-file", "kind":"network", "code":1, "plain_out":"[]", "stderr":"error during connect: no such file or directory", "plain":"UNKNOWN"},
+    {"name":"missing-certificate", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"unable to read certificate: no such file or directory", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"missing-context", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"context {target} not found", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"tls-failure", "kind":"container", "code":1, "format_out":"", "plain_out":"", "stderr":"TLS handshake failed: certificate not found", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"permission-denied", "kind":"container", "code":1, "format_out":"", "plain_out":"", "stderr":"Error: permission denied", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"daemon-unreachable", "kind":"container", "code":1, "format_out":"", "plain_out":"", "stderr":"Cannot connect to the Docker daemon", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"wrong-target", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: other-target", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"target-prefix", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: CaseSensitive", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"target-suffix", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: {target}-other", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"wrong-target-case", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: casesensitivetarget", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"wrong-resource-kind", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"Error response from daemon: network {target} not found", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"network-wrong-kind", "kind":"network", "code":1, "plain_out":"[]", "stderr":"error: no such object: {target}", "plain":"UNKNOWN"},
+    {"name":"network-wrong-target-case", "kind":"network", "code":1, "plain_out":"[]", "stderr":"error response from daemon: network casesensitivetarget not found", "plain":"UNKNOWN"},
+    {"name":"embedded-message", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"connection error wrapping error: no such object: {target}", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"multiple-diagnostics", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: {target}\nCannot connect to daemon", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"quoted-target", "kind":"container", "code":1, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: '{target}'", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"conflicting-stdout", "kind":"container", "code":1, "format_out":"running\n", "plain_out":"[{\"Id\":\"present\"}]", "stderr":"error: no such object: {target}", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"malformed-stdout", "kind":"container", "code":1, "format_out":"truncated", "plain_out":"truncated", "stderr":"error: no such object: {target}", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"array-on-formatted-query", "kind":"container", "code":1, "format_out":"[]\n", "plain_out":"[]\n", "stderr":"error: no such object: {target}", "formatted":"UNKNOWN", "plain":"ABSENT"},
+    {"name":"signal-ended", "kind":"container", "code":-9, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: {target}", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"unsupported-error-exit", "kind":"container", "code":2, "format_out":"", "plain_out":"[]", "stderr":"error: no such object: {target}", "formatted":"UNKNOWN", "plain":"UNKNOWN"},
+    {"name":"zero-is-not-absence", "kind":"container", "code":0, "format_out":"running\n", "plain_out":"[]", "stderr":"error: no such object: {target}", "formatted":"PRESENT", "plain":"PRESENT"}
+  ],
+  "qualification_controls": [
+    {"predicate":"old-broad-substrings", "witness":"connect-no-such-file", "expected":"REFUSED"},
+    {"predicate":"always-absent", "witness":"connect-no-such-file", "expected":"REFUSED"}
+  ]
+}
