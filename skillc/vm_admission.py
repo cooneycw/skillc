@@ -130,7 +130,21 @@ class OperatorCollector:
         except Exception:  # noqa: BLE001 - injected adapter failure must become unavailable evidence
             # An adapter error can contain a private path, identity or payload.
             raise AdmissionRefused('operator_admission: operator observation unavailable') from None
-        raw = _object(response, BINDING_KEYS | {'observed_at', 'payload'}, 'incomplete operator observation')
+        if request.get('check') in ('credential-login', 'credential-logout'):
+            from . import vm_credential_window as custody
+            try:
+                raw = _object(response, BINDING_KEYS | {'observed_at', 'payload'}, 'incomplete operator observation')
+                _require(all(raw[k] == request[k] for k in BINDING_KEYS), 'login receipt binding differs')
+                raw = {**{key: request[key] for key in BINDING_KEYS},
+                       'observed_at': _number(raw['observed_at']),
+                       'payload': custody.operator_payload(request['check'], raw['payload'])}
+            except (custody.CustodyRefused, AdmissionRefused):
+                # Do not serialize an invalid login payload into a Receipt.
+                # Clear this frame too: diagnostic tracebacks may include locals.
+                response, raw = None, {}
+                raise AdmissionRefused('operator_admission: invalid login/logout receipt') from None
+        else:
+            raw = _object(response, BINDING_KEYS | {'observed_at', 'payload'}, 'incomplete operator observation')
         sequence = len(self._issued) + 1
         data = _canonical({**raw, 'version': 1, 'check': request['check'],
                            'authority': self.authority, 'sequence': sequence})
@@ -189,6 +203,16 @@ class WindowSession:
                              'receipts': {}, 'events': ['PLANNED']} for wave in raw['planned_waves']}
         self._deadlines: dict[str, CompletionDeadline] = {}
         self._last_sequence = 0
+        self._credential_policy: dict[str, Any] | None = None
+        self._credential_inputs: dict[str, Any] = {}
+        self._credential_held = False
+        self._credential_logout: set[str] = set()
+        if 'credential_window' in self._declaration.data:
+            from . import vm_credential_window as custody
+            self._credential_policy = custody.validate_plan(self._declaration.data)
+
+    def _checks(self) -> tuple[str, ...]:
+        return (*CHECKS, 'credential-login') if self._credential_policy is not None else CHECKS
 
     def _row(self, wave: str) -> dict[str, Any]:
         _require(wave in self._waves, 'unplanned wave')
@@ -218,7 +242,7 @@ class WindowSession:
         row = self._row(wave)
         try:
             _require(row['state'] in ('PLANNED', 'COLLECTING'), 'wave collection is closed')
-            _require(check in CHECKS, 'unknown host check')
+            _require(check in self._checks(), 'unknown host check')
             self._deadline(wave)
             receipt = self._collector.collect({**self._binding(wave), 'check': check})
             self._deadline(wave)
@@ -239,7 +263,7 @@ class WindowSession:
             raw = json.loads(receipt.data)
             _require(receipt.sequence > self._last_sequence, 'receipt sequence replay')
             _require(all(raw[k] == v for k, v in self._binding(wave).items()), 'receipt binding differs')
-            _require(raw['check'] in CHECKS and raw['check'] not in row['receipts'], 'duplicate or unknown check')
+            _require(raw['check'] in self._checks() and raw['check'] not in row['receipts'], 'duplicate or unknown check')
             self._deadline(wave)
             row['receipts'][raw['check']] = receipt
             row['state'], row['reason'] = 'COLLECTING', 'host-checks-incomplete'
@@ -282,6 +306,15 @@ class WindowSession:
             _require(p['complete'] is True and p['timer_state'] == p['service_state'] == 'inactive'
                      and p['service_substate'] == 'dead' and _names(p['jobs']) == [] and _names(p['processes']) == [],
                      'runner not drained')
+        elif check == 'credential-login':
+            from . import vm_credential_window as custody
+            try:
+                login = custody.operator_payload(check, payload)['login_at']
+            except custody.CustodyRefused:
+                raise AdmissionRefused('operator_admission: invalid login receipt') from None
+            start, end = (datetime.fromisoformat(self._vm['window'][key]).timestamp()
+                          for key in ('starts_at', 'ends_at'))
+            _require(start <= login < end and login <= now, 'login outside current window or future')
 
     @_serialized
     def require_ready(self, declaration: CalibrationDeclaration, observed: vm_identity.Observation | None,
@@ -303,7 +336,10 @@ class WindowSession:
                 raise AdmissionRefused('operator_admission: wall clock unavailable') from None
             start, end = (datetime.fromisoformat(self._vm['window'][k]).timestamp() for k in ('starts_at', 'ends_at'))
             _require(start <= now < end, 'outside declared window')
-            _require(set(row['receipts']) == set(CHECKS), 'host observation absent or incomplete')
+            if self._credential_policy is not None:
+                _require(not self._credential_held and 'credential-login' in row['receipts'],
+                         'credential login absent or window held')
+            _require(set(row['receipts']) == set(self._checks()), 'host observation absent or incomplete')
             for check, receipt in row['receipts'].items():
                 _require(self._collector.owns(receipt), 'receipt provenance lost')
                 raw = json.loads(receipt.data)
@@ -335,9 +371,85 @@ class WindowSession:
     def request_dispatch(self, wave: str, root: Path) -> None:
         """Validate again at dispatch; no work is executed by this transition."""
         self.admit(wave, root)
+        if self._credential_policy is not None:
+            self.hold_credentials()
+            self._nonstart(wave, 'credential-contracts-unavailable')
+            raise AdmissionRefused('operator_admission: credential window contracts unavailable; runner held')
         row = self._row(wave)
         row['state'] = 'DISPATCHED'
         row['events'].append('DISPATCHED')
+
+    @_serialized
+    def credential_input(self, wave: str, root: Path) -> object:
+        """Metadata-only input; this does not authorize dispatch or secret access."""
+        from . import vm_credential_window as custody
+        _require(self._credential_policy is not None, 'credential window not declared')
+        self.admit(wave, root)
+        assert self._credential_policy is not None
+        roles = next(tuple(row['roles']) for row in self._credential_policy['waves'] if row['wave_id'] == wave)
+        if wave not in self._credential_inputs:
+            self._credential_inputs[wave] = custody.WindowCredentialInput(
+                self, wave, self._row(wave)['receipts']['credential-login'], roles)
+        return self._credential_inputs[wave]
+
+    @_serialized
+    def require_credential_input(self, value: object) -> None:
+        from . import vm_credential_window as custody
+        _require(isinstance(value, custody.WindowCredentialInput)
+                 and value._issuer is self and self._credential_inputs.get(value._wave) is value,
+                 'credential input provenance unavailable')
+        assert isinstance(value, custody.WindowCredentialInput)
+        _require(self._row(value._wave)['receipts'].get('credential-login') is value._receipt,
+                 'credential login binding changed')
+        try:
+            self.require_ready(self._declaration, self._observation, value._wave)
+        except AdmissionRefused:
+            self._credential_held = True
+            raise
+
+    @_serialized
+    def hold_credentials(self) -> None:
+        self._credential_held = True
+
+    def credential_declaration(self) -> CalibrationDeclaration:
+        return copy.deepcopy(self._declaration)
+
+    @_serialized
+    def collect_credential_logout(self, value: object) -> Receipt:
+        from . import vm_credential_window as custody
+        _require(isinstance(value, custody.WindowCredentialInput)
+                 and value._issuer is self and self._credential_inputs.get(value._wave) is value,
+                 'credential input provenance unavailable')
+        assert isinstance(value, custody.WindowCredentialInput)
+        self._credential_held = True
+        return self._collector.collect({**self._binding(value._wave), 'check': custody.LOGOUT})
+
+    @_serialized
+    def accept_credential_logout(self, value: object, receipt: object) -> None:
+        from . import vm_credential_window as custody
+        _require(isinstance(value, custody.WindowCredentialInput)
+                 and value._issuer is self and self._credential_inputs.get(value._wave) is value,
+                 'credential input provenance unavailable')
+        assert isinstance(value, custody.WindowCredentialInput)
+        self._credential_held = True
+        _require(self._collector.owns(receipt), 'logout receipt provenance unavailable')
+        assert isinstance(receipt, Receipt)
+        raw = json.loads(receipt.data)
+        _require(raw['check'] == custody.LOGOUT and value._wave not in self._credential_logout
+                 and receipt.sequence > self._last_sequence
+                 and all(raw[key] == expected for key, expected in self._binding(value._wave).items()),
+                 'logout receipt binding or sequence differs')
+        try:
+            logout = custody.operator_payload(custody.LOGOUT, raw['payload'])['logout_at']
+        except custody.CustodyRefused:
+            raise AdmissionRefused('operator_admission: invalid logout receipt') from None
+        login = json.loads(value._receipt.data)['payload']['login_at']
+        now = _number(self._wall_clock())
+        observed = _number(raw['observed_at'])
+        _require(login <= logout <= observed <= now
+                 and now - observed <= self._policy['max_receipt_age_seconds'], 'logout time unavailable')
+        self._credential_logout.add(value._wave)
+        self._last_sequence = receipt.sequence
 
     @_serialized
     def close(self, wave: str) -> None:

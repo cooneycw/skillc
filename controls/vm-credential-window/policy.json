@@ -1,0 +1,11 @@
+{
+  "credential_window": {
+    "version": 1,
+    "client": "codex",
+    "account_class": "owner-subscription",
+    "source": "owner-interactive-login",
+    "storage": {"kind": "tmpfs", "directory_mode": 448, "file_mode": 384,
+                "persistence": "prevented"},
+    "stop_on_refresh": true
+  }
+}

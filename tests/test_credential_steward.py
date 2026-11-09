@@ -201,3 +201,16 @@ def test_the_steward_watches_the_backends_own_codex_home() -> None:
     from skillc import docker_backend as d
     assert cs.HOME_CODEX == f"{d.CONTAINER_HOME}/.codex"
     assert cs.STEWARD_SOURCE.is_file()
+
+
+def test_vault_bytes_cannot_enter_driver_repr() -> None:
+    import secrets
+
+    from test_remnant_scan import no_marker
+
+    from skillc.remnant_scan import References
+
+    refs = References((b'SYNTHETIC_ONLY_' + secrets.token_hex(20).encode(),))
+    driver = cs.CredentialSteward(cs.CredentialStewardSession('synthetic-attempt'), cs.HOME_CODEX)
+    driver.final_vault = refs._values[0]
+    no_marker(repr(driver).encode(), refs)
