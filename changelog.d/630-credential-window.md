@@ -1,0 +1,1 @@
+- Require minimal bound operator login receipts for declared credential windows and add redacted per-role steward/cleanup orchestration. Real-window dispatch, export and restart remain held behind unapproved custody contracts; no credential resolver or transfer path is added.

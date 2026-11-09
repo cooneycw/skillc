@@ -1,0 +1,9 @@
+{
+  "steward_faults": ["none", "prepare", "arm", "resume", "refresh", "stop", "cleanup", "freeze", "writers", "logout", "remove", "scan"],
+  "qualification_controls": [
+    {"name": "allow-dispatch", "expected": "REFUSED"},
+    {"name": "leaking-repr", "expected": "REFUSED"},
+    {"name": "always-release", "expected": "REFUSED"}
+  ],
+  "unapproved_contracts": ["reference-retention-contract-unavailable", "removed-root-absence-contract-unavailable"]
+}
