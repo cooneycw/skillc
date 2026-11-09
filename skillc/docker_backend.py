@@ -905,6 +905,27 @@ def _unconfirmed_cleanup_note(reason: str, attempt_id: str) -> str:
     )
 
 
+def _missing_inspect_reply(kind: str, name: str, code: int, out: str, err: str,
+                           *, formatted: bool) -> bool:
+    """A whole target-specific absence reply, never a generic CLI error.
+
+    Docker's error status alone cannot distinguish absence from daemon/config
+    failures. Fixed diagnostic words changed case in Docker 29; target names
+    remain case sensitive. Unformatted inspect may print an empty array.
+    Unsupported wording stays UNKNOWN at the caller, pending qualification.
+    """
+    if (code != 1 or not name or any(c in name for c in '\r\n\0')
+            or out.strip() not in (('',) if formatted else ('', '[]'))):
+        return False
+    if kind == 'container':
+        pattern = r'(?i:Error: No such object: )' + re.escape(name)
+    elif kind == 'network':
+        pattern = r'(?i:Error response from daemon: network )' + re.escape(name) + r'(?i: not found)'
+    else:
+        return False
+    return re.fullmatch(pattern, err.strip()) is not None
+
+
 @dataclass(frozen=True)
 class DockerBackend:
     """One `ExecutionBackend` per attempt lifecycle. `image` should be pinned
@@ -3177,7 +3198,7 @@ class DockerBackend:
         """Returns `(reachable, absent, status)`.
 
         - `reachable=False` (daemon unreachable, a timeout, or ANY docker CLI
-          error this method cannot positively identify as "no such object")
+          error this method cannot identify as a complete target-specific absence reply)
           means `confirm_stopped()`/`confirm_absent()` must answer
           `Confirmation.UNKNOWN` - never a guess. `absent`/`status` are
           meaningless in this case.
@@ -3193,7 +3214,7 @@ class DockerBackend:
         specific text for. Treating every non-zero exit as "gone" (the
         pre-fix code's actual bug, not merely a hardening gap) would let a
         merely-unreachable daemon read as a *confirmed* absence - so only an
-        explicit "no such" message is trusted as absence; every OTHER
+        whole target-specific absence reply is trusted; every OTHER
         failure, unrecognized or not, is UNKNOWN. A successful call with
         empty stdout is likewise never trusted as a status - an existing
         container's inspect does not do that in practice, so empty output is
@@ -3207,7 +3228,8 @@ class DockerBackend:
         except (OSError, subprocess.TimeoutExpired):
             return False, False, None
         if proc.returncode != 0:
-            if "no such" in proc.stderr.lower():
+            if _missing_inspect_reply('container', handle.name, proc.returncode, proc.stdout, proc.stderr,
+                                      formatted=True):
                 return True, True, None
             return False, False, None
         status = proc.stdout.strip()
@@ -3318,7 +3340,7 @@ class DockerBackend:
 
     def _object_absent(self, kind: str, name: str, env: Mapping[str, str]) -> bool | None:
         """#442: whether a container or network is gone. `None` when the daemon
-        could not be asked or answered with something other than "not found"."""
+        could not be asked or gave no complete target-specific absence reply."""
         argv = [*self.docker_bin, "network", "inspect", name] if kind == "network" \
             else [*self.docker_bin, "inspect", name]
         try:
@@ -3328,5 +3350,5 @@ class DockerBackend:
             return None
         if done.returncode == 0:
             return False
-        err = done.stderr.lower()
-        return True if ("no such" in err or "not found" in err) else None
+        return True if _missing_inspect_reply(kind, name, done.returncode, done.stdout, done.stderr,
+                                             formatted=False) else None
