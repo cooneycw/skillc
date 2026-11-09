@@ -62,7 +62,7 @@ class AttemptGuard:
     guard: cg.CodexGuardSession = field(init=False)
     #: #518: the credential steward's record and driver.
     steward: cs.CredentialStewardSession = field(init=False)
-    steward_driver: cs.CredentialSteward | None = None
+    steward_driver: cs.CredentialSteward | None = field(default=None, repr=False)
     _steward_record: dict[str, Any] | None = None
     _finished: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

@@ -163,7 +163,7 @@ class _Handle:
     platform satisfies it."""
 
     attempt_id: str
-    token: str
+    token: str = field(repr=False)
 
 
 def _surface_bytes(value: object) -> bytes | None:

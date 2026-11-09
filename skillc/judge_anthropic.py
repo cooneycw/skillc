@@ -175,7 +175,7 @@ class AnthropicJudge:
     an id it has no definition for is `JudgeUnavailable` (the model would be
     grading a name, not a rule)."""
 
-    key_provider: KeyProvider
+    key_provider: KeyProvider = field(repr=False)
     criteria_text: Mapping[str, str]
     observation_files: frozenset[str] = frozenset()
     model: str = DEFAULT_MODEL
