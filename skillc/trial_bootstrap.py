@@ -149,7 +149,7 @@ def _remove_probe_container(docker_bin: Sequence[str], name: str, timeout: float
         removed = subprocess.run([*docker_bin, "rm", "-f", name], capture_output=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"; cleanup 'docker rm -f {name}' failed: {exc}"
-    if removed.returncode != 0 and b"No such container" not in removed.stderr:
+    if removed.returncode != 0 and b"no such container" not in removed.stderr.lower():
         return f"; cleanup 'docker rm -f {name}' exited {removed.returncode}"
     return ""
 

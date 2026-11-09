@@ -1363,7 +1363,7 @@ class DockerBackend:
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return f"; cleanup 'docker rm -f {name}' also failed: {exc}"
-        if removed.returncode != 0 and "No such container" not in removed.stderr:
+        if removed.returncode != 0 and "no such container" not in removed.stderr.casefold():
             return f"; cleanup 'docker rm -f {name}' also failed: exit {removed.returncode}: {removed.stderr.strip()}"
         return ""
 
