@@ -187,6 +187,9 @@ class CredentialSteward:
     def __repr__(self) -> str:
         return '<CredentialSteward redacted>'
 
+    def __repr__(self) -> str:
+        return '<CredentialSteward redacted>'
+
     def _await(self, event: str, after: int) -> bool:
         deadline = self.clock() + self.wait_s
         while self.clock() < deadline:

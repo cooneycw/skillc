@@ -69,6 +69,7 @@ from . import (
     trial,
     verify,
     vm_admission,
+    vm_credential_window,
     vm_identity,
     wave_export,
 )
@@ -594,6 +595,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    if "credential_window" in data:
+        try:
+            vm_credential_window.validate_plan(data)
+        except vm_credential_window.CustodyRefused:
+            raise _refuse("credential_window requires the closed custody and scan policy") from None
     if "remnant_scan" in data:
         try:
             remnant_scan.validate_plan(data)
@@ -971,6 +977,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
+    if "credential_window" in data:
+        raise _refuse("credential_window is supported only for calibration-declaration")
     if "remnant_scan" in data:
         raise _refuse("remnant_scan is supported only for calibration-declaration")
     if "execution_environment" in data:
@@ -1231,6 +1239,11 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
     `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
     still says `UNKNOWN`, and the declared task's grader is the one on disk.
     A declaration that validates is still only a plan (ADR 0005)."""
+    if "credential_window" in declaration.data:
+        try:
+            vm_credential_window.validate_plan(declaration.data)
+        except vm_credential_window.CustodyRefused:
+            raise _refuse("credential_window requires the closed custody and scan policy") from None
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     require_outcome_approval(declaration)
     treated = _treated_arm(declaration)
@@ -1313,6 +1326,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
     grader, fixture or profile files changing the answer: who/when and the
     schedule size, the approved mutated_digest, and (D-P2a) the whole
     declaration digest."""
+    if "credential_window" in declaration.data:
+        raise _refuse("credential_window is supported only for calibration-declaration")
     if "remnant_scan" in declaration.data:
         raise _refuse("remnant_scan is supported only for calibration-declaration")
     if "execution_environment" in declaration.data:
