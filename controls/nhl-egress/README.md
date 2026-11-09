@@ -5,7 +5,7 @@
 classification from pre-fix main e22a436. `mutants.json` selects committed blind
 variants exercised by the tests: allow-all, ignore-denied and always-issue.
 
-The unchanged behavior tests on that main produced 13 failures and 3 passes:
+The unchanged behavior tests on that main produced 13 failures and 8 passes:
 two allowed NHL hosts wrongly stopped native scheduling; a denied undeclared
 request wrongly allowed later slots; seven malformed policies were accepted;
 and all three purposes could pass existing approval without a frozen NHL digest.

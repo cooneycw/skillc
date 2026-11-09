@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -127,3 +128,16 @@ def test_legacy_policy_and_containment_bytes_match_parent_fixture() -> None:
     actual = {'document': egress.allowlist_document(), 'digest': egress.allowlist_digest(),
               'denied_traffic': cr.containment_evidence(record)}
     assert trial.canonical(actual) == (ROOT / 'controls/nhl-egress/legacy-policy.json').read_bytes()
+
+
+@pytest.mark.parametrize('config', [None, 0, False, [], 'nhl_egress'])
+def test_malformed_stored_config_keeps_the_existing_report_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: object,
+) -> None:
+    experiment = SimpleNamespace(root=tmp_path, attempts=lambda: iter([
+        ({'config': {'digest': 'a' * 64}}, {})]))
+    # Isolate the report's post-verification shape check, not ledger hashing.
+    monkeypatch.setattr(trial.Experiment, 'open', lambda _root: experiment)
+    monkeypatch.setattr(trial, '_read_object', lambda *_a: json.dumps(config).encode())
+    with pytest.raises(cr.CalibrationRefused, match='configuration is not an object'):
+        cr.build_report(cast(trial.Experiment, experiment), [], declared_model='fixed', declared_effort='fixed')

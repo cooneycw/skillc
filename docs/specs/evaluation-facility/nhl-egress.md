@@ -80,7 +80,7 @@ declaration, not a hidden allowlist addition.
 ## Evidence and remaining scope
 
 The unchanged existing-consumer behavior file gives 13 meaningful failures and
-three passing preservation controls on pre-fix main e22a436. Failures concern
+eight passing preservation controls on pre-fix main e22a436. Failures concern
 allowed NHL scheduling, denied-request continuation, ignored closed-policy
 fields and unfrozen approval. New-API import failures are not red evidence.
 The schedule harness replaces approval and expensive attempt/backend boundaries

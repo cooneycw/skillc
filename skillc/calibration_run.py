@@ -2003,7 +2003,10 @@ def _report_nhl_policy(experiment: trial.Experiment) -> nhl.Policy | None:
     for planned, _attempt in experiment.attempts():
         config = planned['config']
         assert isinstance(config, dict)
-        configs.append(json.loads(trial._read_object(experiment.root, str(config['digest']))))
+        row = json.loads(trial._read_object(experiment.root, str(config['digest'])))
+        if not isinstance(row, dict):
+            raise CalibrationRefused('trial configuration is not an object')
+        configs.append(row)
     if not any('nhl_egress' in row for row in configs):
         return None
     binding = configs[0].get('nhl_egress')
