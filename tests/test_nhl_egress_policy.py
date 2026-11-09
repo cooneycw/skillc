@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import subprocess
 from pathlib import Path
@@ -262,3 +263,8 @@ def test_committed_mutant_population_is_complete() -> None:
     cases = json.loads((ROOT / 'controls/nhl-egress/mutants.json').read_text())
     assert len(cases) == 3
     assert {row['name'] for row in cases} == {'allow-all', 'ignore-denied', 'always-issue'}
+
+
+def test_permit_does_not_shift_legacy_backend_positional_arguments() -> None:
+    parameter = inspect.signature(db.DockerBackend).parameters['nhl_egress_permit']
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY

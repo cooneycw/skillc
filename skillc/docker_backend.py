@@ -972,7 +972,7 @@ class DockerBackend:
     #: `allow-all` break widens it, to prove the denial check can fail.
     egress_hosts: tuple[str, ...] = eg.ALLOWED_HOSTS
     #: A registered declaration-bound policy permit; controls cannot prepare Docker.
-    nhl_egress_permit: object | None = field(default=None, repr=False)
+    nhl_egress_permit: object | None = field(default=None, repr=False, kw_only=True)
     #: #460: how long `prepare()` waits for the egress proxy to accept
     #: connections before refusing the attempt. Without the wait, a proxy slower
     #: to start than the agent container refuses the agent's first CONNECTs.
