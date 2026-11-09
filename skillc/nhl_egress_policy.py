@@ -7,6 +7,7 @@ are provenance checks, not a sandbox against code running in this process.
 from __future__ import annotations
 
 import copy
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -191,6 +192,24 @@ def _counts(value: object) -> Mapping[str, int]:
                                              for k, v in value.items())):
         raise PolicyRefused('nhl_egress: complete nonnegative connection counters required')
     return value
+
+
+def summarize_log(raw: object) -> dict[str, object]:
+    """Validate NHL wire roots before the historical object-only decoder.
+
+    Keep the legacy decoder unchanged. A non-object root or broken transport
+    is unavailable input, not an empty clean connection census.
+    """
+    if not isinstance(raw, bytes):
+        raise PolicyRefused('nhl_egress: proxy log bytes unavailable')
+    for line in raw.decode('utf-8', 'replace').splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            raise PolicyRefused('nhl_egress: malformed proxy log line') from None
+        if not isinstance(entry, dict):
+            raise PolicyRefused('nhl_egress: proxy log object required')
+    return egress.summarize_log(raw)
 
 
 def violation(summary: object, policy: Policy) -> dict[str, object] | None:
