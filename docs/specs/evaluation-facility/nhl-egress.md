@@ -171,3 +171,24 @@ or credential. Local Docker absence is an honest skip. After merge, the
 scheduled real-Docker certification on the merge commit must execute the new
 nodes (the previous 49-node population grows by two); only that run qualifies
 actual init forwarding. Live NHL admission remains held by PR-A and #630.
+
+
+## Retained byte evidence and recovery
+
+At pre-teardown capture, bounded raw bytes are stored content-addressed and
+bound once by a controller `egress-bytes-retained` journal detail. The binding
+names the attempt, policy digest, byte-object digest and size. It is separate
+from artifact export, so later artifact-capture failure need not erase already
+observed bytes. Storage failure is recorded as unavailable byte evidence and
+never skips teardown. A finalized attempt cannot append a new retention result.
+This detail event does not satisfy execution, capture, admission or cleanup.
+
+Reporting and public recovery ignore mutable `outcomes.json` byte summaries.
+They resolve the scheduled attempt's unique retained binding, verify its closed
+schema and attempt/policy identity, open bounded regular objects without
+following symlinks, check exact size and SHA256, then recompute chain/trailer
+completeness from those bytes. Missing, ambiguous, mismatched or unreadable
+bindings remain UNKNOWN. An edited checkpoint cannot promote missing coverage
+to COMPLETE or replace a valid retained measurement. This is controller-store
+custody and integrity, not authentication against an operator rewriting that
+whole store.

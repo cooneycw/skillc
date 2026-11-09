@@ -53,7 +53,7 @@ def test_every_new_wire_input_level_is_unknown_not_an_exception(path: list[Any],
         elif category == 'start':
             set_path(rows[0], rest, value)
         elif category == 'connection':
-            set_path(rows[3] if category == 'chain' else rows[-1], rest, value)
+            set_path(rows[3], rest, value)
         elif category == 'end':
             set_path(rows[-1], rest, value)
         raw = rechain(rows)

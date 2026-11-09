@@ -21,8 +21,24 @@ not missing new helpers/imports. Partial malformed JSON already produced the
 controlled unavailable refusal; legacy summary and default report shape also
 already pass. These are preservation controls, not new safety-failure claims.
 
-Local byte/control files: 401 passing controls. Prior 377 policy controls remain
+Local byte/control files: 443 passing controls. Prior 377 policy controls remain
 green. Real-Docker forwarding and absent-handler controls are in the existing
 certification-floor file, skipped here because Docker is absent; the scheduled
 merge-commit run is owed before forwarding can be called physically verified.
 No live NHL execution or credential handling is enabled by these controls.
+
+
+The corrected connection branch mutates the progress record, not the trailer.
+A committed generation-blind parser witness proves that this table detects the
+missing check. On actual cbe6c5f, the public recovery and table-instrument tests
+produce 11 assertion failures: nine forged COMPLETE claims over absent/invalid
+retained evidence, one ignored valid retained capture, and the blind table
+witness. No missing API or setup failure is counted. After the fix all pass.
+
+`retained-shapes.json` covers seven retained-binding fields (55 wrong-type
+variants), plus missing/extra event fields, raw journal roots, duplicate keys,
+symlink/nonregular/missing/corrupt objects, exact-size valid-log swapping,
+reader/writer identity types and write-once retention. Recovery selects the
+scheduled attempt's unique journal binding, rechecks bounded no-follow object
+bytes against size and digest, and reruns chain/trailer completeness. Edited
+outcome summaries are ignored. Absent or unverifiable capture stays UNKNOWN.

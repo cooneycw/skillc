@@ -3,3 +3,5 @@ checkpoints, generation/connection sequences, hash-chained logs and a bounded
 shutdown capture. Incomplete or malformed coverage stays UNKNOWN with null
 totals. HTTP request counts and response codes are not measured. Legacy
 provider-only behavior and the existing live-admission hold remain unchanged.
+Reporting recomputes completeness from attempt-bound retained raw bytes; mutable
+outcome summaries cannot promote UNKNOWN to COMPLETE.

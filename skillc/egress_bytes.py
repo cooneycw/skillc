@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 MAX_CAPTURE = 8 * 1024 * 1024  # Technical capture bound; exceeding it is UNKNOWN.
@@ -193,6 +196,85 @@ def report(value: object) -> dict[str, object]:
         return json.loads(json.dumps(value))  # Return independent JSON-safe data.
     except (Incomplete, ValueError, RecursionError) as exc:
         return unknown(str(exc))
+
+
+def retain(experiment: Any, attempt: str, raw: bytes, policy_digest: str) -> None:
+    """Freeze already-observed bytes independently of the mutable checkpoint."""
+    from . import trial
+    if (not isinstance(experiment, trial.Experiment) or not isinstance(experiment.root, Path)
+            or not isinstance(attempt, str)
+            or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', attempt) is None
+            or not isinstance(policy_digest, str)
+            or re.fullmatch(r'sha256:[0-9a-f]{64}', policy_digest) is None):
+        raise Incomplete('attempt-bound byte retention identity required')
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_CAPTURE:
+        raise Incomplete('bounded proxy bytes required')
+    with trial.experiment_lock(experiment.root):
+        experiment.trial_of(attempt)
+        events = experiment.events(attempt)
+        if any(not isinstance(row, dict) for row in events):
+            raise Incomplete('journal object required')
+        if (any(row.get('event') == 'egress-bytes-retained' for row in events)
+                or (experiment.root / f'lifecycle-{attempt}.json').exists()):
+            raise Incomplete('byte retention outcome already frozen or attempt closed')
+        experiment.record(attempt, 'egress-bytes-retained', version=1, attempt=attempt,
+                          policy_digest=policy_digest, digest=trial.put_object(experiment, raw), size=len(raw))
+
+
+def _bounded(path: Path, size: int | None = None, *, directory: int | None = None) -> bytes:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CAPTURE
+                or size is not None and info.st_size != size):
+            raise Incomplete('retained byte object size or type differs')
+        raw = stream.read(MAX_CAPTURE + 1)
+    if len(raw) > MAX_CAPTURE or size is not None and len(raw) != size:
+        raise Incomplete('retained byte object changed or exceeded bound')
+    return raw
+
+
+def from_capture(experiment: Any, attempt: object, policy_digest: object) -> dict[str, object]:
+    """Re-derive completeness only from unique journal-bound, verified raw bytes."""
+    from . import trial
+    try:
+        if (not isinstance(experiment, trial.Experiment) or not isinstance(experiment.root, Path)
+                or not isinstance(attempt, str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', attempt) is None
+                or not isinstance(policy_digest, str)
+                or re.fullmatch(r'sha256:[0-9a-f]{64}', policy_digest) is None):
+            raise Incomplete('attempt-bound retained byte identity required')
+        experiment.trial_of(attempt)
+        directory = os.open(experiment.root / trial.JOURNAL, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            journal = _bounded(Path(experiment.journal(attempt).name), directory=directory)
+        finally:
+            os.close(directory)
+        events = [json.loads(line, object_pairs_hook=_pairs) for line in journal.splitlines()]
+        if any(type(row) is not dict for row in events):
+            raise Incomplete('journal object required')
+        bindings = [row for row in events if row.get('event') == 'egress-bytes-retained']
+        if len(bindings) != 1:
+            raise Incomplete('retained byte capture absent or ambiguous')
+        entry = _object(bindings[0], {'event', 'at', 'version', 'attempt', 'policy_digest', 'digest', 'size'})
+        digest = entry['digest']
+        if (type(entry['version']) is not int or entry['version'] != 1
+                or entry['attempt'] != attempt or entry['policy_digest'] != policy_digest
+                or not isinstance(entry['at'], str) or not entry['at']
+                or not isinstance(digest, str) or re.fullmatch(r'sha256:[0-9a-f]{64}', digest) is None):
+            raise Incomplete('retained byte capture schema or identity mismatch')
+        size = _integer(entry['size'])
+        if not 0 < size <= MAX_CAPTURE:
+            raise Incomplete('retained byte capture size unavailable')
+        objects = os.open(experiment.root / trial.OBJECTS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            raw = _bounded(Path(digest.removeprefix('sha256:')), size, directory=objects)
+        finally:
+            os.close(objects)
+        if trial.sha256_bytes(raw) != digest:
+            raise Incomplete('retained byte capture digest mismatch')
+        return report(summarize(raw, policy_digest))
+    except (Incomplete, OSError, ValueError, RecursionError, trial.Refused):
+        return unknown('retained byte capture unavailable or unverifiable')
 
 
 _PIPE = r'''

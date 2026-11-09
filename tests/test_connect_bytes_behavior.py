@@ -11,6 +11,7 @@ from test_nhl_egress_behavior import DIGEST, DOCUMENT, run_control, summary
 
 from skillc import calibration_run as cr
 from skillc import nhl_egress_policy as nhl
+from skillc import trial
 
 GENERATION = 'ab' * 16
 
@@ -78,6 +79,7 @@ def test_existing_report_retains_bytes_and_measurement_limit(
 ) -> None:
     observed = {'status': 'read', **nhl.summarize_log(wire(records()))}
     experiment, outcomes, _ = run_control(tmp_path, monkeypatch, observed)
+    protected_capture(experiment, outcomes[0].scheduled.attempt_id, wire(records()))
     report = cr.build_report(experiment, outcomes, declared_model='gpt-6-astra', declared_effort='high')
     attempts = report['attempts']
     assert isinstance(attempts, list)
@@ -103,3 +105,18 @@ def test_legacy_schedule_report_does_not_gain_byte_fields(
     attempts = report['attempts']
     assert isinstance(attempts, list)
     assert all('bytes_observed' not in row for row in attempts)
+
+
+def protected_capture(experiment: trial.Experiment, attempt: str, raw: bytes) -> dict[str, Any]:
+    """Synthetic controller-store fixture; not candidate/checkpoint input.
+
+    Write the new binding as bytes so this test also exercises the old public
+    reader without a missing-new-event API failure.
+    """
+    digest = trial.put_object(experiment, raw)
+    entry = {'event': 'egress-bytes-retained', 'at': '2026-01-01T00:00:00Z',
+             'version': 1, 'attempt': attempt, 'policy_digest': DIGEST,
+             'digest': digest, 'size': len(raw)}
+    with experiment.journal(attempt).open('a') as stream:
+        stream.write(json.dumps(entry) + '\n')
+    return entry
