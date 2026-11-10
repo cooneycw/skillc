@@ -600,7 +600,7 @@ def census(reports: list[Json]) -> Json:
                 raise ReferenceError("invalid or duplicate family census")
             states[family["family_id"]] = family["status"]
         population.append(states)
-    result = {}
+    result: dict[str, Json] = {}
     for family in FAMILIES:
         statuses = Counter(game[family] for game in population)
         unavailable = statuses["UNAVAILABLE"]
@@ -612,7 +612,7 @@ def census(reports: list[Json]) -> Json:
             planted_cases_required=statuses["DISCREPANCY"] == 0,
             grading_basis=basis,
             grading_status="NOT_GRADED",
-            source_coverage=("UNAVAILABLE" if unavailable == len(reports) else
+            game_status_coverage=("UNAVAILABLE" if unavailable == len(reports) else
                              "PARTIAL" if unavailable else "COMPLETE"),
         )
     return {"game_count": len(reports), "families": result}

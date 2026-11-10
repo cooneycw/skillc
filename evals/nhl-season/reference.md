@@ -90,9 +90,12 @@ UNAVAILABLE counts. Each family also reports:
   observed but some game is available; `UNKNOWN` when every game is unavailable.
 - `grading_status`: always `NOT_GRADED`. The basis names the required grading
   route, not evidence that a candidate or the #634 plants have been graded.
-- `source_coverage`: `COMPLETE` when every game is available, `PARTIAL` when any
+- `game_status_coverage`: `COMPLETE` when every game is available, `PARTIAL` when any
   game is unavailable but some are available, and `UNAVAILABLE` when all are
-  unavailable. A family with unavailable games must not be described as clean.
+  unavailable. A family with unavailable games must not be described as clean. These are
+  per-game family statuses, not certification that every underlying source or
+  individual check is available (a DISCREPANCY family may also contain
+  unavailable checks).
 - `planted_cases_required`: the existing obligation flag, true whenever observed
   discrepancies are zero, including a wholly unavailable family. The UNKNOWN
   basis still prevents that flag from claiming the season was actually examined.

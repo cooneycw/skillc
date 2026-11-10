@@ -89,6 +89,6 @@ def test_valid_extra_observations_and_all_statuses_remain_accepted() -> None:
     for index, family in enumerate(data[0]['families']):
         family.update(checks=[], status=('PASS', 'DISCREPANCY', 'UNAVAILABLE')[index % 3])
     result = oracle.census(data)
-    assert result['families']['F1']['source_coverage'] == 'COMPLETE'
+    assert result['families']['F1']['game_status_coverage'] == 'COMPLETE'
     assert result['families']['F2']['grading_basis'] == 'graded by real discrepancies'
     assert result['families']['F3']['grading_basis'] == 'UNKNOWN'
