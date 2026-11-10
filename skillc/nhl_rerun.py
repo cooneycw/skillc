@@ -33,6 +33,14 @@ class InfrastructureError(ReferenceError):
     """Controller execution failed; no candidate verdict can be inferred."""
 
 
+class _CandidateFailure(ReferenceError):
+    """A documented candidate obligation failed with controller-held evidence."""
+
+
+class _CaptureLimit(InfrastructureError):
+    """The harness cut off command output; this is not a task-failure verdict."""
+
+
 
 @dataclass(frozen=True)
 class _InvocationEvidence:
@@ -67,6 +75,7 @@ class _Terminations:
         self.timed_out = False
         self.entrypoint: str | None = None
         self.sequence = 0
+        self.cutoff_reason: str | None = None
         self.event('controller-termination-tracking-started')
 
     def event(self, name: str, **fields: Any) -> None:
@@ -94,7 +103,15 @@ class _Terminations:
         self.event('harness-timeout', entrypoint=self.entrypoint)
         self.timed_out = True
 
+    def cutoff(self, reason: str) -> None:
+        # Command-client kills are observed after the runner raises. Never
+        # publish a no-signal attestation after such an interrupted command.
+        self.cutoff_reason = reason
+        self.event('command-cutoff-observed', reason=reason, entrypoint=self.entrypoint)
+
     def capture(self, runtime: str) -> _InvocationEvidence:
+        if self.cutoff_reason is not None:
+            raise InfrastructureError(self.cutoff_reason)
         if self.entrypoint is None:
             raise InfrastructureError('documented invocation not recorded')
         record = {'candidate': self.candidate, 'entrypoint': self.entrypoint,
@@ -151,11 +168,11 @@ def _attribute_failure(inspected: subprocess.CompletedProcess[str], *, entrypoin
         if state['Status'] != 'running' or state['ExitCode'] != 0 or state['OOMKilled']:
             raise unknown
         if type(command_exit) is int and 0 < command_exit <= 255:
-            raise ReferenceError(f'documented entry point failed (exit {command_exit}): {entrypoint}')
+            raise _CandidateFailure(f'documented entry point failed (exit {command_exit}): {entrypoint}')
         raise unknown
     if state['Status'] != 'exited' or state['ExitCode'] == 0:
         raise unknown
-    raise ReferenceError(f'documented entry point failed (container exit {state["ExitCode"]}): {entrypoint}')
+    raise _CandidateFailure(f'documented entry point failed (container exit {state["ExitCode"]}): {entrypoint}')
 
 
 def custody(project: Path, *private: Path) -> None:
@@ -341,7 +358,7 @@ def run_command(argv: list[str], timeout: float) -> subprocess.CompletedProcess[
                             continue
                         buffers[key.fd].extend(chunk)
                         if sum(len(value) for value in buffers.values()) > 4 * 1024 * 1024:
-                            raise ReferenceError("command output exceeds four MiB capture cap")
+                            raise _CaptureLimit("harness-output-cap: command exceeded the harness output capture limit (four MiB capture cap; #639 approval pending)")
                 returncode = process.wait(timeout=max(.001, deadline - time.monotonic()))
         except BaseException:
             try:
@@ -356,18 +373,25 @@ def run_command(argv: list[str], timeout: float) -> subprocess.CompletedProcess[
 
 
 def validate_adapter(project: Path, adapter: Json) -> None:
-    readme = safe_file(project, adapter["readme"]).read_text()
+    try:
+        readme = safe_file(project, adapter["readme"]).read_text()
+    except FileNotFoundError as exc:
+        raise _CandidateFailure("documented README missing") from exc
     commands = adapter.get("commands")
     if (not isinstance(commands, list) or not commands
-            or any(not isinstance(c, str) or not c.strip() or c not in readme for c in commands)):
-        raise ReferenceError("documented install/retrieve/reconcile/export entry points missing")
+            or any(not isinstance(c, str) or not c.strip() for c in commands)):
+        raise ReferenceError("invalid controller command mapping")
+    if any(command not in readme for command in commands):
+        raise _CandidateFailure("documented install/retrieve/reconcile/export entry points missing")
     environment = adapter.get("base_env")
     placeholder = adapter.get("api_base_placeholder")
     if environment is not None and (not isinstance(environment, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", environment)):
         raise ReferenceError("invalid documented endpoint override environment name")
+    if environment is None and placeholder is None:
+        raise ReferenceError("controller endpoint override mapping absent")
     if not ((environment and environment in readme) or
             (isinstance(placeholder, str) and placeholder and any(placeholder in c for c in commands))):
-        raise ReferenceError("endpoint override absent from README")
+        raise _CandidateFailure("endpoint override absent from README")
     extractions = adapter.get("controller_extract_commands", [])
     if not isinstance(extractions, list) or any(not isinstance(c, str) or not c.strip() for c in extractions):
         raise ReferenceError("invalid controller source extraction commands")
@@ -398,8 +422,13 @@ class DockerReplay:
         try:
             custody(project, evidence)
             validate_adapter(project, adapter)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+        except _CandidateFailure as exc:
             verdict = {"name": case["name"], "status": "FAIL", "reasons": [str(exc)]}
+            (evidence / "verdict.json").write_text(json.dumps(verdict, indent=2))
+            return verdict
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            verdict = {"name": case["name"], "status": "UNKNOWN",
+                       "reasons": ["controller replay configuration unavailable: " + str(exc)]}
             (evidence / "verdict.json").write_text(json.dumps(verdict, indent=2))
             return verdict
         token = "nhl-replay-" + uuid.uuid4().hex
@@ -428,7 +457,8 @@ class DockerReplay:
                 inspection = ["docker", "inspect", "--format", "{{json .State}}", candidate]
                 try:
                     state = self.run(inspection, 3)
-                except (OSError, subprocess.SubprocessError) as exc:
+                except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                    terminations.cutoff("candidate runtime inspect or transport unavailable")
                     transcript.append({"argv": inspection[1:], "error": "runtime inspect unavailable"})
                     raise InfrastructureError("candidate runtime state unconfirmed") from exc
                 transcript.append({"argv": inspection[1:], "returncode": state.returncode,
@@ -446,12 +476,20 @@ class DockerReplay:
                 terminations.signal(args[0])
             try:
                 completed = self.run(["docker", *args], remaining)
+            except _CaptureLimit:
+                transcript.append({"argv": args, "error": "harness output capture limit"})
+                terminations.cutoff("harness output capture limit (#639 approval pending)")
+                raise
             except subprocess.TimeoutExpired as exc:
                 transcript.append({"argv": args, "error": "timeout"})
                 if candidate_command:
                     terminations.timeout()
                     candidate_failure(command_exit=None, timed_out=True)
                 raise InfrastructureError("replay exceeded the harness wall-time limit (#639 approval pending)") from exc
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                transcript.append({"argv": args, "error": "controller command transport unavailable"})
+                terminations.cutoff("controller command transport unavailable")
+                raise InfrastructureError("controller command transport unavailable") from exc
             transcript.append({"argv": args, "returncode": completed.returncode,
                                "stdout": completed.stdout, "stderr": completed.stderr})
             if completed.returncode:
@@ -510,10 +548,10 @@ class DockerReplay:
             call(["cp", f"{server}:/access.jsonl", str(access_log)])
             requested = [json.loads(line) for line in access_log.read_text().splitlines()]
             verdict = grade(case, output, adapter, requested=requested)
-        except (OSError, InfrastructureError, subprocess.SubprocessError) as exc:
-            verdict = {"name": case["name"], "status": "UNKNOWN", "reasons": [str(exc)]}
-        except (ValueError, KeyError, TypeError) as exc:
+        except _CandidateFailure as exc:
             verdict = {"name": case["name"], "status": "FAIL", "reasons": [str(exc)]}
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+            verdict = {"name": case["name"], "status": "UNKNOWN", "reasons": [str(exc)]}
         finally:
             # Cleanup is independent of the exhausted execution deadline.
             cleanup = []

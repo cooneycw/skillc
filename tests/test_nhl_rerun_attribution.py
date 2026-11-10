@@ -5,6 +5,7 @@ import inspect
 import json
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -23,14 +24,26 @@ def state(*, running: bool = False, oom: bool = False, exit_code: int = 7) -> di
 
 
 def run_case(tmp_path: Path, facts: object, *, timeout: bool = False,
-             command_exit: int = 17, inspect_exit: int = 0, prose: str = '') -> tuple[dict[str, Any], list[list[str]]]:
+             command_exit: int = 17, inspect_exit: int = 0, prose: str = '', capture_flood: bool = False, controller_fault: str | None = None) -> tuple[dict[str, Any], list[list[str]]]:
     cases = nhl_rerun.scenarios(*nhl_rerun_control.sample(tmp_path))
     project = tmp_path / 'project'
     adapter = nhl_rerun_control.materialize(project)
+    if controller_fault == 'adapter':
+        adapter['export_dir'] = '/outside-controller-mapping'
+    elif controller_fault == 'extraction':
+        adapter['controller_extract_commands'] = 'not-a-command-list'
+    elif controller_fault == 'command-shape':
+        adapter['commands'] = 17
+    elif controller_fault == 'base-mapping':
+        del adapter['base_env']
     calls: list[list[str]] = []
     def run(args: list[str], seconds: float) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         if args[1] == 'exec' and '/bin/sh' in args:
+            if controller_fault == 'transport-value-error':
+                raise ValueError('synthetic controller transport error')
+            if capture_flood:
+                return nhl_rerun.run_command([sys.executable, '-c', 'import sys;sys.stdout.write("x"*(5*1024*1024))'], seconds)
             if timeout:
                 raise subprocess.TimeoutExpired(args, seconds)
             return subprocess.CompletedProcess(args, command_exit, prose, '')
@@ -41,13 +54,15 @@ def run_case(tmp_path: Path, facts: object, *, timeout: bool = False,
                 '{{.State.Running}}' in args) else json.dumps(facts)
             return subprocess.CompletedProcess(args, inspect_exit, raw, 'daemon unavailable' if inspect_exit else '')
         if args[1] == 'cp' and args[2].endswith(':/access.jsonl'):
-            Path(args[3]).write_text(''.join(json.dumps(p) + '\n' for p in cases[0]['payloads']))
+            Path(args[3]).write_text('not-json' if controller_fault == 'access-log' else ''.join(json.dumps(p) + '\n' for p in cases[0]['payloads']))
         if args[1] == 'cp' and args[2].endswith('/exports/.'):
             adapter.update(export(cases[0], tmp_path / 'generated'))
             shutil.copytree(tmp_path / 'generated', Path(args[3]), dirs_exist_ok=True)
         return subprocess.CompletedProcess(args, 0, '', '')
     result = nhl_rerun.DockerReplay(IMAGE, IMAGE, run=run).execute(project, adapter, cases[0], tmp_path / 'evidence')
-    assert (tmp_path / 'evidence/execution.json').is_file()
+    assert (tmp_path / 'evidence/verdict.json').is_file()
+    if calls:
+        assert (tmp_path / 'evidence/execution.json').is_file()
     return result, calls
 
 
@@ -165,7 +180,7 @@ def test_signal_range_exit_requires_positive_durable_no_signal_record(tmp_path: 
 
 
 def test_missing_positive_record_is_unknown_even_for_signal_range_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(nhl_rerun._Terminations, 'capture', lambda self, runtime: None)
+    monkeypatch.setattr('terminations', 'capture', lambda self, runtime: None)
     result, _ = run_case(tmp_path, state(exit_code=137))
     assert result['status'] == 'UNKNOWN'
     assert 'signal-range exit without a positive no-signal record' in result['reasons'][0]
@@ -177,7 +192,7 @@ def test_changed_controller_record_cannot_establish_no_signal(tmp_path: Path, mo
         proof = original(self, runtime)
         proof.path.write_text('{}')
         return proof
-    monkeypatch.setattr(nhl_rerun._Terminations, 'capture', capture)
+    monkeypatch.setattr('terminations', 'capture', capture)
     result, _ = run_case(tmp_path, state())
     assert result['status'] == 'UNKNOWN'
 
@@ -227,21 +242,22 @@ def test_attribution_file_fsync_failure_cannot_publish_candidate_fail(tmp_path: 
     assert seen and result['status'] == 'UNKNOWN'
 
 
-MUTANTS: dict[str, tuple[Any, str, str, str, str]] = {
-    'ignore-signal': (nhl_rerun, '_attribute_failure', "if held['signals_sent']:", 'if False:',
+MUTANTS: dict[str, tuple[str, str, str, str, str]] = {
+    'ignore-signal': ('module', '_attribute_failure', "if held['signals_sent']:", 'if False:',
                       'test_signal_range_exit_requires_positive_durable_no_signal_record[controller-sigkill]'),
-    'ignore-timeout': (nhl_rerun, '_attribute_failure', "if held['harness_timed_out'] or timed_out:", 'if False:',
+    'ignore-timeout': ('module', '_attribute_failure', "if held['harness_timed_out'] or timed_out:", 'if False:',
                        'test_harness_timeout_stays_unknown_even_if_later_inspect_sees_exit'),
-    'ignore-oom': (nhl_rerun, '_attribute_failure',
+    'ignore-oom': ('module', '_attribute_failure',
                   "if state['OOMKilled'] and not state['Running'] and state['Status'] == 'exited' and state['ExitCode'] > 0:",
                   'if False:', 'test_runtime_oom_is_unknown_due_to_harness_limit'),
-    'skip-receipt-fsync': (nhl_rerun._Terminations, 'capture', 'os.fsync(stream.fileno())', 'pass',
+    'skip-receipt-fsync': ('terminations', 'capture', 'os.fsync(stream.fileno())', 'pass',
                           'test_attribution_file_fsync_failure_cannot_publish_candidate_fail'),
 }
 
 
 def compile_variant(monkeypatch: pytest.MonkeyPatch, variant: str) -> None:
-    owner, name, before, after, _ = MUTANTS[variant]
+    scope, name, before, after, _ = MUTANTS[variant]
+    owner = nhl_rerun if scope == 'module' else nhl_rerun._Terminations
     function = getattr(owner, name)
     source = textwrap.dedent(inspect.getsource(function))
     assert source.count(before) == 1
@@ -269,3 +285,17 @@ def test_committed_witnesses_reject_unsafe_attribution_variants(tmp_path: Path, 
             test_runtime_oom_is_unknown_due_to_harness_limit(tmp_path)
         else:
             test_attribution_file_fsync_failure_cannot_publish_candidate_fail(tmp_path, monkeypatch)
+
+
+
+def test_actual_harness_output_cutoff_is_unknown_without_candidate_attribution(tmp_path: Path) -> None:
+    result, calls = run_case(tmp_path, state(running=True), capture_flood=True)
+    assert result['status'] == 'UNKNOWN'
+    assert 'harness output capture limit' in result['reasons'][0]
+    assert not any(args[1] == 'inspect' for args in calls)
+
+
+@pytest.mark.parametrize('fault', ['adapter', 'extraction', 'access-log', 'transport-value-error', 'command-shape', 'base-mapping'])
+def test_controller_configuration_and_transport_errors_do_not_blame_candidate(tmp_path: Path, fault: str) -> None:
+    result, _ = run_case(tmp_path, state(running=True), command_exit=0, controller_fault=fault)
+    assert result['status'] == 'UNKNOWN'

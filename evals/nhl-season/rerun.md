@@ -186,5 +186,22 @@ roots and contradictory states. They distinguish SIGKILL/137 from a positively
 recorded no-signal/137 exit, reject missing or changed controller records, and
 refuse attribution when journal or attribution-file fsync fails. Compiled unsafe
 variants that ignore signal requests, timeouts, OOM or receipt fsync each lose
-their committed witness. Four existing-entry-point regressions fail on unchanged
-parent `12f12cf`, with three preservation cases and no API/setup errors.
+their committed witness. Eleven unchanged public-entry-point controls fail on parent `12f12cf`, with
+three preservation cases and no collection, API or setup errors. New-instrument
+mutant owners resolve lazily so this final test file collects on the parent.
+
+
+The harness four-MiB output cap is also UNKNOWN (`harness-output-cap`), never
+candidate FAIL. The actual bounded runner is exercised by a trusted five-MiB
+emitter. Client-group kills caused by output cutoff, timeout or command transport
+errors cannot publish a positive no-signal attestation afterward; the controller
+records a cutoff observation and closes that path as UNKNOWN.
+
+Exception audit: missing documented README/entry-point/endpoint-override claims
+and positively attributed candidate returns use a dedicated candidate-failure
+exception. Malformed controller adapter command/export/extraction configuration,
+controller access-log decode failures, custody/preparation errors and command
+transport exceptions remain UNKNOWN. Candidate retained exports and reconciliation
+are still compared by `grade`, which returns FAIL for missing, malformed or wrong
+candidate artifacts. Cleanup exceptions remain UNKNOWN. KeyboardInterrupt or
+SystemExit abort the command/run without manufacturing a PASS or FAIL receipt.
