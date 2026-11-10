@@ -1,9 +1,9 @@
 {
   "inventory_schema": 1,
   "profile": "cpp-codex-project-wave-auto-87ecb097",
-  "profile_digest": "sha256:bbf1e6a95c9916b88c814206a464fa3a6b7d61d90d8785b1bc21ba6049a92ed0",
+  "profile_digest": "sha256:9c3b388e7b2dfe555c06c8cc106bc13d4cd07039c079535405d4f703d85568cd",
   "subject": {
-    "declaration_digest": "sha256:9f9c4df39dc47ee494fa163d7b4f5a6889502ee99cb22e5b034577297a2da478",
+    "declaration_digest": "sha256:8c37a22624ac3a6ec9be5590300ea0b2a11ccf97179a585a70e9c03f5bbb6684",
     "locator": "github.com/cooneycw/claude-power-pack",
     "revision": "87ecb0970f70aace9e0323feee00c9ca57dda133",
     "source_kind": "git",
@@ -17,6 +17,7 @@
   "treatment_question": "product",
   "selection": [
     "flow-auto",
+    "flow-register",
     "flow-wave",
     "project-init"
   ],
@@ -430,6 +431,128 @@
       ]
     },
     {
+      "name": "flow-register",
+      "directory": "flow-register",
+      "description_digest": "sha256:5e39c87926981ee74f445be99ab6d1a7a4b6d4557bc814aa90a9827510aeedb8",
+      "body_digest": "sha256:85c804ae656fe4844923df94033ca47d74eb9946abd122ff4da640e3d8e9f54a",
+      "required_references": [
+        "reference.md"
+      ],
+      "checksums": "verified",
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/PROVENANCE.md",
+          "destination": ".codex/skills/flow-register/PROVENANCE.md",
+          "mode": "100644",
+          "size": 650,
+          "digest": "sha256:cafcf5f4cf1f24b3eaf0fdb0a4990457d30680d5990344461201293a6c8c4190",
+          "git_blob": "e9977556d8878e711d61037f28418a511c2240d9",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/SKILL.md",
+          "destination": ".codex/skills/flow-register/SKILL.md",
+          "mode": "100644",
+          "size": 2276,
+          "digest": "sha256:39aa37fad213709c8940013b1f69888838f38d4ac5a8cec61175b91bf6ae82d4",
+          "git_blob": "eb1812c5c4c646951aa0258953db9924a30afdc0",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/reference.md",
+          "destination": ".codex/skills/flow-register/reference.md",
+          "mode": "100644",
+          "size": 105323,
+          "digest": "sha256:73df728f27abc44c1dd27c0076cdea860fb1c891235be675c59e7ba433d67ee1",
+          "git_blob": "e076b5e3560457c3bbdce5b7a8a73445d654f00f",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/SHA256SUMS",
+          "destination": ".codex/skills/flow-register/scripts/SHA256SUMS",
+          "mode": "100644",
+          "size": 1103,
+          "digest": "sha256:a4d1acc7f6b7f67f3facf11cee045023cca8ca23c610d7d47104f89feefbe060",
+          "git_blob": "65d691ccc4cca48393069d06221ee1cdd91cdc90",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/flow-driver-capability.sh",
+          "destination": ".codex/skills/flow-register/scripts/flow-driver-capability.sh",
+          "mode": "100755",
+          "size": 32095,
+          "digest": "sha256:439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+          "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/flow-vantage.sh",
+          "destination": ".codex/skills/flow-register/scripts/flow-vantage.sh",
+          "mode": "100755",
+          "size": 17869,
+          "digest": "sha256:884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93",
+          "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+          "destination": ".codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+          "mode": "100755",
+          "size": 56972,
+          "digest": "sha256:a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734",
+          "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+          "destination": ".codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+          "mode": "100755",
+          "size": 186860,
+          "digest": "sha256:072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06",
+          "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+          "destination": ".codex/skills/flow-register/scripts/flow-wave-registry.sh",
+          "mode": "100755",
+          "size": 256041,
+          "digest": "sha256:003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae",
+          "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+          "owner": "skill:flow-register"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+          "destination": ".codex/skills/flow-register/scripts/toolchain-provenance.sh",
+          "mode": "100755",
+          "size": 21590,
+          "digest": "sha256:23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c",
+          "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+          "owner": "skill:flow-register"
+        }
+      ]
+    },
+    {
       "name": "flow-wave",
       "directory": "flow-wave",
       "description_digest": "sha256:c27165c6e7546e7694b7bbd20e7bfb86fbac3d400f1e76b308c82f7556811465",
@@ -797,6 +920,7 @@
         "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
         "codex/skills/flow-auto/scripts/flow-plan-record.py",
         "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+        "codex/skills/flow-register/scripts/toolchain-provenance.sh",
         "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
         "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
         "scripts/flow-finish-gate.sh",
@@ -1051,6 +1175,7 @@
       "referenced_by": [
         "codex/skills/flow-auto/reference.md",
         "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+        "codex/skills/flow-register/scripts/toolchain-provenance.sh",
         "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
         "codex/skills/project-init/reference.md",
         "scripts/flow-finish-gate.sh",
@@ -1868,6 +1993,8 @@
       "traversed": true,
       "no_traverse_reason": null,
       "referenced_by": [
+        "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+        "codex/skills/flow-register/scripts/flow-wave-registry.sh",
         "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
         "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
         "scripts/flow-wave-mailbox.sh",
@@ -2570,6 +2697,173 @@
       "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
     },
     {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-lexicon.sh",
+      "in": "codex/skills/flow-register/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-mailbox.sh",
+      "in": "codex/skills/flow-register/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-registry.sh",
+      "in": "codex/skills/flow-register/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "/home/user/Projects/claude-power-pack",
+      "in": "codex/skills/flow-register/reference.md",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Generic upstream example project path; unsupported and never used by the cold proof."
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "codex/skills/flow-register/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "~/.claude/settings.json",
+      "in": "codex/skills/flow-register/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code's own settings (hook registration by /cpp:init): another client's configuration, never materialized"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "codex/skills/flow-register/scripts/flow-vantage.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-wave-registry.sh",
+      "in": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-registry.sh"
+    },
+    {
+      "reference": "$HOME/.claude/sessions",
+      "in": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$SELF_DIR/flow-wave-lexicon.sh",
+      "in": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+      "pattern": "mailbox-lexicon-sibling",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-lexicon.sh"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-vantage.sh",
+      "in": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-vantage.sh"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/toolchain-provenance.sh",
+      "in": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/toolchain-provenance.sh"
+    },
+    {
+      "reference": "$self_dir/flow-wave-mailbox.sh",
+      "in": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+      "pattern": "registry-mailbox-sibling",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-mailbox.sh"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "$HOME/.claude-power-pack",
+      "in": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "$HOME/Projects/claude-power-pack",
+      "in": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
       "reference": "~/.claude/sessions",
       "in": "codex/skills/flow-wave/reference.md",
       "pattern": "home-path",
@@ -3200,6 +3494,18 @@
       "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
     },
     {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-lexicon.sh",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-mailbox.sh",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-registry.sh",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
       "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-worktree-guard.sh",
       "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
     },
@@ -3214,6 +3520,10 @@
     {
       "reference": "/home/u/.codex/skills",
       "reason": "Illustrative generator install path, not a runtime dependency."
+    },
+    {
+      "reference": "/home/user/Projects/claude-power-pack",
+      "reason": "Generic upstream example project path; unsupported and never used by the cold proof."
     },
     {
       "reference": "/home/user/Projects/half-deleted-issue-9",
@@ -3582,6 +3892,34 @@
         "supplied_by": null
       },
       {
+        "path": "codex/skills/flow-register/scripts/SHA256SUMS",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-register/scripts/flow-driver-capability.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-register/scripts/flow-vantage.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-register/scripts/flow-wave-registry.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-register/scripts/toolchain-provenance.sh",
+        "supplied_by": null
+      },
+      {
         "path": "codex/skills/flow-wave/scripts/SHA256SUMS",
         "supplied_by": null
       },
@@ -3720,8 +4058,8 @@
   ],
   "bundled_checksum_manifest": "SHA256SUMS",
   "installed_surface": {
-    "files": 149,
-    "digest": "sha256:e2cbaaea33eeb66a85b2fb0c678e90f2a63bbc24b0a3e084f476be96cc8b795a"
+    "files": 159,
+    "digest": "sha256:9f0b6087f3cf2a3ed6961b99037372461a9f1fdce3284900412b5651cb7e1dc4"
   },
   "establishes": "a declared, closed dependency inventory at this source revision",
   "does_not_establish": [
