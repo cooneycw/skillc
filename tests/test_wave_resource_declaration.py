@@ -77,3 +77,12 @@ def test_valid_resource_input_preserves_existing_declaration_identity() -> None:
     assert parsed.data['wave_resources'] == raw['wave_resources']
     unchanged = copy.deepcopy(raw)
     assert calibration.declaration_digest(calibration.parse_declaration(unchanged).data) == calibration.declaration_digest(parsed.data)
+
+
+def test_existing_discrimination_parser_cannot_ignore_resource_opt_in() -> None:
+    from test_calibration_discrimination_declaration import _approved
+
+    raw = _approved()
+    raw['wave_resources'] = data()['wave_resources']
+    with pytest.raises(calibration.DeclarationRefused, match='wave_resources'):
+        calibration.parse_discrimination_declaration(raw)

@@ -6,7 +6,7 @@ import inspect
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from test_wave_accounting import encoded
@@ -92,7 +92,7 @@ def test_whole_declaration_binding_and_sizing_identity_cover_resource_changes() 
     with pytest.raises(ValueError):
         planning.bind_plan(raw, digest)
     parsed = calibration.parse_declaration(data())
-    parsed.data['wave_resources']['roles'][2]['memory_bytes'] = False
+    cast(dict[str, Any], parsed.data)['wave_resources']['roles'][2]['memory_bytes'] = False
     with pytest.raises(calibration.DeclarationRefused, match='wave_resources'):
         calibration.require_approved(parsed, Path('.'))
 

@@ -79,11 +79,12 @@ always-PASS, ignore-reservations and ignore-owner-binding variants must lose
 those committed witnesses. These qualify a NEW evaluator; old-main absent APIs
 are not regression evidence. Private-output qualification includes a seeded leak.
 
-Before this fix, 19 unchanged existing-calibration-consumer controls failed on
+Before this fix, 20 unchanged existing-consumer controls failed on
 pinned main `3ef2546` because invalid resource inputs were ignored; one valid-input
-identity control passed. All 19 were meaningful DID NOT RAISE DeclarationRefused
+identity control passed. All 20 were meaningful DID NOT RAISE DeclarationRefused
 failures, with no API/setup errors. They cover the missing third role, CPU/memory
 shape, source/concurrency, auxiliary/reservation and freshness inputs. The new
+controls include 19 calibration cases and one discrimination opt-in refusal. The
 resource evaluator is qualified separately with authored data only.
 
 Capped dispatch remains refused under the existing NHL limits contract; uncapped
