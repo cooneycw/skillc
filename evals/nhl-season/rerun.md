@@ -124,8 +124,9 @@ Private per-case `execution.json` records argv, exit status and captured output;
 adapter and grader implementation hashes. Goal/recipe/adapter bytes are
 rechecked after execution; a changed declaration input invalidates the result. Exit codes are 0 PASS, 1 FAIL and
 2 UNKNOWN. Preparation and Docker transport failures are UNKNOWN. A failed documented
-command is FAIL only when an independent inspect still confirms the candidate
-container running; failed/uncertain inspection does not blame the candidate. PASS here covers only these replay
+command is FAIL when independent runtime facts and the controller termination
+record support candidate attribution as specified below; failed/uncertain
+inspection or harness resource limits do not blame the candidate. PASS here covers only these replay
 checks; it is not a whole-project, full-season, viewer or on-ice verdict.
 
 The committed [controls](../../controls/nhl-rerun/README.md) use two authored
@@ -149,3 +150,32 @@ The floor's committed controls reject this file being skipped, failed, errored
 or missing while every other declared file passes. The passing control counts
 its actual test. Runner host re-pinning and state re-seeding are outside this
 change; #634 remains open until certification and remaining acceptance.
+
+## Runtime failure attribution (#634, #639 boundary)
+
+A nonzero stopped-container code is not sufficient by itself to blame the
+candidate. FAIL requires runtime-confirmed exited state with OOMKilled false,
+a nonzero exit code, the recorded documented entry point, and a positive,
+durable controller record covering that invocation: the controller tracked its
+termination requests and sent no stop, kill or timeout signal before the exit.
+This positive no-signal record is required for signal-range (128+N) exits too;
+missing records never count as evidence that no signal was sent. Candidate
+stdout/stderr, including claims of an exit or OOM, cannot supply these facts.
+
+A controller-signalled container is UNKNOWN with a harness-signalled reason.
+OOM is UNKNOWN with "candidate exceeded the harness memory limit" pending
+#639's approval of fair candidate resource constraints. A harness timeout is
+UNKNOWN with a harness wall-time-limit reason. The public task's time units
+refer to hockey playing time; neither #634 nor the current public goal makes
+the replay adapter's default 120-second wall cap a candidate requirement.
+No new declaration option grants task-limit authority here. Inspect/daemon or
+transport failure, malformed/contradictory state, missing invocation coverage,
+and a signal-range exit without a positive no-signal record remain named UNKNOWN.
+
+A documented command returning nonzero while runtime state confirms its
+container is still running remains FAIL, with that command and code recorded.
+All evidence stays in the controller's private evidence directory. Later cleanup
+signals occur after the attribution snapshot and cannot rewrite its earlier
+invocation interval. Unconfirmed cleanup still overrides the final result to
+UNKNOWN. This repair neither produces private-source replay evidence nor grades
+an actual delivered project; both still require the separate #639 declaration.

@@ -19,6 +19,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -30,6 +31,135 @@ from .nhl_snapshot import Json, ReferenceError
 
 class InfrastructureError(ReferenceError):
     """Controller execution failed; no candidate verdict can be inferred."""
+
+
+
+@dataclass(frozen=True)
+class _InvocationEvidence:
+    path: Path
+    digest: str
+
+    def read(self, candidate: str, entrypoint: str, runtime: str) -> Json:
+        raw = self.path.read_bytes()
+        if snapshot.sha256(raw) != self.digest:
+            raise InfrastructureError('controller termination record changed')
+        record = json.loads(raw)
+        fields = {'candidate', 'entrypoint', 'signal_tracking_complete', 'signals_sent',
+                  'harness_timed_out', 'runtime_sha256'}
+        if (type(record) is not dict or set(record) != fields
+                or record['candidate'] != candidate or record['entrypoint'] != entrypoint
+                or record['signal_tracking_complete'] is not True
+                or type(record['harness_timed_out']) is not bool
+                or type(record['signals_sent']) is not list
+                or any(type(value) is not str or not value for value in record['signals_sent'])
+                or record['runtime_sha256'] != snapshot.sha256(runtime.encode())):
+            raise InfrastructureError('controller termination coverage unavailable')
+        return record
+
+
+class _Terminations:
+    """Private controller journal; every owned termination request is recorded first."""
+
+    def __init__(self, evidence: Path, candidate: str) -> None:
+        self.directory = evidence
+        self.candidate = candidate
+        self.signals: list[str] = []
+        self.timed_out = False
+        self.entrypoint: str | None = None
+        self.sequence = 0
+        self.event('controller-termination-tracking-started')
+
+    def event(self, name: str, **fields: Any) -> None:
+        record = {'sequence': self.sequence, 'event': name, 'candidate': self.candidate, **fields}
+        with (self.directory / 'termination.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(record, sort_keys=True) + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        descriptor = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        self.sequence += 1
+
+    def begin(self, entrypoint: str) -> None:
+        self.event('documented-entrypoint-invoked', entrypoint=entrypoint)
+        self.entrypoint = entrypoint
+
+    def signal(self, action: str) -> None:
+        self.event('controller-termination-request', action=action)
+        self.signals.append(action)
+
+    def timeout(self) -> None:
+        self.event('harness-timeout', entrypoint=self.entrypoint)
+        self.timed_out = True
+
+    def capture(self, runtime: str) -> _InvocationEvidence:
+        if self.entrypoint is None:
+            raise InfrastructureError('documented invocation not recorded')
+        record = {'candidate': self.candidate, 'entrypoint': self.entrypoint,
+                  'signal_tracking_complete': True, 'signals_sent': self.signals[:],
+                  'harness_timed_out': self.timed_out, 'runtime_sha256': snapshot.sha256(runtime.encode())}
+        path = self.directory / f'attribution-{self.sequence}.json'
+        raw = (json.dumps(record, sort_keys=True) + '\n').encode()
+        with path.open('xb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        self.event('attribution-captured', path=path.name, sha256=snapshot.sha256(raw))
+        return _InvocationEvidence(path, snapshot.sha256(raw))
+
+
+def _attribute_failure(inspected: subprocess.CompletedProcess[str], *, entrypoint: str,
+                       command_exit: int | None, timed_out: bool, candidate: str,
+                       evidence: _InvocationEvidence | None) -> None:
+    """Attribute a failed documented command from independently held runtime facts.
+
+    A harness resource limit has no approved task-failure authority yet (#639).
+    Additional runtime fields are allowed, but every fact we consume is required
+    and typed; partial, contradictory or daemon-error state is not candidate blame.
+    """
+    unknown = InfrastructureError("candidate runtime state unconfirmed")
+    if type(inspected.returncode) is not int or inspected.returncode != 0:
+        raise unknown
+    try:
+        state = json.loads(inspected.stdout)
+    except (ValueError, TypeError) as exc:
+        raise unknown from exc
+    if (type(state) is not dict or any(type(state.get(key)) is not bool
+            for key in ('Running', 'OOMKilled', 'Dead', 'Restarting'))
+            or type(state.get('Status')) is not str or type(state.get('Error')) is not str
+            or type(state.get('ExitCode')) is not int or not 0 <= state['ExitCode'] <= 255
+            or state['Error'] or state['Dead'] or state['Restarting']):
+        raise unknown
+    if state['OOMKilled'] and not state['Running'] and state['Status'] == 'exited' and state['ExitCode'] > 0:
+        raise InfrastructureError('candidate exceeded the harness memory limit (#639 approval pending): ' + entrypoint)
+    missing = ('signal-range exit without a positive no-signal record' if state['ExitCode'] >= 128 else
+               'controller termination coverage unavailable')
+    if type(evidence) is not _InvocationEvidence:
+        raise InfrastructureError(missing)
+    try:
+        held = evidence.read(candidate, entrypoint, inspected.stdout)
+    except (OSError, ValueError) as exc:
+        raise InfrastructureError(missing) from exc
+    if held['signals_sent']:
+        raise InfrastructureError('harness-signalled candidate: ' + ','.join(held['signals_sent']))
+    if held['harness_timed_out'] or timed_out:
+        raise InfrastructureError('candidate exceeded the harness wall-time limit (#639 approval pending): ' + entrypoint)
+    running = state['Running']
+    if running:
+        if state['Status'] != 'running' or state['ExitCode'] != 0 or state['OOMKilled']:
+            raise unknown
+        if timed_out:
+            raise InfrastructureError('candidate exceeded the harness wall-time limit (#639 approval pending): ' + entrypoint)
+        if type(command_exit) is int and 0 < command_exit <= 255:
+            raise ReferenceError(f'documented entry point failed (exit {command_exit}): {entrypoint}')
+        raise unknown
+    if state['Status'] != 'exited' or state['ExitCode'] == 0:
+        raise unknown
+    if state['OOMKilled']:
+        raise InfrastructureError('candidate exceeded the harness memory limit (#639 approval pending): ' + entrypoint)
+    raise ReferenceError(f'documented entry point failed (container exit {state["ExitCode"]}): {entrypoint}')
 
 
 def custody(project: Path, *private: Path) -> None:
@@ -280,31 +410,57 @@ class DockerReplay:
         network, server, candidate = token, token + "-source", token + "-candidate"
         transcript: list[Json] = []
         deadline = time.monotonic() + self.timeout
+        try:
+            terminations = _Terminations(evidence, candidate)
+        except OSError:
+            verdict = {"name": case["name"], "status": "UNKNOWN",
+                       "reasons": ["controller termination journal unavailable"]}
+            (evidence / "verdict.json").write_text(json.dumps(verdict, indent=2))
+            (evidence / "execution.json").write_text(json.dumps({"commands": [], "cleanup": [],
+                                                               "error": "journal unavailable before launch"}, indent=2))
+            return verdict
+        documented_entrypoint: str | None = None
 
         def call(args: list[str], *, candidate_command: bool = False) -> str:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise ReferenceError("replay exceeded whole-case wall-time cap")
+                raise InfrastructureError("replay exceeded the harness wall-time limit (#639 approval pending)")
+            def candidate_failure(*, command_exit: int | None, timed_out: bool) -> None:
+                # The controller has not requested candidate stop at this point.
+                # Only the runtime inspect response, never candidate stdout,
+                # can establish the container's terminal or memory-limit state.
+                inspection = ["docker", "inspect", "--format", "{{json .State}}", candidate]
+                try:
+                    state = self.run(inspection, 3)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    transcript.append({"argv": inspection[1:], "error": "runtime inspect unavailable"})
+                    raise InfrastructureError("candidate runtime state unconfirmed") from exc
+                transcript.append({"argv": inspection[1:], "returncode": state.returncode,
+                                   "stdout": state.stdout, "stderr": state.stderr})
+                held = terminations.capture(state.stdout)
+                _attribute_failure(state, entrypoint=documented_entrypoint or args[-1],
+                                   command_exit=command_exit, timed_out=timed_out,
+                                   candidate=candidate, evidence=held)
+
+            if candidate_command:
+                if documented_entrypoint is None:
+                    raise InfrastructureError('documented invocation not recorded')
+                terminations.begin(documented_entrypoint)
+            if args[0] in ('stop', 'kill', 'restart') and candidate in args:
+                terminations.signal(args[0])
             try:
                 completed = self.run(["docker", *args], remaining)
             except subprocess.TimeoutExpired as exc:
                 transcript.append({"argv": args, "error": "timeout"})
                 if candidate_command:
-                    state = self.run(["docker", "inspect", "--format", "{{.State.Running}}", candidate], 3)
-                    transcript.append({"argv": ["inspect", candidate], "returncode": state.returncode,
-                                       "stdout": state.stdout, "stderr": state.stderr})
-                    if state.returncode == 0 and state.stdout.strip() == "true":
-                        raise ReferenceError("documented entry point exceeded declared wall-time cap") from exc
-                raise
+                    terminations.timeout()
+                    candidate_failure(command_exit=None, timed_out=True)
+                raise InfrastructureError("replay exceeded the harness wall-time limit (#639 approval pending)") from exc
             transcript.append({"argv": args, "returncode": completed.returncode,
                                "stdout": completed.stdout, "stderr": completed.stderr})
             if completed.returncode:
                 if candidate_command:
-                    state = self.run(["docker", "inspect", "--format", "{{.State.Running}}", candidate], max(.001, deadline - time.monotonic()))
-                    transcript.append({"argv": ["inspect", candidate], "returncode": state.returncode,
-                                       "stdout": state.stdout, "stderr": state.stderr})
-                    if state.returncode == 0 and state.stdout.strip() == "true":
-                        raise ReferenceError(f"documented entry point failed (exit {completed.returncode})")
+                    candidate_failure(command_exit=completed.returncode, timed_out=False)
                 raise InfrastructureError(f"Docker operation failed: {args[0]} (exit {completed.returncode})")
             return completed.stdout
 
@@ -340,6 +496,7 @@ class DockerReplay:
             for command in adapter["commands"]:
                 if adapter.get("api_base_placeholder"):
                     command = command.replace(adapter["api_base_placeholder"], "http://nhl-source:8080")
+                documented_entrypoint = command
                 call(["exec", candidate, "/bin/sh", "-eu", "-c", command], candidate_command=True)
             # Trusted adapter extraction reads existing retained source records;
             # it is not a delivered entry point or a replacement reconciler.
@@ -366,9 +523,18 @@ class DockerReplay:
             cleanup = []
             for args in (["rm", "-f", candidate, server], ["network", "rm", network]):
                 try:
+                    journal_error = None
+                    if args[0] == "rm" and candidate in args:
+                        try:
+                            terminations.signal("cleanup-rm-force")
+                        except OSError:
+                            # A failed journal must not strand owned containers.
+                            # This is after the attribution interval closed.
+                            journal_error = "cleanup termination record unavailable"
                     receipt = self.run(["docker", *args], 30)
                     cleanup.append({"argv": args, "returncode": receipt.returncode,
-                                    "stdout": receipt.stdout, "stderr": receipt.stderr})
+                                    "stdout": receipt.stdout, "stderr": receipt.stderr,
+                                    "journal_error": journal_error})
                 except (OSError, ValueError, subprocess.SubprocessError) as exc:
                     cleanup.append({"argv": args, "error": str(exc)})
             (evidence / "execution.json").write_text(json.dumps({"commands": transcript, "cleanup": cleanup}, indent=2))
