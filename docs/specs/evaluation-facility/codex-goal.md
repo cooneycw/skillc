@@ -156,7 +156,11 @@ objective, version, model and validated recorded total before initialization.
 Every exact raw frame (base64 encoded in the journal) and structured goal event
 is appended with a sequence and previous-line hash, and fsynced before its caller
 can consume it. Outbound frames are flushed **before dispatch**: `sent` records a
-dispatch intention, not proof that the peer received any bytes. Partial incoming
+dispatch intention, not proof that the peer received any bytes. Each successful
+raw read is additionally flushed as `received-chunk` before buffering; this
+retains coalesced bytes even when a later poll never consumes them. Frame and
+chunk observations overlap and must not be concatenated as one transcript.
+Partial incoming
 bytes are retained as `received-partial` before EOF, timeout or oversized-frame
 refusal. An observation may contain malformed JSON; custody retains those bytes
 without upgrading them to a valid goal. The transport still bounds I/O and the

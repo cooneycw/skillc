@@ -118,7 +118,7 @@ def test_custody_covers_actual_scripted_peer(tmp_path: Path, mode: str) -> None:
     assert retained['status'] == 'CAPTURED'
     assert retained['events'] == report['events']
     frames = retained['frames']
-    assert {row['direction'] for row in frames} == {'sent', 'received'}
+    assert {row['direction'] for row in frames} == {'sent', 'received', 'received-chunk'}
     assert json.loads(frames[0]['raw'])['method'] == 'initialize'
     assert report['recorded_token_budget'] == 300 and report['budget_enforced'] is False
     if mode in ('peer-disappears', 'malformed-goal'):
@@ -185,3 +185,46 @@ def test_sealed_capture_is_closed_and_reference_round_trips(tmp_path: Path) -> N
     path.unlink()
     path.symlink_to(tmp_path / 'missing')
     assert c.verify(tmp_path / 'capture', ref, ctx)['status'] == 'UNKNOWN'
+
+
+def test_coalesced_unconsumed_read_bytes_are_already_durable(tmp_path: Path) -> None:
+    ctx = context()
+    capture = c.Capture(tmp_path / 'capture', ctx)
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, 'rb', buffering=0) as reader, os.fdopen(write_fd, 'wb', buffering=0) as writer:
+        transport = g.JsonLineTransport(reader, writer, wire=lambda *_: None, capture=capture)
+        g.GoalSession(transport, objective=ctx.objective, model=ctx.model,
+                      comparison_sessions=SESSIONS, capture=capture)
+        wire = b'{"id":1}\n{"id":2}\n'
+        writer.write(wire)
+        capture.event({'seq': 1, 'kind': 'request', 'method': 'initialize', 'params': {}})
+        assert transport.receive() == {'id': 1}
+        assert transport.buffer == b'{"id":2}\n'
+    result = c.verify(capture.root, capture.seal(), ctx)
+    assert result['status'] == 'CAPTURED'
+    assert b''.join(row['raw'] for row in result['frames'] if row['direction'] == 'received-chunk') == wire
+
+
+def test_one_capture_cannot_bind_two_sessions_or_connections(tmp_path: Path) -> None:
+    capture = c.Capture(tmp_path / 'capture', context())
+    try:
+        capture.bind_transport()
+        with pytest.raises(c.CaptureUnavailable):
+            capture.bind_transport()
+        with pytest.raises(c.CaptureUnavailable):
+            capture.seal()
+    finally:
+        capture.close()
+
+
+def test_captured_transport_requires_same_session_capture(tmp_path: Path) -> None:
+    capture = c.Capture(tmp_path / 'capture', context())
+    read_fd, write_fd = os.pipe()
+    try:
+        with os.fdopen(read_fd, 'rb', buffering=0) as reader, os.fdopen(write_fd, 'wb', buffering=0) as writer:
+            transport = g.JsonLineTransport(reader, writer, wire=lambda *_: None, capture=capture)
+            with pytest.raises(g.GoalRefused):
+                g.GoalSession(transport, objective=context().objective, model=context().model,
+                              comparison_sessions=SESSIONS)
+    finally:
+        capture.close()

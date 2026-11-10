@@ -105,6 +105,9 @@ class JsonLineTransport:
             if not data:
                 self._partial()
                 raise EOFError("app-server stream closed")
+            # Preserve even coalesced bytes never consumed by a later poll.
+            if self.capture is not None:
+                self.capture.frame("received-chunk", data)
             self.buffer += data
         line, _, self.buffer = self.buffer.partition(b"\n")
         self._wire("received", line + b"\n")

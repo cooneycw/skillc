@@ -247,9 +247,9 @@ class Capture:
 
 
 def _frame(direction: object, raw: object) -> None:
-    if (type(direction) is not str or direction not in ('sent', 'received', 'received-partial')
+    if (type(direction) is not str or direction not in ('sent', 'received', 'received-partial', 'received-chunk')
             or type(raw) is not bytes or not 0 < len(raw) <= MAX_FRAME
-            or direction != 'received-partial' and (not raw.endswith(b'\n') or b'\n' in raw[:-1])):
+            or direction in ('sent', 'received') and (not raw.endswith(b'\n') or b'\n' in raw[:-1])):
         raise CaptureUnavailable('bounded exact frame or received fragment required')
 
 
@@ -303,8 +303,8 @@ def _decode(raw: bytes, ref: Reference, expected: Context) -> dict[str, Any]:
             or parse_context(start['context']) != expected
             or rows[1] != {'kind': 'transport-bound'} or rows[2] != {'kind': 'session-bound'}):
         raise CaptureUnavailable('capture context/binding differs')
-    events = []
-    frames = []
+    events: list[dict[str, Any]] = []
+    frames: list[dict[str, Any]] = []
     for stored in rows[3:-1]:
         if stored.get('kind') == 'event':
             row = _object(stored, {'kind', 'event'})

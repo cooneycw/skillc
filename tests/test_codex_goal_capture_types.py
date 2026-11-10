@@ -47,7 +47,7 @@ def test_closed_parser_root_sweep(bad: Any) -> None:
 @pytest.mark.parametrize('bad', BAD, ids=IDS)
 @pytest.mark.parametrize('argument', ['root', 'reference', 'expected'])
 def test_verifier_argument_sweep(tmp_path: Path, argument: str, bad: Any) -> None:
-    args = {'root': tmp_path, 'reference': c.Reference(**REFERENCE), 'expected': c.Context(**CONTEXT)}
+    args: dict[str, Any] = {'root': tmp_path, 'reference': c.Reference(**REFERENCE), 'expected': c.Context(**CONTEXT)}
     args[argument] = bad
     assert c.verify(**args)['status'] == 'UNKNOWN'
 
@@ -55,7 +55,7 @@ def test_verifier_argument_sweep(tmp_path: Path, argument: str, bad: Any) -> Non
 @pytest.mark.parametrize('bad', BAD, ids=IDS)
 @pytest.mark.parametrize('argument', ['root', 'context'])
 def test_capture_constructor_sweep(tmp_path: Path, argument: str, bad: Any) -> None:
-    args = {'root': tmp_path / 'capture', 'context': c.Context(**CONTEXT)}
+    args: dict[str, Any] = {'root': tmp_path / 'capture', 'context': c.Context(**CONTEXT)}
     args[argument] = bad
     with pytest.raises(c.CaptureUnavailable):
         c.Capture(**args)
@@ -76,7 +76,7 @@ def capture(tmp_path: Path):
 @pytest.mark.parametrize('bad', BAD, ids=IDS)
 @pytest.mark.parametrize('argument', ['direction', 'raw'])
 def test_frame_argument_sweep(capture: c.Capture, argument: str, bad: Any) -> None:
-    args = {'direction': 'received', 'raw': b'{}\n'}
+    args: dict[str, Any] = {'direction': 'received', 'raw': b'{}\n'}
     args[argument] = bad
     with pytest.raises(c.CaptureUnavailable):
         capture.frame(**args)
@@ -104,7 +104,7 @@ def test_bind_session_field_sweep(tmp_path: Path, field: str, bad: Any) -> None:
     capture = c.Capture(tmp_path / 'capture', c.Context(**CONTEXT))
     try:
         capture.bind_transport()
-        args = {'client_version': g.CLIENT_VERSION, 'model': 'model', 'objective': 'objective', 'budget': 1}
+        args: dict[str, Any] = {'client_version': g.CLIENT_VERSION, 'model': 'model', 'objective': 'objective', 'budget': 1}
         args[field] = bad
         with pytest.raises(c.CaptureUnavailable):
             capture.bind_session(**args)
@@ -122,7 +122,7 @@ def test_existing_adapter_capture_seam_sweep(bad: Any) -> None:
         with pytest.raises(g.GoalRefused):
             g.JsonLineTransport(reader, writer, wire=lambda *_: None, capture=bad)
         with pytest.raises(g.GoalRefused):
-            g.GoalSession(None, objective='objective', model='model', comparison_sessions=[
+            g.GoalSession(bad, objective='objective', model='model', comparison_sessions=[
                 {'session': 'worker', 'role': 'worker', 'token_budget': 1}], capture=bad)
 
 
