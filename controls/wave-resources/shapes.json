@@ -1,0 +1,701 @@
+[
+  {
+    "id": "r000",
+    "kind": "policy",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r001",
+    "kind": "policy",
+    "path": [
+      "version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r002",
+    "kind": "policy",
+    "path": [
+      "sizing_report_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r003",
+    "kind": "policy",
+    "path": [
+      "concurrency"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r004",
+    "kind": "policy",
+    "path": [
+      "roles"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {}
+    ]
+  },
+  {
+    "id": "r005",
+    "kind": "policy",
+    "path": [
+      "roles",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r006",
+    "kind": "policy",
+    "path": [
+      "roles",
+      0,
+      "role"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r007",
+    "kind": "policy",
+    "path": [
+      "roles",
+      0,
+      "cpu_millicores"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r008",
+    "kind": "policy",
+    "path": [
+      "roles",
+      0,
+      "memory_bytes"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r009",
+    "kind": "policy",
+    "path": [
+      "auxiliaries"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {}
+    ]
+  },
+  {
+    "id": "r010",
+    "kind": "policy",
+    "path": [
+      "auxiliaries",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r011",
+    "kind": "policy",
+    "path": [
+      "auxiliaries",
+      0,
+      "name"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r012",
+    "kind": "policy",
+    "path": [
+      "auxiliaries",
+      0,
+      "cpu_millicores"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r013",
+    "kind": "policy",
+    "path": [
+      "auxiliaries",
+      0,
+      "memory_bytes"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r014",
+    "kind": "policy",
+    "path": [
+      "auxiliaries",
+      0,
+      "multiplicity"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r015",
+    "kind": "policy",
+    "path": [
+      "reservations"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {}
+    ]
+  },
+  {
+    "id": "r016",
+    "kind": "policy",
+    "path": [
+      "reservations",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r017",
+    "kind": "policy",
+    "path": [
+      "reservations",
+      0,
+      "name"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r018",
+    "kind": "policy",
+    "path": [
+      "reservations",
+      0,
+      "cpu_millicores"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r019",
+    "kind": "policy",
+    "path": [
+      "reservations",
+      0,
+      "memory_bytes"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r020",
+    "kind": "policy",
+    "path": [
+      "reservations",
+      0,
+      "multiplicity"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r021",
+    "kind": "policy",
+    "path": [
+      "max_age_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r022",
+    "kind": "policy",
+    "path": [
+      "max_collection_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r023",
+    "kind": "binding",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r024",
+    "kind": "binding",
+    "path": [
+      "collection_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r025",
+    "kind": "binding",
+    "path": [
+      "window_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r026",
+    "kind": "binding",
+    "path": [
+      "wave_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r027",
+    "kind": "binding",
+    "path": [
+      "vm_binding_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r028",
+    "kind": "binding",
+    "path": [
+      "declaration_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r029",
+    "kind": "binding",
+    "path": [
+      "sizing_report_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r030",
+    "kind": "receipt",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r031",
+    "kind": "receipt",
+    "path": [
+      "version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r032",
+    "kind": "receipt",
+    "path": [
+      "binding"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "r033",
+    "kind": "receipt",
+    "path": [
+      "binding",
+      "collection_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r034",
+    "kind": "receipt",
+    "path": [
+      "binding",
+      "window_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r035",
+    "kind": "receipt",
+    "path": [
+      "binding",
+      "wave_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r036",
+    "kind": "receipt",
+    "path": [
+      "binding",
+      "vm_binding_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r037",
+    "kind": "receipt",
+    "path": [
+      "binding",
+      "declaration_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r038",
+    "kind": "receipt",
+    "path": [
+      "binding",
+      "sizing_report_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r039",
+    "kind": "receipt",
+    "path": [
+      "started_at"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r040",
+    "kind": "receipt",
+    "path": [
+      "finished_at"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r041",
+    "kind": "receipt",
+    "path": [
+      "complete"
+    ],
+    "values": [
+      null,
+      false,
+      0,
+      1,
+      1.5,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "r042",
+    "kind": "receipt",
+    "path": [
+      "available_cpu_millicores"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "r043",
+    "kind": "receipt",
+    "path": [
+      "available_memory_bytes"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  }
+]

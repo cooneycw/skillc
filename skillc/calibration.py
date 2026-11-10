@@ -452,6 +452,17 @@ def _refuse(message: str) -> DeclarationRefused:
     return DeclarationRefused(f"calibration declaration: {message}")
 
 
+def _require_wave_resources(data: Mapping[str, object]) -> None:
+    if 'wave_resources' not in data:
+        return
+    from .wave_resources import validate_declaration
+
+    try:
+        validate_declaration(data)
+    except ValueError:
+        raise _refuse('wave_resources requires complete declaration-bound CPU/memory sizing') from None
+
+
 def _positive_number(value: object, what: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) \
             or not math.isfinite(value) or value <= 0:
@@ -595,6 +606,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    _require_wave_resources(data)
     from . import nhl_egress_policy as nhl
     from . import nhl_limits
     try:
@@ -988,6 +1000,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
+    if 'wave_resources' in data:
+        raise _refuse('wave_resources is supported only for calibration-declaration')
     if "nhl_egress" in data or "nhl_limits" in data:
         raise _refuse("nhl_egress is supported only for calibration-declaration")
     if "credential_window" in data:
@@ -1252,6 +1266,7 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
     `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
     still says `UNKNOWN`, and the declared task's grader is the one on disk.
     A declaration that validates is still only a plan (ADR 0005)."""
+    _require_wave_resources(declaration.data)
     from . import nhl_egress_policy as nhl
     from . import nhl_limits
     try:
@@ -1346,6 +1361,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
     grader, fixture or profile files changing the answer: who/when and the
     schedule size, the approved mutated_digest, and (D-P2a) the whole
     declaration digest."""
+    if 'wave_resources' in declaration.data:
+        raise _refuse('wave_resources is supported only for calibration-declaration')
     if "credential_window" in declaration.data:
         raise _refuse("credential_window is supported only for calibration-declaration")
     if "remnant_scan" in declaration.data:
