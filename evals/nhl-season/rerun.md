@@ -214,3 +214,12 @@ directory is missing only when runtime confirms the candidate still running;
 FAIL then names the missing artifact, not the prior command. Other probe errors
 or a stopped/unconfirmed container are UNKNOWN. No positive documented-command
 attribution snapshot is issued for a controller artifact probe.
+
+Controller grading mappings are validated before candidate files are read.
+Missing/malformed payload or reconciliation mappings, incomplete observed-route
+coverage, out-of-population routes and invalid controller observation/population
+shapes are UNKNOWN. Lexical mapping paths must stay relative to the export root.
+A valid mapping that names a missing/wrong candidate file still yields FAIL.
+Committed controls include 33 invalid adapter-map variants, an execute-path case
+with correct candidate artifacts but no controller payload map, two genuine
+missing-artifact failures and controller population/observation shape controls.

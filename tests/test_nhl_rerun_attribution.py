@@ -333,3 +333,81 @@ def test_failed_controller_export_probe_does_not_reinvoke_successful_documented_
 def test_unavailable_controller_export_probe_is_unknown(tmp_path: Path, running: bool, code: int) -> None:
     result, _ = run_case(tmp_path, state(running=running), command_exit=0, export_probe_exit=code)
     assert result['status'] == 'UNKNOWN'
+
+
+MAP_CASES = json.loads((CONTROLS.parent / 'grading-maps.json').read_text())
+
+
+@pytest.mark.parametrize('fault', MAP_CASES, ids=lambda row: row['id'])
+def test_controller_grading_mapping_unavailable_is_not_candidate_fail(tmp_path: Path, fault: dict[str, Any]) -> None:
+    case = nhl_rerun.scenarios(*nhl_rerun_control.sample(tmp_path))[0]
+    output = tmp_path / 'correct-exports'
+    mapping = export(case, output)
+    assert nhl_rerun.grade(case, output, mapping)['status'] == 'PASS'
+    kind = fault['kind']
+    if kind == 'root':
+        mapping = fault['value']
+    elif kind in {'payloads', 'reconciliation'}:
+        mapping[kind] = fault['value']
+    elif kind == 'filename':
+        mapping['payloads'][next(iter(mapping['payloads']))] = fault['value']
+    elif kind == 'missing-payloads':
+        del mapping['payloads']
+    elif kind == 'missing-reconciliation':
+        del mapping['reconciliation']
+    elif kind == 'missing-route':
+        del mapping['payloads'][next(iter(mapping['payloads']))]
+    elif kind == 'unknown-route':
+        mapping['payloads']['/not-a-served-route'] = 'unrelated.json'
+    else:
+        mapping['payloads'][17] = 'unrelated.json'
+    result = nhl_rerun.grade(case, output, mapping)
+    assert result['status'] == 'UNKNOWN'
+    assert 'controller' in result['reasons'][0]
+
+
+def test_execute_with_correct_artifacts_and_missing_controller_payload_map_is_unknown(tmp_path: Path,
+                                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    original = export
+    def no_mapping(case: dict[str, Any], root: Path) -> dict[str, Any]:
+        mapping = original(case, root)
+        del mapping['payloads']
+        return mapping
+    monkeypatch.setattr(sys.modules[__name__], 'export', no_mapping)
+    result, _ = run_case(tmp_path, state(running=True), command_exit=0)
+    assert result['status'] == 'UNKNOWN' and 'controller' in result['reasons'][0]
+
+
+@pytest.mark.parametrize('missing', ['payload', 'reconciliation'])
+def test_valid_controller_map_with_missing_candidate_file_remains_fail(tmp_path: Path, missing: str) -> None:
+    case = nhl_rerun.scenarios(*nhl_rerun_control.sample(tmp_path))[0]
+    output = tmp_path / 'exports'
+    mapping = export(case, output)
+    filename = next(iter(mapping['payloads'].values())) if missing == 'payload' else mapping['reconciliation']
+    (output / filename).unlink()
+    assert nhl_rerun.grade(case, output, mapping)['status'] == 'FAIL'
+
+
+def test_controller_population_and_observation_shape_sweep_is_unknown(tmp_path: Path) -> None:
+    case = nhl_rerun.scenarios(*nhl_rerun_control.sample(tmp_path))[0]
+    output = tmp_path / 'exports'
+    mapping = export(case, output)
+    assert nhl_rerun.grade(case, output, mapping)['status'] == 'PASS'
+    bad = json.loads((CONTROLS.parent / 'grading-context-shapes.json').read_text())
+    assert set(bad) == {'root', 'payloads', 'expected', 'requested'}
+    for kind, values in bad.items():
+        assert values
+        for value in values:
+            altered: Any = dict(case)
+            requested = None
+            if kind == 'root':
+                altered = value
+            elif kind == 'requested':
+                requested = value
+            else:
+                altered[kind] = value
+            result = nhl_rerun.grade(altered, output, mapping, requested=requested)
+            assert result['status'] == 'UNKNOWN'
+    for identity in [True, 0, -1, 'not-a-game']:
+        altered = {**case, 'expected': {identity: next(iter(case['expected'].values()))}}
+        assert nhl_rerun.grade(altered, output, mapping)['status'] == 'UNKNOWN'

@@ -305,6 +305,41 @@ def safe_file(root: Path, relative: str) -> Path:
     return path
 
 
+
+def _grading_context(case: Json, adapter: Json, requested: list[str] | None) -> tuple[Json, str, set[str]]:
+    """Validate controller mappings without reading or blaming candidate files."""
+    def relative(value: object) -> bool:
+        return (type(value) is str and bool(value) and value != '.' and not Path(value).is_absolute()
+                and '..' not in Path(value).parts)
+
+    if type(case) is not dict or type(adapter) is not dict:
+        raise InfrastructureError('controller grading mapping root unavailable')
+    payloads, expected = case.get('payloads'), case.get('expected')
+    if (type(payloads) is not dict or not payloads or any(type(key) is not str for key in payloads)
+            or type(expected) is not dict or not expected
+            or any(type(key) is not int or key <= 0 for key in expected)):
+        raise InfrastructureError('controller replay population unavailable')
+    retained = adapter.get('payloads')
+    reconciliation = adapter.get('reconciliation')
+    if type(retained) is not dict or not retained:
+        raise InfrastructureError('controller payload mapping unavailable')
+    if any(type(key) is not str or key not in payloads or not relative(value) for key, value in retained.items()):
+        raise InfrastructureError('controller payload mapping malformed')
+    if not relative(reconciliation):
+        raise InfrastructureError('controller reconciliation mapping unavailable')
+    if requested is None:
+        observed = set(payloads)
+    else:
+        if type(requested) is not list or any(type(value) is not str for value in requested):
+            raise InfrastructureError('controller request observation malformed')
+        observed = set(requested)
+    if not observed <= set(payloads):
+        raise InfrastructureError('controller request observation outside served population')
+    if not observed <= set(retained):
+        raise InfrastructureError('controller payload mapping missing requested endpoint')
+    return dict(retained), reconciliation, observed
+
+
 def grade(case: Json, output: Path, adapter: Json, *, requested: list[str] | None = None) -> Json:
     """Read ordinary delivered exports via controller-selected path mapping.
 
@@ -312,23 +347,24 @@ def grade(case: Json, output: Path, adapter: Json, *, requested: list[str] | Non
     list member, but allowing equivalent serialization. No injected markers
     alone can substitute for the retained complete source records.
     """
+    name = case.get('name', 'unknown') if type(case) is dict else 'unknown'
+    try:
+        retained, reconciliation, observed = _grading_context(case, adapter, requested)
+    except (ValueError, KeyError, TypeError) as exc:
+        return {"name": name, "status": "UNKNOWN", "reasons": ["controller grading mapping unavailable: " + str(exc)]}
     reasons = []
     try:
-        retained = adapter["payloads"]
-        observed = set(case["payloads"] if requested is None else requested)
         required = {route(snapshot.endpoint(source, identity)) for identity in case["expected"]
                     for source in snapshot.SOURCE_IDS}
         schedules = {path for path in observed if path.startswith("/v1/schedule/")}
         if not required <= observed or not schedules or not observed <= set(case["payloads"]):
             raise ReferenceError("retriever did not request schedule and every required game source")
-        if not observed <= set(retained):
-            raise ReferenceError("retained-source mapping missing requested endpoint")
         for endpoint in observed:
             expected = case["payloads"][endpoint]
             actual = json.loads(safe_file(output, retained[endpoint]).read_text())
             if json.dumps(actual, sort_keys=True) != json.dumps(expected, sort_keys=True):
                 reasons.append(f"retained payload differs: {endpoint}")
-        exported = json.loads(safe_file(output, adapter["reconciliation"]).read_text())
+        exported = json.loads(safe_file(output, reconciliation).read_text())
         games = exported["games"]
         if (not isinstance(games, list) or len(games) != len(case["expected"])
                 or {g["game_id"] for g in games} != set(case["expected"])):
@@ -339,7 +375,7 @@ def grade(case: Json, output: Path, adapter: Json, *, requested: list[str] | Non
                 reasons.append(f"reconciliation differs for game {candidate['game_id']}: {comparison}")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         reasons.append(f"missing/invalid documented export: {exc}")
-    return {"name": case["name"], "status": "FAIL" if reasons else "PASS", "reasons": reasons}
+    return {"name": name, "status": "FAIL" if reasons else "PASS", "reasons": reasons}
 
 
 Run = Callable[[list[str], float], subprocess.CompletedProcess[str]]

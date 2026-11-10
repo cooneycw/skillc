@@ -1,0 +1,162 @@
+[
+  {
+    "id": "root-0",
+    "kind": "root",
+    "value": null
+  },
+  {
+    "id": "root-1",
+    "kind": "root",
+    "value": false
+  },
+  {
+    "id": "root-2",
+    "kind": "root",
+    "value": 0
+  },
+  {
+    "id": "root-3",
+    "kind": "root",
+    "value": []
+  },
+  {
+    "id": "root-4",
+    "kind": "root",
+    "value": "map"
+  },
+  {
+    "id": "payloads-5",
+    "kind": "payloads",
+    "value": null
+  },
+  {
+    "id": "payloads-6",
+    "kind": "payloads",
+    "value": false
+  },
+  {
+    "id": "payloads-7",
+    "kind": "payloads",
+    "value": 0
+  },
+  {
+    "id": "payloads-8",
+    "kind": "payloads",
+    "value": []
+  },
+  {
+    "id": "payloads-9",
+    "kind": "payloads",
+    "value": "payloads"
+  },
+  {
+    "id": "payloads-10",
+    "kind": "payloads",
+    "value": {}
+  },
+  {
+    "id": "reconcile-11",
+    "kind": "reconciliation",
+    "value": null
+  },
+  {
+    "id": "reconcile-12",
+    "kind": "reconciliation",
+    "value": false
+  },
+  {
+    "id": "reconcile-13",
+    "kind": "reconciliation",
+    "value": 0
+  },
+  {
+    "id": "reconcile-14",
+    "kind": "reconciliation",
+    "value": []
+  },
+  {
+    "id": "reconcile-15",
+    "kind": "reconciliation",
+    "value": {}
+  },
+  {
+    "id": "reconcile-16",
+    "kind": "reconciliation",
+    "value": ""
+  },
+  {
+    "id": "reconcile-17",
+    "kind": "reconciliation",
+    "value": "."
+  },
+  {
+    "id": "reconcile-18",
+    "kind": "reconciliation",
+    "value": "/absolute.json"
+  },
+  {
+    "id": "reconcile-19",
+    "kind": "reconciliation",
+    "value": "../escape.json"
+  },
+  {
+    "id": "filename-20",
+    "kind": "filename",
+    "value": null
+  },
+  {
+    "id": "filename-21",
+    "kind": "filename",
+    "value": false
+  },
+  {
+    "id": "filename-22",
+    "kind": "filename",
+    "value": 0
+  },
+  {
+    "id": "filename-23",
+    "kind": "filename",
+    "value": []
+  },
+  {
+    "id": "filename-24",
+    "kind": "filename",
+    "value": {}
+  },
+  {
+    "id": "filename-25",
+    "kind": "filename",
+    "value": ""
+  },
+  {
+    "id": "filename-26",
+    "kind": "filename",
+    "value": "/absolute.json"
+  },
+  {
+    "id": "filename-27",
+    "kind": "filename",
+    "value": "../escape.json"
+  },
+  {
+    "id": "missing-payloads",
+    "kind": "missing-payloads"
+  },
+  {
+    "id": "missing-reconciliation",
+    "kind": "missing-reconciliation"
+  },
+  {
+    "id": "missing-route",
+    "kind": "missing-route"
+  },
+  {
+    "id": "unknown-route",
+    "kind": "unknown-route"
+  },
+  {
+    "id": "nontext-route",
+    "kind": "nontext-route"
+  }
+]
