@@ -124,7 +124,20 @@ def require_population(inv: dict[str, Any], rows: object) -> None:
     assert [row['helper'] for row in rows] == helper_paths(inv), 'helper probe population differs'
 
 
+
+REGISTER_SKILL = '.codex/skills/flow-register/SKILL.md'
+
+
+def require_register_step(home: Path, inv: dict[str, Any]) -> None:
+    """Resolve the wave's procedure lookup, without running a native client."""
+    assert 'flow-register' in inv['selection'], 'flow-register SKILL.md absent from selection'
+    row = next((r for r in profile.verify_installed(inv, home)['files']
+                if r['destination'] == REGISTER_SKILL), None)
+    assert row is not None and row['status'] == 'satisfied', 'flow-register SKILL.md missing or changed'
+
+
 def probe(home: Path, inv: dict[str, Any]) -> dict[str, Any]:
+    require_register_step(home, inv)
     observed = profile.verify_installed(inv, home)
     failed = [row['destination'] for row in observed['files'] if row['status'] != 'satisfied']
     assert observed['files'] and not failed, 'installed closure differs: ' + ','.join(failed)
@@ -139,7 +152,11 @@ def probe(home: Path, inv: dict[str, Any]) -> dict[str, Any]:
         dependencies = shell_siblings(path, home) if path.suffix == '.sh' else imports(path)
         rows.append({'interpreter': interpreter, 'resolved_dependencies': dependencies, 'helper': relative, 'probe': 'bash-n' if path.suffix == '.sh' else 'python-compile', 'status': 'PASS'})
     require_population(inv, rows)
-    return {'helpers': rows, 'status': 'PASS', 'scope': 'installed bytes/modes; named interpreter, syntax and static dependency resolution',
+    register_helpers = [r['helper'] for r in rows if r['helper'].startswith('.codex/skills/flow-register/scripts/')]
+    assert register_helpers, 'flow-register helper probe population empty'
+    return {'register_step': {'skill': REGISTER_SKILL, 'status': 'PASS', 'helpers': register_helpers,
+                              'scope': 'installed procedure and named helper tiers; no native-session execution'},
+            'helpers': rows, 'status': 'PASS', 'scope': 'installed bytes/modes; named interpreter, syntax and static dependency resolution',
             'full_workflow_proven': False, 'full_workflow_executable': False, 'admission_authority': False}
 
 
@@ -198,6 +215,20 @@ def actor(home: Path) -> dict[str, Any]:
         except Unsupported:
             continue
         raise AssertionError('unsupported operation dispatched')
+    # The procedure lookup itself must fail by name when its skill is missing.
+    entry = home / REGISTER_SKILL
+    saved, mode = entry.read_bytes(), entry.stat().st_mode & 0o777
+    entry.unlink()
+    try:
+        probe(home, inv)
+    except AssertionError as exc:
+        assert str(exc) == 'flow-register SKILL.md missing or changed'
+        result['missing_register_control'] = {'skill': REGISTER_SKILL, 'result': 'FAIL'}
+    else:
+        raise AssertionError('missing flow-register SKILL.md control blind')
+    finally:
+        entry.write_bytes(saved)
+        entry.chmod(mode)
     # Same instrument, same independently derived inventory, deliberately missing helper.
     target = home / helper_paths(inv)[0]
     target.unlink()

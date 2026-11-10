@@ -108,5 +108,14 @@
         {}
       ]
     }
+  ],
+  "register_selection_invalid": [
+    null,
+    false,
+    0,
+    [],
+    {},
+    "",
+    "not-a-selected-skill"
   ]
 }

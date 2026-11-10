@@ -7,7 +7,8 @@
   "select": [
     "project-init",
     "flow-wave",
-    "flow-auto"
+    "flow-auto",
+    "flow-register"
   ],
   "checksum_manifest": "scripts/SHA256SUMS",
   "external_references": [
