@@ -325,7 +325,7 @@ def _grading_context(case: Json, adapter: Json, requested: list[str] | None) -> 
         raise InfrastructureError('controller payload mapping unavailable')
     if any(type(key) is not str or key not in payloads or not relative(value) for key, value in retained.items()):
         raise InfrastructureError('controller payload mapping malformed')
-    if not relative(reconciliation):
+    if type(reconciliation) is not str or not relative(reconciliation):
         raise InfrastructureError('controller reconciliation mapping unavailable')
     if requested is None:
         observed = set(payloads)
