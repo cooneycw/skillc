@@ -180,7 +180,7 @@ def test_signal_range_exit_requires_positive_durable_no_signal_record(tmp_path: 
 
 
 def test_missing_positive_record_is_unknown_even_for_signal_range_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('terminations', 'capture', lambda self, runtime: None)
+    monkeypatch.setattr(nhl_rerun._Terminations, 'capture', lambda self, runtime: None)
     result, _ = run_case(tmp_path, state(exit_code=137))
     assert result['status'] == 'UNKNOWN'
     assert 'signal-range exit without a positive no-signal record' in result['reasons'][0]
@@ -192,7 +192,7 @@ def test_changed_controller_record_cannot_establish_no_signal(tmp_path: Path, mo
         proof = original(self, runtime)
         proof.path.write_text('{}')
         return proof
-    monkeypatch.setattr('terminations', 'capture', capture)
+    monkeypatch.setattr(nhl_rerun._Terminations, 'capture', capture)
     result, _ = run_case(tmp_path, state())
     assert result['status'] == 'UNKNOWN'
 
