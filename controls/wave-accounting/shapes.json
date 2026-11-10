@@ -1,0 +1,936 @@
+[
+  {
+    "id": "s000",
+    "kind": "context",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s001",
+    "kind": "context",
+    "path": [
+      "wave_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s002",
+    "kind": "context",
+    "path": [
+      "declaration_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s003",
+    "kind": "context",
+    "path": [
+      "deadline_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s004",
+    "kind": "context",
+    "path": [
+      "deadline_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s005",
+    "kind": "context",
+    "path": [
+      "clock"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s006",
+    "kind": "context",
+    "path": [
+      "client_version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s007",
+    "kind": "context",
+    "path": [
+      "roles"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {},
+      []
+    ]
+  },
+  {
+    "id": "s008",
+    "kind": "context",
+    "path": [
+      "roles",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s009",
+    "kind": "context",
+    "path": [
+      "roles",
+      0,
+      "role"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s010",
+    "kind": "context",
+    "path": [
+      "roles",
+      0,
+      "session_id"
+    ],
+    "values": [
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s011",
+    "kind": "context",
+    "path": [
+      "roles",
+      0,
+      "turns"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {},
+      []
+    ]
+  },
+  {
+    "id": "s012",
+    "kind": "context",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s013",
+    "kind": "reference",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s014",
+    "kind": "reference",
+    "path": [
+      "version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s015",
+    "kind": "reference",
+    "path": [
+      "context_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s016",
+    "kind": "reference",
+    "path": [
+      "digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s017",
+    "kind": "reference",
+    "path": [
+      "size"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s018",
+    "kind": "usage",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s019",
+    "kind": "usage",
+    "path": [
+      "version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s020",
+    "kind": "usage",
+    "path": [
+      "wave_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s021",
+    "kind": "usage",
+    "path": [
+      "declaration_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s022",
+    "kind": "usage",
+    "path": [
+      "deadline_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s023",
+    "kind": "usage",
+    "path": [
+      "clock"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s024",
+    "kind": "usage",
+    "path": [
+      "client_version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s025",
+    "kind": "usage",
+    "path": [
+      "counter_format"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s026",
+    "kind": "usage",
+    "path": [
+      "completion_elapsed"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s027",
+    "kind": "usage",
+    "path": [
+      "roles"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {},
+      []
+    ]
+  },
+  {
+    "id": "s028",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s029",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "role"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s030",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "session_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s031",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {},
+      []
+    ]
+  },
+  {
+    "id": "s032",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s033",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0,
+      "turn_id"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s034",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0,
+      "started_at"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s035",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0,
+      "ended_at"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s036",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0,
+      "samples"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {},
+      []
+    ]
+  },
+  {
+    "id": "s037",
+    "kind": "usage",
+    "path": [
+      "roles",
+      0,
+      "turns",
+      0,
+      "samples",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s038",
+    "kind": "plan",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s039",
+    "kind": "plan",
+    "path": [
+      "version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s040",
+    "kind": "plan",
+    "path": [
+      "sizing_report_digest"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s041",
+    "kind": "plan",
+    "path": [
+      "critical_path_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s042",
+    "kind": "plan",
+    "path": [
+      "setup_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s043",
+    "kind": "plan",
+    "path": [
+      "capture_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s044",
+    "kind": "plan",
+    "path": [
+      "cleanup_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s045",
+    "kind": "plan",
+    "path": [
+      "roles"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      {},
+      []
+    ]
+  },
+  {
+    "id": "s046",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s047",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "role"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s048",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "initial_input_tokens"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s049",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "initial_output_tokens"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s050",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "resume_input_tokens"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s051",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "resume_output_tokens"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s052",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "resumed_turns"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s053",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "initial_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s054",
+    "kind": "plan",
+    "path": [
+      "roles",
+      0,
+      "resume_seconds"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {}
+    ]
+  },
+  {
+    "id": "s055",
+    "kind": "limits",
+    "path": [],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      "",
+      []
+    ]
+  },
+  {
+    "id": "s056",
+    "kind": "limits",
+    "path": [
+      "version"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      "",
+      [],
+      {},
+      1.5
+    ]
+  },
+  {
+    "id": "s057",
+    "kind": "limits",
+    "path": [
+      "mode"
+    ],
+    "values": [
+      null,
+      false,
+      true,
+      1.5,
+      [],
+      {}
+    ]
+  }
+]
