@@ -1,4 +1,4 @@
-"""Bounded client-reported wave usage, never a token limiter or live authority.
+"""Bounded client-counter diagnostics, never an accepted sizing/accounting basis.
 
 Inputs are authored/retained numeric captures, not a credential or transcript
 reader. The caller must retain the expected receipt and context independently.
@@ -259,6 +259,8 @@ def _project(data: object, context: Context) -> dict[str, Any]:
             raise UsageRefused('accounting completion clock inconsistent')
     return {'version': 1, 'status': 'COMPLETE' if complete and completion is not None else 'UNKNOWN',
             'wave_id': context.wave_id, 'source': 'client-reported-not-provider-attested',
+            'scope': 'client-counter-diagnostics-only',
+            'sizing_basis_accepted': False, 'accounting_basis_accepted': False,
             'tokens_complete': bool(complete), 'tokens': subtotal if complete else None,
             'known_tokens_subtotal': subtotal, 'known_roles': len(known), 'planned_roles': len(context.roles),
             'roles': records, 'wall_seconds': completion,
@@ -284,6 +286,8 @@ def evaluate(raw: object, receipt: object, expected: object) -> dict[str, Any]:
         return _project(json.loads(raw, object_pairs_hook=wake._pairs), expected)
     except (ValueError, RecursionError):
         return {'version': 1, 'status': 'UNKNOWN', 'tokens_complete': False, 'tokens': None,
+                'scope': 'client-counter-diagnostics-only',
+                'sizing_basis_accepted': False, 'accounting_basis_accepted': False,
                 'known_tokens_subtotal': None, 'known_roles': 0,
                 'wave_id': known_context.wave_id if known_context is not None else None,
                 'planned_roles': len(known_context.roles) if known_context is not None else None,
