@@ -1,0 +1,32 @@
+[
+  {
+    "name": "trust-projection",
+    "before": "        if export['export_status'] != 'VERIFIED':",
+    "after": "        result['status'] = next(w['task_status'] for w in catalogue['waves'] if w['wave_id'] == row['plan']['wave_id'])\n        if export['export_status'] != 'VERIFIED':",
+    "witness": "forged-pass-missing-protocol"
+  },
+  {
+    "name": "skip-poke-verifier",
+    "before": "wave_wake_capture.poke_counts(",
+    "after": "_blind_counts(",
+    "witness": "wrong-poke-receipt"
+  },
+  {
+    "name": "arrival-denominator",
+    "before": "    for row in raw['waves']:",
+    "after": "    for row in [r for r in raw['waves'] if r['observation'] is not None]:",
+    "witness": "healthy"
+  },
+  {
+    "name": "complete-without-protocol",
+    "before": "        protocol = reader.blob(capture['protocol'], binding.role, 'protocol')",
+    "after": "        protocol = reader.blob(capture['protocol'], binding.role, 'protocol') or _blind_protocol(plan, binding)",
+    "witness": "missing-role-protocol"
+  },
+  {
+    "name": "missing-to-zero",
+    "before": "counts.get(binding.role), observed['started']",
+    "after": "counts.get(binding.role, live_wave.PokeCount(binding.role, binding.session_id, 0)), observed['started']",
+    "witness": "missing-wave-wake"
+  }
+]

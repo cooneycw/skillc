@@ -1,0 +1,234 @@
+[
+  {
+    "name": "healthy",
+    "kind": "none",
+    "expected": "PASS"
+  },
+  {
+    "name": "alternative-order",
+    "kind": "alternative",
+    "expected": "PASS"
+  },
+  {
+    "name": "missing-wave-observation",
+    "kind": "missing-wave",
+    "field": "observation",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-wave-wake",
+    "kind": "missing-wave",
+    "field": "wake",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-wave-final",
+    "kind": "missing-wave",
+    "field": "final",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-role-startup",
+    "kind": "missing-role",
+    "field": "startup",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-role-observation",
+    "kind": "missing-role",
+    "field": "observation",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-role-transcript",
+    "kind": "missing-role",
+    "field": "transcript",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-role-protocol",
+    "kind": "missing-role",
+    "field": "protocol",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-role-artifacts",
+    "kind": "missing-role",
+    "field": "artifacts",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "optional-metrics",
+    "kind": "role-metadata",
+    "patch": {
+      "tokens": null,
+      "wall_seconds": null
+    },
+    "expected": "PASS"
+  },
+  {
+    "name": "valid-zero-tokens",
+    "kind": "role-metadata",
+    "patch": {
+      "tokens": 0
+    },
+    "expected": "PASS"
+  },
+  {
+    "name": "idle-not-complete",
+    "kind": "role-metadata",
+    "patch": {
+      "stop_reason": "unavailable"
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "launch-failed",
+    "kind": "role-metadata",
+    "patch": {
+      "started": false,
+      "stop_reason": "launch-failed"
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "uncertain-cleanup",
+    "kind": "role-metadata",
+    "patch": {
+      "cleanup_confirmed": false
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "incomplete-capture",
+    "kind": "role-metadata",
+    "patch": {
+      "capture_complete": false
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "natural-nonzero",
+    "kind": "role-metadata",
+    "patch": {
+      "exit_code": 7
+    },
+    "expected": "FAIL"
+  },
+  {
+    "name": "unknown-exit",
+    "kind": "role-metadata",
+    "patch": {
+      "exit_code": null
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "bad-token",
+    "kind": "role-metadata",
+    "patch": {
+      "tokens": true
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "bad-wall",
+    "kind": "role-metadata",
+    "patch": {
+      "wall_seconds": -1
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "late-cleanup",
+    "kind": "wave-metadata",
+    "patch": {
+      "completion_elapsed": 11
+    },
+    "expected": "FAIL"
+  },
+  {
+    "name": "missing-completion",
+    "kind": "wave-metadata",
+    "patch": {
+      "completion_elapsed": null
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "deadline-witness",
+    "kind": "wave-metadata",
+    "patch": {
+      "deadline_witnessed_at": 10
+    },
+    "expected": "FAIL"
+  },
+  {
+    "name": "early-infrastructure",
+    "kind": "wave-metadata",
+    "patch": {
+      "infrastructure_failed_at": 3,
+      "deadline_witnessed_at": 10,
+      "completion_elapsed": 11
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "missing-common-cleanup",
+    "kind": "wave-metadata",
+    "patch": {
+      "cleanup_confirmed": false
+    },
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "wrong-role",
+    "kind": "wrong-role",
+    "expected": "FAIL"
+  },
+  {
+    "name": "duplicate-complete",
+    "kind": "duplicate",
+    "expected": "FAIL"
+  },
+  {
+    "name": "unfinished-integration",
+    "kind": "unfinished",
+    "expected": "FAIL"
+  },
+  {
+    "name": "bad-integration",
+    "kind": "bad-artifact",
+    "expected": "FAIL"
+  },
+  {
+    "name": "same-size-swap",
+    "kind": "swap",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "wrong-poke-receipt",
+    "kind": "wake-ref",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "forged-pass-missing-protocol",
+    "kind": "forged",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "bad-task-after-infrastructure",
+    "kind": "infra-artifact",
+    "expected": "UNKNOWN"
+  },
+  {
+    "name": "positive-plus-unrelated-missing",
+    "kind": "positive-missing",
+    "expected": "FAIL"
+  },
+  {
+    "name": "same-size-valid-sealed-swap",
+    "kind": "swap-valid",
+    "expected": "UNKNOWN"
+  }
+]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -165,6 +166,7 @@ def _contract(value: object, exported: wave_export.FrozenExport) -> dict[str, An
     _require(type(raw['version']) is int and raw['version'] == 1, 'assembly version required')
     _require(_digest(raw['declaration_digest']) == exported.declaration_digest, 'export declaration differs')
     expected_plan = _object(_json(exported.plan), {'version', 'waves'})
+    _require(type(expected_plan['version']) is int and expected_plan['version'] == 1, 'retained export version required')
     export_waves = _population(expected_plan['waves'])
     rows = _population(raw['waves'])
     ids = []
@@ -212,21 +214,68 @@ def _contract(value: object, exported: wave_export.FrozenExport) -> dict[str, An
 
 
 @dataclass(frozen=True)
+class Planned:
+    """Original task/role/grader/clock plan, held BEFORE observation by caller."""
+
+    data: bytes
+
+
+def freeze_plan(value: object) -> Planned:
+    try:
+        raw = _object(value, {'version', 'declaration_digest', 'waves'})
+        _require(type(raw['version']) is int and raw['version'] == 1, 'original plan version required')
+        _digest(raw['declaration_digest'])
+        ids = []
+        for row in _population(raw['waves']):
+            _object(row, {'plan', 'budget_digest', 'clock', 'grader_digest'})
+            ids.append(_plan(row['plan']).wave_id)
+            _digest(row['budget_digest'])
+            _digest(row['grader_digest'])
+            _require(row['clock'] in ('monotonic', 'injected-policy-only'), 'original plan clock required')
+        _require(len(ids) == len(set(ids)), 'original planned waves must be unique')
+        return Planned(_canonical(raw))
+    except AssemblyRefused:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
+        raise AssemblyRefused('original wave plan unavailable') from None
+
+
+@dataclass(frozen=True)
 class Expected:
     """Keep separately from arriving bytes; consistency is not approval."""
 
     data: bytes
     exported: wave_export.FrozenExport
+    planned: Planned
 
 
-def freeze(value: object, exported: object) -> Expected:
-    _require(type(exported) is wave_export.FrozenExport, 'independently held export expectation required')
-    assert isinstance(exported, wave_export.FrozenExport)
-    _digest(exported.manifest_sha256)
-    _digest(exported.declaration_digest)
-    _json(exported.outcomes)
-    raw = _contract(value, exported)
-    return Expected(_canonical(raw), exported)
+def freeze(value: object, exported: object, planned: object) -> Expected:
+    try:
+        _require(type(exported) is wave_export.FrozenExport, 'independently held export expectation required')
+        assert isinstance(exported, wave_export.FrozenExport)
+        _digest(exported.manifest_sha256)
+        _digest(exported.declaration_digest)
+        _require(type(planned) is Planned, 'separately held original wave plan required')
+        assert isinstance(planned, Planned)
+        original = freeze_plan(_json(planned.data))
+        raw = _contract(value, exported)
+        projection = {'version': raw['version'], 'declaration_digest': raw['declaration_digest'],
+                      'waves': [{k: row[k] for k in ('plan', 'budget_digest', 'clock', 'grader_digest')}
+                                for row in raw['waves']]}
+        _require(_canonical(projection) == original.data, 'capture expectations changed the original plan')
+        outcomes = _population(_json(exported.outcomes))
+        for outcome in outcomes:
+            _object(outcome, {'wave_id', 'task_status', 'nonstart'})
+            _name(outcome['wave_id'])
+            _require(outcome['task_status'] in ('PASS', 'FAIL', 'UNKNOWN'), 'retained task status required')
+            _boolean(outcome['nonstart'])
+        _require([r['wave_id'] for r in outcomes] == [r['plan']['wave_id'] for r in raw['waves']],
+                 'retained outcome denominator differs')
+        return Expected(_canonical(raw), exported, original)
+    except AssemblyRefused:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
+        raise AssemblyRefused('frozen assembly contract unavailable') from None
 
 
 @dataclass(frozen=True)
@@ -282,8 +331,17 @@ class _Reader:
         return _json(blob.data)
 
     def capture_root(self, path: str) -> bool:
-        return any(r['kind'] == 'capture' and r['availability'] == 'CAPTURED'
-                   and (path == r['path'] or path.startswith(r['path'] + '/')) for r in self.records)
+        if not any(r['kind'] == 'capture' and r['availability'] == 'CAPTURED'
+                   and (path == r['path'] or path.startswith(r['path'] + '/')) for r in self.records):
+            return False
+        try:
+            # The delegated readers reject a linked root, but also check every
+            # parent below the held payload before passing them a nested root.
+            fd = self.tree._open_dir(list(PurePosixPath(path).parts))
+            os.close(fd)
+            return True
+        except (OSError, Unreadable):
+            return False
 
 
 def _observation(raw: object, row: dict[str, Any], *, role: live_wave.RoleBinding | None = None) -> dict[str, Any]:
@@ -323,7 +381,10 @@ def _grade(binding: object, row: dict[str, Any]) -> live_wave.ArtifactGrader:
         assert isinstance(binding, Grader)
         _require(binding.digest == row['grader_digest'] and binding.budget_digest == row['budget_digest']
                  and binding.clock == row['clock'] and callable(binding.grade), 'pinned grader or clock differs')
-        result = binding.grade(plan, artifacts)
+        try:
+            result = binding.grade(plan, artifacts)
+        except Exception:  # noqa: BLE001 - grader loss cannot erase independently observed violations
+            raise AssemblyRefused('pinned grader unavailable') from None
         _require(type(result) is live_wave.DeliveryGrade and result.status in ('PASS', 'FAIL', 'UNKNOWN'),
                  'grader verdict unavailable')
         _optional(result.completed_elapsed, _number)
@@ -332,6 +393,34 @@ def _grade(binding: object, row: dict[str, Any]) -> live_wave.ArtifactGrader:
             _name(reason)
         return result
     return checked
+
+
+def _stream(blob: live_wave.Blob | None, *, protocol: bool) -> live_wave.Blob | None:
+    """Qualify normalized stream shapes before the older verdict consumer."""
+    if blob is None:
+        return None
+    try:
+        _require(bool(blob.data) and blob.data.endswith(b'\n'), 'complete stream required')
+        lines = blob.data.splitlines()
+        _require(len(lines) <= MAX_ROWS if protocol else len(lines) <= wave_wake_capture.MAX_EVENTS,
+                 'bounded stream population required')
+        for line in lines:
+            event = _json(line)
+            _require(type(event) is dict, 'stream object required')
+            if protocol:
+                _object(event, {'wave_id', 'role', 'attempt_id', 'session_id', 'task', 'generation',
+                                'revision', 'nonce', 'op', 'elapsed'})
+                for key in ('wave_id', 'role', 'attempt_id', 'session_id', 'task', 'nonce', 'op'):
+                    _name(event[key])
+                _integer(event['generation'])
+                _integer(event['revision'], 1)
+                _number(event['elapsed'])
+            elif event.get('type') == 'session_meta':
+                _require(type(event.get('payload')) is dict, 'session metadata object required')
+                _name(event['payload'].get('id'))
+        return blob
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+        return None
 
 
 def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dict[str, Any]) -> dict[str, Any]:
@@ -369,6 +458,8 @@ def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dic
             session = None
         transcript = reader.blob(capture['transcript'], binding.role, 'transcript')
         protocol = reader.blob(capture['protocol'], binding.role, 'protocol')
+        transcript = _stream(transcript, protocol=False)
+        protocol = _stream(protocol, protocol=True)
         artifacts = None
         if capture['artifacts'] is not None:
             blobs = {name: reader.blob(ref, binding.role, 'artifact') for name, ref in capture['artifacts'].items()}
@@ -388,7 +479,7 @@ def report(arrival: object, expected: object, graders: object) -> dict[str, Any]
     """Read-only local replay; frozen inputs are never chosen by projections."""
     _require(type(expected) is Expected, 'independently held assembly expectation required')
     assert isinstance(expected, Expected)
-    frozen = freeze(_json(expected.data), expected.exported)
+    frozen = freeze(_json(expected.data), expected.exported, expected.planned)
     raw = _json(frozen.data)
     _require(type(arrival) is Path or isinstance(arrival, Path), 'local arrival path required')
     assert isinstance(arrival, Path)
@@ -417,6 +508,17 @@ def report(arrival: object, expected: object, graders: object) -> dict[str, Any]
                 result['status'] = 'UNKNOWN'
                 result['primary']['completed'] = 0
         waves.append(result)
+    # Custody is operator-held, not an atomic filesystem transaction. Detect
+    # ordinary drift across assembly too; verified individual objects keep
+    # independently observed violations when unrelated capture is lost.
+    after = wave_export.verify_arrival(arrival, frozen.exported)
+    if after['export_status'] != 'VERIFIED':
+        export = after
+        for result in waves:
+            result['unknown'] = sorted(set(result['unknown']) | {'export-custody-unavailable'})
+            if result['status'] == 'PASS':
+                result['status'] = 'UNKNOWN'
+                result['primary']['completed'] = 0
     return {'version': 1, 'scope': 'offline-controller-capture-assembly-only',
             'declaration_digest': raw['declaration_digest'], 'export_status': export['export_status'],
             'primary': {'unit': 'wave', 'planned': len(waves), 'completed': sum(w['status'] == 'PASS' for w in waves),
