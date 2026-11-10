@@ -83,10 +83,28 @@ claim. An unavailable reconstruction writes no membership rows and is explicitly
 UNAVAILABLE, rather than exporting guessed players.
 
 The census accounts for every game and family with PASS, DISCREPANCY and
-UNAVAILABLE counts. `planted_cases_required` is true for each family with zero
-observed discrepancies, including a family whose inputs were all unavailable.
-That is a #634 requirement, not evidence that synthetic cases have measured the
-season. A source anomaly is retained and reported; no shift is extended, clipped
+UNAVAILABLE counts. Each family also reports:
+
+- `grading_basis`: `graded by real discrepancies` when at least one game has a
+  discrepancy; `graded only via planted cases (#634)` when no discrepancy is
+  observed but some game is available; `UNKNOWN` when every game is unavailable.
+- `grading_status`: always `NOT_GRADED`. The basis names the required grading
+  route, not evidence that a candidate or the #634 plants have been graded.
+- `game_status_coverage`: `COMPLETE` when every game is available, `PARTIAL` when any
+  game is unavailable but some are available, and `UNAVAILABLE` when all are
+  unavailable. A family with unavailable games must not be described as clean. These are
+  per-game family statuses, not certification that every underlying source or
+  individual check is available (a DISCREPANCY family may also contain
+  unavailable checks).
+- `planted_cases_required`: the existing obligation flag, true whenever observed
+  discrepancies are zero, including a wholly unavailable family. The UNKNOWN
+  basis still prevents that flag from claiming the season was actually examined.
+
+Neither complete source coverage nor a zero discrepancy count establishes task
+grading. The synthetic controls in `controls/nhl-census` exercise zero, nonzero,
+all-unavailable and mixed populations; compiled variants that drop the basis,
+claim grading occurred or hide unavailable coverage are rejected. These are
+#634 obligations, not evidence that synthetic cases have measured the season. A source anomaly is retained and reported; no shift is extended, clipped
 or invented to force agreement. Overlapping shifts contribute their raw duration
 to F5, while membership deduplicates the player at each second.
 

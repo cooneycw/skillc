@@ -1,0 +1,1 @@
+- Report each NHL census family's grading obligation and source coverage without claiming grading ran, retaining UNKNOWN for wholly unavailable families and rejecting malformed census inputs.

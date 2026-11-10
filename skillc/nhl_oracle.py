@@ -578,19 +578,43 @@ def compare(expected: Json, candidate: Json, *, fresh: bool) -> Json:
 
 
 def census(reports: list[Json]) -> Json:
-    if not reports or len({r["game_id"] for r in reports}) != len(reports):
-        raise ReferenceError("empty or duplicate census population")
-    result = {}
+    """Summarize source observations and grading obligations, never task grades."""
+    if type(reports) is not list or not reports:
+        raise ReferenceError("empty or malformed census population")
+    seen: set[int] = set()
+    population: list[dict[str, str]] = []
     for report in reports:
-        ids = [f.get("family_id") for f in report.get("families", [])]
-        if len(ids) != len(FAMILIES) or set(ids) != set(FAMILIES):
-            raise ReferenceError("incomplete or duplicate family census")
+        if (type(report) is not dict or type(report.get("game_id")) is not int
+                or report["game_id"] <= 0 or report["game_id"] in seen):
+            raise ReferenceError("invalid or duplicate census game identity")
+        seen.add(report["game_id"])
+        families = report.get("families")
+        if type(families) is not list or len(families) != len(FAMILIES):
+            raise ReferenceError("incomplete or malformed family census")
+        states: dict[str, str] = {}
+        for family in families:
+            if (type(family) is not dict or type(family.get("family_id")) is not str
+                    or family["family_id"] not in FAMILIES or family["family_id"] in states
+                    or type(family.get("status")) is not str
+                    or family["status"] not in ("PASS", "DISCREPANCY", "UNAVAILABLE")):
+                raise ReferenceError("invalid or duplicate family census")
+            states[family["family_id"]] = family["status"]
+        population.append(states)
+    result: dict[str, Json] = {}
     for family in FAMILIES:
-        statuses = Counter(f["status"] for r in reports for f in r["families"] if f["family_id"] == family)
-        if sum(statuses.values()) != len(reports):
-            raise ReferenceError("incomplete family census")
+        statuses = Counter(game[family] for game in population)
+        unavailable = statuses["UNAVAILABLE"]
+        basis = ("UNKNOWN" if unavailable == len(reports) else
+                 "graded by real discrepancies" if statuses["DISCREPANCY"] else
+                 "graded only via planted cases (#634)")
         result[family] = {s: statuses[s] for s in ("PASS", "DISCREPANCY", "UNAVAILABLE")}
-        result[family]["planted_cases_required"] = statuses["DISCREPANCY"] == 0
+        result[family].update(
+            planted_cases_required=statuses["DISCREPANCY"] == 0,
+            grading_basis=basis,
+            grading_status="NOT_GRADED",
+            game_status_coverage=("UNAVAILABLE" if unavailable == len(reports) else
+                             "PARTIAL" if unavailable else "COMPLETE"),
+        )
     return {"game_count": len(reports), "families": result}
 
 
