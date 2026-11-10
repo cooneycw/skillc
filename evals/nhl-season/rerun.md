@@ -205,3 +205,12 @@ transport exceptions remain UNKNOWN. Candidate retained exports and reconciliati
 are still compared by `grade`, which returns FAIL for missing, malformed or wrong
 candidate artifacts. Cleanup exceptions remain UNKNOWN. KeyboardInterrupt or
 SystemExit abort the command/run without manufacturing a PASS or FAIL receipt.
+
+Controller source extraction and the export-directory probe have separate
+controller-operation events and clear the documented-command attribution slot.
+A completed documented command is recorded as completed once, never re-invoked
+in the journal for the later probe. Probe exit 71 means the required export
+directory is missing only when runtime confirms the candidate still running;
+FAIL then names the missing artifact, not the prior command. Other probe errors
+or a stopped/unconfirmed container are UNKNOWN. No positive documented-command
+attribution snapshot is issued for a controller artifact probe.

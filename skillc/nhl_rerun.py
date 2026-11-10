@@ -95,6 +95,10 @@ class _Terminations:
         self.event('documented-entrypoint-invoked', entrypoint=entrypoint)
         self.entrypoint = entrypoint
 
+    def artifact(self, argv: list[str]) -> None:
+        self.entrypoint = None
+        self.event('controller-artifact-probe-invoked', argv=argv)
+
     def signal(self, action: str) -> None:
         self.event('controller-termination-request', action=action)
         self.signals.append(action)
@@ -127,15 +131,7 @@ class _Terminations:
         return _InvocationEvidence(path, snapshot.sha256(raw))
 
 
-def _attribute_failure(inspected: subprocess.CompletedProcess[str], *, entrypoint: str,
-                       command_exit: int | None, timed_out: bool, candidate: str,
-                       evidence: _InvocationEvidence | None) -> None:
-    """Attribute a failed documented command from independently held runtime facts.
-
-    A harness resource limit has no approved task-failure authority yet (#639).
-    Additional runtime fields are allowed, but every fact we consume is required
-    and typed; partial, contradictory or daemon-error state is not candidate blame.
-    """
+def _runtime_state(inspected: subprocess.CompletedProcess[str]) -> Json:
     unknown = InfrastructureError("candidate runtime state unconfirmed")
     if type(inspected.returncode) is not int or inspected.returncode != 0:
         raise unknown
@@ -149,6 +145,20 @@ def _attribute_failure(inspected: subprocess.CompletedProcess[str], *, entrypoin
             or type(state.get('ExitCode')) is not int or not 0 <= state['ExitCode'] <= 255
             or state['Error'] or state['Dead'] or state['Restarting']):
         raise unknown
+    return state
+
+
+def _attribute_failure(inspected: subprocess.CompletedProcess[str], *, entrypoint: str,
+                       command_exit: int | None, timed_out: bool, candidate: str,
+                       evidence: _InvocationEvidence | None) -> None:
+    """Attribute a failed documented command from independently held runtime facts.
+
+    A harness resource limit has no approved task-failure authority yet (#639).
+    Additional runtime fields are allowed, but every fact we consume is required
+    and typed; partial, contradictory or daemon-error state is not candidate blame.
+    """
+    state = _runtime_state(inspected)
+    unknown = InfrastructureError("candidate runtime state unconfirmed")
     if state['OOMKilled'] and not state['Running'] and state['Status'] == 'exited' and state['ExitCode'] > 0:
         raise InfrastructureError('candidate exceeded the harness memory limit (#639 approval pending): ' + entrypoint)
     missing = ('signal-range exit without a positive no-signal record' if state['ExitCode'] >= 128 else
@@ -446,11 +456,12 @@ class DockerReplay:
             return verdict
         documented_entrypoint: str | None = None
 
-        def call(args: list[str], *, candidate_command: bool = False) -> str:
+        def call(args: list[str], *, candidate_command: bool = False,
+                 artifact_directory: str | None = None) -> str:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise InfrastructureError("replay exceeded the harness wall-time limit (#639 approval pending)")
-            def candidate_failure(*, command_exit: int | None, timed_out: bool) -> None:
+            def inspect_runtime() -> subprocess.CompletedProcess[str]:
                 # The controller has not requested candidate stop at this point.
                 # Only the runtime inspect response, never candidate stdout,
                 # can establish the container's terminal or memory-limit state.
@@ -471,11 +482,19 @@ class DockerReplay:
                     raise InfrastructureError("candidate runtime state unconfirmed") from exc
                 transcript.append({"argv": inspection[1:], "returncode": state.returncode,
                                    "stdout": state.stdout, "stderr": state.stderr})
+                return state
+
+            def candidate_failure(*, command_exit: int | None, timed_out: bool) -> None:
+                state = inspect_runtime()
                 held = terminations.capture(state.stdout)
                 _attribute_failure(state, entrypoint=documented_entrypoint or args[-1],
                                    command_exit=command_exit, timed_out=timed_out,
                                    candidate=candidate, evidence=held)
 
+            if artifact_directory is not None:
+                if candidate_command:
+                    raise InfrastructureError('controller artifact probe cannot be a documented invocation')
+                terminations.artifact(args)
             if candidate_command:
                 if documented_entrypoint is None:
                     raise InfrastructureError('documented invocation not recorded')
@@ -490,8 +509,8 @@ class DockerReplay:
                 raise
             except subprocess.TimeoutExpired as exc:
                 transcript.append({"argv": args, "error": "timeout"})
+                terminations.timeout()
                 if candidate_command:
-                    terminations.timeout()
                     candidate_failure(command_exit=None, timed_out=True)
                 raise InfrastructureError("replay exceeded the harness wall-time limit (#639 approval pending)") from exc
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -501,6 +520,17 @@ class DockerReplay:
             transcript.append({"argv": args, "returncode": completed.returncode,
                                "stdout": completed.stdout, "stderr": completed.stderr})
             if completed.returncode:
+                if artifact_directory is not None:
+                    if completed.returncode != 71:
+                        raise InfrastructureError(f'controller export probe failed (exit {completed.returncode})')
+                    observed = _runtime_state(inspect_runtime())
+                    if observed['OOMKilled'] and not observed['Running'] and observed['Status'] == 'exited':
+                        raise InfrastructureError('candidate exceeded the harness memory limit (#639 approval pending)')
+                    if (observed['Running'] and observed['Status'] == 'running'
+                            and observed['ExitCode'] == 0 and not observed['OOMKilled']):
+                        raise _CandidateFailure('documented export directory missing: ' + artifact_directory
+                                                + ' (controller artifact probe exit 71)')
+                    raise InfrastructureError('controller export probe unavailable: candidate no longer running')
                 if candidate_command:
                     candidate_failure(command_exit=completed.returncode, timed_out=False)
                 raise InfrastructureError(f"Docker operation failed: {args[0]} (exit {completed.returncode})")
@@ -540,12 +570,17 @@ class DockerReplay:
                     command = command.replace(adapter["api_base_placeholder"], "http://nhl-source:8080")
                 documented_entrypoint = command
                 call(["exec", candidate, "/bin/sh", "-eu", "-c", command], candidate_command=True)
+                terminations.event('documented-entrypoint-completed', entrypoint=command, returncode=0)
             # Trusted adapter extraction reads existing retained source records;
             # it is not a delivered entry point or a replacement reconciler.
+            documented_entrypoint = None
+            terminations.entrypoint = None
             for command in adapter.get("controller_extract_commands", []):
+                terminations.event('controller-extraction-invoked', argv=["/bin/sh", "-eu", "-c", command])
                 call(["exec", candidate, "/bin/sh", "-eu", "-c", command])
             check_export = "from pathlib import Path;raise SystemExit(0 if Path(" + repr(adapter["export_dir"]) + ").is_dir() else 71)"
-            call(["exec", candidate, "python3", "-c", check_export], candidate_command=True)
+            documented_entrypoint = None
+            call(["exec", candidate, "python3", "-c", check_export], artifact_directory=adapter["export_dir"])
             # Stop delivered code before collecting files; no live writer races.
             call(["stop", "--time", "1", candidate])
             output = evidence / "output"

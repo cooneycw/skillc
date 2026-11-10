@@ -24,7 +24,7 @@ def state(*, running: bool = False, oom: bool = False, exit_code: int = 7) -> di
 
 
 def run_case(tmp_path: Path, facts: object, *, timeout: bool = False,
-             command_exit: int = 17, inspect_exit: int = 0, prose: str = '', capture_flood: bool = False, controller_fault: str | None = None) -> tuple[dict[str, Any], list[list[str]]]:
+             command_exit: int = 17, inspect_exit: int = 0, prose: str = '', capture_flood: bool = False, controller_fault: str | None = None, export_probe_exit: int = 0) -> tuple[dict[str, Any], list[list[str]]]:
     cases = nhl_rerun.scenarios(*nhl_rerun_control.sample(tmp_path))
     project = tmp_path / 'project'
     adapter = nhl_rerun_control.materialize(project)
@@ -47,6 +47,8 @@ def run_case(tmp_path: Path, facts: object, *, timeout: bool = False,
             if timeout:
                 raise subprocess.TimeoutExpired(args, seconds)
             return subprocess.CompletedProcess(args, command_exit, prose, '')
+        if args[1] == 'exec' and 'else 71)' in args[-1]:
+            return subprocess.CompletedProcess(args, export_probe_exit, '', '')
         if args[1] == 'inspect':
             if controller_fault == 'inspect-output-cap':
                 return nhl_rerun.run_command([sys.executable, '-c', 'import sys;sys.stdout.write("x"*(5*1024*1024))'], seconds)
@@ -310,3 +312,24 @@ def test_controller_configuration_and_transport_errors_do_not_blame_candidate(tm
 def test_runtime_inspection_client_cutoffs_retain_harness_reason(tmp_path: Path, fault: str, reason: str) -> None:
     result, _ = run_case(tmp_path, state(running=True), controller_fault=fault)
     assert result['status'] == 'UNKNOWN' and reason in result['reasons'][0]
+
+
+
+def test_failed_controller_export_probe_does_not_reinvoke_successful_documented_command(tmp_path: Path) -> None:
+    result, _ = run_case(tmp_path, state(running=True), command_exit=0, export_probe_exit=71)
+    assert result['status'] == 'FAIL' and 'documented export directory missing' in result['reasons'][0]
+    assert 'entry point failed' not in result['reasons'][0]
+    events = [json.loads(line) for line in (tmp_path / 'evidence/termination.jsonl').read_text().splitlines()]
+    invoked = [row for row in events if row['event'] == 'documented-entrypoint-invoked']
+    completed = [row for row in events if row['event'] == 'documented-entrypoint-completed']
+    probes = [row for row in events if row['event'] == 'controller-artifact-probe-invoked']
+    assert len(invoked) == len(completed) == len(probes) == 1
+    assert invoked[0]['entrypoint'] == completed[0]['entrypoint'] == 'python3 project.py'
+    assert '/project/exports' in probes[0]['argv'][-1]
+    assert not list((tmp_path / 'evidence').glob('attribution-*.json'))
+
+
+@pytest.mark.parametrize(('running', 'code'), [(True, 2), (False, 71)], ids=['probe-error', 'stopped-after-success'])
+def test_unavailable_controller_export_probe_is_unknown(tmp_path: Path, running: bool, code: int) -> None:
+    result, _ = run_case(tmp_path, state(running=running), command_exit=0, export_probe_exit=code)
+    assert result['status'] == 'UNKNOWN'
