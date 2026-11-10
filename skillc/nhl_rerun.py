@@ -150,15 +150,11 @@ def _attribute_failure(inspected: subprocess.CompletedProcess[str], *, entrypoin
     if running:
         if state['Status'] != 'running' or state['ExitCode'] != 0 or state['OOMKilled']:
             raise unknown
-        if timed_out:
-            raise InfrastructureError('candidate exceeded the harness wall-time limit (#639 approval pending): ' + entrypoint)
         if type(command_exit) is int and 0 < command_exit <= 255:
             raise ReferenceError(f'documented entry point failed (exit {command_exit}): {entrypoint}')
         raise unknown
     if state['Status'] != 'exited' or state['ExitCode'] == 0:
         raise unknown
-    if state['OOMKilled']:
-        raise InfrastructureError('candidate exceeded the harness memory limit (#639 approval pending): ' + entrypoint)
     raise ReferenceError(f'documented entry point failed (container exit {state["ExitCode"]}): {entrypoint}')
 
 
