@@ -1,0 +1,66 @@
+{
+  "repository": "cooneycw/claude-power-pack",
+  "commit": "87ecb0970f70aace9e0323feee00c9ca57dda133",
+  "files": [
+    {
+      "path": "scripts/project-init.py",
+      "mode": "100755",
+      "git_blob": "7ab404ca32cac84c8da75560fc8ea7e70a971dbe",
+      "sha256": "39b03ed59e5a49313ead549b49a01004058a30ceae26dad7340aba74ea3337b1"
+    },
+    {
+      "path": "templates/cicd.yml.example",
+      "mode": "100644",
+      "git_blob": "fe236fc849bef9ddcb1ec2799dc69f4a28208495",
+      "sha256": "3ea59319fe480838027253efa812abf87b0f1298108d8478f1566cbddc443fa9"
+    },
+    {
+      "path": ".specify/templates/plan-template.md",
+      "mode": "100644",
+      "git_blob": "25336df2c120001a0ad45e0b1d96656566addb76",
+      "sha256": "c760f5433588f2076f62f0219131d88222ed440865111cf41699f86ee9684474"
+    },
+    {
+      "path": ".specify/templates/spec-template.md",
+      "mode": "100644",
+      "git_blob": "f978a06962298dcd689383d2a7421b5b393ab7a5",
+      "sha256": "5cac1aa78dc494931032490c8e879e5e46cb49e75c16a3cc4efc4e6d4118cf47"
+    },
+    {
+      "path": ".specify/templates/tasks-template.md",
+      "mode": "100644",
+      "git_blob": "33b15d8ef250064ac450bf7a2138de926fc7692b",
+      "sha256": "fd4feb8a5d3bb3acc6e4f32fb35bb7378d7442d0716cbfc5084701299e181e24"
+    },
+    {
+      "path": "scripts/flow-wave-registry.sh",
+      "mode": "100755",
+      "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+      "sha256": "003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae"
+    },
+    {
+      "path": "scripts/flow-vantage.sh",
+      "mode": "100755",
+      "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+      "sha256": "884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93"
+    },
+    {
+      "path": "scripts/toolchain-provenance.sh",
+      "mode": "100755",
+      "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+      "sha256": "23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c"
+    },
+    {
+      "path": "scripts/flow-wave-mailbox.sh",
+      "mode": "100755",
+      "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+      "sha256": "072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06"
+    },
+    {
+      "path": "scripts/flow-wave-lexicon.sh",
+      "mode": "100755",
+      "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+      "sha256": "a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734"
+    }
+  ]
+}

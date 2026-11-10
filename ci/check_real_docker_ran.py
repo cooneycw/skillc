@@ -76,6 +76,8 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_nhl_rerun_live",
     "tests.test_docker_wave_live",
     "tests.test_calibration_signal_recovery_live",
+    # #625: exact combined-profile closure cold installation and per-helper proof.
+    "tests.test_profile_project_wave_cold_live",
 )
 
 ERROR = "ERROR"
