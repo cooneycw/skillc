@@ -1,0 +1,46 @@
+{
+  "root": [
+    null,
+    false,
+    0,
+    [],
+    "case"
+  ],
+  "payloads": [
+    null,
+    false,
+    0,
+    [],
+    "sources",
+    {}
+  ],
+  "expected": [
+    null,
+    false,
+    0,
+    [],
+    "reports",
+    {}
+  ],
+  "requested": [
+    false,
+    0,
+    {},
+    "route",
+    [
+      null
+    ],
+    [
+      0
+    ],
+    [
+      {}
+    ],
+    [
+      []
+    ],
+    [
+      "/not-served"
+    ]
+  ]
+}
