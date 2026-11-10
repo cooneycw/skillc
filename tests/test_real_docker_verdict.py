@@ -48,7 +48,7 @@ def _suite(*cases: str) -> str:
                    'name="signal-proof-passed"/>')
     cold_pass = ('<testcase classname="tests.test_profile_project_wave_cold_live" '
                  'name="cold-proof-passed"/>')
-    return f'<?xml version="1.0"?><testsuites><testsuite name="pytest">{"".join(cases)}{signal_pass}{cold_pass}</testsuite></testsuites>' 
+    return f'<?xml version="1.0"?><testsuites><testsuite name="pytest">{"".join(cases)}{signal_pass}{cold_pass}</testsuite></testsuites>'
 
 
 def test_a_missing_report_raises_oserror(tmp_path: Path) -> None:
