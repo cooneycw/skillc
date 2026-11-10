@@ -1,0 +1,261 @@
+[
+  {
+    "name": "sufficient",
+    "patches": [],
+    "status": "PASS",
+    "required_bytes": 240
+  },
+  {
+    "name": "exact-boundary",
+    "patches": [
+      [
+        "roots",
+        "reference",
+        "available_bytes",
+        240
+      ],
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        240
+      ]
+    ],
+    "status": "PASS"
+  },
+  {
+    "name": "byte-shortage",
+    "patches": [
+      [
+        "roots",
+        "reference",
+        "available_bytes",
+        239
+      ],
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        239
+      ]
+    ],
+    "status": "FAIL"
+  },
+  {
+    "name": "shared-device-not-two-pools",
+    "patches": [
+      [
+        "roots",
+        "reference",
+        "available_bytes",
+        200
+      ],
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        200
+      ]
+    ],
+    "status": "FAIL"
+  },
+  {
+    "name": "reservation-pressure",
+    "patches": [
+      [
+        "roots",
+        "reference",
+        "available_bytes",
+        230
+      ],
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        230
+      ]
+    ],
+    "status": "FAIL"
+  },
+  {
+    "name": "inode-shortage",
+    "patches": [
+      [
+        "roots",
+        "reference",
+        "available_inodes",
+        10
+      ]
+    ],
+    "status": "FAIL"
+  },
+  {
+    "name": "zero-free",
+    "patches": [
+      [
+        "roots",
+        "reference",
+        "available_bytes",
+        0
+      ]
+    ],
+    "status": "FAIL"
+  },
+  {
+    "name": "unread-root",
+    "patches": [
+      [
+        "roots",
+        "database",
+        null
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "stale",
+    "patches": [
+      [
+        "now",
+        200
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "future",
+    "patches": [
+      [
+        "now",
+        99
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "slow-collection",
+    "patches": [
+      [
+        "finished_at",
+        111
+      ],
+      [
+        "now",
+        112
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "wrong-binding",
+    "patches": [
+      [
+        "receipt_binding",
+        "declaration_digest",
+        "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "missing-inodes",
+    "patches": [
+      [
+        "roots",
+        "database",
+        "available_inodes",
+        null
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "ambiguous-device",
+    "patches": [
+      [
+        "roots",
+        "database",
+        "filesystem_id",
+        222
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "two-distinct-filesystems",
+    "patches": [
+      [
+        "roots",
+        "database",
+        "device",
+        22
+      ],
+      [
+        "roots",
+        "database",
+        "filesystem_id",
+        222
+      ]
+    ],
+    "status": "PASS"
+  },
+  {
+    "name": "shared-fsid-not-two-pools",
+    "patches": [
+      [
+        "roots",
+        "database",
+        "device",
+        22
+      ],
+      [
+        "roots",
+        "reference",
+        "available_bytes",
+        200
+      ],
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        200
+      ]
+    ],
+    "status": "FAIL"
+  },
+  {
+    "name": "negative-free",
+    "patches": [
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        -1
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "boolean-free",
+    "patches": [
+      [
+        "roots",
+        "database",
+        "available_bytes",
+        true
+      ]
+    ],
+    "status": "UNKNOWN"
+  },
+  {
+    "name": "boolean-version",
+    "patches": [
+      [
+        "policy",
+        "version",
+        true
+      ]
+    ],
+    "status": "UNKNOWN"
+  }
+]

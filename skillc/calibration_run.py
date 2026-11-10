@@ -89,6 +89,7 @@ from . import (
     egress,
     egress_bytes,
     gate_state,
+    nhl_limits,
     profile,
     trial,
     verify,
@@ -98,9 +99,7 @@ from . import collection_conformance as cc
 from . import fixture_attempt as fa
 from . import matched_pilot as mp
 from . import materialize as m
-from . import (
-    nhl_egress_policy as nhl,
-)
+from . import nhl_egress_policy as nhl
 from .spec import FrontmatterError
 
 ROOT = mp.ROOT
@@ -814,6 +813,10 @@ def run_calibration(
                            else completion_deadline.child(declared_total))
     # ADR 0005: nothing - no store, no plan, no container - before this.
     declaration = _launch_declaration(declaration)
+    try:
+        nhl_limits.require_for_execution(declaration.data)
+    except nhl_limits.LimitsRefused as exc:
+        raise CalibrationRefused(str(exc)) from None
     calibration.require_approved(declaration, root)
     _require_explicit_product(declaration, root, treatment)
     if calibration.outcome_endpoint(declaration) is not None:

@@ -1,0 +1,146 @@
+[
+  {
+    "name": "uncapped",
+    "value": {
+      "version": 1,
+      "mode": "uncapped"
+    },
+    "valid": true
+  },
+  {
+    "name": "capped-plan-only",
+    "value": {
+      "version": 1,
+      "mode": "capped",
+      "wall_seconds": 3600,
+      "tokens": 1000,
+      "sizing_report_digest": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    "valid": true
+  },
+  {
+    "name": "null",
+    "value": null,
+    "valid": false
+  },
+  {
+    "name": "boolean",
+    "value": false,
+    "valid": false
+  },
+  {
+    "name": "integer",
+    "value": 0,
+    "valid": false
+  },
+  {
+    "name": "array",
+    "value": [],
+    "valid": false
+  },
+  {
+    "name": "text",
+    "value": "uncapped",
+    "valid": false
+  },
+  {
+    "name": "missing-mode",
+    "value": {
+      "version": 1
+    },
+    "valid": false
+  },
+  {
+    "name": "missing-version",
+    "value": {
+      "mode": "uncapped"
+    },
+    "valid": false
+  },
+  {
+    "name": "boolean-version",
+    "value": {
+      "version": true,
+      "mode": "uncapped"
+    },
+    "valid": false
+  },
+  {
+    "name": "unknown-mode",
+    "value": {
+      "version": 1,
+      "mode": "auto"
+    },
+    "valid": false
+  },
+  {
+    "name": "uncapped-with-token",
+    "value": {
+      "version": 1,
+      "mode": "uncapped",
+      "tokens": 0
+    },
+    "valid": false
+  },
+  {
+    "name": "uncapped-with-wall",
+    "value": {
+      "version": 1,
+      "mode": "uncapped",
+      "wall_seconds": null
+    },
+    "valid": false
+  },
+  {
+    "name": "capped-incomplete",
+    "value": {
+      "version": 1,
+      "mode": "capped"
+    },
+    "valid": false
+  },
+  {
+    "name": "capped-null-token",
+    "value": {
+      "version": 1,
+      "mode": "capped",
+      "wall_seconds": 3600,
+      "tokens": null,
+      "sizing_report_digest": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    "valid": false
+  },
+  {
+    "name": "capped-bool-token",
+    "value": {
+      "version": 1,
+      "mode": "capped",
+      "wall_seconds": 3600,
+      "tokens": true,
+      "sizing_report_digest": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    "valid": false
+  },
+  {
+    "name": "capped-zero-wall",
+    "value": {
+      "version": 1,
+      "mode": "capped",
+      "wall_seconds": 0,
+      "tokens": 1000,
+      "sizing_report_digest": "sha256:abababababababababababababababababababababababababababababababab"
+    },
+    "valid": false
+  },
+  {
+    "name": "capped-unbound-source",
+    "value": {
+      "version": 1,
+      "mode": "capped",
+      "wall_seconds": 3600,
+      "tokens": 1000,
+      "sizing_report_digest": "unknown"
+    },
+    "valid": false
+  }
+]

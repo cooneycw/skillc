@@ -1,0 +1,59 @@
+{
+  "policy": {
+    "version": 1,
+    "sizing_report_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "max_age_seconds": 60,
+    "max_collection_seconds": 10,
+    "demands": [
+      {
+        "root": "reference",
+        "copy_id": "reference-copy",
+        "bytes": 60,
+        "inodes": 2,
+        "multiplicity": 1
+      },
+      {
+        "root": "database",
+        "copy_id": "database-copy",
+        "bytes": 80,
+        "inodes": 4,
+        "multiplicity": 2
+      }
+    ],
+    "reservations": [
+      {
+        "root": "database",
+        "copy_id": "retained-evidence",
+        "bytes": 20,
+        "inodes": 1,
+        "multiplicity": 1
+      }
+    ]
+  },
+  "binding": {
+    "collection_id": "collection",
+    "window_id": "window",
+    "wave_id": "wave",
+    "vm_binding_digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "declaration_digest": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+  },
+  "roots": {
+    "reference": {
+      "device": 11,
+      "inode": 101,
+      "filesystem_id": 111,
+      "available_bytes": 300,
+      "available_inodes": 50
+    },
+    "database": {
+      "device": 11,
+      "inode": 102,
+      "filesystem_id": 111,
+      "available_bytes": 300,
+      "available_inodes": 50
+    }
+  },
+  "started_at": 100,
+  "finished_at": 101,
+  "now": 105
+}
