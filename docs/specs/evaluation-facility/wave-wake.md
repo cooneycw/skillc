@@ -126,3 +126,56 @@ The conditions adopt the design identified in #622 from
 watermarks, spacing, supersession fencing, and attempt-versus-receipt accounting.
 No source text was copied and no runtime imports or dependencies were added
 from that repository. Its native wake route remains a later phase.
+
+## Closed inputs and caller approval binding
+
+A dynamic caller must set `wave.approved_wake` to a `WakeBinding` before calling
+`drive`. `bind_declaration(frozen_declaration, approved_digest)` verifies the
+canonical whole declaration against the digest already held by that trusted
+caller. It is a consistency check, not an approval issuer, authentication of a
+checkpoint or live execution authority. The caller must independently validate
+approval and the remainder of its own declaration schema. No live caller or
+study declaration is introduced here.
+
+The declaration has a `roles` array of logical names and a `controller_wake`
+object. The latter has exactly `version: 1` and every `WakePolicy` field:
+`literal`, `poll_seconds`, `min_spacing_seconds`, `max_pokes`, `after_failure`,
+`after_cap`, `max_files`, `max_bytes`, `on_observation_failure` and
+`after_unconfirmed`. All fields are explicit; constructor defaults do not fill
+omissions at this boundary. Its literal is validated by `controller_turns` and
+must encode as UTF-8. The existing failure/cap/observation/unconfirmed behavior
+strings are the only supported v1 choices. Counts are nonboolean integers;
+clocks are finite nonboolean numbers. Polling is positive and spacing may be
+zero. The poke cap is 0..64. Technical observation ceilings are 4096 entries and
+4 MiB, matching the existing defaults; these are not selected study budgets.
+Populations contain 1..64 unique logical names using the existing role grammar.
+The physical Docker wave still requires at least two roles.
+
+`drive` re-verifies that binding, the ordered runtime population and the exact
+policy digest before preparation, publication or turns. An altered literal,
+policy, population or approved hash refuses. Callers retain responsibility for
+resources they allocated before handing a valid context to the driver.
+`parse_policy`, `parse_revision`, `parse_poke`, `parse_state` and `parse_binding`
+validate closed objects. A parsed state is always new: no input restores slots,
+counts or events from a mutable checkpoint. Sessions are canonical UUIDs,
+revisions complete lowercase SHA256 digests and poke nonces 32 lowercase hex
+characters. Invalid targets refuse before a dictionary lookup; refusals without
+a valid token record an explicit null nonce. They cannot consume another role's
+valid token. Observer JSON rejects duplicate fields, incomplete shapes and
+oversized/deep responses rather than inventing an empty revision.
+
+`controls/wave-wake/shapes.json` commits 275 malformed inputs spanning each new
+parsed field and boundary. Healthy, missing/extra field, overflow/nonfinite and
+identity boundary twins supplement it. The final unchanged existing-consumer
+regressions on main `5e10683` produce 44 assertion failures: malformed state/poke
+identities or policies, ignored caller approval changes and duplicate observer
+fields. The 108 original preservation controls and deep-JSON refusal pass there. Those tests import existing
+APIs; no missing new parser or setup error counts as a regression. New closed
+parser tests qualify new input validation separately. Scripted wake/runtime
+controls, including the lock-time session and previous-sample fences, remain
+preservation evidence. No physical wake or native thread wake is claimed.
+
+The separate sealed capture/verifier slice will retain and verify event bytes
+before a later reader derives poke counts. Until then the mutable JSON report
+is a controller projection, not an integrity-bound replay artifact. The issue's
+remaining scope includes that custody join and qualification review.
