@@ -297,7 +297,8 @@ class WakeState:
         slot.watermark = revision.identity if revision is not None else None
         self.record('turn-ended', role, now, reason=result.reason, exit_code=result.exit_code,
                     session=session, binding_session=slot.session,
-                    revision=slot.watermark, nonce=slot.active_nonce)
+                    revision=slot.watermark, files=revision.files if revision is not None else None,
+                    refs=revision.refs if revision is not None else None, nonce=slot.active_nonce)
         slot.active_nonce = None
         reason = None
         if result.reason != 'exited' or result.exit_code != 0:
@@ -361,7 +362,7 @@ class WakeState:
         slot.phase = 'running'
         slot.active_nonce = poke.nonce
         self.record('poke-attempt', poke.role, now, revision=poke.revision, session=poke.session,
-                    nonce=poke.nonce, poke=slot.pokes)
+                    files=revision.files, refs=revision.refs, nonce=poke.nonce, poke=slot.pokes)
         return True
 
     def suppressed(self, poke: Poke, now: float) -> None:
@@ -450,6 +451,10 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
         raise ValueError('wake driver is single-use for an owned wave')
     state = WakeState(policy, roles)
     state.journal = lambda event: wave._write('wake-events.json', state.events)
+    from . import wave_wake_capture as custody
+    capture: custody.Capture | None = None
+    wave.wake_capture_reference = None
+    wave.wake_capture_context = None
     declaration = {'version': 1, 'policy': asdict(policy), 'policy_digest': policy.digest,
                    'approved_declaration_digest': bound.approved_digest,
                    'trigger': 'controller-file-and-ref-digests', 'roles': roles,
@@ -501,13 +506,27 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
             result = future.result()
         except ct.TurnsRefused:
             slot = state.slots[role]
-            state.record('poke-refused', role, clock(), reason='turn-fenced', nonce=slot.active_nonce)
+            nonce = slot.active_nonce
             slot.phase, slot.end = 'terminal', 'turn-fenced'
+            slot.active_nonce = None
+            state.record('poke-refused', role, clock(), reason='turn-fenced', nonce=nonce)
             stop_terminal(role)
         else:
             ended(role, result, revision)
 
     try:
+        marker = wave.deadline.marker(wave.attempt_id)
+        context = custody.Context(wave.attempt_id, bound.approved_digest, policy.digest, roles,
+                                  'sha256:' + marker['budget_id'], declaration['clock'])
+        wave.wake_capture_context = context
+        capture = custody.Capture(wave.root / 'wake-capture', context, wave.deadline.start)
+
+        def journal(event: Mapping[str, Any]) -> None:
+            assert capture is not None
+            capture.append(dict(event))  # Durable before state.dispatch can authorize a turn.
+            wave._write('wake-events.json', state.events)  # Mutable compatibility projection only.
+
+        state.journal = journal
         wave._write('wake-declaration.json', {**declaration, 'digest': declaration_digest})
         pool = ThreadPoolExecutor(max_workers=len(roles))
         if not wave._prepared:
@@ -591,6 +610,15 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
                 completed(role, future, None)
             except BaseException as exc:  # noqa: BLE001 - account all futures
                 errors.append(exc)
+        for role, slot in state.slots.items():
+            if slot.active_nonce is not None:
+                try:
+                    # A queued dispatch can fail before it creates a future.
+                    # After owned cleanup, retain an explicit unresolved attempt.
+                    assert slot.session is not None and slot.watermark is not None
+                    state.suppressed(Poke(role, slot.session, slot.watermark, slot.active_nonce), clock())
+                except BaseException as exc:  # noqa: BLE001 - retain known counts even if publication fails
+                    errors.append(exc)
         completion = cleanup.get('completion', {})
         if completion.get('cleanup_confirmed') is not True or ('elapsed' in completion and completion['elapsed'] is None):
             outcome = 'UNKNOWN'
@@ -598,11 +626,33 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
             outcome = 'DEADLINE'
         if errors:
             outcome = 'UNKNOWN'
+        retained: dict[str, Any] = {'status': 'UNKNOWN', 'complete': False}
+        if capture is not None:
+            try:
+                finals = [{'role': role, 'session_id': getattr(wave.states.get(role), 'session_id', None)}
+                          for role in roles]
+                reference = capture.seal(outcome, finals)
+                retained = custody.verify(capture.root, reference, capture.context)
+                if retained['status'] != 'CAPTURED':
+                    raise custody.CaptureUnavailable('sealed wake capture verification failed')
+                # This receipt is held separately by the trusted caller. A report's
+                # copy can describe it but cannot replace it at the verifier API.
+                wave.wake_capture_reference = reference
+            except BaseException as exc:  # noqa: BLE001 - capture refusal cannot bypass owned cleanup
+                errors.append(exc)
+                outcome = 'UNKNOWN'
+            finally:
+                capture.close()
         report = state.report(outcome)
         report['attempt_id'] = wave.attempt_id
         for row in report['poke_counts']:
             if wave.states[row['role']].session_id != row['session_id']:
                 row['pokes'] = None
+        if retained['status'] == 'CAPTURED':
+            report['poke_count'] = retained['poke_count']
+            report['poke_counts'] = retained['poke_counts']
+            report['pokes'] = retained['pokes']
+        report['wake_capture'] = retained
         report['completion'] = completion
         report['declaration_digest'] = declaration_digest
         report['unavailable_samples_at_end'] = missed
