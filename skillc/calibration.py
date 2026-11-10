@@ -596,10 +596,12 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
     from . import nhl_egress_policy as nhl
+    from . import nhl_limits
     try:
+        nhl_limits.parse(data)
         if nhl.parse(data) is not None:
             _require_agent_network(data)
-    except nhl.PolicyRefused as exc:
+    except (nhl.PolicyRefused, nhl_limits.LimitsRefused) as exc:
         raise _refuse(str(exc)) from None
     if "credential_window" in data:
         try:
@@ -986,7 +988,7 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
     declaration`'s own shared/attempts/arm_order/task machinery via
     `_parse_schedule_and_identities`, never a copy of it."""
-    if "nhl_egress" in data:
+    if "nhl_egress" in data or "nhl_limits" in data:
         raise _refuse("nhl_egress is supported only for calibration-declaration")
     if "credential_window" in data:
         raise _refuse("credential_window is supported only for calibration-declaration")
@@ -1251,9 +1253,11 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
     still says `UNKNOWN`, and the declared task's grader is the one on disk.
     A declaration that validates is still only a plan (ADR 0005)."""
     from . import nhl_egress_policy as nhl
+    from . import nhl_limits
     try:
+        nhl_limits.require_for_execution(declaration.data)
         nhl.require_live_authority(declaration.data)
-    except nhl.PolicyRefused as exc:
+    except (nhl.PolicyRefused, nhl_limits.LimitsRefused) as exc:
         raise _refuse(str(exc)) from None
     if "credential_window" in declaration.data:
         try:

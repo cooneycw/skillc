@@ -1,0 +1,14 @@
+[
+  {
+    "name": "always-PASS",
+    "before": "'status': 'FAIL' if any(row['status'] == 'FAIL' for row in results) else 'PASS'",
+    "after": "'status': 'PASS'",
+    "witness": "byte-shortage"
+  },
+  {
+    "name": "ignore-reservations",
+    "before": "for kind in ('demands', 'reservations'):",
+    "after": "for kind in ('demands',):",
+    "witness": "reservation-pressure"
+  }
+]

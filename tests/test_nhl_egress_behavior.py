@@ -34,6 +34,7 @@ DIGEST = 'sha256:' + hashlib.sha256(json.dumps(DOCUMENT, sort_keys=True, separat
 def data() -> dict[str, Any]:
     raw = cast(dict[str, Any], _declaration_data(attempts=2))
     raw['nhl_egress'] = copy.deepcopy(POLICY)
+    raw['nhl_limits'] = {'version': 1, 'mode': 'uncapped'}  # Explicit synthetic fixture choice, not a default.
     raw['shared']['agent_network'] = {'policy': 'nhl-declaration-egress', 'allowlist_digest': DIGEST,
                                      'codex_server_side_off': list(egress.CODEX_SERVER_SIDE_OFF)}
     return stamp_approval(raw)
