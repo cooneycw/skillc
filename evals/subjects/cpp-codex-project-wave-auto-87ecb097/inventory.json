@@ -1,0 +1,3733 @@
+{
+  "inventory_schema": 1,
+  "profile": "cpp-codex-project-wave-auto-87ecb097",
+  "profile_digest": "sha256:bbf1e6a95c9916b88c814206a464fa3a6b7d61d90d8785b1bc21ba6049a92ed0",
+  "subject": {
+    "declaration_digest": "sha256:9f9c4df39dc47ee494fa163d7b4f5a6889502ee99cb22e5b034577297a2da478",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "87ecb0970f70aace9e0323feee00c9ca57dda133",
+    "source_kind": "git",
+    "surface": "codex-skills",
+    "client": {
+      "name": "codex",
+      "version": "0.157.1"
+    }
+  },
+  "treatment": "targeted",
+  "treatment_question": "product",
+  "selection": [
+    "flow-auto",
+    "flow-wave",
+    "project-init"
+  ],
+  "skills": [
+    {
+      "name": "flow-auto",
+      "directory": "flow-auto",
+      "description_digest": "sha256:423e1d6ce8456cce7d57deb38d0afaa66a49c8e9696acf13f6fc6a3ed8bd9ce8",
+      "body_digest": "sha256:350e01945e48db3e6fcd88b8be9093cf7c87f9e3bac0b0b5d4ebf4d86318b13c",
+      "required_references": [
+        "reference.md"
+      ],
+      "checksums": "verified",
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/PROVENANCE.md",
+          "destination": ".codex/skills/flow-auto/PROVENANCE.md",
+          "mode": "100644",
+          "size": 1585,
+          "digest": "sha256:e9022fe0e4c92c3225277e91bf80865b15b245d3d36f35303c86616c3dba49dc",
+          "git_blob": "6ef97dbf4bbc302f6e2b8512f74aa6da57556932",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/SKILL.md",
+          "destination": ".codex/skills/flow-auto/SKILL.md",
+          "mode": "100644",
+          "size": 3804,
+          "digest": "sha256:4eb7f25ed9bd264c73d4b9b2320fdfabab9dbda70ca192e1415481c017ee9b08",
+          "git_blob": "0380a00b21b0ec6124cc4ec9e2d50a728853d3b2",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/agents/closing-report-contract.md",
+          "destination": ".codex/skills/flow-auto/docs/agents/closing-report-contract.md",
+          "mode": "100644",
+          "size": 7581,
+          "digest": "sha256:13d0beae8e06d3c084b6d7d74c8a18641aa1250c65573d90c9d64b72cb8cb695",
+          "git_blob": "565c8f38a005f9ab0cd032010abb9fdf007ab143",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/agents/detector-contracts.md",
+          "destination": ".codex/skills/flow-auto/docs/agents/detector-contracts.md",
+          "mode": "100644",
+          "size": 37740,
+          "digest": "sha256:d97fa7aed7e6f3ec7ad8e217dc751d06902f9d740d91d1f78562376d847b50db",
+          "git_blob": "090687b58e637b7243a2684f1ca24b8b1bc3d04c",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/agents/flow-plan-record.md",
+          "destination": ".codex/skills/flow-auto/docs/agents/flow-plan-record.md",
+          "mode": "100644",
+          "size": 22026,
+          "digest": "sha256:7f7e9d5935b6d1249b37855b3aa0670dc60235d93bd0aacb91716c054c6c98ab",
+          "git_blob": "3663ba4bd7fea5ff2a3dac30e064cd78f68b71ad",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/agents/issue-contract.md",
+          "destination": ".codex/skills/flow-auto/docs/agents/issue-contract.md",
+          "mode": "100644",
+          "size": 15532,
+          "digest": "sha256:7c70b4ab2cfceba6d8c38d38d9522744e3ef2b1cb4a8c692cdd598022f04809e",
+          "git_blob": "0ef1b7bff7230dd211a4e645373b99e0f3fbf09f",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md",
+          "destination": ".codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md",
+          "mode": "100644",
+          "size": 6775,
+          "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d",
+          "git_blob": "083365031e75831e7d1aced6c9db8b1d1fb267cf",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md",
+          "destination": ".codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md",
+          "mode": "100644",
+          "size": 25254,
+          "digest": "sha256:13eca0c5cd919339b77010b8f4f3f77a57dd2d354f4b02b5c433a68bb507719e",
+          "git_blob": "dc8e9f908b29867d75d65234711308124cf8e330",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+          "destination": ".codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+          "mode": "100644",
+          "size": 117282,
+          "digest": "sha256:991261cba992a14f4aef581a2bf0512e961234dd4e8dba9fbee229ff488aa393",
+          "git_blob": "358944facda04f3aa87ebbcfa98a7748f48172db",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md",
+          "destination": ".codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md",
+          "mode": "100644",
+          "size": 10732,
+          "digest": "sha256:8fb644b69ee093ac619cf22c8911a464b8cb7bdce05ea1e2c526b12ad0604f52",
+          "git_blob": "1f5e7039b5a292fb06840b55a2d60f9988ddf5f6",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/lib/vendor.py",
+          "destination": ".codex/skills/flow-auto/lib/vendor.py",
+          "mode": "100644",
+          "size": 43040,
+          "digest": "sha256:468ac086166765ce0d69998d1b642f92867f87d44b59a97be6eafd2793e0cae0",
+          "git_blob": "e2c1dc75e6fada0c1fbe0950469703092b434b46",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/reference.md",
+          "destination": ".codex/skills/flow-auto/reference.md",
+          "mode": "100644",
+          "size": 135772,
+          "digest": "sha256:2864388d66aba0f11830babb5ee7b00c6a07a165d93cc899a66f26b6bbf44718",
+          "git_blob": "43b2d3f9778e00ac0f3828c9bea29887a7adae65",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/SHA256SUMS",
+          "destination": ".codex/skills/flow-auto/scripts/SHA256SUMS",
+          "mode": "100644",
+          "size": 2592,
+          "digest": "sha256:58e6c6fe93ba920a8faff4a6a31f4bfa3af835412695d31388401b72830d0e63",
+          "git_blob": "40bd86fbf3941da3b2fdde4ba4a9c16e670738ab",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+          "destination": ".codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+          "mode": "100755",
+          "size": 14606,
+          "digest": "sha256:ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+          "git_blob": "e0a4d429959f1b2e06a9cebe49839917a0aab60f",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/codex-skill-resync.sh",
+          "destination": ".codex/skills/flow-auto/scripts/codex-skill-resync.sh",
+          "mode": "100755",
+          "size": 8726,
+          "digest": "sha256:43f257169f891098fdc205cb3109b1636c055aeedf7f0a6357ff5f81f317df5d",
+          "git_blob": "a93afce26215b34a2a38be9c83f63f967bcc46fa",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+          "destination": ".codex/skills/flow-auto/scripts/codex-skill-sync.py",
+          "mode": "100755",
+          "size": 120904,
+          "digest": "sha256:b21b6c2c8978620106f620dbb7cb851a15a1c81d40081e6e9106df62c1d01d22",
+          "git_blob": "7cddd62b88b6f6da8c0df006888de315ca8cb91f",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+          "destination": ".codex/skills/flow-auto/scripts/counter-model-receipt.py",
+          "mode": "100755",
+          "size": 126044,
+          "digest": "sha256:8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+          "git_blob": "9e6a2d0dabdca04f0f7569d997ea0233b5c4f5f8",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py",
+          "destination": ".codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py",
+          "mode": "100755",
+          "size": 20541,
+          "digest": "sha256:10070b93da07f81e3d5bd9d3a434527d231d0abcd8b386ff8e96171f1b5dc92b",
+          "git_blob": "47e41177a269029eecbb5dc48f0536111d23fe63",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/eli5-vendor.py",
+          "destination": ".codex/skills/flow-auto/scripts/eli5-vendor.py",
+          "mode": "100755",
+          "size": 4756,
+          "digest": "sha256:6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5",
+          "git_blob": "fc41617c59c90b6a02898d95509b41fceec7c12d",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-ci-status.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-ci-status.sh",
+          "mode": "100755",
+          "size": 34306,
+          "digest": "sha256:71a3d705fd222e4eb44425c87460111fcba49d95d8e5689555d31601e55862ac",
+          "git_blob": "b0aee7ddecda9e97e5e986e088ddf53485457e09",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+          "mode": "100755",
+          "size": 32095,
+          "digest": "sha256:439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+          "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+          "mode": "100755",
+          "size": 95564,
+          "digest": "sha256:83b0a68caefc010a9907211612e96c1bfb94b35a6cff446939a2306ce95bb2da",
+          "git_blob": "fb6a1c60ea1d343edf288e2a9e7d383d682b094d",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+          "mode": "100755",
+          "size": 7472,
+          "digest": "sha256:cbd85a9e0e08471a9c0be29725c177a09059a58a5604e0543263f2cf55cad6ca",
+          "git_blob": "a46781ef3cdf183f80a953c4da0aa48816a4cf3a",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-plan-record.py",
+          "destination": ".codex/skills/flow-auto/scripts/flow-plan-record.py",
+          "mode": "100755",
+          "size": 62338,
+          "digest": "sha256:05c5aaf1d28a95d31d9e89eab9c128f33f916a7ed931146492fee7c5a5c1244d",
+          "git_blob": "63187a491817fe47703f68f343770754294aa130",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-stale-check.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-stale-check.sh",
+          "mode": "100755",
+          "size": 12127,
+          "digest": "sha256:abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+          "git_blob": "718ef98e6458d80c56f04a0d63392c103c6f1597",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+          "mode": "100755",
+          "size": 42082,
+          "digest": "sha256:fa067118095e617c0668a0fa16fd4a3d5c0f0ec99bb95c00611b72671c3421f3",
+          "git_blob": "70128f9598f3f94dd814068af38535c596633599",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+          "mode": "100755",
+          "size": 24912,
+          "digest": "sha256:b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+          "git_blob": "93615e5e4f1521f2583d635f4ec78144ba187831",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+          "destination": ".codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+          "mode": "100755",
+          "size": 21730,
+          "digest": "sha256:d3ee7378cc583ccb8dd8e0a6c9c10e2c958b392e5e0bb973dd5824ac310b4d22",
+          "git_blob": "7070e3a57ccec7fd0d645663b1acde3bef801df0",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/friction-log.sh",
+          "destination": ".codex/skills/flow-auto/scripts/friction-log.sh",
+          "mode": "100755",
+          "size": 7271,
+          "digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660",
+          "git_blob": "92fcf4be202cb3f16fd50689ce5e9239b560db4c",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/gate-lib.sh",
+          "destination": ".codex/skills/flow-auto/scripts/gate-lib.sh",
+          "mode": "100755",
+          "size": 23176,
+          "digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8",
+          "git_blob": "c3da2e5ff76fbacf602b28a0c7f96feef1b83f34",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+          "destination": ".codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+          "mode": "100755",
+          "size": 115250,
+          "digest": "sha256:a44e285612c90508f77afe1f90601f0adb9c526ea73c331e17bcc677f897e508",
+          "git_blob": "4002cd5773e8952888924f730dedd3dcc61e3e24",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+          "destination": ".codex/skills/flow-auto/scripts/hook-permission-census.sh",
+          "mode": "100755",
+          "size": 21117,
+          "digest": "sha256:31ff4ea2c863e580c40fa80f3fad66d1b443382140d6e7f397435825809c05e3",
+          "git_blob": "0079a7faec1d42f5ecdc71f054661e4499da554d",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/nit-store-resolve.sh",
+          "destination": ".codex/skills/flow-auto/scripts/nit-store-resolve.sh",
+          "mode": "100755",
+          "size": 5770,
+          "digest": "sha256:673b2314d843cb1bea36ea0fd10669060a62369a276c00e52fcc6c0663a5e837",
+          "git_blob": "5a7b26a26f5add39c051cd9801758daf5b783525",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/speckit-context.py",
+          "destination": ".codex/skills/flow-auto/scripts/speckit-context.py",
+          "mode": "100755",
+          "size": 32676,
+          "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+          "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/stash-worktree-guard.sh",
+          "destination": ".codex/skills/flow-auto/scripts/stash-worktree-guard.sh",
+          "mode": "100755",
+          "size": 25652,
+          "digest": "sha256:cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745",
+          "git_blob": "5c5d777f2f0e9dc22804dd8e229846c37a4a64fb",
+          "owner": "skill:flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+          "destination": ".codex/skills/flow-auto/scripts/worktree-remove.sh",
+          "mode": "100755",
+          "size": 77051,
+          "digest": "sha256:30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+          "git_blob": "2ebc1037c87dc6f316f136cbe4afe5e9584a41f3",
+          "owner": "skill:flow-auto"
+        }
+      ]
+    },
+    {
+      "name": "flow-wave",
+      "directory": "flow-wave",
+      "description_digest": "sha256:c27165c6e7546e7694b7bbd20e7bfb86fbac3d400f1e76b308c82f7556811465",
+      "body_digest": "sha256:11fec7213daa49120873cf3d887ea0ba3b4464a082d32c06b3674fa0d693d56f",
+      "required_references": [
+        "reference.md"
+      ],
+      "checksums": "verified",
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/PROVENANCE.md",
+          "destination": ".codex/skills/flow-wave/PROVENANCE.md",
+          "mode": "100644",
+          "size": 970,
+          "digest": "sha256:18ebd0dc4ceb5b333ca599aaccc3a8f00501f0d6f6ae1e6f5adde6e8d9c1d150",
+          "git_blob": "f18eda552ab00e46a50963dc625efc7bc05d649e",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/SKILL.md",
+          "destination": ".codex/skills/flow-wave/SKILL.md",
+          "mode": "100644",
+          "size": 3023,
+          "digest": "sha256:60930bb13da9bd620cc148591e4ca468d351f08a1ac1eff9ec6179afdfddca0e",
+          "git_blob": "a21bc64cf22959a7e853440d4996344f9ab16117",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md",
+          "destination": ".codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md",
+          "mode": "100644",
+          "size": 15255,
+          "digest": "sha256:8c34c74ac7d9135638e05714fcb102437ac7a996e2ec6d82f3a5a8c9b624f8dc",
+          "git_blob": "2d22bc8294515e975016c1605675479c7062118f",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/reference.md",
+          "destination": ".codex/skills/flow-wave/reference.md",
+          "mode": "100644",
+          "size": 63557,
+          "digest": "sha256:0ebb9ed92a023cfcf4b089a6c0f1af76449b34959fe3865c2a4fae3421509169",
+          "git_blob": "f66896755e187b8c1999a487a4f54c8aef4f01ea",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/SHA256SUMS",
+          "destination": ".codex/skills/flow-wave/scripts/SHA256SUMS",
+          "mode": "100644",
+          "size": 1800,
+          "digest": "sha256:f91f807e267fb2f10728dcaff9c4f31ac3a842b16ac7c967ff2dbac17df5f629",
+          "git_blob": "21e5dedf4d65a6d6737dceb5443022f74a0ae43c",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-driver-capability.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-driver-capability.sh",
+          "mode": "100755",
+          "size": 32095,
+          "digest": "sha256:439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+          "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-pr-watch.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-pr-watch.sh",
+          "mode": "100755",
+          "size": 36347,
+          "digest": "sha256:05935f75c2a0b78a5d8a6b0529486ea1d844de13c14927710b16dbef7c4c028e",
+          "git_blob": "a2941050f4dea93bd0a3cfea6846ca4903de8658",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-vantage.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-vantage.sh",
+          "mode": "100755",
+          "size": 17869,
+          "digest": "sha256:884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93",
+          "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-wave-lexicon.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-wave-lexicon.sh",
+          "mode": "100755",
+          "size": 56972,
+          "digest": "sha256:a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734",
+          "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+          "mode": "100755",
+          "size": 186860,
+          "digest": "sha256:072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06",
+          "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-wave-plan.py",
+          "destination": ".codex/skills/flow-wave/scripts/flow-wave-plan.py",
+          "mode": "100755",
+          "size": 39024,
+          "digest": "sha256:df2871bce4ac8a6ed36ff122a4bd425cd8087dc736d8dd5b18e141ca0d24eff3",
+          "git_blob": "fb21ba3bdf910c08e88ebfa58b94552cdf0333a3",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+          "mode": "100755",
+          "size": 256041,
+          "digest": "sha256:003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae",
+          "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-wave-residuals.py",
+          "destination": ".codex/skills/flow-wave/scripts/flow-wave-residuals.py",
+          "mode": "100755",
+          "size": 31016,
+          "digest": "sha256:73dd985a40d6498974c58bbd49a35d6efa972eafd6c2b05bfeed3c8fc275f5ed",
+          "git_blob": "d005e4054b78cc74325456fa9fb12c9e1d2fd317",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-worktree-claim.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-worktree-claim.sh",
+          "mode": "100755",
+          "size": 24912,
+          "digest": "sha256:b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+          "git_blob": "93615e5e4f1521f2583d635f4ec78144ba187831",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+          "destination": ".codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+          "mode": "100755",
+          "size": 26771,
+          "digest": "sha256:9b963b0186ff8d92f4eb65b3414b1347cd7f4f230f5b02923c363a4ae7192c32",
+          "git_blob": "8e142b0ae85f772fde0758fd9e16ebc64fe6a46f",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/speckit-context.py",
+          "destination": ".codex/skills/flow-wave/scripts/speckit-context.py",
+          "mode": "100755",
+          "size": 32676,
+          "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+          "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh",
+          "destination": ".codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh",
+          "mode": "100755",
+          "size": 32879,
+          "digest": "sha256:4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec",
+          "git_blob": "390d13576b57d06226738fef30a2eff77c44669a",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+          "destination": ".codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+          "mode": "100755",
+          "size": 21590,
+          "digest": "sha256:23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c",
+          "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+          "owner": "skill:flow-wave"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+          "destination": ".codex/skills/flow-wave/scripts/worktree-remove.sh",
+          "mode": "100755",
+          "size": 77051,
+          "digest": "sha256:30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+          "git_blob": "2ebc1037c87dc6f316f136cbe4afe5e9584a41f3",
+          "owner": "skill:flow-wave"
+        }
+      ]
+    },
+    {
+      "name": "project-init",
+      "directory": "project-init",
+      "description_digest": "sha256:0ff6e82e3a0ca9be5887a50f030116fdfd1e30eac19d522ca60226abfd8cbf87",
+      "body_digest": "sha256:54a858d948afbd22e46c89b9da2f97990da968c54b4493f37b2c9a0af9541916",
+      "required_references": [
+        "reference.md"
+      ],
+      "checksums": "verified",
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/PROVENANCE.md",
+          "destination": ".codex/skills/project-init/PROVENANCE.md",
+          "mode": "100644",
+          "size": 585,
+          "digest": "sha256:6ffa7e100776e38311a13740ad8516c4770c9e64c7050d271051749e17658035",
+          "git_blob": "4c7d68e99dd7378d190863fda4b1a8d72c3a6ffd",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/SKILL.md",
+          "destination": ".codex/skills/project-init/SKILL.md",
+          "mode": "100644",
+          "size": 3156,
+          "digest": "sha256:8820b9e918398a42443ea282a2b4c106640442fadc16cd5b109389e00e63017f",
+          "git_blob": "fe3152e00c8137aa9d7e207ae3cf720d11d4cfd8",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/docs/agents/knowledge-lifecycle.md",
+          "destination": ".codex/skills/project-init/docs/agents/knowledge-lifecycle.md",
+          "mode": "100644",
+          "size": 6775,
+          "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d",
+          "git_blob": "083365031e75831e7d1aced6c9db8b1d1fb267cf",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/reference.md",
+          "destination": ".codex/skills/project-init/reference.md",
+          "mode": "100644",
+          "size": 24356,
+          "digest": "sha256:1fb38b47266ee0c879a50241f311323672ed45cb5d4f779086dd42fcb576d366",
+          "git_blob": "f7dea5f3bec8c00bc5a5db3aa64d9c1a863bc213",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/scripts/SHA256SUMS",
+          "destination": ".codex/skills/project-init/scripts/SHA256SUMS",
+          "mode": "100644",
+          "size": 837,
+          "digest": "sha256:05e1ec41938f0931581add1d03ab3ed99f0c802a839cb4936a286273dfa5ecc5",
+          "git_blob": "93fead186855b77dadafedf875b886739e96fe0c",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/scripts/project-init.py",
+          "destination": ".codex/skills/project-init/scripts/project-init.py",
+          "mode": "100755",
+          "size": 52771,
+          "digest": "sha256:39b03ed59e5a49313ead549b49a01004058a30ceae26dad7340aba74ea3337b1",
+          "git_blob": "7ab404ca32cac84c8da75560fc8ea7e70a971dbe",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/scripts/speckit-context.py",
+          "destination": ".codex/skills/project-init/scripts/speckit-context.py",
+          "mode": "100755",
+          "size": 32676,
+          "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+          "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+          "owner": "skill:project-init"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh",
+          "destination": ".codex/skills/project-init/scripts/speckit-tasks-to-issues.sh",
+          "mode": "100755",
+          "size": 32879,
+          "digest": "sha256:4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec",
+          "git_blob": "390d13576b57d06226738fef30a2eff77c44669a",
+          "owner": "skill:project-init"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "helper-flow-finish-gate",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "the audited gate helper; reference.md Step 6 item 2 invokes it bare at this installed path, which the harness witnesses (gate_entrypoint)",
+      "destination": ".claude/scripts",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "at CPP ca3030d (#1408) the skill invokes its BUNDLED gate, not this installed path; the installed copy stays installed and witnessed (gate_entrypoint) so a subject that still reaches it reads witnessed, never unobserved (#525). The bundled copy is witnessed through bundled_gate_entrypoints.",
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-finish-gate.sh",
+          "destination": ".claude/scripts/flow-finish-gate.sh",
+          "mode": "100755",
+          "size": 95564,
+          "digest": "sha256:83b0a68caefc010a9907211612e96c1bfb94b35a6cff446939a2306ce95bb2da",
+          "git_blob": "fb6a1c60ea1d343edf288e2a9e7d383d682b094d",
+          "owner": "helper-flow-finish-gate"
+        }
+      ],
+      "digest": "sha256:07ce6ba96e0a44762f78c6b3698a991eafd00803a589f9bed81465b9ae2b1ce5",
+      "probes": []
+    },
+    {
+      "id": "helper-gate-lib",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "library sourced by flow-finish-gate.sh from beside itself, else from the installed helper directory (flow-finish-gate.sh:170-200)",
+      "destination": ".claude/scripts",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [
+        "codex/skills/flow-auto/reference.md",
+        "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+        "codex/skills/flow-auto/scripts/eli5-vendor.py",
+        "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+        "codex/skills/flow-auto/scripts/flow-plan-record.py",
+        "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+        "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+        "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+        "scripts/flow-finish-gate.sh",
+        "scripts/flow-plan-record.py",
+        "scripts/toolchain-provenance.sh"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/gate-lib.sh",
+          "destination": ".claude/scripts/gate-lib.sh",
+          "mode": "100755",
+          "size": 23176,
+          "digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8",
+          "git_blob": "c3da2e5ff76fbacf602b28a0c7f96feef1b83f34",
+          "owner": "helper-gate-lib"
+        }
+      ],
+      "digest": "sha256:97ca02a07e9974a33f4f8707c846f47fea87d0a434d8bfc597882fa36210fdc9",
+      "probes": []
+    },
+    {
+      "id": "helper-counter-model-receipt",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "receipt writer reference.md Step 6 item 1 resolves first at this installed path, and flow-finish-gate.sh looks for on its finish path",
+      "destination": ".claude/scripts",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [
+        "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+        "scripts/flow-finish-gate.sh"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/counter-model-receipt.py",
+          "destination": ".claude/scripts/counter-model-receipt.py",
+          "mode": "100755",
+          "size": 126044,
+          "digest": "sha256:8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+          "git_blob": "9e6a2d0dabdca04f0f7569d997ea0233b5c4f5f8",
+          "owner": "helper-counter-model-receipt"
+        }
+      ],
+      "digest": "sha256:5b464121f21683e780b57ad677ed86f6af6d4e0f708fb95f55f730d77d556755",
+      "probes": []
+    },
+    {
+      "id": "helper-flow-auto",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "the flow helpers reference.md invokes at the installed path (Steps 1-9; each `~/.claude/scripts/<name>` call site), installed from the checkout's scripts/, byte-identical to the skill's bundled copies (mirrors)",
+      "destination": ".claude/scripts",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [
+        "codex/skills/flow-auto/scripts/worktree-remove.sh",
+        "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+        "codex/skills/flow-wave/scripts/worktree-remove.sh",
+        "scripts/worktree-remove.sh"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/check-ignored-additions.sh",
+          "destination": ".claude/scripts/check-ignored-additions.sh",
+          "mode": "100755",
+          "size": 14606,
+          "digest": "sha256:ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+          "git_blob": "e0a4d429959f1b2e06a9cebe49839917a0aab60f",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-ci-status.sh",
+          "destination": ".claude/scripts/flow-ci-status.sh",
+          "mode": "100755",
+          "size": 34306,
+          "digest": "sha256:71a3d705fd222e4eb44425c87460111fcba49d95d8e5689555d31601e55862ac",
+          "git_blob": "b0aee7ddecda9e97e5e986e088ddf53485457e09",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-driver-capability.sh",
+          "destination": ".claude/scripts/flow-driver-capability.sh",
+          "mode": "100755",
+          "size": 32095,
+          "digest": "sha256:439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+          "git_blob": "968d696e99c1e300b75ca08668bcbdb13f338f44",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-live-driver-guard.sh",
+          "destination": ".claude/scripts/flow-live-driver-guard.sh",
+          "mode": "100755",
+          "size": 7472,
+          "digest": "sha256:cbd85a9e0e08471a9c0be29725c177a09059a58a5604e0543263f2cf55cad6ca",
+          "git_blob": "a46781ef3cdf183f80a953c4da0aa48816a4cf3a",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-plan-record.py",
+          "destination": ".claude/scripts/flow-plan-record.py",
+          "mode": "100755",
+          "size": 62338,
+          "digest": "sha256:05c5aaf1d28a95d31d9e89eab9c128f33f916a7ed931146492fee7c5a5c1244d",
+          "git_blob": "63187a491817fe47703f68f343770754294aa130",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-stale-check.sh",
+          "destination": ".claude/scripts/flow-stale-check.sh",
+          "mode": "100755",
+          "size": 12127,
+          "digest": "sha256:abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+          "git_blob": "718ef98e6458d80c56f04a0d63392c103c6f1597",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-start-resolve.sh",
+          "destination": ".claude/scripts/flow-start-resolve.sh",
+          "mode": "100755",
+          "size": 42082,
+          "digest": "sha256:fa067118095e617c0668a0fa16fd4a3d5c0f0ec99bb95c00611b72671c3421f3",
+          "git_blob": "70128f9598f3f94dd814068af38535c596633599",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-worktree-claim.sh",
+          "destination": ".claude/scripts/flow-worktree-claim.sh",
+          "mode": "100755",
+          "size": 24912,
+          "digest": "sha256:b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+          "git_blob": "93615e5e4f1521f2583d635f4ec78144ba187831",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-worktree-guard.sh",
+          "destination": ".claude/scripts/flow-worktree-guard.sh",
+          "mode": "100755",
+          "size": 21730,
+          "digest": "sha256:d3ee7378cc583ccb8dd8e0a6c9c10e2c958b392e5e0bb973dd5824ac310b4d22",
+          "git_blob": "7070e3a57ccec7fd0d645663b1acde3bef801df0",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/friction-log.sh",
+          "destination": ".claude/scripts/friction-log.sh",
+          "mode": "100755",
+          "size": 7271,
+          "digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660",
+          "git_blob": "92fcf4be202cb3f16fd50689ce5e9239b560db4c",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/gh-pr-merge.sh",
+          "destination": ".claude/scripts/gh-pr-merge.sh",
+          "mode": "100755",
+          "size": 115250,
+          "digest": "sha256:a44e285612c90508f77afe1f90601f0adb9c526ea73c331e17bcc677f897e508",
+          "git_blob": "4002cd5773e8952888924f730dedd3dcc61e3e24",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/nit-store-resolve.sh",
+          "destination": ".claude/scripts/nit-store-resolve.sh",
+          "mode": "100755",
+          "size": 5770,
+          "digest": "sha256:673b2314d843cb1bea36ea0fd10669060a62369a276c00e52fcc6c0663a5e837",
+          "git_blob": "5a7b26a26f5add39c051cd9801758daf5b783525",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/speckit-context.py",
+          "destination": ".claude/scripts/speckit-context.py",
+          "mode": "100755",
+          "size": 32676,
+          "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+          "git_blob": "c45b2f6e53fd923952bf48df72090aa0981a7d0d",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/stash-worktree-guard.sh",
+          "destination": ".claude/scripts/stash-worktree-guard.sh",
+          "mode": "100755",
+          "size": 25652,
+          "digest": "sha256:cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745",
+          "git_blob": "5c5d777f2f0e9dc22804dd8e229846c37a4a64fb",
+          "owner": "helper-flow-auto"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/worktree-remove.sh",
+          "destination": ".claude/scripts/worktree-remove.sh",
+          "mode": "100755",
+          "size": 77051,
+          "digest": "sha256:30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+          "git_blob": "2ebc1037c87dc6f316f136cbe4afe5e9584a41f3",
+          "owner": "helper-flow-auto"
+        }
+      ],
+      "digest": "sha256:b0479b7c1918b5663bd8e69dc5de5bf965a0f4f417f108eff95645ee96695c29",
+      "probes": []
+    },
+    {
+      "id": "checkout-libraries",
+      "kind": "library",
+      "scope": "treatment",
+      "role": "the CPP checkout's Python packages the procedure runs through `uv run --project` (reference.md:24-34, 100; flow-finish-gate.sh:343-373)",
+      "destination": "Projects/claude-power-pack",
+      "version": null,
+      "supply": null,
+      "traversed": false,
+      "no_traverse_reason": "Python packages: their dependencies are imports resolved by the interpreter, not path text a reference pattern can read. At this pin lib/cicd and lib/security import only themselves and PyPI packages (see tool-pypi-runtime). Whether they import cleanly in a disposable home is #266's installed-path proof.",
+      "referenced_by": [
+        "codex/skills/flow-auto/reference.md",
+        "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+        "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+        "codex/skills/project-init/reference.md",
+        "scripts/flow-finish-gate.sh",
+        "scripts/toolchain-provenance.sh"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/__init__.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/__init__.py",
+          "mode": "100644",
+          "size": 10016,
+          "digest": "sha256:00f0f4c6f99b2d58fe5b031f1ec18037b1149bbe7046e61d0fda28bef5e8bd6e",
+          "git_blob": "dd278d889cd5aaf3d1921ea79d8680575a5bbaae",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/__main__.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/__main__.py",
+          "mode": "100644",
+          "size": 338,
+          "digest": "sha256:6420d4552d8216e24146f6b07e0c451da5e5ab4fb9cb6ff3368d618a2c333d73",
+          "git_blob": "e3bf71046b598b050c6d02e5186dedcee6600f96",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/bootstrap.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/bootstrap.py",
+          "mode": "100644",
+          "size": 9161,
+          "digest": "sha256:4a061eebfbc0da70b6f72dfffdd98d013eef7b05967f40e021765d46b35efcf7",
+          "git_blob": "fe968602004761c632324e53d46e3bc8814505c2",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/cli.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/cli.py",
+          "mode": "100644",
+          "size": 36813,
+          "digest": "sha256:5db9e7723be0f063c10de8d924257e8e051de0a1e681d0a05f329b3cf2030045",
+          "git_blob": "cac99f7eb5a6c93bf2ab99067f70b7fbb4f20b32",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/config.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/config.py",
+          "mode": "100644",
+          "size": 26884,
+          "digest": "sha256:8d74479bcd92a6ebb624e385d1d0b7f791324e55933b629bfc02bac46f2d5857",
+          "git_blob": "7db87a79f9d56b019eead98c08740d5d869f75e9",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/container.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/container.py",
+          "mode": "100644",
+          "size": 14421,
+          "digest": "sha256:2ecb3c0f40cc9954e29441f8a5edad446edab31af9d0f69429416ffb026cf5e3",
+          "git_blob": "0199110a57fb21b1dc80fbf6cb84e0cbff1b247f",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/coverage.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/coverage.py",
+          "mode": "100644",
+          "size": 18043,
+          "digest": "sha256:5d050770229da151d8dccb3e2bd1c949f9f7e503dc4a15487df6a01221369211",
+          "git_blob": "c07c384d9bf1f160fca46b333c288f817ec056d1",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/deploy/__init__.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/deploy/__init__.py",
+          "mode": "100644",
+          "size": 1206,
+          "digest": "sha256:fc9e5249db0bf07ee4356dd8e951d7bfde35d380cb22239de1a3f18269ebd3db",
+          "git_blob": "b37911fe710dd36d0d678f1729f338c2a4f4ae21",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/deploy/docker_compose.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/deploy/docker_compose.py",
+          "mode": "100644",
+          "size": 9546,
+          "digest": "sha256:dddd154f8fcb6e1a37261a3dc602dd175db0b69009da4e7f453aed738fc1757f",
+          "git_blob": "b0d334429b00801de4bdac9014dc0903994eb5d9",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/deploy/guardrails.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/deploy/guardrails.py",
+          "mode": "100644",
+          "size": 13349,
+          "digest": "sha256:72b29f31cae36e66739f4d85fc80c1e31cdb40688220fefe7d15e2523a88d61d",
+          "git_blob": "8768a43fff60bd07c3ada3170da34834546fbba6",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/deploy/strategy.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/deploy/strategy.py",
+          "mode": "100644",
+          "size": 11927,
+          "digest": "sha256:df28ff1da583e8a806dce26e285f40923bc769e76b6eb4316e53a45adba58756",
+          "git_blob": "41e0293abe11820a1f93065a7e3a863aa9e59293",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/detector.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/detector.py",
+          "mode": "100644",
+          "size": 17696,
+          "digest": "sha256:e09256f2091e89b4d25fad4a3399ea9244b20b1ded2a0e0898da58535c08d7e4",
+          "git_blob": "32a5283b0fa8e02a4501f5df35f9eccc4c1d02db",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/evidence.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/evidence.py",
+          "mode": "100644",
+          "size": 42569,
+          "digest": "sha256:ba2ed1244a9ae0c35a7e1e662799649c20645c7269dc7521fbb609e8852b3305",
+          "git_blob": "bc0c80efd9310ff8e1eb1d61a1332f3b62be8038",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/failure_patterns.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/failure_patterns.py",
+          "mode": "100644",
+          "size": 10752,
+          "digest": "sha256:cad24fca2a855f08900eb1a1af69d8a5d3bcfa51407d92ef991e9c1bbbbad656",
+          "git_blob": "c08c2fdaa6d5e3d44354d70b4222adffbc0e9197",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/health.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/health.py",
+          "mode": "100644",
+          "size": 12330,
+          "digest": "sha256:ad6a94126c84ea075a5acd34465dd5900643ac6f39ff4fbd4c865f13898c01f9",
+          "git_blob": "c5a946d3e97219ab248d72aa18810dcf3b3575d6",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/infrastructure.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/infrastructure.py",
+          "mode": "100644",
+          "size": 23949,
+          "digest": "sha256:73fb8bfb989f5ce7ca3ead97577f91196a62457e154d60f38659b0240f984823",
+          "git_blob": "5d80a46ee5eba0510a8e0a06e74816de39cfb58a",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/makefile.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/makefile.py",
+          "mode": "100644",
+          "size": 15022,
+          "digest": "sha256:d8fbe3ac0af99a72794232b20784c413d020c97510e753ea39cba8e4190b0d5d",
+          "git_blob": "00dcd6741745249aa85da9244b46c565caaa0262",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/makefile_declaration.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/makefile_declaration.py",
+          "mode": "100644",
+          "size": 13116,
+          "digest": "sha256:2094cf58730e7bba868e6be299c82823482470e0c663051ad6d99b61f3141302",
+          "git_blob": "0a2d6d92d737b04469e0195857678c3745fb6d3d",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/manifest.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/manifest.py",
+          "mode": "100644",
+          "size": 24414,
+          "digest": "sha256:efdb15b933787bef88f7de2d3cc53cb8797c368a7d91aad4c92ccd9bb47896c1",
+          "git_blob": "0d1dee7a7917322a6fb830f9466d2b2ea5928661",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/manifest_path.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/manifest_path.py",
+          "mode": "100644",
+          "size": 442,
+          "digest": "sha256:744bd33ccbbc9e75587ffdf4156a3dbc78efce0e870f41b56de20423b3a57389",
+          "git_blob": "4c71eb3c85c43f86fe412247fad08f5713ccfc78",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/models.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/models.py",
+          "mode": "100644",
+          "size": 18925,
+          "digest": "sha256:71a7714e6a259c51d4a6e0969284138f2bb2c5243268fd4a718745b82e2c4633",
+          "git_blob": "8fe638aec927a2bfcec37570a5bee4bb724c75f8",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/mypy_scope.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/mypy_scope.py",
+          "mode": "100644",
+          "size": 3205,
+          "digest": "sha256:301ccbe539017e5d0303194f07fe877a1dec43230a64ec1bfe5943dab71736fa",
+          "git_blob": "550a14a9c637a2d1fcb42183e2fad7415473ef8a",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/outcomes.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/outcomes.py",
+          "mode": "100644",
+          "size": 27050,
+          "digest": "sha256:b5154d41810882c2e12b3fc3fa0ba487ded8c2a55f1257428fa9ff125d4fef67",
+          "git_blob": "5ab28c53ce1740bba3c69a5af4567ebe0661a3bf",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/pipeline.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/pipeline.py",
+          "mode": "100644",
+          "size": 18885,
+          "digest": "sha256:b5e4ffefd62f059eaf79be927a4b15d1d1ee82ec2f0b1be7e0f603f140caf31e",
+          "git_blob": "a2e77402eafbb0df5b274d167efdd9ea3606ab87",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/pyproject.toml",
+          "destination": "Projects/claude-power-pack/lib/cicd/pyproject.toml",
+          "mode": "100644",
+          "size": 469,
+          "digest": "sha256:11d3a8f1865bbc7d928f774496659619c6c35d4f7fbc678fe018d14743dc9d11",
+          "git_blob": "b2dd9ab48f8f48a4995b6a8a2e4d14d004e2485b",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/runner.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/runner.py",
+          "mode": "100644",
+          "size": 105415,
+          "digest": "sha256:dfcc2459f611015d5ad2532837dc2c093b951feb2b189392d71bdaa3c07d632c",
+          "git_blob": "c4e405399f4c183e6be529e560c33b425e948f97",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/smoke.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/smoke.py",
+          "mode": "100644",
+          "size": 3400,
+          "digest": "sha256:172c385af59ff5bc3bccf7e5e7cfc0be198f0b6553d04da24b96e1c7c61440b5",
+          "git_blob": "65fa554acc17f130446b80f0496f7d22615502f8",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/state.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/state.py",
+          "mode": "100644",
+          "size": 37021,
+          "digest": "sha256:9d194dcb58129a70395c89d908f86da2c44ce392e0442c1663ad67a8afa55d81",
+          "git_blob": "ab1e7a9500bd3545b1e4a5d125bd5516eb402ddf",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/steps.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/steps.py",
+          "mode": "100644",
+          "size": 87486,
+          "digest": "sha256:e060aee7d1702d4298c03a95929aad3bf28bbac1a57669a88a4f56695735aa03",
+          "git_blob": "c4a289e558630842f4fb12bf3caf5cd39df5a747",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/cicd/verify.py",
+          "destination": "Projects/claude-power-pack/lib/cicd/verify.py",
+          "mode": "100644",
+          "size": 19132,
+          "digest": "sha256:8fc08d6ddca7c3a9d6a2064c57ca1a3380041b013de8121ba90a5101c0d26310",
+          "git_blob": "3e22cd5a5fa2ac1898f1dacc37556210d647b45e",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/README.md",
+          "destination": "Projects/claude-power-pack/lib/security/README.md",
+          "mode": "100644",
+          "size": 7974,
+          "digest": "sha256:d61e4442503348fe4e7f7e7b0a9a0d2dac203b47fd31f4018a18db56c66dccb3",
+          "git_blob": "ce7d22d802245a026a62c8d9b5bb4e544400d1c3",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/__init__.py",
+          "destination": "Projects/claude-power-pack/lib/security/__init__.py",
+          "mode": "100644",
+          "size": 1100,
+          "digest": "sha256:e09b329aafca9da698136f58e48ad537b82ce393c1295253715d77ea5db5f8d0",
+          "git_blob": "e7bc11ae8851541e5c9366c8d39373d23e5ec6a1",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/__main__.py",
+          "destination": "Projects/claude-power-pack/lib/security/__main__.py",
+          "mode": "100644",
+          "size": 517,
+          "digest": "sha256:73ed1d15295e4c8adf83a16d5fd1c13b6b2989cdf05839c04b8501ebd343e928",
+          "git_blob": "a0f2b20bfe4f53787498d92172e4ee711cbba9b8",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/cli.py",
+          "destination": "Projects/claude-power-pack/lib/security/cli.py",
+          "mode": "100644",
+          "size": 12810,
+          "digest": "sha256:7399e320a70bf39a0bfcbba257bb6be70e8c487037c4651e1e0c582f47bc5373",
+          "git_blob": "0332ba8844d9cf8346e5c0d85b8408189ba96b67",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/config.py",
+          "destination": "Projects/claude-power-pack/lib/security/config.py",
+          "mode": "100644",
+          "size": 8802,
+          "digest": "sha256:35308bea7b5cac75d8352ad9ef8216188b49931b9cb86a388adff392f47c87b4",
+          "git_blob": "cdc45f81d3b81700d64ccd8686f9750d439f7874",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/explain.py",
+          "destination": "Projects/claude-power-pack/lib/security/explain.py",
+          "mode": "100644",
+          "size": 6056,
+          "digest": "sha256:f01e4e2aa2343b5c2ba501b82ca6a5ff4e3947d600d16ba8bef8dda6ae2b4166",
+          "git_blob": "99bf79df93d8be7f1e78c52e2e314208ab8caa90",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/models.py",
+          "destination": "Projects/claude-power-pack/lib/security/models.py",
+          "mode": "100644",
+          "size": 5786,
+          "digest": "sha256:4b0059ccb56517dc88f214220d106b02bcec395e92c861cfb2a1035df284d8ea",
+          "git_blob": "695462eb6f1a0fd9958105365a346a0a39909d14",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/__init__.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/__init__.py",
+          "mode": "100644",
+          "size": 113,
+          "digest": "sha256:f6d4ca5e32c2fb52ec0a11fdf8be4ce076407d2fd7757732748e2b1ee8d32bd6",
+          "git_blob": "6bc50c721c6f14d0a8aa5f8ff3c0a52142e60587",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/debug_flags.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/debug_flags.py",
+          "mode": "100644",
+          "size": 2867,
+          "digest": "sha256:f89758573d7ebe0759e7d9552510021399543a6fdb13557de0dc0e4e18830845",
+          "git_blob": "f43c6ee9b3e22ea5121ae96e0390905eb7949944",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/env_files.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/env_files.py",
+          "mode": "100644",
+          "size": 2898,
+          "digest": "sha256:976a5bc7a80cc388a9ee3458523344fe18eaea43e2cabb010eddf3bddeff1494",
+          "git_blob": "7c1d375d3ce840cde9800d0a4b089bfa0457691c",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/gitignore.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/gitignore.py",
+          "mode": "100644",
+          "size": 3725,
+          "digest": "sha256:0ae55dcd49659ff536075608999198e1b1dd354e46e4c7df9d786cc7b37b7b1d",
+          "git_blob": "7ddec5f732d2759be86c61e66b72354f040ec52b",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/gitleaks.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/gitleaks.py",
+          "mode": "100644",
+          "size": 6121,
+          "digest": "sha256:8a12b8905e4ae0c37e7dcff6afa266b26ece70494b27b23219d99a9e7946e3bf",
+          "git_blob": "a83bcdb6fa809569d20aa263be7a4af923d4526f",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/npm_audit.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/npm_audit.py",
+          "mode": "100644",
+          "size": 5809,
+          "digest": "sha256:b6143b1cbd9296bb858d5b40d2be3b66b21575d9c4eb2b64bd39df6b3161bb50",
+          "git_blob": "395262135c4a856c6277c6d86375df6614430bb6",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/permissions.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/permissions.py",
+          "mode": "100644",
+          "size": 3171,
+          "digest": "sha256:6a309a3158ffc96fef04213090f98cc5831a03ab3f0c6d18cf10c1c39cff4e3f",
+          "git_blob": "888750117936dfaadae54bc9617c0b384764fc11",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/pip_audit.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/pip_audit.py",
+          "mode": "100644",
+          "size": 7180,
+          "digest": "sha256:a48ffb701bae94692a26a7fb18ae9d68fca14040545509350ea86a714c0f1e45",
+          "git_blob": "36148471fb1804464d0e26f500c7f7db2dd0043a",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/modules/secrets.py",
+          "destination": "Projects/claude-power-pack/lib/security/modules/secrets.py",
+          "mode": "100644",
+          "size": 12542,
+          "digest": "sha256:68851de845fcab53889c67a125c45e637230ec077b18bc3359b9434a6c924b74",
+          "git_blob": "e9d1bbe1f03e32689d36af894077de827f3b5b21",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/orchestrator.py",
+          "destination": "Projects/claude-power-pack/lib/security/orchestrator.py",
+          "mode": "100644",
+          "size": 12544,
+          "digest": "sha256:656c31276cb33a5cd2d4ba1aad8437d3e10dac4c1040029e7ba8bbdc3b7396db",
+          "git_blob": "933419fdd56d227e520aa71ecdf8d56c59cef93b",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/output/__init__.py",
+          "destination": "Projects/claude-power-pack/lib/security/output/__init__.py",
+          "mode": "100644",
+          "size": 51,
+          "digest": "sha256:fcedfaf008a071dfd90071239e272ee25814c53695359194834e5c84b88a7925",
+          "git_blob": "0a9751a40180bcf7c26e606a99276b88d9511c24",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/output/json_output.py",
+          "destination": "Projects/claude-power-pack/lib/security/output/json_output.py",
+          "mode": "100644",
+          "size": 1093,
+          "digest": "sha256:33bf607eb1f0cbfa292ecddb0ab9b130ddd4b5d9e0562d310f821012da97177c",
+          "git_blob": "4a0c9c8d9e4b0d86fefef6501ba7f9f6001c96b4",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/output/novice.py",
+          "destination": "Projects/claude-power-pack/lib/security/output/novice.py",
+          "mode": "100644",
+          "size": 2668,
+          "digest": "sha256:f2bd022d3b2dd7bf303637353236084f5ce0b8a54a8296e13b59b5e5db0de0ee",
+          "git_blob": "9b44973561d22f887dd64e6a8e114f41d9f185b2",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "lib/security/pyproject.toml",
+          "destination": "Projects/claude-power-pack/lib/security/pyproject.toml",
+          "mode": "100644",
+          "size": 454,
+          "digest": "sha256:cb3b02d8e23e37091e0c25620b4ec17234f7f22cbeb37c696f16ed33e5118354",
+          "git_blob": "59610f9eaae51f10bd6b33054e184898b4008b54",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "pyproject.toml",
+          "destination": "Projects/claude-power-pack/pyproject.toml",
+          "mode": "100644",
+          "size": 7756,
+          "digest": "sha256:fe4b57ddb90f92793e0a1e45092d51bc28a7cfc048ae73ec00905cfed9ab00ed",
+          "git_blob": "152e37dfb7ba37220c1e29684cd9b8e96610efaa",
+          "owner": "checkout-libraries"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "uv.lock",
+          "destination": "Projects/claude-power-pack/uv.lock",
+          "mode": "100644",
+          "size": 111921,
+          "digest": "sha256:0d7606bfd0efa1f58d5fa38386bde45cd63d75812c03cd0324bcd6f422ba6c32",
+          "git_blob": "f7f49366dcb0467cc2a169e2e8496c51c31b0d39",
+          "owner": "checkout-libraries"
+        }
+      ],
+      "digest": "sha256:4dc77d08405a2f77b2934c68afc862614bf72014f3633364acac633945586081",
+      "probes": []
+    },
+    {
+      "id": "checkout-detection-marker",
+      "kind": "synthetic",
+      "scope": "treatment",
+      "role": "Existence-only checkout detection marker",
+      "destination": "Projects/claude-power-pack",
+      "version": null,
+      "supply": null,
+      "traversed": false,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "scripts/flow-finish-gate.sh:347 tests directory and CLAUDE.md existence only.",
+      "files": [
+        {
+          "source": null,
+          "destination": "Projects/claude-power-pack/CLAUDE.md",
+          "origin": "synthetic",
+          "content": "# Synthetic checkout marker only - not agent instructions.\n# See skillc#303.\n",
+          "mode": "100644",
+          "size": 77,
+          "digest": "sha256:25cc21d90ab757433f80b56ec1e7992ed354f2fff80b8aa56eda25b50b4c024a",
+          "git_blob": "4ec2f2cb75d7107b167fd3a4fb7a49daabe464c6",
+          "owner": "checkout-detection-marker",
+          "shadow_path": "CLAUDE.md",
+          "replaces_pinned_digest": "sha256:26ece3df9adbc777f0e7bcacfec387d242a54a2058df225b495870c1c5a3285e",
+          "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
+        }
+      ],
+      "digest": "sha256:f88f4f4118d733c5b3e39af33a7377287b5c2e1d7b42055370490ddee1710722",
+      "probes": []
+    },
+    {
+      "id": "checkout-scripts",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "scripts the procedure and flow-finish-gate.sh run from the checkout rather than from the installed helper directory ($CPP_DIR/scripts/...)",
+      "destination": "Projects/claude-power-pack",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [
+        "codex/skills/flow-auto/reference.md",
+        "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+        "scripts/flow-finish-gate.sh"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/check-ignored-additions.sh",
+          "destination": "Projects/claude-power-pack/scripts/check-ignored-additions.sh",
+          "mode": "100755",
+          "size": 14606,
+          "digest": "sha256:ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+          "git_blob": "e0a4d429959f1b2e06a9cebe49839917a0aab60f",
+          "owner": "checkout-scripts"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/counter-model-receipt.py",
+          "destination": "Projects/claude-power-pack/scripts/counter-model-receipt.py",
+          "mode": "100755",
+          "size": 126044,
+          "digest": "sha256:8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+          "git_blob": "9e6a2d0dabdca04f0f7569d997ea0233b5c4f5f8",
+          "owner": "checkout-scripts"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/execution-evidence-verify.py",
+          "destination": "Projects/claude-power-pack/scripts/execution-evidence-verify.py",
+          "mode": "100755",
+          "size": 1996,
+          "digest": "sha256:21b2aecaa85de18724f8f09a37a4a0bd44790db494b56571c6a25f548805b299",
+          "git_blob": "e0a586f14d80b24f20b1b237c069824692ecb806",
+          "owner": "checkout-scripts"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-stale-check.sh",
+          "destination": "Projects/claude-power-pack/scripts/flow-stale-check.sh",
+          "mode": "100755",
+          "size": 12127,
+          "digest": "sha256:abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+          "git_blob": "718ef98e6458d80c56f04a0d63392c103c6f1597",
+          "owner": "checkout-scripts"
+        }
+      ],
+      "digest": "sha256:0fe43bb0c029f7013d89a04c47984e9bd04ab2074ebc4c905ae5345a0b0f89b0",
+      "probes": []
+    },
+    {
+      "id": "tool-python",
+      "kind": "tool",
+      "scope": "common",
+      "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
+      "destination": null,
+      "version": ">=3.11 (pyproject.toml requires-python at the pin)",
+      "supply": "the trial image; not carried by the subject",
+      "traversed": null,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:100), which no path pattern reads",
+      "files": [],
+      "digest": null,
+      "probes": [
+        {
+          "kind": "command",
+          "name": "python3",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": ">=3.11"
+        }
+      ]
+    },
+    {
+      "id": "tool-uv",
+      "kind": "tool",
+      "scope": "common",
+      "role": "runs the checkout's packages (`uv run --project`)",
+      "destination": null,
+      "version": "unpinned by the subject; #266 pins it in the image",
+      "supply": "the trial image; not carried by the subject",
+      "traversed": null,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:100; flow-finish-gate.sh:355), which no path pattern reads",
+      "files": [],
+      "digest": null,
+      "probes": [
+        {
+          "kind": "command",
+          "name": "uv",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        }
+      ]
+    },
+    {
+      "id": "tool-pypi-runtime",
+      "kind": "tool",
+      "scope": "common",
+      "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
+      "destination": null,
+      "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
+      "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
+      "traversed": null,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+      "files": [],
+      "digest": null,
+      "probes": [
+        {
+          "kind": "python-import",
+          "modules": [
+            "pydantic",
+            "yaml"
+          ],
+          "uv_project": "Projects/claude-power-pack"
+        }
+      ]
+    },
+    {
+      "id": "tool-make-git-bash",
+      "kind": "tool",
+      "scope": "common",
+      "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
+      "destination": null,
+      "version": "unpinned by the subject; any POSIX-conforming version the image carries",
+      "supply": "the trial image; not carried by the subject",
+      "traversed": null,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+      "files": [],
+      "digest": null,
+      "probes": [
+        {
+          "kind": "command",
+          "name": "make",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        },
+        {
+          "kind": "command",
+          "name": "git",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        },
+        {
+          "kind": "command",
+          "name": "bash",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        }
+      ]
+    },
+    {
+      "id": "installed-wave-fallbacks",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "Wave helpers resolve fallback siblings exclusively inside this installed disposable home.",
+      "destination": ".claude/scripts",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [
+        "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+        "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+        "scripts/flow-wave-mailbox.sh",
+        "scripts/flow-wave-registry.sh"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-vantage.sh",
+          "destination": ".claude/scripts/flow-vantage.sh",
+          "mode": "100755",
+          "size": 17869,
+          "digest": "sha256:884634889faafd9a962b2cfc261b1589b6680c1bb76d40624706ece890500a93",
+          "git_blob": "704a36dfaca77d9fee56c041898413b131348a70",
+          "owner": "installed-wave-fallbacks"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-wave-lexicon.sh",
+          "destination": ".claude/scripts/flow-wave-lexicon.sh",
+          "mode": "100755",
+          "size": 56972,
+          "digest": "sha256:a9562871ed70557fdca7b5045ea41f0eaa4654cab8863164ad5befa74dc45734",
+          "git_blob": "833838044e59926f28f3b4fa58ddb896ce7b65f8",
+          "owner": "installed-wave-fallbacks"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-wave-mailbox.sh",
+          "destination": ".claude/scripts/flow-wave-mailbox.sh",
+          "mode": "100755",
+          "size": 186860,
+          "digest": "sha256:072cc9b2cc45177939fb1b0945f085d1cd3c5da5fde2ec23951a841ceaefac06",
+          "git_blob": "b05799347ab1faf4a1c90a17fabea008313b6c43",
+          "owner": "installed-wave-fallbacks"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/flow-wave-registry.sh",
+          "destination": ".claude/scripts/flow-wave-registry.sh",
+          "mode": "100755",
+          "size": 256041,
+          "digest": "sha256:003d945ba56990e09d239a3eecbf6f2cdd2fe97da384116ee81e9cffe6ada6ae",
+          "git_blob": "74ac3d18c1b4f0ef2ec0760079a2cdf8f7eb01ed",
+          "owner": "installed-wave-fallbacks"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/toolchain-provenance.sh",
+          "destination": ".claude/scripts/toolchain-provenance.sh",
+          "mode": "100755",
+          "size": 21590,
+          "digest": "sha256:23f23e508ac30c492364c5235d5b388ecd17420da5c47600885e0624522ef06c",
+          "git_blob": "355e0d44eed786aa589a9fbcca37c389954158b7",
+          "owner": "installed-wave-fallbacks"
+        }
+      ],
+      "digest": "sha256:4ca3764284acfad36c5df12fa8da29104b22939ef754f58c1817a665f2056d84",
+      "probes": []
+    },
+    {
+      "id": "project-init-engine-and-templates",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "Pinned deterministic engine and only the template routes reached by project-init.",
+      "destination": "Projects/claude-power-pack",
+      "version": null,
+      "supply": null,
+      "traversed": true,
+      "no_traverse_reason": null,
+      "referenced_by": [
+        "codex/skills/project-init/reference.md"
+      ],
+      "unreferenced_reason": null,
+      "files": [
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": ".specify/templates/plan-template.md",
+          "destination": "Projects/claude-power-pack/.specify/templates/plan-template.md",
+          "mode": "100644",
+          "size": 2743,
+          "digest": "sha256:c760f5433588f2076f62f0219131d88222ed440865111cf41699f86ee9684474",
+          "git_blob": "25336df2c120001a0ad45e0b1d96656566addb76",
+          "owner": "project-init-engine-and-templates"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": ".specify/templates/spec-template.md",
+          "destination": "Projects/claude-power-pack/.specify/templates/spec-template.md",
+          "mode": "100644",
+          "size": 2080,
+          "digest": "sha256:5cac1aa78dc494931032490c8e879e5e46cb49e75c16a3cc4efc4e6d4118cf47",
+          "git_blob": "f978a06962298dcd689383d2a7421b5b393ab7a5",
+          "owner": "project-init-engine-and-templates"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": ".specify/templates/tasks-template.md",
+          "destination": "Projects/claude-power-pack/.specify/templates/tasks-template.md",
+          "mode": "100644",
+          "size": 2742,
+          "digest": "sha256:fd4feb8a5d3bb3acc6e4f32fb35bb7378d7442d0716cbfc5084701299e181e24",
+          "git_blob": "33b15d8ef250064ac450bf7a2138de926fc7692b",
+          "owner": "project-init-engine-and-templates"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "scripts/project-init.py",
+          "destination": "Projects/claude-power-pack/scripts/project-init.py",
+          "mode": "100755",
+          "size": 52771,
+          "digest": "sha256:39b03ed59e5a49313ead549b49a01004058a30ceae26dad7340aba74ea3337b1",
+          "git_blob": "7ab404ca32cac84c8da75560fc8ea7e70a971dbe",
+          "owner": "project-init-engine-and-templates"
+        },
+        {
+          "origin": "pinned",
+          "replaces_pinned_digest": null,
+          "source": "templates/cicd.yml.example",
+          "destination": "Projects/claude-power-pack/templates/cicd.yml.example",
+          "mode": "100644",
+          "size": 5150,
+          "digest": "sha256:3ea59319fe480838027253efa812abf87b0f1298108d8478f1566cbddc443fa9",
+          "git_blob": "fe236fc849bef9ddcb1ec2799dc69f4a28208495",
+          "owner": "project-init-engine-and-templates"
+        }
+      ],
+      "digest": "sha256:1f976b2f00eaff91fd8a2f67caa821641c776e490238feb2949fad8d3c4b4636",
+      "probes": []
+    },
+    {
+      "id": "tool-wave-runtime",
+      "kind": "tool",
+      "scope": "common",
+      "role": "Bounded offline wave fixture command dependencies; no network capability.",
+      "destination": null,
+      "version": "image-supplied",
+      "supply": "cold proof image",
+      "traversed": null,
+      "no_traverse_reason": null,
+      "referenced_by": [],
+      "unreferenced_reason": "Shell command words are not file-path references; actual cold consumers exercise these tools.",
+      "files": [],
+      "digest": null,
+      "probes": [
+        {
+          "kind": "command",
+          "name": "jq",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        },
+        {
+          "kind": "command",
+          "name": "flock",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        },
+        {
+          "kind": "command",
+          "name": "ps",
+          "version_args": [
+            "--version"
+          ],
+          "constraint": null
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "reference": "~/.codex/config.toml",
+      "in": "codex/skills/flow-auto/SKILL.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "codex-skill-sync.py install-time config edit; the installer is not run inside a trial, and the trial's codex config is the harness's"
+    },
+    {
+      "reference": "~/.claude/daemon/roster.json",
+      "in": "codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a Claude Code fleet daemon's roster, cited by ADR 0007's history; host state, never materialized"
+    },
+    {
+      "reference": "~/.claude/CLAUDE.md",
+      "in": "codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the operator's private global instructions, cited by CPP's ADR text; never part of a trial"
+    },
+    {
+      "reference": "~/.claude/settings.json",
+      "in": "codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code's own settings (hook registration by /cpp:init): another client's configuration, never materialized"
+    },
+    {
+      "reference": "~/.codex/AGENTS.md",
+      "in": "codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Codex's global instructions file, named in a bundled ADR (docs/decisions/0008) as prose; generated by CPP's own installer, not a treatment dependency (#279 ca3030d re-pin)"
+    },
+    {
+      "reference": "~/.claude/CLAUDE.md",
+      "in": "codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the operator's private global instructions, cited by CPP's ADR text; never part of a trial"
+    },
+    {
+      "reference": "$CPP_DIR/scripts/counter-model-receipt.py",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "checkout-scripts",
+      "resolves_to": "Projects/claude-power-pack/scripts/counter-model-receipt.py"
+    },
+    {
+      "reference": "$CPP_DIR/scripts/flow-stale-check.sh",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "checkout-scripts",
+      "resolves_to": "Projects/claude-power-pack/scripts/flow-stale-check.sh"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-/nonexistent",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Plugin-root alternative fallback; installed helpers are supplied and selected first."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/counter-model-receipt.py",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-ci-status.sh",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-finish-gate.sh",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-plan-record.py",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-stale-check.sh",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-worktree-guard.sh",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/friction-log.sh",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/speckit-context.py",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "/home/user/Projects/my-project",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "/home/user/Projects/my-repo",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude-power-pack",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/commands",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code command surface (the source of the generated codex skill); another client's surface"
+    },
+    {
+      "reference": "~/.claude/commands/flow/eli5.md",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code command surface for /flow:eli5; the codex client reads the selected flow-eli5 skill instead"
+    },
+    {
+      "reference": "~/.claude/projects",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a live Claude Code client's transcript store, read by counter-model-receipt.py to derive the implementer; client state, never materialized"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/.claude/settings.json",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code's own settings (hook registration by /cpp:init): another client's configuration, never materialized"
+    },
+    {
+      "reference": "~/.claude/skills/flow-eli5/SKILL.md",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code native-skill surface; another client's surface - the codex path is supplied by the selection"
+    },
+    {
+      "reference": "~/.codex/skills/flow-eli5/SKILL.md",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Optional flow-eli5 procedure is outside the approved exact three-skill selection; the cold proof makes no full-workflow or ELI5 claim."
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "~/Projects/claude-power-pack",
+      "in": "codex/skills/flow-auto/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "$CPP_DIR/scripts/x",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Illustrative generator input placeholder, not a runtime helper."
+    },
+    {
+      "reference": "/home/u/.codex/skills",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative generator install path, not a runtime dependency."
+    },
+    {
+      "reference": "~/.agents/skills",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Host install-time Codex surface in codex-skill-sync; no host skill installation is part of a trial."
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/.codex",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "codex-skill-sync.py install-time root: the installer is not run inside a trial, the harness installs the selected skills"
+    },
+    {
+      "reference": "~/.codex/.cpp-skill-install.lock",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "codex-skill-sync.py install-time lock; the installer is not run inside a trial"
+    },
+    {
+      "reference": "~/.codex/config.toml",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "codex-skill-sync.py install-time config edit; the installer is not run inside a trial, and the trial's codex config is the harness's"
+    },
+    {
+      "reference": "~/.codex/skills",
+      "in": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "codex-skill-sync.py install-time destination; the harness installs the selected skills there itself"
+    },
+    {
+      "reference": "~/.claude/projects",
+      "in": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a live Claude Code client's transcript store, read by counter-model-receipt.py to derive the implementer; client state, never materialized"
+    },
+    {
+      "reference": "~/.codex/sessions",
+      "in": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a live codex client's session store, read by counter-model-receipt.py to derive the reviewer model; client state, never materialized"
+    },
+    {
+      "reference": "~/.qwen/projects",
+      "in": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Another client session store; this profile uses Codex only."
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-auto/scripts/eli5-vendor.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "$HOME/.local/bin/aws",
+      "in": "codex/skills/flow-auto/scripts/flow-ci-status.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the AWS CLI, used by flow-ci-status.sh to read a Woodpecker token secret: services and network are not provided to trials (client_profiles.services)"
+    },
+    {
+      "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "$CPP_DIR/scripts/counter-model-receipt.py",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "checkout-scripts",
+      "resolves_to": "Projects/claude-power-pack/scripts/counter-model-receipt.py"
+    },
+    {
+      "reference": "$HOME/.claude-power-pack",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "$HOME/.claude/scripts",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-counter-model-receipt",
+      "resolves_to": ".claude/scripts/counter-model-receipt.py"
+    },
+    {
+      "reference": "$HOME/Projects/claude-power-pack",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts/counter-model-receipt.py",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-auto/scripts/flow-plan-record.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "$HOME/Projects",
+      "in": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the same PROJECT lookup root as ~/Projects, spelled with $HOME in flow-start-resolve.sh"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/.claude/scripts/hook-permission-census.sh",
+      "in": "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a Claude Code PermissionRequest hook (registered in ~/.claude/settings.json); never run by a codex trial"
+    },
+    {
+      "reference": "~/.claude/settings.json",
+      "in": "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Claude Code's own settings (hook registration by /cpp:init): another client's configuration, never materialized"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-worktree-claim.sh",
+      "in": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-flow-auto",
+      "resolves_to": ".claude/scripts/flow-worktree-claim.sh"
+    },
+    {
+      "reference": "/home/user/Projects/half-deleted-issue-9",
+      "in": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/main",
+      "in": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/nhl-api-issue-42",
+      "in": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "codex/skills/flow-wave/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "codex/skills/flow-wave/scripts/flow-vantage.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-wave-registry.sh",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-registry.sh"
+    },
+    {
+      "reference": "$HOME/.claude/sessions",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$SELF_DIR/flow-wave-lexicon.sh",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "pattern": "mailbox-lexicon-sibling",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-lexicon.sh"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-vantage.sh",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-vantage.sh"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/toolchain-provenance.sh",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/toolchain-provenance.sh"
+    },
+    {
+      "reference": "$self_dir/flow-wave-mailbox.sh",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+      "pattern": "registry-mailbox-sibling",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-mailbox.sh"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "$HOME/.claude/scripts",
+      "in": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/worktree-remove.sh",
+      "in": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-flow-auto",
+      "resolves_to": ".claude/scripts/worktree-remove.sh"
+    },
+    {
+      "reference": "$HOME/.claude-power-pack",
+      "in": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "$HOME/Projects/claude-power-pack",
+      "in": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-worktree-claim.sh",
+      "in": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-flow-auto",
+      "resolves_to": ".claude/scripts/flow-worktree-claim.sh"
+    },
+    {
+      "reference": "/home/user/Projects/half-deleted-issue-9",
+      "in": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/main",
+      "in": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/nhl-api-issue-42",
+      "in": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "$CPP_DIR/.claude/commands",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Example or other-client instruction surface; not installed or executed by this bounded cold proof."
+    },
+    {
+      "reference": "$CPP_DIR/.claude/skills",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Example or other-client instruction surface; not installed or executed by this bounded cold proof."
+    },
+    {
+      "reference": "$CPP_DIR/.specify/templates",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "project-init-engine-and-templates",
+      "resolves_to": "Projects/claude-power-pack/.specify/templates"
+    },
+    {
+      "reference": "$CPP_DIR/scripts/project-init.py",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "project-init-engine-and-templates",
+      "resolves_to": "Projects/claude-power-pack/scripts/project-init.py"
+    },
+    {
+      "reference": "$CPP_DIR/templates/cicd.yml.example",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "project-init-engine-and-templates",
+      "resolves_to": "Projects/claude-power-pack/templates/cicd.yml.example"
+    },
+    {
+      "reference": "$HOME/Projects",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the same PROJECT lookup root as ~/Projects, spelled with $HOME in flow-start-resolve.sh"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude-power-pack",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "~/Projects/claude-power-pack",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "~/Projects/my-awesome-app",
+      "in": "codex/skills/project-init/reference.md",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Example or other-client instruction surface; not installed or executed by this bounded cold proof."
+    },
+    {
+      "reference": "~/.claude/projects",
+      "in": "scripts/counter-model-receipt.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a live Claude Code client's transcript store, read by counter-model-receipt.py to derive the implementer; client state, never materialized"
+    },
+    {
+      "reference": "~/.codex/sessions",
+      "in": "scripts/counter-model-receipt.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "a live codex client's session store, read by counter-model-receipt.py to derive the reviewer model; client state, never materialized"
+    },
+    {
+      "reference": "~/.qwen/projects",
+      "in": "scripts/counter-model-receipt.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Another client session store; this profile uses Codex only."
+    },
+    {
+      "reference": "$HOME/.local/bin/aws",
+      "in": "scripts/flow-ci-status.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the AWS CLI, used by flow-ci-status.sh to read a Woodpecker token secret: services and network are not provided to trials (client_profiles.services)"
+    },
+    {
+      "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "$CPP_DIR/scripts/counter-model-receipt.py",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "checkout-root",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "checkout-scripts",
+      "resolves_to": "Projects/claude-power-pack/scripts/counter-model-receipt.py"
+    },
+    {
+      "reference": "$HOME/.claude-power-pack",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "$HOME/.claude/scripts",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/counter-model-receipt.py",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-counter-model-receipt",
+      "resolves_to": ".claude/scripts/counter-model-receipt.py"
+    },
+    {
+      "reference": "$HOME/Projects/claude-power-pack",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts/counter-model-receipt.py",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "plugin-root",
+      "class": "variable-rooted",
+      "status": "unsupported",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "scripts/flow-finish-gate.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "scripts/flow-plan-record.py",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "$HOME/Projects",
+      "in": "scripts/flow-start-resolve.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "the same PROJECT lookup root as ~/Projects, spelled with $HOME in flow-start-resolve.sh"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "scripts/flow-start-resolve.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "scripts/flow-vantage.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-wave-registry.sh",
+      "in": "scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-registry.sh"
+    },
+    {
+      "reference": "$HOME/.claude/sessions",
+      "in": "scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$SELF_DIR/flow-wave-lexicon.sh",
+      "in": "scripts/flow-wave-mailbox.sh",
+      "pattern": "mailbox-lexicon-sibling",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-lexicon.sh"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "in": "scripts/flow-wave-mailbox.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-vantage.sh",
+      "in": "scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-vantage.sh"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/toolchain-provenance.sh",
+      "in": "scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/toolchain-provenance.sh"
+    },
+    {
+      "reference": "$self_dir/flow-wave-mailbox.sh",
+      "in": "scripts/flow-wave-registry.sh",
+      "pattern": "registry-mailbox-sibling",
+      "class": "variable-rooted",
+      "status": "satisfied",
+      "dependency": "installed-wave-fallbacks",
+      "resolves_to": ".claude/scripts/flow-wave-mailbox.sh"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "scripts/flow-wave-registry.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "$HOME/.claude-power-pack",
+      "in": "scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "$HOME/Projects/claude-power-pack",
+      "in": "scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "checkout-libraries",
+      "resolves_to": "Projects/claude-power-pack"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "in": "scripts/toolchain-provenance.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/scripts",
+      "in": "scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-gate-lib",
+      "resolves_to": ".claude/scripts"
+    },
+    {
+      "reference": "~/Projects",
+      "in": "scripts/toolchain-provenance.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "unsupported",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "$HOME/.claude/scripts/flow-worktree-claim.sh",
+      "in": "scripts/worktree-remove.sh",
+      "pattern": "home-path",
+      "class": "home-relative",
+      "status": "satisfied",
+      "dependency": "helper-flow-auto",
+      "resolves_to": ".claude/scripts/flow-worktree-claim.sh"
+    },
+    {
+      "reference": "/home/user/Projects/half-deleted-issue-9",
+      "in": "scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/main",
+      "in": "scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/nhl-api-issue-42",
+      "in": "scripts/worktree-remove.sh",
+      "pattern": "absolute-system-path",
+      "class": "absolute",
+      "status": "unsupported",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    }
+  ],
+  "unsupported": [
+    {
+      "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "$CPP_DIR/.claude/commands",
+      "reason": "Example or other-client instruction surface; not installed or executed by this bounded cold proof."
+    },
+    {
+      "reference": "$CPP_DIR/.claude/skills",
+      "reason": "Example or other-client instruction surface; not installed or executed by this bounded cold proof."
+    },
+    {
+      "reference": "$CPP_DIR/scripts/x",
+      "reason": "Illustrative generator input placeholder, not a runtime helper."
+    },
+    {
+      "reference": "$HOME/.claude-power-pack",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "$HOME/.claude/sessions",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "$HOME/.local/bin/aws",
+      "reason": "the AWS CLI, used by flow-ci-status.sh to read a Woodpecker token secret: services and network are not provided to trials (client_profiles.services)"
+    },
+    {
+      "reference": "$HOME/Projects",
+      "reason": "the same PROJECT lookup root as ~/Projects, spelled with $HOME in flow-start-resolve.sh"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-/nonexistent",
+      "reason": "Plugin-root alternative fallback; installed helpers are supplied and selected first."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts/counter-model-receipt.py",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/counter-model-receipt.py",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-ci-status.sh",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-finish-gate.sh",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-plan-record.py",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-stale-check.sh",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-worktree-guard.sh",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/friction-log.sh",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/speckit-context.py",
+      "reason": "Claude Code plugin surface: another client's profile (CLAUDE_PLUGIN_ROOT), declared unsupported below - the exit-127 fallback this procedure names after the installed path"
+    },
+    {
+      "reference": "/home/u/.codex/skills",
+      "reason": "Illustrative generator install path, not a runtime dependency."
+    },
+    {
+      "reference": "/home/user/Projects/half-deleted-issue-9",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/main",
+      "reason": "Illustrative cleanup usage path, not the trial repository."
+    },
+    {
+      "reference": "/home/user/Projects/my-project",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "/home/user/Projects/my-repo",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "/home/user/Projects/nhl-api-issue-42",
+      "reason": "not a runtime reference: an illustrative path in an invocation example (reference.md Step 1a / worktree-remove.sh usage text)"
+    },
+    {
+      "reference": "/opt/claude-power-pack",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.agents/skills",
+      "reason": "Host install-time Codex surface in codex-skill-sync; no host skill installation is part of a trial."
+    },
+    {
+      "reference": "~/.claude-power-pack",
+      "reason": "alternative CPP checkout location; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first"
+    },
+    {
+      "reference": "~/.claude/CLAUDE.md",
+      "reason": "the operator's private global instructions, cited by CPP's ADR text; never part of a trial"
+    },
+    {
+      "reference": "~/.claude/commands",
+      "reason": "Claude Code command surface (the source of the generated codex skill); another client's surface"
+    },
+    {
+      "reference": "~/.claude/commands/flow/eli5.md",
+      "reason": "Claude Code command surface for /flow:eli5; the codex client reads the selected flow-eli5 skill instead"
+    },
+    {
+      "reference": "~/.claude/daemon/roster.json",
+      "reason": "a Claude Code fleet daemon's roster, cited by ADR 0007's history; host state, never materialized"
+    },
+    {
+      "reference": "~/.claude/projects",
+      "reason": "a live Claude Code client's transcript store, read by counter-model-receipt.py to derive the implementer; client state, never materialized"
+    },
+    {
+      "reference": "~/.claude/scripts/hook-permission-census.sh",
+      "reason": "a Claude Code PermissionRequest hook (registered in ~/.claude/settings.json); never run by a codex trial"
+    },
+    {
+      "reference": "~/.claude/sessions",
+      "reason": "Native client session discovery is unsupported; cold probes use only a fresh disposable home and synthetic logical wave state, never host session files."
+    },
+    {
+      "reference": "~/.claude/settings.json",
+      "reason": "Claude Code's own settings (hook registration by /cpp:init): another client's configuration, never materialized"
+    },
+    {
+      "reference": "~/.claude/skills/flow-eli5/SKILL.md",
+      "reason": "Claude Code native-skill surface; another client's surface - the codex path is supplied by the selection"
+    },
+    {
+      "reference": "~/.codex",
+      "reason": "codex-skill-sync.py install-time root: the installer is not run inside a trial, the harness installs the selected skills"
+    },
+    {
+      "reference": "~/.codex/.cpp-skill-install.lock",
+      "reason": "codex-skill-sync.py install-time lock; the installer is not run inside a trial"
+    },
+    {
+      "reference": "~/.codex/AGENTS.md",
+      "reason": "Codex's global instructions file, named in a bundled ADR (docs/decisions/0008) as prose; generated by CPP's own installer, not a treatment dependency (#279 ca3030d re-pin)"
+    },
+    {
+      "reference": "~/.codex/config.toml",
+      "reason": "codex-skill-sync.py install-time config edit; the installer is not run inside a trial, and the trial's codex config is the harness's"
+    },
+    {
+      "reference": "~/.codex/sessions",
+      "reason": "a live codex client's session store, read by counter-model-receipt.py to derive the reviewer model; client state, never materialized"
+    },
+    {
+      "reference": "~/.codex/skills",
+      "reason": "codex-skill-sync.py install-time destination; the harness installs the selected skills there itself"
+    },
+    {
+      "reference": "~/.codex/skills/flow-eli5/SKILL.md",
+      "reason": "Optional flow-eli5 procedure is outside the approved exact three-skill selection; the cold proof makes no full-workflow or ELI5 claim."
+    },
+    {
+      "reference": "~/.qwen/projects",
+      "reason": "Another client session store; this profile uses Codex only."
+    },
+    {
+      "reference": "~/Projects",
+      "reason": "flow-start-resolve.sh's PROJECT lookup root (`~/Projects/<PROJECT>`): this task runs flow:auto with no PROJECT argument, inside the fixture checkout /work/repo; the checkout the profile does supply is ~/Projects/claude-power-pack"
+    },
+    {
+      "reference": "~/Projects/my-awesome-app",
+      "reason": "Example or other-client instruction surface; not installed or executed by this bounded cold proof."
+    }
+  ],
+  "mirrors": [
+    {
+      "generated": "codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+      "generated_digest": "sha256:ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+      "source": "scripts/check-ignored-additions.sh",
+      "source_digest": "sha256:ee962d1a9c3006304f64534695198336c35c51b64c2b346a4e25e7ca39487bb8",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+      "generated_digest": "sha256:8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+      "source": "scripts/counter-model-receipt.py",
+      "source_digest": "sha256:8e426660c2f9c435a8f7650292e0be7c82a7ed1d57b7a4c2fd29f441731f5904",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-ci-status.sh",
+      "generated_digest": "sha256:71a3d705fd222e4eb44425c87460111fcba49d95d8e5689555d31601e55862ac",
+      "source": "scripts/flow-ci-status.sh",
+      "source_digest": "sha256:71a3d705fd222e4eb44425c87460111fcba49d95d8e5689555d31601e55862ac",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+      "generated_digest": "sha256:439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+      "source": "scripts/flow-driver-capability.sh",
+      "source_digest": "sha256:439d8e012be0936bee854aea7a17894d7ce2e013a2e2b1509950c062a9009d50",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+      "generated_digest": "sha256:83b0a68caefc010a9907211612e96c1bfb94b35a6cff446939a2306ce95bb2da",
+      "source": "scripts/flow-finish-gate.sh",
+      "source_digest": "sha256:83b0a68caefc010a9907211612e96c1bfb94b35a6cff446939a2306ce95bb2da",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+      "generated_digest": "sha256:cbd85a9e0e08471a9c0be29725c177a09059a58a5604e0543263f2cf55cad6ca",
+      "source": "scripts/flow-live-driver-guard.sh",
+      "source_digest": "sha256:cbd85a9e0e08471a9c0be29725c177a09059a58a5604e0543263f2cf55cad6ca",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-plan-record.py",
+      "generated_digest": "sha256:05c5aaf1d28a95d31d9e89eab9c128f33f916a7ed931146492fee7c5a5c1244d",
+      "source": "scripts/flow-plan-record.py",
+      "source_digest": "sha256:05c5aaf1d28a95d31d9e89eab9c128f33f916a7ed931146492fee7c5a5c1244d",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-stale-check.sh",
+      "generated_digest": "sha256:abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+      "source": "scripts/flow-stale-check.sh",
+      "source_digest": "sha256:abade59f8afaa71b0a56511d7e4439e5ff8673a8989c81c1bfa0de571bc4e8b0",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+      "generated_digest": "sha256:fa067118095e617c0668a0fa16fd4a3d5c0f0ec99bb95c00611b72671c3421f3",
+      "source": "scripts/flow-start-resolve.sh",
+      "source_digest": "sha256:fa067118095e617c0668a0fa16fd4a3d5c0f0ec99bb95c00611b72671c3421f3",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+      "generated_digest": "sha256:b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+      "source": "scripts/flow-worktree-claim.sh",
+      "source_digest": "sha256:b00aa7f3eb76b8addb05ffa658c09443fe589256e53d0a41a902d47c84d15d1f",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+      "generated_digest": "sha256:d3ee7378cc583ccb8dd8e0a6c9c10e2c958b392e5e0bb973dd5824ac310b4d22",
+      "source": "scripts/flow-worktree-guard.sh",
+      "source_digest": "sha256:d3ee7378cc583ccb8dd8e0a6c9c10e2c958b392e5e0bb973dd5824ac310b4d22",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/friction-log.sh",
+      "generated_digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660",
+      "source": "scripts/friction-log.sh",
+      "source_digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/gate-lib.sh",
+      "generated_digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8",
+      "source": "scripts/gate-lib.sh",
+      "source_digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+      "generated_digest": "sha256:a44e285612c90508f77afe1f90601f0adb9c526ea73c331e17bcc677f897e508",
+      "source": "scripts/gh-pr-merge.sh",
+      "source_digest": "sha256:a44e285612c90508f77afe1f90601f0adb9c526ea73c331e17bcc677f897e508",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/nit-store-resolve.sh",
+      "generated_digest": "sha256:673b2314d843cb1bea36ea0fd10669060a62369a276c00e52fcc6c0663a5e837",
+      "source": "scripts/nit-store-resolve.sh",
+      "source_digest": "sha256:673b2314d843cb1bea36ea0fd10669060a62369a276c00e52fcc6c0663a5e837",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/speckit-context.py",
+      "generated_digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+      "source": "scripts/speckit-context.py",
+      "source_digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4",
+      "status": "identical"
+    },
+    {
+      "generated": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+      "generated_digest": "sha256:30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+      "source": "scripts/worktree-remove.sh",
+      "source_digest": "sha256:30ebbd9dc11a27591c8fa6437544e1a82c2b09d6da59050fbddb533754638ec6",
+      "status": "identical"
+    }
+  ],
+  "generated_from": [
+    {
+      "generated": "codex/skills/flow-auto/SKILL.md",
+      "generated_digest": "sha256:4eb7f25ed9bd264c73d4b9b2320fdfabab9dbda70ca192e1415481c017ee9b08",
+      "source": ".claude/commands/flow/auto.md",
+      "source_digest": "sha256:62617902d1ed20f3e22af7dfe5802b729cf4447dae83289dc76546918ec7c243",
+      "status": "transform-not-verified"
+    },
+    {
+      "generated": "codex/skills/flow-auto/reference.md",
+      "generated_digest": "sha256:2864388d66aba0f11830babb5ee7b00c6a07a165d93cc899a66f26b6bbf44718",
+      "source": ".claude/commands/flow/auto.md",
+      "source_digest": "sha256:62617902d1ed20f3e22af7dfe5802b729cf4447dae83289dc76546918ec7c243",
+      "status": "transform-not-verified"
+    }
+  ],
+  "helper_parity": {
+    "common": [
+      "tool-make-git-bash",
+      "tool-pypi-runtime",
+      "tool-python",
+      "tool-uv",
+      "tool-wave-runtime"
+    ],
+    "treatment": [
+      "checkout-detection-marker",
+      "checkout-libraries",
+      "checkout-scripts",
+      "helper-counter-model-receipt",
+      "helper-flow-auto",
+      "helper-flow-finish-gate",
+      "helper-gate-lib",
+      "installed-wave-fallbacks",
+      "project-init-engine-and-templates"
+    ],
+    "bundled": [
+      {
+        "path": "codex/skills/flow-auto/lib/vendor.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/SHA256SUMS",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/codex-skill-resync.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/codex-skill-sync.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/counter-model-receipt.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/eli5-vendor.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-ci-status.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-plan-record.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-stale-check.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/friction-log.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/gate-lib.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/hook-permission-census.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/nit-store-resolve.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/speckit-context.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/stash-worktree-guard.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-auto/scripts/worktree-remove.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/SHA256SUMS",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-driver-capability.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-pr-watch.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-vantage.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-wave-lexicon.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-wave-plan.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-wave-residuals.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-worktree-claim.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/speckit-context.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/flow-wave/scripts/worktree-remove.sh",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/project-init/scripts/SHA256SUMS",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/project-init/scripts/project-init.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/project-init/scripts/speckit-context.py",
+        "supplied_by": null
+      },
+      {
+        "path": "codex/skills/project-init/scripts/speckit-tasks-to-issues.sh",
+        "supplied_by": null
+      }
+    ]
+  },
+  "declared_empty_kinds": [
+    "startup-context"
+  ],
+  "client_profiles": {
+    "codex": {
+      "status": "declared",
+      "reason": "the subject's own surface (codex-skills); this inventory describes it, and #266 owns the proof that it installs and runs"
+    },
+    "claude-code": {
+      "status": "unsupported",
+      "reason": "Claude Code commands, plugin and native skills are a different surface with different helpers (CLAUDE_PLUGIN_ROOT); a Codex inventory does not establish Claude parity"
+    },
+    "browser": {
+      "status": "unsupported",
+      "reason": "flow-check needs no browser; the browser/MCP capability profile is #283's to prove"
+    },
+    "security-scanner": {
+      "status": "unsupported",
+      "reason": "external scanners and live advisory feeds are #285's profile; this one carries only the checkout's lib.security"
+    },
+    "services": {
+      "status": "unsupported",
+      "reason": "GitHub, Docker, AWS, MCP servers and network are not provided to trials (spec.md section 4)"
+    }
+  },
+  "gate_entrypoint": ".claude/scripts/flow-finish-gate.sh",
+  "bundled_gate_entrypoints": [
+    ".codex/skills/flow-auto/scripts/flow-finish-gate.sh"
+  ],
+  "checksum_consumers": [
+    {
+      "path": ".claude/scripts/flow-plan-record.py",
+      "reason": "measured #279 re-pin (CPP ca3030d :605-614): MANIFEST_RE only ATTRIBUTES a repository's codex/skills/*/scripts/SHA256SUMS mirror to its source in the plan-compliance report; never hashes or verifies an installed skill"
+    },
+    {
+      "path": ".codex/skills/flow-auto/reference.md",
+      "reason": "measured (ca3030d :636): prose on how Section C attributes a regenerated SHA256SUMS mirror; no command on the Step-6 path verifies checksums (#525 comment 6353142724, measured at this pin)"
+    },
+    {
+      "path": ".codex/skills/flow-auto/scripts/codex-skill-sync.py",
+      "reason": "measured (ca3030d :1320-1347, run_check): GENERATES a bundle's SHA256SUMS and checks a CPP repository's own codex/skills mirrors; Step 6 runs it only via a project-relative scripts/codex-skill-resync.sh absent in the twin-gate repo, and the bundled resync run from a non-CPP project errors whether or not the gate is shimmed (#525 comment 6353142724, measured at ca3030d)"
+    },
+    {
+      "path": ".codex/skills/flow-auto/scripts/flow-plan-record.py",
+      "reason": "byte-identical to scripts/flow-plan-record.py at CPP ca3030d (measured): attribution of repository mirrors only, never a verification of the installed skill"
+    },
+    {
+      "path": ".codex/skills/flow-doctor/scripts/flow-helpers-install.sh",
+      "reason": "measured (CPP ca3030d :181-197): verifies the bundle IT runs from (SOURCE_DIR = its own skill's scripts/, or $FLOW_HELPERS_SOURCE), never flow-auto's; flow-auto's Step 6 only TELLS the user to run /flow-repair and does not run it. Pointed at a shimmed bundle it reports TAMPERED (exit 5) - a visible refusal, never a false pass. Delivered with the subject's other skills, outside this closure"
+    },
+    {
+      "path": ".codex/skills/flow-finish/scripts/codex-skill-sync.py",
+      "reason": "byte-identical to flow-auto's bundled copy at CPP ca3030d (measured); same reason: generates manifests and checks a CPP repository's own mirrors, never the installed skill"
+    },
+    {
+      "path": ".codex/skills/flow-repair/scripts/flow-helpers-install.sh",
+      "reason": "byte-identical to flow-doctor's copy at CPP ca3030d (measured); same reason: verifies its own bundle"
+    }
+  ],
+  "bundled_checksum_manifest": "SHA256SUMS",
+  "installed_surface": {
+    "files": 149,
+    "digest": "sha256:e2cbaaea33eeb66a85b2fb0c678e90f2a63bbc24b0a3e084f476be96cc8b795a"
+  },
+  "establishes": "a declared, closed dependency inventory at this source revision",
+  "does_not_establish": [
+    "installation into any home",
+    "that any helper, library or tool runs",
+    "client availability, invocation or task outcome",
+    "parity for any client profile other than the declared one"
+  ]
+}

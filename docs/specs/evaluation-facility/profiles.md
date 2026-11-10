@@ -540,3 +540,67 @@ unreadable inventory, failed fetch or empty/ambiguous population cannot mean non
 
 Study-approval receipt binding remains the separate #383 checkpoint. This command
 alone does not change existing approval authorization.
+
+## Combined project-init / flow-wave / flow-auto cold profile (#625)
+
+`evals/subjects/cpp-codex-project-wave-auto-87ecb097/` is a separate profile at
+CPP `87ecb0970f70aace9e0323feee00c9ca57dda133`. Its exact selection is
+`project-init`, `flow-wave`, `flow-auto`. Existing profiles are unchanged;
+`preserved-profiles.json` records all eleven existing profile hashes. The
+committed `inventory.json` is the existing closure walk's output, checked against
+a fresh walk. The fixture combines the existing immutable CPP snapshot and ten
+additional pinned source files, with Git blob, SHA-256 and mode provenance.
+It does not carry the entire commands/skills pack.
+
+The bounded proof installs into a fresh disposable home. Native client session
+discovery, other-client instruction paths, example project paths, authentication,
+network operations and native client procedures are explicitly unsupported.
+Installed fallback helpers resolve only inside that home. Neither real home
+files nor host session directories are read, copied or mounted. The unselected
+`flow-register` procedure and optional `flow-eli5` procedure remain declared gaps;
+their helper availability does not establish native procedure execution.
+
+`tests/test_profile_project_wave_cold_live.py` is declared in the real-Docker
+floor. In its cold container it compares all 149 installed files against the
+inventory, probes all 68 helper installations by name, resolves each shebang,
+checks shell/Python syntax and statically discovers import and sibling routes.
+Python lazy import statements are included without running helper main; isolated
+interpreters exclude controller paths, ambient PYTHONPATH and site packages.
+Non-stdlib imports use the root the helper explicitly puts on its own sys.path.
+The already bundled `flow-auto/lib/vendor.py` imports through that real route;
+its fetch/compare/revendor operations never run. Shell checks resolve literal
+and variable-rooted sibling paths and declared installed fallbacks. Other-client
+fallbacks are unsupported. These static checks do not establish all possible
+runtime branches or dynamically constructed dependencies.
+
+Only the deterministic project-init dry-run and authored wave registry, mailbox,
+planner and lexicon fixture commands run functionally. Merging, finishing,
+syncing, applying a generated plan, authentication and network/client entrypoints
+never run. Results explicitly retain `full_workflow_executable: false`.
+Committed controls cover missing helpers, syntax errors, lazy missing imports,
+missing sourced siblings, wrong executable modes, libraries present only at a
+wrong route, probe-population gaps and unsupported dispatch. The ordinary suite
+qualifies these authored controls; it makes no container-isolation claim.
+
+The cold test uses no bind mounts and no network, runs as an unprivileged user
+with a read-only root and bounded disposable writable surfaces, and includes an
+actual missing-helper failure control. A local skip is not physical evidence.
+The new floor entry becomes effective only after owner-controlled runner
+installation from reviewed main and observed execution of the new file. Merging
+this profile or passing the ordinary gate does not establish that certification.
+No live model run is authorized.
+
+`clutter-map.json` describes the profile's registry, mailboxes, cursors,
+acknowledgements, heartbeats, locks, claims and shared-wave surfaces. It permits
+no surviving added wave state after retirement. Pre-existing-state preservation
+remains separate; workspace/cache allowances cannot hide coordination or shared
+state. The map does not grant live-study allowances. Exact per-role/shared roots,
+allowed products and the frozen declaration digest remain #639 responsibilities.
+
+The floor-verdict regression has four unchanged existing-consumer controls that
+report false SUCCESS on pre-fix `b5a75c3` (missing/skipped/failed/error cold file),
+with one passing preservation case and no API/setup errors. They pass after the
+floor entry. Separate authored negative executions fail for missing helper,
+wrong mode, broken syntax, lazy missing import, absent shell sibling, wrong
+library route and omitted probe. The exact upstream-source lint exception is
+qualified with the committed UP017 sibling input; no local helper is exempted.

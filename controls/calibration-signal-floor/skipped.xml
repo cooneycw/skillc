@@ -1,4 +1,3 @@
-<?xml version='1.0' encoding='utf-8'?>
 <testsuites>
   <testsuite name="calibration-signal-floor">
     <testcase classname="tests.test_decide_reply_channel_live" name="other-proof-passed" />
@@ -54,5 +53,6 @@
     <testcase classname="tests.test_calibration_signal_recovery_live" name="test_sigkill_real_docker_recovery_preserves_durable_dispatch[after-execution]">
       <skipped message="daemon unavailable" />
     </testcase>
+    <testcase classname="tests.test_profile_project_wave_cold_live" name="unrelated-cold-proof-passed" />
   </testsuite>
 </testsuites>

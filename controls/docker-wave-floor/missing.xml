@@ -1,4 +1,3 @@
-<?xml version='1.0' encoding='utf-8'?>
 <testsuites>
   <testsuite name="physical-wave-floor">
     <testcase classname="tests.test_decide_reply_channel_live" name="other-proof-passed" />
@@ -20,5 +19,6 @@
     <testcase classname="tests.test_inventory_oracle_live" name="other-proof-passed" />
     <testcase classname="tests.test_nhl_rerun_live" name="other-proof-passed" />
     <testcase classname="tests.test_calibration_signal_recovery_live" name="other-proof-passed" />
+    <testcase classname="tests.test_profile_project_wave_cold_live" name="unrelated-cold-proof-passed" />
   </testsuite>
 </testsuites>

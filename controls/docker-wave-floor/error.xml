@@ -1,4 +1,3 @@
-<?xml version='1.0' encoding='utf-8'?>
 <testsuites>
   <testsuite name="physical-wave-floor">
     <testcase classname="tests.test_decide_reply_channel_live" name="other-proof-passed" />
@@ -27,5 +26,6 @@
     <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[timeout]" />
     <testcase classname="tests.test_docker_wave_live" name="test_physical_wave_transport_protections_and_retirement[cancel]" />
     <testcase classname="tests.test_calibration_signal_recovery_live" name="other-proof-passed" />
+    <testcase classname="tests.test_profile_project_wave_cold_live" name="unrelated-cold-proof-passed" />
   </testsuite>
 </testsuites>

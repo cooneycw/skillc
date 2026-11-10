@@ -1,0 +1,112 @@
+{
+  "syntax": [
+    "broken.py",
+    "broken.sh"
+  ],
+  "missing": [
+    "helper",
+    "shell-sibling",
+    "executable-mode",
+    "actual-import-route"
+  ],
+  "population": {
+    "bad": [
+      null,
+      false,
+      0,
+      1.5,
+      "PASS",
+      {},
+      [],
+      [
+        {}
+      ],
+      [
+        {
+          "helper": "unrelated",
+          "status": "PASS"
+        }
+      ]
+    ],
+    "mutants": [
+      "omit-one",
+      "duplicate-one",
+      "reorder",
+      "fail-one"
+    ]
+  },
+  "profile_wrong_types": [
+    {
+      "field": "profile_schema",
+      "values": [
+        null,
+        false,
+        0,
+        2,
+        [],
+        {},
+        "1"
+      ]
+    },
+    {
+      "field": "name",
+      "values": [
+        null,
+        false,
+        0,
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "subject",
+      "values": [
+        null,
+        false,
+        0,
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "select",
+      "values": [
+        false,
+        0,
+        "flow-wave",
+        {},
+        []
+      ]
+    },
+    {
+      "field": "dependencies",
+      "values": [
+        null,
+        false,
+        0,
+        "helpers",
+        {}
+      ]
+    },
+    {
+      "field": "allowed_destinations",
+      "values": [
+        null,
+        false,
+        0,
+        "home",
+        {}
+      ]
+    },
+    {
+      "field": "unsupported",
+      "values": [
+        null,
+        false,
+        0,
+        "all",
+        {}
+      ]
+    }
+  ]
+}

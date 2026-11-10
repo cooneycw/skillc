@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "profile": "cpp-codex-project-wave-auto-87ecb097",
+  "cpp_revision": "87ecb0970f70aace9e0323feee00c9ca57dda133",
+  "settle_point": "after-completion-before-teardown",
+  "retired_wave_allowed": [],
+  "native_session_discovery": "unsupported",
+  "logical_root": "disposable-XDG_RUNTIME_DIR/cc-flow-wave",
+  "surfaces": {
+    "registry": {
+      "source": "scripts/flow-wave-registry.sh",
+      "selectors": [
+        "registry.json wave entry",
+        "registry.lock"
+      ],
+      "retired_allowed": []
+    },
+    "mailboxes": {
+      "source": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "selectors": [
+        "wave directory inbox/messages",
+        "acknowledgements"
+      ],
+      "retired_allowed": []
+    },
+    "cursors": {
+      "source": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "selectors": [
+        ".cursor-*",
+        ".ack-*"
+      ],
+      "retired_allowed": []
+    },
+    "heartbeats": {
+      "source": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "selectors": [
+        ".watch-*"
+      ],
+      "retired_allowed": []
+    },
+    "locks": {
+      "source": "codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+      "selectors": [
+        ".mailbox.lock",
+        ".supervise-*.lock",
+        ".supervise-*.pid",
+        ".supervise-*.log"
+      ],
+      "retired_allowed": []
+    },
+    "claims": {
+      "source": "codex/skills/flow-wave/scripts/flow-worktree-claim.sh",
+      "selectors": [
+        "git common-dir flow claims"
+      ],
+      "retired_allowed": []
+    },
+    "shared": {
+      "source": "codex/skills/flow-wave/reference.md",
+      "selectors": [
+        "per-wave shared coordination root",
+        "verdicts.json",
+        "residual ledger"
+      ],
+      "retired_allowed": []
+    }
+  },
+  "study_binding": "#639 supplies exact role roots, scope, allowed products and declaration digest; this descriptive map grants no allowance or live-run authority."
+}
