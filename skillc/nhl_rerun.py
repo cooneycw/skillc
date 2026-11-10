@@ -457,6 +457,14 @@ class DockerReplay:
                 inspection = ["docker", "inspect", "--format", "{{json .State}}", candidate]
                 try:
                     state = self.run(inspection, 3)
+                except _CaptureLimit:
+                    terminations.cutoff("harness-output-cap during runtime inspection")
+                    transcript.append({"argv": inspection[1:], "error": "harness-output-cap"})
+                    raise
+                except subprocess.TimeoutExpired as exc:
+                    terminations.cutoff("harness wall-time limit during runtime inspection")
+                    transcript.append({"argv": inspection[1:], "error": "harness inspection timeout"})
+                    raise InfrastructureError("runtime inspection exceeded the harness wall-time limit") from exc
                 except (OSError, ValueError, subprocess.SubprocessError) as exc:
                     terminations.cutoff("candidate runtime inspect or transport unavailable")
                     transcript.append({"argv": inspection[1:], "error": "runtime inspect unavailable"})

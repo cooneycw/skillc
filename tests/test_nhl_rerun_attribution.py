@@ -48,6 +48,10 @@ def run_case(tmp_path: Path, facts: object, *, timeout: bool = False,
                 raise subprocess.TimeoutExpired(args, seconds)
             return subprocess.CompletedProcess(args, command_exit, prose, '')
         if args[1] == 'inspect':
+            if controller_fault == 'inspect-output-cap':
+                return nhl_rerun.run_command([sys.executable, '-c', 'import sys;sys.stdout.write("x"*(5*1024*1024))'], seconds)
+            if controller_fault == 'inspect-timeout':
+                return nhl_rerun.run_command([sys.executable, '-c', 'import time;time.sleep(10)'], .05)
             # Each implementation gets the runtime fact shape it requested.
             # This keeps pre-fix reds semantic, not mock/API format failures.
             raw = ('true' if isinstance(facts, dict) and facts.get('Running') is True else 'false') if (
@@ -299,3 +303,10 @@ def test_actual_harness_output_cutoff_is_unknown_without_candidate_attribution(t
 def test_controller_configuration_and_transport_errors_do_not_blame_candidate(tmp_path: Path, fault: str) -> None:
     result, _ = run_case(tmp_path, state(running=True), command_exit=0, controller_fault=fault)
     assert result['status'] == 'UNKNOWN'
+
+
+@pytest.mark.parametrize(('fault', 'reason'), [('inspect-output-cap', 'harness-output-cap'),
+                                             ('inspect-timeout', 'harness wall-time limit')])
+def test_runtime_inspection_client_cutoffs_retain_harness_reason(tmp_path: Path, fault: str, reason: str) -> None:
+    result, _ = run_case(tmp_path, state(running=True), controller_fault=fault)
+    assert result['status'] == 'UNKNOWN' and reason in result['reasons'][0]
