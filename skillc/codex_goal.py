@@ -17,6 +17,8 @@ import time
 from collections.abc import Callable
 from typing import IO, Any, NoReturn, Protocol
 
+from . import codex_goal_capture as custody
+
 CLIENT_VERSION = "0.165.0"
 # Global server config gates ThreadGoal handlers; a per-thread override alone
 # cannot enable them. The caller launches this argv only inside its trial.
@@ -52,18 +54,31 @@ class JsonLineTransport:
 
     def __init__(self, reader: IO[bytes], writer: IO[bytes], *,
                  wire: Callable[[str, bytes], None], timeout: float = 30.0,
-                 max_frame: int = 4 * 1024 * 1024) -> None:
+                 max_frame: int = 4 * 1024 * 1024,
+                 capture: custody.Capture | None = None) -> None:
         if (type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300
                 or type(max_frame) is not int or not 1024 <= max_frame <= 16 * 1024 * 1024):
             raise GoalRefused("invalid transport bounds")
+        if capture is not None and type(capture) is not custody.Capture:
+            raise GoalRefused("owned goal capture required")
+        self.capture = capture
+        if capture is not None:
+            capture.bind_transport()
         self.reader, self.writer, self.wire = reader, writer, wire
         self.timeout, self.max_frame = timeout, max_frame
         self.buffer = b""
+
+    def _wire(self, direction: str, data: bytes) -> None:
+        # A sent frame is a durable dispatch intention, not proof of delivery.
+        if self.capture is not None:
+            self.capture.frame(direction, data)
+        self.wire(direction, data)
 
     def send(self, message: dict[str, Any]) -> None:
         data = json.dumps(message, ensure_ascii=False, allow_nan=False).encode() + b"\n"
         if len(data) > self.max_frame:
             raise GoalRefused("outgoing app-server frame too large")
+        self._wire("sent", data)
         remaining_data = memoryview(data)
         deadline = time.monotonic() + self.timeout
         while remaining_data:
@@ -75,28 +90,38 @@ class JsonLineTransport:
             if count <= 0:
                 raise OSError("app-server write closed")
             remaining_data = remaining_data[count:]
-        self.wire("sent", data)
 
     def receive(self) -> dict[str, Any]:
         deadline = time.monotonic() + self.timeout
         while b"\n" not in self.buffer:
             if len(self.buffer) > self.max_frame:
+                self._partial()
                 raise GoalRefused("incoming app-server frame too large")
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([self.reader], [], [], remaining)[0]:
+                self._partial()
                 raise TimeoutError("app-server read timeout")
             data = os.read(self.reader.fileno(), 65536)
             if not data:
+                self._partial()
                 raise EOFError("app-server stream closed")
+            # Preserve even coalesced bytes never consumed by a later poll.
+            if self.capture is not None:
+                self.capture.frame("received-chunk", data)
             self.buffer += data
         line, _, self.buffer = self.buffer.partition(b"\n")
-        self.wire("received", line + b"\n")
+        self._wire("received", line + b"\n")
         if len(line) > self.max_frame:
             raise GoalRefused("incoming app-server frame too large")
         value = json.loads(line, object_pairs_hook=_unique)
         if not isinstance(value, dict):
             raise GoalRefused("app-server frame is not an object")
         return value
+
+    def _partial(self) -> None:
+        if self.buffer:
+            self._wire("received-partial", self.buffer)
+            self.buffer = b""
 
 
 def _text(value: object, name: str, maximum: int = 4000) -> str:
@@ -181,11 +206,20 @@ class GoalSession:
     """
 
     def __init__(self, transport: Transport, *, objective: str, model: str,
-                 comparison_sessions: object) -> None:
+                 comparison_sessions: object, capture: custody.Capture | None = None) -> None:
         self.transport = transport
         self.objective = _text(objective, "objective").strip()
         self.model = _text(model, "declared model")
         self.budget = recorded_budget(comparison_sessions)
+        if capture is not None:
+            if (type(capture) is not custody.Capture or not isinstance(transport, JsonLineTransport)
+                    or transport.capture is not capture):
+                raise GoalRefused("session and raw transport must share owned custody")
+            capture.bind_session(client_version=CLIENT_VERSION, model=self.model,
+                                 objective=self.objective, budget=self.budget)
+        elif isinstance(transport, JsonLineTransport) and transport.capture is not None:
+            raise GoalRefused("captured transport needs captured session")
+        self.capture = capture
         self.thread_id: str | None = None
         self.goal: dict[str, Any] | None = None
         self.events: list[dict[str, Any]] = []
@@ -196,7 +230,14 @@ class GoalSession:
         self._cleared = False
 
     def _event(self, kind: str, **detail: Any) -> None:
-        self.events.append(copy.deepcopy({"seq": len(self.events) + 1, "kind": kind, **detail}))
+        event = copy.deepcopy({"seq": len(self.events) + 1, "kind": kind, **detail})
+        if self.capture is not None:
+            try:
+                self.capture.event(event)
+            except (OSError, ValueError) as exc:
+                self._failed = "goal custody failed"
+                raise GoalRefused(self._failed) from exc
+        self.events.append(event)
 
     def _fail(self, reason: str) -> NoReturn:
         self._failed = reason
@@ -253,9 +294,9 @@ class GoalSession:
                 self._fail("invalid goal accounting")
         if value.get("tokenBudget") is not None:
             self._fail("native goal unexpectedly enforces a token budget")
+        self._event("goal-state", source=source, goal=value)
         self.goal = copy.deepcopy(value)
         self._cleared = False
-        self._event("goal-state", source=source, goal=value)
 
     def _notification(self, message: dict[str, Any]) -> None:
         method, params = message.get("method"), message.get("params")
@@ -268,9 +309,9 @@ class GoalSession:
         elif method == "thread/goal/cleared":
             if params.get("threadId") != self.thread_id:
                 self._fail("cleared goal lacks thread identity")
+            self._event("goal-cleared")
             self.goal = None
             self._cleared = True
-            self._event("goal-cleared")
         elif method == "model/rerouted":
             if params.get("threadId") != self.thread_id:
                 self._fail("reroute lacks thread identity")
@@ -338,9 +379,9 @@ class GoalSession:
         result = self._request("thread/goal/clear", {"threadId": self.thread_id})
         if result.get("cleared") is not True:
             self._fail("goal clear was not acknowledged")
+        self._event("goal-cleared", source="thread/goal/clear")
         self.goal = None
         self._cleared = True
-        self._event("goal-cleared", source="thread/goal/clear")
 
     def refresh(self) -> None:
         """Read current native goal accounting without resetting its usage."""
@@ -348,9 +389,9 @@ class GoalSession:
             raise GoalRefused("get needs a started thread")
         result = self._request("thread/goal/get", {"threadId": self.thread_id})
         if result.get("goal") is None:
+            self._event("goal-cleared", source="thread/goal/get")
             self.goal = None
             self._cleared = True
-            self._event("goal-cleared", source="thread/goal/get")
         else:
             self._goal(result["goal"], "thread/goal/get")
 
