@@ -230,8 +230,10 @@ def alteration(case: dict[str, Any]) -> Callable[[Path, dict[str, Any], dict[str
             replace_capture(source, catalogue, ref, b''.join(raw_json(e) + b'\n' for e in events))
             if kind == 'positive-missing':
                 row['roles'][1]['transcript'] = None
-        elif kind in ('bad-artifact', 'infra-artifact'):
+        elif kind in ('bad-artifact', 'infra-artifact', 'bad-artifact-missing-protocol'):
             replace_capture(source, catalogue, role['artifacts']['output.json'], b'{}')
+            if kind == 'bad-artifact-missing-protocol':
+                role['protocol'] = None
             if kind == 'infra-artifact':
                 edit_metadata(source, catalogue, row['observation'], {'infrastructure_failed_at': 3})
                 for captured in row['roles']:

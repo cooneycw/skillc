@@ -465,7 +465,10 @@ def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dic
             blobs = {name: reader.blob(ref, binding.role, 'artifact') for name, ref in capture['artifacts'].items()}
             if all(b is not None for b in blobs.values()):
                 artifacts = {name: b for name, b in blobs.items() if b is not None}
-        complete = observed['capture_complete'] and transcript is not None and protocol is not None and artifacts is not None
+        # The kernel's completeness flag gates artifact-census grading. Keep
+        # that independent of unrelated stream availability: missing streams
+        # already add UNKNOWN, but must not erase a verified artifact failure.
+        complete = observed['capture_complete'] and artifacts is not None
         roles.append(live_wave.RoleEvidence(binding.role, binding.attempt_id, session, transcript, protocol, artifacts,
             counts.get(binding.role), observed['started'], complete, observed['stopped'], observed['cleanup_confirmed'],
             observed['stop_reason'], observed['exit_code'], observed['stop_elapsed'], observed['tokens'], observed['wall_seconds']))
@@ -497,7 +500,7 @@ def report(arrival: object, expected: object, graders: object) -> dict[str, Any]
     waves = []
     for row in raw['waves']:
         try:
-            _require(catalogue is not None, 'export catalogue unavailable')
+            _require(type(catalogue) is dict, 'export catalogue object unavailable')
             assert isinstance(catalogue, dict)
             result = _assemble(row, arrival / 'payload', graders.get(row['plan']['wave_id']), catalogue)
         except (OSError, ValueError, KeyError, TypeError, Unreadable, RecursionError):

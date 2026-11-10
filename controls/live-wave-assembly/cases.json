@@ -230,5 +230,10 @@
     "name": "same-size-valid-sealed-swap",
     "kind": "swap-valid",
     "expected": "UNKNOWN"
+  },
+  {
+    "name": "artifact-failure-survives-missing-protocol",
+    "kind": "bad-artifact-missing-protocol",
+    "expected": "FAIL"
   }
 ]

@@ -62,7 +62,11 @@ attempt/session IDs, `started`, `stopped`, `cleanup_confirmed`,
 `wall_seconds`. Completeness is the trusted producer's complete-stream/census
 attestation, including startup drain flags, and is additionally constrained by
 the assembler's actual inputs and stream validation. Export success alone
-cannot set it true. An unavailable observation omits that role's usable evidence
+cannot set it true. Artifact-census eligibility is independent of transcript
+and protocol availability: missing streams add UNKNOWN and prevent PASS, but
+cannot erase incorrect integration established by independently verified
+artifact bytes. Missing artifact bytes themselves give UNKNOWN. An unavailable
+observation omits that role's usable evidence
 while preserving its planned diagnostic row.
 
 Wave observation fields are version, wave ID, budget digest, clock, captured
@@ -122,7 +126,7 @@ deadline is positive and integer counters fit 2^63-1. These are representation
 bounds, not study settings, concurrency choices or approved capacities.
 
 `controls/live-wave-assembly/` commits the authored fixture, required-source and
-no-inference cases, wrong-type tables and five blind variants. Controls drive
+no-inference cases, wrong-type tables and six blind variants. Controls drive
 the real export/final-custody verifiers, sealed poke producer/verified adapter,
 assembler and existing verdict with a deterministic integration grader. They
 include healthy/alternative PASS plus a planned nonstart, valid zero attempts,
@@ -131,7 +135,7 @@ valid sealed swaps, forged projection, original-plan mutation, grader/clock
 mismatch, source drift, nonregular files and planted output-privacy witnesses.
 
 The compiled trust-projection, skip-poke-verifier, arrival-denominator,
-complete-without-protocol and missing-to-zero variants lose their committed
+complete-without-protocol, missing-to-zero and artifact-stream-coupling variants lose their committed
 witnesses. These qualify a **new instrument**; no absent API on old main counts
 as a regression red. Existing verdict/export/wake tests provide preservation
 evidence. A synthetic healthy path is not qualification of a live observer.

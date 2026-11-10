@@ -28,5 +28,11 @@
     "before": "counts.get(binding.role), observed['started']",
     "after": "counts.get(binding.role, live_wave.PokeCount(binding.role, binding.session_id, 0)), observed['started']",
     "witness": "missing-wave-wake"
+  },
+  {
+    "name": "artifact-stream-coupling",
+    "before": "        complete = observed['capture_complete'] and artifacts is not None",
+    "after": "        complete = observed['capture_complete'] and transcript is not None and protocol is not None and artifacts is not None",
+    "witness": "artifact-failure-survives-missing-protocol"
   }
 ]
