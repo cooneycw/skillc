@@ -1,0 +1,10 @@
+{
+  "purpose": "Authored controller and protocol fixtures only; no existing live semantic producer is claimed.",
+  "deadline": 10,
+  "completion_elapsed": 6,
+  "grader_elapsed": 6,
+  "clock": "injected-policy-only",
+  "roles": ["integrator", "worker"],
+  "worker_result": "alpha",
+  "events": {"integrator": [["ack", 1], ["complete", 4]], "worker": [["ack", 1.1], ["complete", 2.1]]}
+}

@@ -84,14 +84,17 @@ null, never invented zeroes. Aggregate tokens are present only when every role
 has an observation. Wave wall time includes the completion boundary. Timeout and
 abandonment are reported separately from delivery and infrastructure reasons.
 
-The agreed #622 seam is `wake-report.json['poke_counts']`, one
+The compatibility #622 projection is `wake-report.json['poke_counts']`, one
 `PokeCount(role, session_id, pokes)` row per declared role. `session_id` is a
 string or null; `pokes` is a nonnegative count or null. It counts controller-issued
 poke **attempts**, including unconfirmed or suppressed transport, not receipt or
 acknowledgement. Missing or mismatched required poke capture is UNKNOWN; a count
 never substitutes for observed protocol completion. The consumer accepts the
-rows through the typed seam. Integration with the producer remains fixture-only;
-there is no claim that a live integration has run.
+rows through the typed seam. Verified replay uses
+`wave_wake_capture.poke_counts` with independently retained receipts, never the
+mutable projection. The [offline assembler](live-wave-assembly.md) joins this
+adapter and held capture expectations to the verdict. Its healthy controls use
+authored semantic protocol bytes; no live producer/integration is claimed.
 
 Optional #623 handoff timings and #619 clutter count stay null when unobserved;
 their absence does not block PASS. They are separate metrics and provide no

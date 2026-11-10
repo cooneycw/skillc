@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "declaration_digest": "sha256:a0050bb82edd509a91a4fb69ac4b1d8d6cf7edbd8a2540a38a9c073b2bac3c76",
+  "waves": [
+    {
+      "plan": {
+        "wave_id": "synthetic-wave-1",
+        "roles": [
+          {
+            "role": "integrator",
+            "attempt_id": "synthetic-wave-1-integrator",
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "task": "integrator",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "task-nonce-integrator",
+            "required_artifacts": [
+              "output.json"
+            ]
+          },
+          {
+            "role": "worker",
+            "attempt_id": "synthetic-wave-1-worker",
+            "session_id": "00000000-0000-0000-0000-000000000002",
+            "task": "worker",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "task-nonce-worker",
+            "required_artifacts": [
+              "output.json"
+            ]
+          }
+        ],
+        "integrator": "integrator",
+        "deadline": 10
+      },
+      "budget_digest": "sha256:abababababababababababababababababababababababababababababababab",
+      "clock": "injected-policy-only",
+      "grader_digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "observation": {
+        "slot": "wave-report",
+        "path": "synthetic-wave-1/report.json",
+        "size": 311,
+        "sha256": "sha256:84f958a2a668358bfb8d6d3bc67fc4a60ca8a83e980241ffa15196d7d68d9625"
+      },
+      "roles": [
+        {
+          "role": "integrator",
+          "startup": {
+            "slot": "integrator-stderr",
+            "path": "synthetic-wave-1/integrator/stderr.data",
+            "size": 89,
+            "sha256": "sha256:eb6d02e624773919b4c91be12de219ab31db90392a2265fc3d078134a2a092a2"
+          },
+          "observation": {
+            "slot": "integrator-report",
+            "path": "synthetic-wave-1/integrator/role.json",
+            "size": 445,
+            "sha256": "sha256:39b136cf2e7b9351f43cef847ab1a1506a83d22ab06f51a16371e54c63312a9f"
+          },
+          "transcript": {
+            "slot": "integrator-transcript",
+            "path": "synthetic-wave-1/integrator/transcript",
+            "size": 80,
+            "sha256": "sha256:ac8e43836041ceb3a0d1c12957e67f4f8ddf8c5fd8b20656e9bc5e23ce8dfe99"
+          },
+          "protocol": {
+            "slot": "integrator-protocol",
+            "path": "synthetic-wave-1/integrator/protocol.data",
+            "size": 503,
+            "sha256": "sha256:2644dc3e8852d7f99e0c558537f8c885b7f14b32248af4b7b2d279fb38815c14"
+          },
+          "artifacts": {
+            "output.json": {
+              "slot": "integrator-artifact",
+              "path": "synthetic-wave-1/integrator/artifact.data",
+              "size": 18,
+              "sha256": "sha256:d1b77ed9efa8b5bffc6915edb45b2e475a0658bd916c944901931254b4d87f5c"
+            }
+          }
+        },
+        {
+          "role": "worker",
+          "startup": {
+            "slot": "worker-startup",
+            "path": "synthetic-wave-1/worker/startup",
+            "size": 89,
+            "sha256": "sha256:baacf588d521745ae7c7efe92bf81efbdbc5d64bbbf4b9bb498904f5e0a1bfff"
+          },
+          "observation": {
+            "slot": "worker-report",
+            "path": "synthetic-wave-1/worker/role.json",
+            "size": 437,
+            "sha256": "sha256:b39807ea432b2567d9d5e00440eb13548b0750c5afbf6f0710b7583946e6bbf9"
+          },
+          "transcript": {
+            "slot": "worker-transcript",
+            "path": "synthetic-wave-1/worker/transcript",
+            "size": 80,
+            "sha256": "sha256:48a4560a546156b058f6e67387ef8606a4f28d41830aa71c9f9ef2d6e6623de8"
+          },
+          "protocol": {
+            "slot": "worker-protocol",
+            "path": "synthetic-wave-1/worker/protocol",
+            "size": 475,
+            "sha256": "sha256:d07d4ef74f1f5861e2f771641fef7f910082a77496c4c80481059abf4759b000"
+          },
+          "artifacts": {
+            "output.json": {
+              "slot": "worker-artifact",
+              "path": "synthetic-wave-1/worker/artifact",
+              "size": 7,
+              "sha256": "sha256:902cf2b465fb076229183b408aad4014266eb9eb72d448754227adc1eeac49b9"
+            }
+          }
+        }
+      ],
+      "wake": {
+        "root": "synthetic-wave-1/integrator/capture/wake",
+        "reference": {
+          "version": 1,
+          "context_digest": "sha256:f114af45ba23ed3dd370e15b48e9750f2da580e910121b5465fcc4aa045124c8",
+          "digest": "sha256:ef92fc859cfdc3c39daf15262331c23b079bdc93e2e2f4214b501902481a9376",
+          "size": 4520
+        },
+        "context": {
+          "attempt_id": "synthetic-wave-1",
+          "approved_declaration_digest": "sha256:a0050bb82edd509a91a4fb69ac4b1d8d6cf7edbd8a2540a38a9c073b2bac3c76",
+          "policy_digest": "sha256:33e4960869721bb90702e9e27a1b465930fe0de8e83773e5ef010e1f857dac01",
+          "roles": [
+            "integrator",
+            "worker"
+          ],
+          "deadline_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "clock": "injected-policy-only"
+        }
+      },
+      "final": {
+        "root": "synthetic-wave-1/integrator/capture/final",
+        "sha256": "sha256:a59a69e1bb57b65ce8bb0b6d636c39f7084aeea14542f8e1ee2b6020d661f0dc"
+      }
+    },
+    {
+      "plan": {
+        "wave_id": "synthetic-wave-2",
+        "roles": [
+          {
+            "role": "integrator",
+            "attempt_id": "synthetic-wave-2-integrator",
+            "session_id": null,
+            "task": "integrator",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "task-nonce-integrator",
+            "required_artifacts": [
+              "output.json"
+            ]
+          },
+          {
+            "role": "worker",
+            "attempt_id": "synthetic-wave-2-worker",
+            "session_id": null,
+            "task": "worker",
+            "generation": 0,
+            "revision": 1,
+            "nonce": "task-nonce-worker",
+            "required_artifacts": [
+              "output.json"
+            ]
+          }
+        ],
+        "integrator": "integrator",
+        "deadline": 10
+      },
+      "budget_digest": "sha256:abababababababababababababababababababababababababababababababab",
+      "clock": "injected-policy-only",
+      "grader_digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "observation": null,
+      "roles": [
+        {
+          "role": "integrator",
+          "startup": null,
+          "observation": null,
+          "transcript": null,
+          "protocol": null,
+          "artifacts": null
+        },
+        {
+          "role": "worker",
+          "startup": null,
+          "observation": null,
+          "transcript": null,
+          "protocol": null,
+          "artifacts": null
+        }
+      ],
+      "wake": null,
+      "final": null
+    }
+  ]
+}

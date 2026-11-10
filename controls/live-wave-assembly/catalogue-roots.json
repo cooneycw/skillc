@@ -1,0 +1,13 @@
+[
+  {"name": "null", "value": null},
+  {"name": "false", "value": false},
+  {"name": "true", "value": true},
+  {"name": "negative", "value": -1},
+  {"name": "zero", "value": 0},
+  {"name": "float", "value": 1.5},
+  {"name": "empty-string", "value": ""},
+  {"name": "string", "value": "invalid"},
+  {"name": "empty-array", "value": []},
+  {"name": "array", "value": [{}]},
+  {"name": "empty-object", "value": {}}
+]
