@@ -1,0 +1,7 @@
+[
+  {"id":"healthy","status":"CAPTURED"},
+  {"id":"tamper","status":"UNKNOWN"},
+  {"id":"truncation","status":"UNKNOWN"},
+  {"id":"reorder","status":"UNKNOWN"},
+  {"id":"misbinding","status":"UNKNOWN"}
+]

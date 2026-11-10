@@ -1,4 +1,6 @@
 {
+  "peer-disappears": {"model_identity": "UNKNOWN", "outcome": "infrastructure-protocol-error", "pool_eligible": false},
+  "malformed-goal": {"model_identity": "UNKNOWN", "outcome": "infrastructure-protocol-error", "pool_eligible": false},
   "healthy": {"model_identity": "STABLE", "outcome": "goal-complete", "pool_eligible": true},
   "model-change": {"model_identity": "CHANGED", "outcome": "goal-complete", "pool_eligible": false},
   "usage-limit": {"model_identity": "STABLE", "outcome": "infrastructure-usage-limit", "pool_eligible": false},

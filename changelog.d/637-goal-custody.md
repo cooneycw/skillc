@@ -1,0 +1,1 @@
+- Retain context-bound native goal events and exact app-server frames in fsynced, sealed controller custody, with model-free disappearance and malformed-goal controls.

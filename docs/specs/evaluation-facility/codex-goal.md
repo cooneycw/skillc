@@ -26,8 +26,8 @@ budget, not clear an existing one. Consequently this adapter creates a new threa
 and never resumes a previously budgeted thread.
 
 Attach `JsonLineTransport` to that process's binary stdout/stdin pipes, supplying
-a `wire(direction, bytes)` callback that writes every exact frame into private,
-controller-owned capture. It preserves coalesced frames, refuses duplicate JSON
+a `wire(direction, bytes)` callback. For retained evidence, also attach the
+same `codex_goal_capture.Capture` to the transport and `GoalSession`, as below. It preserves coalesced frames, refuses duplicate JSON
 members and bounds frame size and transport I/O. The backend must separately
 drain stderr, contain descendants, confirm process stop and finalize all capture.
 The adapter does not own those backend obligations and starts no host process.
@@ -136,3 +136,63 @@ The pin recipe now resolves 0.165.0. A real image rebuild and the image-level
 identity probe are still required evidence; offline schema generation and the
 scripted peer cannot substitute for them. No frozen declaration or retained
 historical client pin is rewritten.
+
+## Durable goal custody (#637 residual)
+
+`codex_goal_capture` follows the controller-owned append/seal/reference pattern
+of `wave_wake_capture`. It adds no second goal driver. Before constructing the
+transport, create `Capture(private_new_root, Context(...))`. Its frozen context
+names the attempt, approved declaration digest, pinned client version, model,
+initial objective and recorded CPP-session token total. This binds the supplied
+total; exhaustive derivation from the frozen declaration still belongs to #639.
+A context containing an approval digest is not evidence that approval was given.
+
+Pass `capture=capture` to both `JsonLineTransport` and `GoalSession`. A captured
+session requires that exact transport and capture object; sharing a writer across
+connections or sessions refuses. Existing uncaptured calls remain diagnostic and
+do not provide retained custody. The context must match the driver's normalized
+objective, version, model and validated recorded total before initialization.
+
+Every exact raw frame (base64 encoded in the journal) and structured goal event
+is appended with a sequence and previous-line hash, and fsynced before its caller
+can consume it. Outbound frames are flushed **before dispatch**: `sent` records a
+dispatch intention, not proof that the peer received any bytes. Partial incoming
+bytes are retained as `received-partial` before EOF, timeout or oversized-frame
+refusal. An observation may contain malformed JSON; custody retains those bytes
+without upgrading them to a valid goal. The transport still bounds I/O and the
+existing driver still classifies protocol loss. A write/fsync failure poisons the
+capture; it cannot subsequently produce a seal. Goal state is not exposed before
+its event append succeeds. The private writer is exclusive and cannot resume.
+
+After the backend confirms process stop and drains its streams, call `seal()`.
+The returned `Reference` binds version, context digest, object digest and byte
+size. The journal includes a seal with record/event/frame counts, is copied into
+a read-only content-addressed object, fsynced along with its directory, verified,
+and closed. Retain the reference and expected context independently of the
+capture/report. `verify(root, reference, expected_context)` rereads bounded,
+nonsymlink regular-file bytes and checks the reference, complete chain, exact
+context, ordered event sequence and seal counts. Missing objects, unsealed tails,
+truncation, alteration, reordering and misbinding yield `UNKNOWN`. It returns
+`CAPTURED` with the retained events/frames only when those custody checks hold.
+
+`CAPTURED` does not witness process stop, a complete rollout, stable model
+identity, declaration approval, complete CPP population, or task achievement.
+The existing driver and independent grading retain those separate contracts;
+#639 still owns the contained process, stderr draining and final rollout binding.
+No report-supplied reference may replace the independently retained one. This is
+controller storage custody, not a signature against a compromised controller.
+
+Bounds are 64 MiB per journal, 65,536 records, and a maximum 16 MiB transport frame
+plus one 65,536-byte read of refusal evidence. Exhaustion fails custody, not the
+model's token budget; the native treatment remains uncapped. Only a separately
+approved live runner can decide how to stop and account for such an attempt.
+
+`controls/codex-goal-custody/cases.json` commits healthy, tampered, truncated,
+reordered and misbound cases. `tests/test_codex_goal_capture.py` qualifies those
+cases against the verifier and compiled always-CAPTURED / always-UNKNOWN blind
+variants. These are new-instrument qualification controls, not regressions
+against a nonexistent API. The two existing-transport regressions in
+`tests/test_codex_goal_custody_regression.py` fail on actual `20bfbd4`: dispatch
+preceded a failed capture callback, and partial EOF bytes were lost. Scripted
+peer cases now also include disappearance and a malformed ThreadGoal. The public
+custody input wrong-type sweep is in `tests/test_codex_goal_capture_types.py`.

@@ -63,6 +63,11 @@ for line in sys.stdin:
         send({"id": msg["id"], "error": {"code": -1, "message": "scripted refusal"}})
     else:
         send({"id": msg["id"], "result": result})
+    if method == "thread/goal/set" and MODE == "peer-disappears":
+        sys.exit(0)
+    if method == "thread/goal/set" and MODE == "malformed-goal":
+        note("thread/goal/updated", threadId=THREAD, goal={"threadId": THREAD, "status": []})
+        continue
     if method == "thread/goal/set" and not started and MODE != "rpc-error":
         assert goal is not None
         started = True
