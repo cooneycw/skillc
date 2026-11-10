@@ -1,9 +1,11 @@
 """Existing replay entry point: runtime facts, never candidate prose, set blame."""
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -223,3 +225,47 @@ def test_attribution_file_fsync_failure_cannot_publish_candidate_fail(tmp_path: 
     monkeypatch.setattr(nhl_rerun.os, 'fsync', fsync)
     result, _ = run_case(tmp_path, state())
     assert seen and result['status'] == 'UNKNOWN'
+
+
+MUTANTS: dict[str, tuple[Any, str, str, str, str]] = {
+    'ignore-signal': (nhl_rerun, '_attribute_failure', "if held['signals_sent']:", 'if False:',
+                      'test_signal_range_exit_requires_positive_durable_no_signal_record[controller-sigkill]'),
+    'ignore-timeout': (nhl_rerun, '_attribute_failure', "if held['harness_timed_out'] or timed_out:", 'if False:',
+                       'test_harness_timeout_stays_unknown_even_if_later_inspect_sees_exit'),
+    'ignore-oom': (nhl_rerun, '_attribute_failure',
+                  "if state['OOMKilled'] and not state['Running'] and state['Status'] == 'exited' and state['ExitCode'] > 0:",
+                  'if False:', 'test_runtime_oom_is_unknown_due_to_harness_limit'),
+    'skip-receipt-fsync': (nhl_rerun._Terminations, 'capture', 'os.fsync(stream.fileno())', 'pass',
+                          'test_attribution_file_fsync_failure_cannot_publish_candidate_fail'),
+}
+
+
+def compile_variant(monkeypatch: pytest.MonkeyPatch, variant: str) -> None:
+    owner, name, before, after, _ = MUTANTS[variant]
+    function = getattr(owner, name)
+    source = textwrap.dedent(inspect.getsource(function))
+    assert source.count(before) == 1
+    namespace = vars(nhl_rerun)
+    prior = namespace.get(name)
+    exec(compile(source.replace(before, after), '<unsafe-attribution-variant>', 'exec'), namespace)  # noqa: S102
+    mutant = namespace[name]
+    if prior is None:
+        del namespace[name]
+    else:
+        namespace[name] = prior
+    monkeypatch.setattr(owner, name, mutant)
+
+
+@pytest.mark.parametrize('variant', list(MUTANTS), ids=str)
+def test_committed_witnesses_reject_unsafe_attribution_variants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                              variant: str) -> None:
+    compile_variant(monkeypatch, variant)
+    with pytest.raises(AssertionError):
+        if variant == 'ignore-signal':
+            test_signal_range_exit_requires_positive_durable_no_signal_record(tmp_path, monkeypatch, True)
+        elif variant == 'ignore-timeout':
+            test_harness_timeout_stays_unknown_even_if_later_inspect_sees_exit(tmp_path)
+        elif variant == 'ignore-oom':
+            test_runtime_oom_is_unknown_due_to_harness_limit(tmp_path)
+        else:
+            test_attribution_file_fsync_failure_cannot_publish_candidate_fail(tmp_path, monkeypatch)

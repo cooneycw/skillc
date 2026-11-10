@@ -179,3 +179,12 @@ signals occur after the attribution snapshot and cannot rewrite its earlier
 invocation interval. Unconfirmed cleanup still overrides the final result to
 UNKNOWN. This repair neither produces private-source replay evidence nor grades
 an actual delivered project; both still require the separate #639 declaration.
+
+The attribution controls include seven runtime fields / 47 invalid values and
+six positive-record fields / 37 invalid values, plus missing fields, malformed
+roots and contradictory states. They distinguish SIGKILL/137 from a positively
+recorded no-signal/137 exit, reject missing or changed controller records, and
+refuse attribution when journal or attribution-file fsync fails. Compiled unsafe
+variants that ignore signal requests, timeouts, OOM or receipt fsync each lose
+their committed witness. Four existing-entry-point regressions fail on unchanged
+parent `12f12cf`, with three preservation cases and no API/setup errors.
