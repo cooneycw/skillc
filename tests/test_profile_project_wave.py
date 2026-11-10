@@ -9,7 +9,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from profile_project_wave_cold import Unsupported, dispatch, helper_paths, imports, probe, require_population, shell_siblings, syntax
+from profile_project_wave_cold import (
+    Unsupported,
+    dispatch,
+    helper_paths,
+    imports,
+    probe,
+    require_population,
+    shell_siblings,
+    syntax,
+)
 from profile_project_wave_support import DECL, EXTRA, ROOT, Source, inventory
 
 from skillc import profile
@@ -190,3 +199,9 @@ def test_no_unapproved_profile_or_clutter_policy_drift_is_hidden() -> None:
     pins = json.loads((DECL / 'preserved-profiles.json').read_text())
     paths = {p.relative_to(ROOT).as_posix() for p in (ROOT / 'evals/subjects').glob('*/profile.json')}
     assert paths == set(pins) | {str(DECL.relative_to(ROOT) / 'profile.json')}
+
+
+def test_mypy_extra_snapshot_exception_does_not_hide_siblings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import test_profile_flow_auto_87ecb097 as existing
+    monkeypatch.setattr(existing, 'SOURCE', EXTRA)
+    existing.test_mypy_snapshot_exemption_is_exact(tmp_path)

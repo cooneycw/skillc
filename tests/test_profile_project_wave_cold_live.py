@@ -55,7 +55,7 @@ def test_cold_combined_profile_and_missing_helper_control(tmp_path: Path) -> Non
         (tmp_path / 'cold-result.json').write_text(json.dumps(row, indent=2) + '\n')
     finally:
         # Unique names belong solely to this test. Cleanup failure cannot be a green.
-        removed = subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=30)
+        removed = subprocess.run(['docker', 'rm', '-f', name], capture_output=True, timeout=30, check=False)
         if removed.returncode:
             listed = subprocess.check_output(['docker', 'ps', '-aq', '--filter', 'name=^/' + name + '$'], timeout=30)
             assert not listed.strip(), 'owned container cleanup unconfirmed'

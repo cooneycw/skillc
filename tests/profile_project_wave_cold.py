@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import shutil
-import os
 import subprocess
 import sys
 from pathlib import Path

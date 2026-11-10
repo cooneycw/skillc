@@ -71,3 +71,7 @@ exclude = ['^evals/level1/[^/]+/(fixture|reference|alternatives|wrong)/',
            '^tests/fixtures/profile-cpp-codex-flow-auto-87ecb097/',
            '^tests/fixtures/profile-project-wave-auto-87ecb097-extra/',
            '^tests/fixtures/profile-cpp-codex-flow-check-resume-v1/']
+
+# Immutable pinned CPP source, preserved byte-for-byte; local code keeps UP017.
+[tool.ruff.lint.per-file-ignores]
+"tests/fixtures/profile-project-wave-auto-87ecb097-extra/scripts/project-init.py" = ["UP017"]

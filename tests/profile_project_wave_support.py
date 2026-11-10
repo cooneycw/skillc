@@ -22,7 +22,7 @@ class Source(profile.Tree):
     revision = PIN
 
     def __init__(self) -> None:
-        rows: list[dict[str, Any]] = [dict(source=p, mode=mode, bytes=int(size), sha256=digest)
+        rows: list[dict[str, Any]] = [{'source': p, 'mode': mode, 'bytes': int(size), 'sha256': digest}
                 for p, mode, size, digest in re.findall(
                     r"^\| `([^`]+)` \| (100644|100755) \| (\d+) \| ([0-9a-f]{64}) \|$",
                     (BASE / 'README.md').read_text(), re.MULTILINE)]
@@ -40,7 +40,9 @@ class Source(profile.Tree):
             assert ('100755' if path.stat().st_mode & 0o111 else '100644') == row['mode']
         self.base = profile.DirTree(BASE)
         self.extra = profile.DirTree(EXTRA)
-        manifest = json.loads((EXTRA / 'provenance.json').read_text())
+        provenance = (EXTRA / 'provenance.json').read_bytes()
+        assert hashlib.sha256(provenance).hexdigest() == '26e28e000a115c19f8cec7180a8fe691c314cc93159a59f1f286d54bf854f220'
+        manifest = json.loads(provenance)
         assert manifest['commit'] == PIN and manifest['repository'] == 'cooneycw/claude-power-pack'
         self.added = {r['path']: r['mode'] for r in manifest['files']}
         assert len(self.added) == 10

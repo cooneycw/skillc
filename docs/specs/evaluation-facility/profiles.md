@@ -596,3 +596,11 @@ no surviving added wave state after retirement. Pre-existing-state preservation
 remains separate; workspace/cache allowances cannot hide coordination or shared
 state. The map does not grant live-study allowances. Exact per-role/shared roots,
 allowed products and the frozen declaration digest remain #639 responsibilities.
+
+The floor-verdict regression has four unchanged existing-consumer controls that
+report false SUCCESS on pre-fix `b5a75c3` (missing/skipped/failed/error cold file),
+with one passing preservation case and no API/setup errors. They pass after the
+floor entry. Separate authored negative executions fail for missing helper,
+wrong mode, broken syntax, lazy missing import, absent shell sibling, wrong
+library route and omitted probe. The exact upstream-source lint exception is
+qualified with the committed UP017 sibling input; no local helper is exempted.
