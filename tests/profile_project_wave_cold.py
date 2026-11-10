@@ -141,7 +141,7 @@ def probe(home: Path, inv: dict[str, Any]) -> dict[str, Any]:
     observed = profile.verify_installed(inv, home)
     failed = [row['destination'] for row in observed['files'] if row['status'] != 'satisfied']
     assert observed['files'] and not failed, 'installed closure differs: ' + ','.join(failed)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for relative in helper_paths(inv):
         path = home / relative
         first = path.read_text().splitlines()[0]
