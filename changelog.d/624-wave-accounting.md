@@ -1,0 +1,1 @@
+- Add bounded client-reported multi-role usage coverage and additive wave schedule/cost projections, preserving uncapped measurement and capped execution refusal without credential or live-run authority.

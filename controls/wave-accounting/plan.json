@@ -1,0 +1,48 @@
+{
+  "kind": "synthetic-accounting-plan",
+  "nhl_egress": {},
+  "nhl_limits": {
+    "version": 1,
+    "mode": "uncapped"
+  },
+  "wave_accounting": {
+    "version": 1,
+    "sizing_report_digest": "sha256:0303030303030303030303030303030303030303030303030303030303030303",
+    "critical_path_seconds": 9,
+    "setup_seconds": 2,
+    "capture_seconds": 1,
+    "cleanup_seconds": 2,
+    "roles": [
+      {
+        "role": "orchestrator",
+        "initial_input_tokens": 10,
+        "initial_output_tokens": 2,
+        "resume_input_tokens": 5,
+        "resume_output_tokens": 1,
+        "resumed_turns": 2,
+        "initial_seconds": 2,
+        "resume_seconds": 1
+      },
+      {
+        "role": "worker-a",
+        "initial_input_tokens": 20,
+        "initial_output_tokens": 3,
+        "resume_input_tokens": 6,
+        "resume_output_tokens": 1,
+        "resumed_turns": 1,
+        "initial_seconds": 3,
+        "resume_seconds": 1
+      },
+      {
+        "role": "worker-b",
+        "initial_input_tokens": 30,
+        "initial_output_tokens": 4,
+        "resume_input_tokens": 7,
+        "resume_output_tokens": 1,
+        "resumed_turns": 3,
+        "initial_seconds": 4,
+        "resume_seconds": 1
+      }
+    ]
+  }
+}

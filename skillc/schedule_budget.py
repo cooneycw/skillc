@@ -14,6 +14,17 @@ from collections.abc import Mapping
 # allowance, not a worst-case guarantee; the agent limit was not exhausted.
 MIN_ATTEMPT_OVERHEAD_SECONDS = 16
 
+
+def wave_refusal_reason(plan: object, *, waves: object, total_seconds: object) -> str | None:
+    """Explicit multi-session path; no historical exemption supplies wave sizing."""
+    from .wave_planning import schedule
+
+    try:
+        schedule(plan, waves=waves, total_seconds=total_seconds)
+    except ValueError:
+        return 'multi-session schedule requires complete sizing and sufficient finite time'
+    return None
+
 # These published declarations predate the correction. Preserve their frozen
 # parsing/approval identities rather than rewriting historical studies. Each
 # canonical WHOLE-declaration digest binds every field, including comments and

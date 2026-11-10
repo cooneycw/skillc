@@ -38,6 +38,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .wave_planning import CostEstimate as WaveCostEstimate
 
 #: The operator's own ceiling for the whole paid run (ADR 0005 rule 6), not
 #: merely a budget someone could approve past. `authorize()` refuses above
@@ -68,6 +72,17 @@ SUBSCRIPTION_LOGIN_RULING_SCOPE = (
 class SpendNotAuthorized(Exception):
     """No live run may start: refused, not silently skipped or approximated
     (ADR 0005 rule 5)."""
+
+
+def estimate_wave(plan: object, *, trials: int, waves_per_trial: int, price: ModelPrice,
+                  judge_tiers_enabled: int = 0, judge_price: ModelPrice | None = None,
+                  judge_input_tokens: int = 0, judge_output_tokens: int = 0) -> WaveCostEstimate:
+    """Additive multi-session projection; paid judge tiers remain per wave."""
+    from .wave_planning import estimate
+
+    return estimate(plan, trials=trials, waves_per_trial=waves_per_trial, price=price,
+                    judge_tiers_enabled=judge_tiers_enabled, judge_price=judge_price,
+                    judge_input_tokens=judge_input_tokens, judge_output_tokens=judge_output_tokens)
 
 
 def _finite_nonnegative(value: float, what: str) -> None:

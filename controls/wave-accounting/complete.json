@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "wave_id": "synthetic-wave",
+  "declaration_digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+  "deadline_digest": "sha256:0202020202020202020202020202020202020202020202020202020202020202",
+  "clock": "injected-policy-only",
+  "client_version": "0.0.0",
+  "counter_format": "cumulative-session-total-v1",
+  "completion_elapsed": 7,
+  "roles": [
+    {
+      "role": "orchestrator",
+      "session_id": "00000000-0000-0000-0000-000000000001",
+      "turns": [
+        {
+          "turn_id": "initial",
+          "started_at": 0,
+          "ended_at": 2,
+          "samples": [
+            1,
+            5
+          ]
+        },
+        {
+          "turn_id": "abababababababababababababababab",
+          "started_at": 3,
+          "ended_at": 5,
+          "samples": [
+            5,
+            9
+          ]
+        }
+      ]
+    },
+    {
+      "role": "worker-a",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "turns": [
+        {
+          "turn_id": "initial",
+          "started_at": 0,
+          "ended_at": 2,
+          "samples": [
+            1,
+            4
+          ]
+        },
+        {
+          "turn_id": "bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc",
+          "started_at": 3,
+          "ended_at": 5,
+          "samples": [
+            4,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "role": "worker-b",
+      "session_id": "00000000-0000-0000-0000-000000000003",
+      "turns": [
+        {
+          "turn_id": "initial",
+          "started_at": 0,
+          "ended_at": 2,
+          "samples": [
+            1,
+            3
+          ]
+        },
+        {
+          "turn_id": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "started_at": 3,
+          "ended_at": 5,
+          "samples": [
+            3,
+            8
+          ]
+        }
+      ]
+    }
+  ]
+}
