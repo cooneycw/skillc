@@ -1,12 +1,13 @@
 """Model-free controls for arm-neutral controller wake and opaque snapshots."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import threading
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -155,6 +156,13 @@ class ScriptedWave:
         self.shared.mkdir()
         self.diagnostic_reads = 0
         self.arm = arm  # Diagnostic only; there is no arm argument to wake policy.
+        from skillc import wave_wake
+        declaration = json.dumps({'roles': ['worker-a', 'worker-b'],
+            'controller_wake': {'version': 1, **asdict(policy())}},
+            sort_keys=True, separators=(',', ':')).encode()
+        binding_type = getattr(wave_wake, 'WakeBinding', SimpleNamespace)
+        self.approved_wake = binding_type(declaration=declaration,
+            approved_digest='sha256:' + hashlib.sha256(declaration).hexdigest())
         self.roles = [SimpleNamespace(name=n, resume_texts=()) for n in ('worker-a', 'worker-b')]
         self.states = {r.name: SimpleNamespace(session_id=None, busy=threading.Lock(), unknown=[],
             handle=None, backend=SimpleNamespace(end_attempt=lambda handle: None,

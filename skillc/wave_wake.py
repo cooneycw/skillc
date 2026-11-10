@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import time
 from collections.abc import Callable, Mapping
@@ -21,7 +22,57 @@ from .completion import CompletionUnavailable, number
 from .wave_attachment import WAVE_ROOT
 from .wave_snapshot import SnapshotUnavailable
 
-_DIGEST_PREFIX = 'sha256:'
+MAX_FILES = 4096
+MAX_BYTES = 4 * 1024 * 1024
+MAX_ROLES = 64
+MAX_DECLARATION = 1024 * 1024
+
+
+class WakeRefused(ValueError):
+    """An incomplete or misbound controller input cannot authorize a turn."""
+
+
+def _role(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r'[a-z][a-z0-9-]{0,39}', value) is None:
+        raise WakeRefused('logical wake role required')
+    return value
+
+
+def _roles(value: object) -> tuple[str, ...]:
+    if type(value) not in (tuple, list):
+        raise WakeRefused('bounded nonempty wake population required')
+    assert isinstance(value, (tuple, list))
+    if not 1 <= len(value) <= MAX_ROLES:
+        raise WakeRefused('bounded nonempty wake population required')
+    names = tuple(_role(name) for name in value)
+    if len(set(names)) != len(names):
+        raise WakeRefused('unique wake population required')
+    return names
+
+
+def _digest(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r'sha256:[0-9a-f]{64}', value) is None:
+        raise WakeRefused('complete wake digest required')
+    return value
+
+
+def _session(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value) is None:
+        raise WakeRefused('canonical wake session required')
+    return value
+
+
+def _nonce(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r'[0-9a-f]{32}', value) is None:
+        raise WakeRefused('controller wake nonce required')
+    return value
+
+
+def _time(value: object) -> float:
+    result = number(value)
+    if result < 0:
+        raise WakeRefused('nonnegative wake time required')
+    return result
 
 
 @dataclass(frozen=True)
@@ -31,9 +82,7 @@ class Revision:
 
     def __post_init__(self) -> None:
         for value in (self.files, self.refs):
-            if (not isinstance(value, str) or not value.startswith(_DIGEST_PREFIX)
-                    or len(value) != 71 or any(c not in '0123456789abcdef' for c in value[7:])):
-                raise ValueError('revision requires complete file and ref digests')
+            _digest(value)
 
     @property
     def identity(self) -> str:
@@ -55,6 +104,10 @@ class WakePolicy:
 
     def __post_init__(self) -> None:
         ct.parse_turns({'version': 1, 'by_case': {'role': [{'text': self.literal}]}}, ['role'])
+        try:
+            self.literal.encode('utf-8')
+        except UnicodeError:
+            raise WakeRefused('encodable wake literal required') from None
         if number(self.poll_seconds) <= 0 or number(self.min_spacing_seconds) < 0:
             raise ValueError('poll interval must be positive; spacing must be nonnegative')
         for key in ('max_pokes', 'max_files', 'max_bytes'):
@@ -66,6 +119,8 @@ class WakePolicy:
             raise ValueError('unsupported wake cap/failure policy')
         if self.after_unconfirmed != 'wait-for-change-or-deadline':
             raise ValueError('unsupported unconfirmed-poke policy')
+        if self.max_files > MAX_FILES or self.max_bytes > MAX_BYTES:
+            raise WakeRefused('wake observation exceeds technical bounds')
 
     @property
     def digest(self) -> str:
@@ -78,6 +133,97 @@ class Poke:
     session: str
     revision: str
     nonce: str
+
+    def __post_init__(self) -> None:
+        _role(self.role)
+        _session(self.session)
+        _digest(self.revision)
+        _nonce(self.nonce)
+
+
+def parse_revision(value: object) -> Revision:
+    if type(value) is not dict or set(value) != {'files', 'refs'}:
+        raise WakeRefused('closed wake revision required')
+    return Revision(value['files'], value['refs'])
+
+
+def parse_poke(value: object) -> Poke:
+    if type(value) is not dict or set(value) != {'role', 'session', 'revision', 'nonce'}:
+        raise WakeRefused('closed controller poke required')
+    return Poke(**value)
+
+
+def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise WakeRefused('duplicate wake JSON member')
+        result[key] = value
+    return result
+
+
+def parse_policy(value: object) -> WakePolicy:
+    """Closed declaration field; every behavior is explicit, including defaults."""
+    keys = set(WakePolicy.__dataclass_fields__)
+    if (type(value) is not dict or set(value) != keys | {'version'}
+            or type(value['version']) is not int or value['version'] != 1):
+        raise WakeRefused('closed version-1 controller_wake object required')
+    try:
+        return WakePolicy(**{key: value[key] for key in keys})
+    except ValueError:
+        raise WakeRefused('invalid controller_wake policy') from None
+
+
+def _canonical(value: object) -> bytes:
+    try:
+        raw = json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    except (TypeError, ValueError, RecursionError):
+        raise WakeRefused('JSON wake declaration required') from None
+    if len(raw) > MAX_DECLARATION:
+        raise WakeRefused('wake declaration exceeds technical bound')
+    return raw
+
+
+@dataclass(frozen=True)
+class WakeBinding:
+    """Whole declaration bytes and the trusted caller's independently approved hash.
+
+    Consistency only: this is not an approval issuer or live launch authority.
+    The caller owns its declaration schema beyond roles/controller_wake.
+    """
+
+    declaration: bytes
+    approved_digest: str
+
+    def verify(self) -> tuple[tuple[str, ...], WakePolicy]:
+        _digest(self.approved_digest)
+        if type(self.declaration) is not bytes or not 0 < len(self.declaration) <= MAX_DECLARATION:
+            raise WakeRefused('bounded bound declaration required')
+        if 'sha256:' + hashlib.sha256(self.declaration).hexdigest() != self.approved_digest:
+            raise WakeRefused('wake declaration differs from caller approval')
+        try:
+            value = json.loads(self.declaration, object_pairs_hook=_pairs)
+        except (ValueError, RecursionError):
+            raise WakeRefused('bound wake declaration unavailable') from None
+        if type(value) is not dict or _canonical(value) != self.declaration:
+            raise WakeRefused('canonical whole wake declaration required')
+        return _roles(value.get('roles')), parse_policy(value.get('controller_wake'))
+
+
+def bind_declaration(value: object, approved_digest: object) -> WakeBinding:
+    """Verify a projection against a hash held by the trusted approving caller."""
+    bound = WakeBinding(_canonical(value), _digest(approved_digest))
+    bound.verify()
+    return bound
+
+
+def parse_binding(value: object) -> WakeBinding:
+    """Validate the trusted caller's in-memory binding envelope, not a checkpoint."""
+    if type(value) is not dict or set(value) != {'declaration', 'approved_digest'}:
+        raise WakeRefused('closed caller wake binding required')
+    bound = WakeBinding(**value)
+    bound.verify()
+    return bound
 
 
 @dataclass
@@ -104,19 +250,39 @@ class WakeState:
     journal: Callable[[Mapping[str, Any]], None] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        if not self.roles or len(set(self.roles)) != len(self.roles):
-            raise ValueError('wake population must be nonempty and unique')
+        if type(self.policy) is not WakePolicy:
+            raise WakeRefused('validated wake policy required')
+        parse_policy({'version': 1, **asdict(self.policy)})
+        self.roles = _roles(self.roles)
         self.slots = {role: Slot() for role in self.roles}
+
+    def target(self, role: object, now: object) -> Slot:
+        """Refuse an invalid target before any lookup or state mutation."""
+        tick = _time(now)
+        try:
+            name = _role(role)
+            if name not in self.slots:
+                raise WakeRefused('undeclared wake role')
+        except WakeRefused:
+            self.record('poke-refused', '-', tick, reason='undeclared-role', nonce=None)
+            raise
+        return self.slots[name]
 
     def record(self, event: str, role: str, now: float, **fields: Any) -> None:
         self.events.append({'seq': len(self.events) + 1, 'event': event, 'role': role,
-                            'time': number(now), **fields})
+                            'time': _time(now), **fields})
         if self.journal is not None:
             self.journal(self.events[-1])
 
     def ended(self, role: str, session: str | None, result: ExecuteResult,
               revision: Revision | None, now: float) -> None:
-        slot = self.slots[role]
+        slot = self.target(role, now)
+        if (type(result) is not ExecuteResult or type(result.reason) is not str
+                or not result.reason or (result.exit_code is not None
+                and (type(result.exit_code) is not int or not -(1 << 31) <= result.exit_code < (1 << 31)))):
+            raise WakeRefused('complete turn result required')
+        if revision is not None and type(revision) is not Revision:
+            raise WakeRefused('observed wake revision required')
         try:
             if not isinstance(session, str):
                 raise ct.TurnsRefused('session not observed')
@@ -148,8 +314,10 @@ class WakeState:
             self.record('role-ended', role, now, reason=reason)
 
     def offer(self, role: str, revision: Revision, now: float) -> Poke | None:
-        slot = self.slots[role]
-        now = number(now)
+        slot = self.target(role, now)
+        now = _time(now)
+        if type(revision) is not Revision:
+            raise WakeRefused('observed wake revision required')
         if (slot.phase != 'idle' or slot.session is None or slot.watermark is None
                 or slot.watermark == revision.identity or slot.pending is not None):
             return None
@@ -165,6 +333,10 @@ class WakeState:
 
     def dispatch(self, poke: Poke, revision: Revision, *, current_role: str,
                  current_session: str | None, idle: bool | None, live: bool | None, now: float) -> bool:
+        _time(now)
+        if type(poke) is not Poke or type(revision) is not Revision:
+            self.record('poke-refused', '-', now, reason='invalid-poke-or-revision', nonce=None)
+            return False
         slot = self.slots.get(poke.role)
         reason = None
         if slot is None or slot.pending != poke or current_role != poke.role:
@@ -184,7 +356,7 @@ class WakeState:
             return False
         assert slot is not None
         slot.pending = None
-        slot.watermark, slot.last_attempt = poke.revision, number(now)
+        slot.watermark, slot.last_attempt = poke.revision, _time(now)
         slot.pokes += 1
         slot.phase = 'running'
         slot.active_nonce = poke.nonce
@@ -195,6 +367,13 @@ class WakeState:
     def suppressed(self, poke: Poke, now: float) -> None:
         # Attempt is not receipt. Consuming the revision prevents repeated
         # attempts on unchanged state, but suppressing it cannot complete a role.
+        _time(now)
+        if type(poke) is not Poke:
+            raise WakeRefused('controller poke required')
+        slot = self.target(poke.role, now)
+        if slot.phase != 'running' or slot.active_nonce != poke.nonce:
+            self.record('poke-refused', poke.role, now, reason='inactive-poke', nonce=poke.nonce)
+            raise WakeRefused('only an active poke can be suppressed')
         self.slots[poke.role].phase = 'idle'
         self.slots[poke.role].active_nonce = None
         self.record('poke-unconfirmed', poke.role, now, nonce=poke.nonce)
@@ -216,6 +395,13 @@ class WakeState:
                 'scope': 'controller-turns-only-not-task-verdict'}
 
 
+def parse_state(value: object) -> WakeState:
+    """A new state only; never restore mutable slots or counters from input."""
+    if type(value) is not dict or set(value) != {'policy', 'roles'}:
+        raise WakeRefused('closed new wake state required')
+    return WakeState(parse_policy(value['policy']), _roles(value['roles']))
+
+
 def observe(wave: Any, policy: WakePolicy) -> Revision:
     """Run fixed controller source in its own helper, never in a role shell."""
     if wave.remote is None:
@@ -225,11 +411,10 @@ def observe(wave: Any, policy: WakePolicy) -> Revision:
                           '-c', source, WAVE_ROOT, '/fixture/repo.git',
                           str(policy.max_files), str(policy.max_bytes)])
     try:
-        data = json.loads(payload)
-        if not isinstance(data, dict) or set(data) != {'files', 'refs'}:
-            raise ValueError('incomplete revision')
-        return Revision(**data)
-    except (TypeError, ValueError) as exc:
+        if type(payload) is not bytes or len(payload) > MAX_DECLARATION:
+            raise WakeRefused('bounded observer response required')
+        return parse_revision(json.loads(payload, object_pairs_hook=_pairs))
+    except (TypeError, ValueError, RecursionError) as exc:
         raise BackendUnavailable('shared observation unavailable') from exc
 
 
@@ -242,14 +427,31 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
     the fixed controller helper and fenced DockerWave.turn. No client runs here
     outside the backend, and no message content or CPP revision enters policy.
     """
+    # The caller retains approval authority. A generated runtime declaration
+    # cannot approve its own policy or replace that independently held binding.
+    bound = getattr(wave, 'approved_wake', None)
+    if type(bound) is not WakeBinding or type(policy) is not WakePolicy:
+        raise WakeRefused('caller-approved wake binding required before preparation')
+    names, approved_policy = bound.verify()
+    parse_policy({'version': 1, **asdict(policy)})
+    population = getattr(wave, 'roles', None)
+    if type(population) not in (tuple, list):
+        raise WakeRefused('complete declared runtime role population required')
+    assert isinstance(population, (tuple, list))
+    if (not 1 <= len(population) <= MAX_ROLES
+            or any(type(getattr(role, 'resume_texts', None)) is not tuple for role in population)):
+        raise WakeRefused('complete declared runtime role population required')
+    roles = _roles(tuple(getattr(role, 'name', None) for role in population))
+    if roles != names or policy.digest != approved_policy.digest:
+        raise WakeRefused('wake policy or population differs from caller approval')
     if any(role.resume_texts for role in wave.roles):
         raise ValueError('fixed resumed turns and wake policy cannot both own turns')
     if wave.closed or (wave.root / 'wake-declaration.json').exists():
         raise ValueError('wake driver is single-use for an owned wave')
-    roles = tuple(role.name for role in wave.roles)
     state = WakeState(policy, roles)
     state.journal = lambda event: wave._write('wake-events.json', state.events)
     declaration = {'version': 1, 'policy': asdict(policy), 'policy_digest': policy.digest,
+                   'approved_declaration_digest': bound.approved_digest,
                    'trigger': 'controller-file-and-ref-digests', 'roles': roles,
                    'attempt_id': wave.attempt_id,
                    'clock': 'monotonic' if clock is time.monotonic else 'injected-policy-only'}
@@ -269,6 +471,8 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
         nonlocal missed
         try:
             revision = read()
+            if type(revision) is not Revision:
+                raise SnapshotUnavailable('complete controller revision required')
         except (BackendUnavailable, SnapshotUnavailable):
             missed += 1
             if missed == 1:
