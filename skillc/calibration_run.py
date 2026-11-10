@@ -682,6 +682,10 @@ def plan_calibration(
     if not skill_digests and any(arm != calibration.BASELINE_ARM for arm in declaration.arm_order):
         raise CalibrationRefused("a treated arm has no skill_digests to pin; refusing to plan it unpinned")
     declaration = _launch_declaration(declaration)
+    try:
+        nhl_limits.require_for_planning(declaration.data)
+    except nhl_limits.LimitsRefused as exc:
+        raise CalibrationRefused(str(exc)) from None
     client_name, client_version = declared_client(declaration)
     grader = verify.GraderDef.load(root / declaration.task_path)
     grader_identity = grader.identity()
@@ -2005,7 +2009,7 @@ def fixture_symmetry(entries: Sequence[Mapping[str, object]]) -> dict[str, objec
             "symmetric": planned_identical and digest is not None and handed and every_arm_dispatched}
 
 
-def _report_nhl_policy(experiment: trial.Experiment) -> nhl.Policy | None:
+def _report_nhl_declaration(experiment: trial.Experiment) -> calibration.CalibrationDeclaration | None:
     configs = []
     for planned, _attempt in experiment.attempts():
         config = planned['config']
@@ -2029,7 +2033,12 @@ def _report_nhl_policy(experiment: trial.Experiment) -> nhl.Policy | None:
         raise CalibrationRefused('unverified launch-bound NHL declaration') from None
     if policy is None or tuple(s.arm for s in schedule_from_ledger(experiment)) != declaration.arm_order:
         raise CalibrationRefused('NHL declaration differs from launch-bound schedule')
-    return policy
+    return declaration
+
+
+def _report_nhl_policy(experiment: trial.Experiment) -> nhl.Policy | None:
+    declaration = _report_nhl_declaration(experiment)
+    return nhl.parse(declaration.data) if declaration is not None else None
 
 
 def build_report(
@@ -2047,7 +2056,9 @@ def build_report(
     counts toward the value comparison."""
     # A mutable outcomes checkpoint cannot select the report's endpoint.
     experiment = trial.Experiment.open(experiment.root)
-    nhl_policy = _report_nhl_policy(experiment)
+    nhl_declaration = _report_nhl_declaration(experiment)
+    nhl_policy = nhl.parse(nhl_declaration.data) if nhl_declaration is not None else None
+    limits = nhl_limits.parse(nhl_declaration.data) if nhl_declaration is not None else None
     declaration = _report_declaration(experiment)
     endpoint = calibration.outcome_endpoint(declaration) if declaration is not None else None
     if declaration is not None and (declared_model, declared_effort) != (
@@ -2138,6 +2149,8 @@ def build_report(
         "kind": REPORT_KIND,
         "experiment_id": experiment.id,
         "attempts": entries,
+        **({"nhl_limits": {"declared": limits, "capped_dispatch_available": False,
+                           "operational_deadlines_finite": True}} if limits is not None else {}),
         **({"containment_stop": containment_stop(entries)}
            if any("nested_codex" in e or "schedule_containment_stop" in e for e in entries) else {}),
         "arms": summarize_arms(entries),

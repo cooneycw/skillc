@@ -115,7 +115,7 @@ def policy_digest(policy: object) -> str:
     return 'sha256:' + hashlib.sha256(data).hexdigest()
 
 
-def root_names(policy: dict[str, Any]) -> set[str]:
+def _root_names(policy: dict[str, Any]) -> set[str]:
     return {row['root'] for kind in ('demands', 'reservations') for row in policy[kind]}
 
 
@@ -126,7 +126,7 @@ def _sample(path: str) -> dict[str, int]:
     try:
         info, space = os.fstat(fd), os.fstatvfs(fd)
         mode = getattr(info, 'st_mode', None)
-        if type(mode) is not int or not stat.S_ISDIR(mode):
+        if type(mode) is not int or not 0 <= mode <= 0xFFFF or not stat.S_ISDIR(mode):
             raise HeadroomRefused('headroom root is not a directory')
         fragment = _integer(getattr(space, 'f_frsize', None), 1)
         return {'device': _identity(getattr(info, 'st_dev', None)),
@@ -144,7 +144,7 @@ def collect(
 ) -> dict[str, Any]:
     """Explicit owner invocation only. Tests inject measurements and clocks."""
     compiled, identity = parse_policy(policy), binding(bound)
-    if type(paths) is not dict or set(paths) != root_names(compiled):
+    if type(paths) is not dict or set(paths) != _root_names(compiled):
         raise HeadroomRefused('private root map must match the complete demand population')
     if any(not isinstance(path, str) or not Path(path).is_absolute() or '\x00' in path for path in paths.values()):
         raise HeadroomRefused('private absolute directory paths required')
@@ -178,7 +178,7 @@ def _evaluate(policy: object, receipt: object, expected_binding: object, now: ob
             or finished - started > policy['max_collection_seconds']):
         raise HeadroomRefused('headroom measurement stale, future or unfinished')
     roots = receipt['roots']
-    if type(roots) is not dict or set(roots) != root_names(policy):
+    if type(roots) is not dict or set(roots) != _root_names(policy):
         raise HeadroomRefused('headroom root coverage missing or mixed')
     for row in roots.values():
         _object(row, SAMPLE_KEYS)

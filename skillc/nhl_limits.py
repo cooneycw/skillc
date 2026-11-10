@@ -49,13 +49,20 @@ def parse(data: object) -> dict[str, Any] | None:
     return copy.deepcopy(raw)
 
 
-def require_for_execution(data: object) -> dict[str, Any] | None:
+def require_for_planning(data: object) -> dict[str, Any] | None:
     mode = parse(data)
     assert isinstance(data, Mapping)
     if 'nhl_egress' not in data:
         return None
     if mode is None:
-        raise LimitsRefused('nhl_limits: NHL execution requires an explicit mode; neither is a default')
+        raise LimitsRefused('nhl_limits: new NHL planning requires an explicit mode; neither is a default')
+    return mode
+
+
+def require_for_execution(data: object) -> dict[str, Any] | None:
+    mode = require_for_planning(data)
+    if mode is None:
+        return None
     if mode['mode'] == 'capped':
         raise LimitsRefused('nhl_limits: capped dispatch requires approved sizing and evidenced token enforcement; unavailable')
     return mode

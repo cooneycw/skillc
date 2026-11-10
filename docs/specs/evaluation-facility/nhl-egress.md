@@ -95,8 +95,9 @@ immutability and refusal controls accompany those policy cases.
 
 HTTP request counts and response codes are **not measured** by encrypted CONNECT
 tunnels. The byte telemetry below observes encrypted transport only. No TLS
-interception or fetch seam is added. Declared limit modes, long-window parameters and the
-owner-run headroom helper are PR-C. Credential validity/coverage and any auth
+interception or fetch seam is added. [Declared limit modes, finite long-window
+parameters and the owner-run headroom helper](nhl-limits-headroom.md) are PR-C.
+Credential validity/coverage and any auth
 material remain separate #630 work; no credential code is changed here.
 Physical proxy/deny/cancellation qualification, actual VM and role wiring,
 approved sizing and the final frozen execution declaration remain deferred.
