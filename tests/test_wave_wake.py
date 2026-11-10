@@ -154,6 +154,8 @@ class ScriptedWave:
         root.mkdir()
         self.shared = root / 'shared'
         self.shared.mkdir()
+        self.wake_capture_reference: Any = None
+        self.wake_capture_context: Any = None
         self.diagnostic_reads = 0
         self.arm = arm  # Diagnostic only; there is no arm argument to wake policy.
         from skillc import wave_wake

@@ -28,3 +28,24 @@ wake. Therefore this map does not recommend issue closure on that evidence.
 The final closure decision needs both remaining-scope review and a truthful
 statement of which dynamic-wake path was qualified. No new real-Docker run is
 part of the first incremental input-validation slice.
+
+## Sealed-custody slice
+
+The second incremental slice adds `wave_wake_capture.py`: a closed context,
+reference and event schema; durable pre-dispatch transition recording; one
+seal; bounded content-addressed retention; verification against a receipt held
+separately by the caller; and a raw-derived `PokeCount` adapter. The mutable
+producer/count-projection gaps above are addressed by
+`test_counts_come_from_retained_stream_and_independently_held_reference`,
+`test_driver_fsyncs_attempt_before_transport_and_supplies_verified_adapter`,
+`test_durable_failure_blocks_poke_but_never_skips_owned_cleanup`, and
+`test_queue_failure_has_an_explicit_unconfirmed_attempt_after_cleanup` in
+`tests/test_wave_wake_capture.py`. Its C13 file/context/semantic twins and five
+compiled blind variants qualify the new instrument without claiming old-main
+absent-API regressions. The 743 malformed-field variants and complete-count
+adapter refusal controls retain unobserved roles explicitly.
+
+This completes the two approved infrastructure slices. Physical qualification
+of the dynamic driver and a live approved caller remain unclaimed; the fixed
+turn qualification cited above does not supply those observations. Issue closure
+requires review of that remaining qualification scope. This change uses Refs.

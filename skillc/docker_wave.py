@@ -16,7 +16,10 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .wave_wake_capture import Context, Reference
 
 from . import controller_turns as turns
 from . import fixture_overlay, leak, wave_capture
@@ -141,6 +144,9 @@ class DockerWave:
         self.unknown: list[str] = []
         self.closed = False
         self._prepared = False
+        # Trusted caller handoff, separate from mutable JSON projections.
+        self.wake_capture_reference: Reference | None = None
+        self.wake_capture_context: Context | None = None
         self._write("declaration.json", {"attempt_id": attempt_id, "roles": [asdict(r) for r in roles],
             "deadline": self.deadline.marker(attempt_id), "pid_namespaces": "separate",
             "shared_surfaces": ["wave-state-volume", "fixture-git-remote"],

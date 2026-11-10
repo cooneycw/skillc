@@ -175,7 +175,89 @@ parser tests qualify new input validation separately. Scripted wake/runtime
 controls, including the lock-time session and previous-sample fences, remain
 preservation evidence. No physical wake or native thread wake is claimed.
 
-The separate sealed capture/verifier slice will retain and verify event bytes
-before a later reader derives poke counts. Until then the mutable JSON report
-is a controller projection, not an integrity-bound replay artifact. The issue's
-remaining scope includes that custody join and qualification review.
+The sealed capture/verifier described below retains and verifies event bytes
+before a later reader derives poke counts. The mutable JSON report remains a
+controller projection; replay authority comes from the separately held receipt
+and verified bytes. Qualification review remains separate from live authority.
+
+## Sealed count custody and the offline adapter
+
+`wave_wake_capture.Capture` now records the driver transitions before the mutable
+compatibility projection. Each `poke-attempt` line is written and fsynced before
+`drive` can submit its resume turn. Failure to retain it prevents that dispatch;
+owned cleanup still runs. A queued launch failure is an explicit unconfirmed
+attempt after cleanup. Neither that record nor a zero exit proves receipt.
+
+The private `wake-capture/` directory is mode 0700. A bounded JSONL stream begins
+with one closed context row, continues with controller event rows, and ends with
+one seal. Every line has monotone `seq` and `prev_hash` of the exact prior line.
+Controller events also retain their contiguous `order` and nonnegative elapsed
+time from the common deadline origin. The stream binds wave attempt, approved
+whole-declaration digest, policy digest, ordered role population, original
+deadline digest and the actual/injected clock domain. Revision rows bind both
+opaque file/ref digests and their combined identity. Event-specific schemas are
+closed; there are no participant-message or transcript-text fields.
+
+The seal names the event count, prior hash, driver outcome and final observed
+session population. It follows cleanup and exit capture. An attempt must join
+one exit, explicit refusal or unconfirmed record. Nonces cannot repeat, poke
+ordinals must be contiguous per role, and initial session bindings cannot be
+reassigned. A STOPPED seal requires terminal role-policy observations; it still
+provides no task-achievement verdict. Missing/changed session bindings retain
+explicit null counts rather than inferred zeroes.
+
+A successful seal freezes a SHA256-addressed, mode-0400 object. The technical
+bounds are 8 MiB and 32768 controller events. Excess or partial capture is
+unavailable evidence. The writer is single-use; it cannot append after a seal
+or recover from a failed transition by silently dropping that transition.
+
+The trusted caller receives `wave.wake_capture_reference` and
+`wave.wake_capture_context` separately from JSON reports. The frozen `Reference`
+binds format version, context digest, exact byte digest and size; its `Context`
+binds the complete wave/policy/budget identity above. The caller must keep this
+receipt in its own retained evidence contract when crossing sessions, just as
+final wave snapshots require a separately retained expected manifest hash.
+There is no reader that selects this expected digest from `wake-report.json`
+or a mutable checkpoint. `parse_reference` validates a trusted caller's receipt;
+it cannot establish the provenance of an arbitrary supplied digest. This is
+controller-store custody, not authentication against an operator rewriting both
+bytes and the caller's independently held receipt.
+
+`verify(root, reference, context)` opens the root/object directories and regular
+object without following symlinks, checks exact size and SHA256 with a bounded
+read, then rechecks every row, chain, seal, binding and count/result join. It
+returns CAPTURED only for verified bytes. `complete` additionally requires a
+compatible observed session for every declared role. Corruption, ambiguous or
+missing coverage returns UNKNOWN, never a complete all-zero population.
+`poke_counts(root, reference, context)` supplies the existing #620 typed
+`PokeCount` rows only when both checks succeed. Its counts come solely from the
+retained stream; it neither reads a report nor accepts count claims as input.
+A copied or edited JSON projection cannot promote it. Task/cleanup evidence is
+still independently required by the wave verdict.
+
+The live controller preserves its known in-process counts during a separate
+capture/publication failure while marking the driver UNKNOWN. Those counts do
+not become verified replay evidence. A valid retained capture re-derives the
+report's counts and per-poke exits/refusals/unconfirmed outcomes; compatibility
+reports and their mutable event lists remain projections.
+
+The new capture instrument is qualified with committed C13 custody twins and
+actual compiled always-accept, hash-blind, trust-projection, ordinal-blind and
+initial-binding-blind variants. Their missing-object, same-size sealed-object
+swap, forged-report, wrong-ordinal and wrong-binding witnesses lose against the
+blind variants. These are new-instrument qualifications, not missing-API reds
+on old main. `capture-shapes.json` exercises 95 parsed levels and 743 malformed
+variants; direct field tests prevent an unrelated hash mismatch from masking
+schema failures. Separate missing/extra, nonfinite, malformed JSON, file-type,
+missing-result, cleanup and dispatch-failure controls cover the joins. Large
+inputs use short parameter IDs. No model, physical dynamic wake or native wake
+was used to qualify this slice.
+
+Durability qualification observes successful `os.fsync` on the actual open
+controller event descriptor, before both delivery callback and resume queue
+submission. Visible unbuffered bytes alone do not satisfy it. The same witness
+rejects compiled omitted/deferred-event-fsync variants, and a direct fsync error
+blocks the poke while retaining cleanup and the known in-process count. The
+old visibility-only witness at `2704974` accepts both blind variants; the two
+committed negative-control tests fail there and pass with the strengthened
+witness. This is API barrier/order evidence, not physical power-loss testing.
