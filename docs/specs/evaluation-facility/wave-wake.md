@@ -252,3 +252,12 @@ schema failures. Separate missing/extra, nonfinite, malformed JSON, file-type,
 missing-result, cleanup and dispatch-failure controls cover the joins. Large
 inputs use short parameter IDs. No model, physical dynamic wake or native wake
 was used to qualify this slice.
+
+Durability qualification observes successful `os.fsync` on the actual open
+controller event descriptor, before both delivery callback and resume queue
+submission. Visible unbuffered bytes alone do not satisfy it. The same witness
+rejects compiled omitted/deferred-event-fsync variants, and a direct fsync error
+blocks the poke while retaining cleanup and the known in-process count. The
+old visibility-only witness at `2704974` accepts both blind variants; the two
+committed negative-control tests fail there and pass with the strengthened
+witness. This is API barrier/order evidence, not physical power-loss testing.

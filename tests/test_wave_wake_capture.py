@@ -180,17 +180,68 @@ def test_writer_is_single_use_and_failed_record_cannot_be_sealed(tmp_path: Path)
     broken.close()
 
 
+def last_synced_record(fd: int) -> dict[str, Any] | None:
+    """Inspect the owned descriptor without moving the writer's offset."""
+    try:
+        raw = wc.os.pread(fd, wc.MAX_CAPTURE + 1, 0)
+        row = json.loads(raw.splitlines()[-1])
+        return row if type(row) is dict else None
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def test_driver_fsyncs_attempt_before_transport_and_supplies_verified_adapter(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
     wave = ScriptedWave(tmp_path / 'wave', 'plain-files')
-    seen = []
+    seen: list[ww.Poke] = []
+    trace: list[tuple[str, str]] = []
+    succeeded: set[str] = set()
+    pending: dict[str, str] = {}
+    original_fsync = wc.os.fsync
+    original_init = wc.Capture.__init__
+    owned: dict[int, wc.Capture] = {}
+
+    def capture_init(capture: wc.Capture, *args: Any, **kwargs: Any) -> None:
+        original_init(capture, *args, **kwargs)
+        owned[capture.stream.fileno()] = capture
+
+    def fsync(fd: int) -> None:
+        capture = owned.get(fd)
+        row = (last_synced_record(fd) if capture is not None and not capture.stream.closed
+               and capture.stream.fileno() == fd else None)
+        original_fsync(fd)  # A visible write is insufficient: record only a successful barrier.
+        if row is not None and row.get('event') == 'poke-attempt':
+            succeeded.add(row['nonce'])
+            trace.append(('fsync', row['nonce']))
+
     def delivered(poke: ww.Poke) -> bool:
-        raw = (wave.root / 'wake-capture' / 'events.tmp').read_bytes()
-        last = json.loads(raw.splitlines()[-1])
-        assert last['event'] == 'poke-attempt' and last['nonce'] == poke.nonce
+        assert poke.nonce in succeeded, 'poke transport preceded its successful event fsync'
+        trace.append(('deliver', poke.nonce))
+        pending[poke.role] = poke.nonce
         seen.append(poke)
         return True
-    report = ww.drive(wave, policy(), read_revision=wave.read, deliver=delivered)
+
+    class QueueProof:
+        def __init__(self, **kwargs: Any) -> None:
+            self.pool = ThreadPoolExecutor(**kwargs)
+        def submit(self, function: Any, *args: Any, **kwargs: Any) -> Any:
+            if len(args) > 1:
+                nonce = pending[args[0]]
+                assert nonce in succeeded, 'resume queue preceded its successful event fsync'
+                trace.append(('submit', nonce))
+            return self.pool.submit(function, *args, **kwargs)
+        def shutdown(self, **kwargs: Any) -> None:
+            self.pool.shutdown(**kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(wc.Capture, '__init__', capture_init)
+        patch.setattr(wc.os, 'fsync', fsync)
+        patch.setattr(ww, 'ThreadPoolExecutor', QueueProof)
+        report = ww.drive(wave, policy(), read_revision=wave.read, deliver=delivered)
     assert len(seen) == 2 and report['wake_capture']['status'] == 'CAPTURED'
+    for poke in seen:
+        assert trace.index(('fsync', poke.nonce)) < trace.index(('deliver', poke.nonce))
+        assert trace.index(('deliver', poke.nonce)) < trace.index(('submit', poke.nonce))
     counts = wc.poke_counts(wave.root / 'wake-capture', wave.wake_capture_reference, wave.wake_capture_context)
     assert [row.pokes for row in counts] == [1, 1]
     (wave.root / 'wake-report.json').write_text('{"poke_count":999,"poke_counts":[]}')
@@ -512,3 +563,54 @@ def test_retained_counts_survive_final_projection_publication_failure(
     assert wave.closed and not (wave.root / 'wake-report.json').exists()
     counts = wc.poke_counts(wave.root / 'wake-capture', wave.wake_capture_reference, wave.wake_capture_context)
     assert [row.pokes for row in counts] == [1, 1]
+
+
+@pytest.mark.parametrize('variant', ['omitted', 'deferred'], ids=['omitted', 'deferred'])
+def test_existing_durability_witness_defeats_barrier_blind_variants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str,
+) -> None:
+    import textwrap
+    source = inspect.getsource(wc.Capture._append)
+    anchor = 'os.fsync(self.stream.fileno())'
+    assert source.count(anchor) == 1
+    replacement = ('pass' if variant == 'omitted' else
+                   "if row['event'] != 'poke-attempt':\n                os.fsync(self.stream.fileno())")
+    # Use actual globals: technical-bound controls must still affect the producer.
+    namespace = vars(wc)
+    sentinel = object()
+    previous = namespace.get('_append', sentinel)
+    exec(compile(textwrap.dedent(source.replace(anchor, replacement)),  # noqa: S102
+                 '<barrier-blind-wake-producer>', 'exec'), namespace)
+    mutant = namespace.pop('_append')
+    if previous is not sentinel:
+        namespace['_append'] = previous
+    monkeypatch.setattr(wc.Capture, '_append', mutant)
+    with pytest.raises(AssertionError):
+        test_driver_fsyncs_attempt_before_transport_and_supplies_verified_adapter(tmp_path)
+
+
+def test_event_fsync_error_blocks_resume_and_preserves_cleanup_and_known_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wave = ScriptedWave(tmp_path / 'wave', 'plain-files')
+    original_fsync = wc.os.fsync
+    failed: list[str] = []
+    delivered: list[ww.Poke] = []
+    def fsync(fd: int) -> None:
+        row = last_synced_record(fd)
+        if row is not None and row.get('event') == 'poke-attempt':
+            failed.append(row['nonce'])
+            raise OSError('synthetic event fsync failure')
+        original_fsync(fd)
+    def transport(poke: ww.Poke) -> bool:
+        delivered.append(poke)
+        return True
+    monkeypatch.setattr(wc.os, 'fsync', fsync)
+    with pytest.raises(OSError, match='synthetic event fsync failure'):
+        ww.drive(wave, policy(), read_revision=wave.read, deliver=transport)
+    assert len(failed) == 1 and not delivered
+    assert wave.closed and all(text is None for _, text, _ in wave.calls)
+    assert wave.wake_capture_reference is None
+    report = json.loads((wave.root / 'wake-report.json').read_text())
+    assert report['outcome'] == 'UNKNOWN' and report['poke_count'] == 1
+    assert report['wake_capture']['status'] == 'UNKNOWN'

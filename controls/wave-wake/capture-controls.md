@@ -33,3 +33,15 @@ kinds. Missing/extra keys, overflow/nonfinite times, invalid UTF-8/deep/duplicat
 JSON, technical bounds and reader/writer boundary types supplement the table.
 Tests use authored bytes, injected clocks and scripted actors only. Private root
 diagnostics are excluded; a seeded leak proves that absence check can fail.
+
+The durability witness tracks the actual open event-stream descriptor and marks
+each nonce only after its real `os.fsync` returns successfully. It requires that
+mark before both the transport callback and executor submission; later object
+or seal flushes cannot satisfy it. Compiled omitted and deferred-event-barrier
+variants must make that same witness fail. On actual head `2704974`, its old
+visibility-only body accepted both variants, so the two committed witness tests
+fail there with `DID NOT RAISE AssertionError`, without setup/API failures. The
+strengthened witness rejects both. A direct event-fsync `OSError` prevents the
+resume, preserves the known attempted count with UNKNOWN evidence and still
+performs owned cleanup. This qualifies the barrier call/order; it is not a
+physical power-loss qualification of storage hardware.
