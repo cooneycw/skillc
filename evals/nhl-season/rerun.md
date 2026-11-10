@@ -220,6 +220,6 @@ Missing/malformed payload or reconciliation mappings, incomplete observed-route
 coverage, out-of-population routes and invalid controller observation/population
 shapes are UNKNOWN. Lexical mapping paths must stay relative to the export root.
 A valid mapping that names a missing/wrong candidate file still yields FAIL.
-Committed controls include 33 invalid adapter-map variants, an execute-path case
+Committed controls include 37 invalid adapter-map variants, an execute-path case
 with correct candidate artifacts but no controller payload map, two genuine
 missing-artifact failures and controller population/observation shape controls.

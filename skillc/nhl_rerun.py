@@ -309,7 +309,8 @@ def safe_file(root: Path, relative: str) -> Path:
 def _grading_context(case: Json, adapter: Json, requested: list[str] | None) -> tuple[Json, str, set[str]]:
     """Validate controller mappings without reading or blaming candidate files."""
     def relative(value: object) -> bool:
-        return (type(value) is str and bool(value) and value != '.' and not Path(value).is_absolute()
+        return (type(value) is str and bool(value) and '\0' not in value and Path(value) != Path('.')
+                and not Path(value).is_absolute()
                 and '..' not in Path(value).parts)
 
     if type(case) is not dict or type(adapter) is not dict:

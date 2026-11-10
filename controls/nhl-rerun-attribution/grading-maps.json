@@ -158,5 +158,25 @@
   {
     "id": "nontext-route",
     "kind": "nontext-route"
+  },
+  {
+    "id": "reconciliation-null",
+    "kind": "reconciliation",
+    "value": "\u0000invalid.json"
+  },
+  {
+    "id": "reconciliation-current-root",
+    "kind": "reconciliation",
+    "value": "./"
+  },
+  {
+    "id": "filename-null",
+    "kind": "filename",
+    "value": "\u0000invalid.json"
+  },
+  {
+    "id": "filename-current-root",
+    "kind": "filename",
+    "value": "./"
   }
 ]
