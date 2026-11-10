@@ -52,6 +52,7 @@ def change(value: Any, path: list[Any], replacement: object) -> Any:
 
 
 def test_complete_three_role_resumed_capture_uses_final_counters_and_common_wall() -> None:
+    assert len(SHAPES) == 58 and sum(len(row['values']) for row in SHAPES) == 365
     result = observed(fixture('complete'))
     assert result['status'] == 'COMPLETE' and result['tokens_complete']
     assert [row['tokens'] for row in result['roles']] == [9, 6, 8]
@@ -158,7 +159,8 @@ def test_missing_sizing_and_changed_whole_approval_refuse_instead_of_free_plan()
         del raw['wave_accounting'][field]
         with pytest.raises(ValueError):
             plan(raw)
-    for value in [None, {}, [], 'not-sized']:
+    absent_values: list[Any] = [None, {}, [], 'not-sized']
+    for value in absent_values:
         assert schedule_budget.wave_refusal_reason(value, waves=1, total_seconds=100) is not None
 
 
@@ -199,7 +201,8 @@ def test_uncapped_measurement_does_not_install_a_token_stopper_and_capped_stays_
     assert observed_usage['status'] == 'COMPLETE' and observed_usage['tokens'] == 6000
     assert observed_usage['tokens'] > expected['input_tokens'] + expected['output_tokens']
     assert expected['mode'] == 'uncapped' and expected['token_enforcement'] == 'unavailable'
-    assert nhl_limits.require_for_execution(raw)['mode'] == 'uncapped'
+    mode = nhl_limits.require_for_execution(raw)
+    assert mode is not None and mode['mode'] == 'uncapped'
     raw['nhl_limits'] = {'version': 1, 'mode': 'capped', 'wall_seconds': 10, 'tokens': 1,
                          'sizing_report_digest': raw['wave_accounting']['sizing_report_digest']}
     assert planning.report(plan(raw))['mode'] == 'capped'
@@ -312,6 +315,11 @@ def test_missing_extra_duplicate_and_deep_json_do_not_become_complete() -> None:
 
 
 def test_no_samples_empty_population_counter_overflow_and_missing_completion_keep_unknown() -> None:
+    zero = fixture('complete')
+    for role in zero['roles']:
+        for turn in role['turns']:
+            turn['samples'] = [0]
+    assert observed(zero)['tokens'] == 0 and observed(zero)['known_roles'] == 3
     data = fixture('complete')
     data['roles'] = []
     result = observed(data)
@@ -329,7 +337,8 @@ def test_no_samples_empty_population_counter_overflow_and_missing_completion_kee
 
 
 def test_context_turn_boundary_and_distinct_session_population() -> None:
-    for value in [None, False, [], {}, '', 'initial', 'AB' * 16, 'ab' * 15]:
+    bad_turn_values: list[Any] = [None, False, [], {}, '', 'initial', 'AB' * 16, 'ab' * 15]
+    for value in bad_turn_values:
         raw = fixture('context')
         raw['roles'][0]['turns'][1] = value
         with pytest.raises(ValueError):
@@ -350,6 +359,42 @@ def test_sizing_source_and_all_cost_entry_argument_types_are_bound() -> None:
     for key in ['trials', 'waves_per_trial', 'judge_tiers_enabled', 'judge_input_tokens', 'judge_output_tokens',
                 'price', 'judge_price']:
         for value in [False, 1.5, [], {}, 'unknown']:
-            kwargs = {'trials': 1, 'waves_per_trial': 1, 'price': price, key: value}
+            kwargs: dict[str, Any] = {'trials': 1, 'waves_per_trial': 1, 'price': price, key: value}
             with pytest.raises(ValueError):
                 cost.estimate_wave(plan(), **kwargs)
+
+
+def test_each_owned_nested_object_refuses_missing_and_extra_members() -> None:
+    def objects(value: Any, path: list[Any]) -> list[tuple[list[Any], dict[str, Any]]]:
+        found = [(path, value)] if type(value) is dict else []
+        if type(value) is dict:
+            for key, child in value.items():
+                found.extend(objects(child, [*path, key]))
+        elif type(value) is list and value:
+            found.extend(objects(value[0], [*path, 0]))
+        return found
+
+    reference = asdict(usage.reference(encoded(fixture('complete')), context()))
+    for kind, original in [('context', fixture('context')), ('reference', reference),
+                           ('usage', fixture('complete')), ('plan', fixture('plan')['wave_accounting']),
+                           ('limits', fixture('plan')['nhl_limits'])]:
+        for path, obj in objects(original, []):
+            for field in [*obj, 'unexpected']:
+                changed = copy.deepcopy(obj)
+                if field == 'unexpected':
+                    changed[field] = None
+                else:
+                    del changed[field]
+                value = change(copy.deepcopy(original), path, changed)
+                if kind == 'usage':
+                    assert observed(value)['status'] == 'UNKNOWN'
+                else:
+                    with pytest.raises(ValueError):
+                        if kind == 'context':
+                            usage.parse_context(value)
+                        elif kind == 'reference':
+                            usage.parse_reference(value)
+                        else:
+                            raw = fixture('plan')
+                            raw['wave_accounting' if kind == 'plan' else 'nhl_limits'] = value
+                            plan(raw)

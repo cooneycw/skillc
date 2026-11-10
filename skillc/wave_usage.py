@@ -64,7 +64,10 @@ def _hash(raw: bytes) -> str:
 
 
 def _turns(value: object) -> tuple[str, ...]:
-    if type(value) not in (tuple, list) or not 1 <= len(value) <= 65:
+    if type(value) not in (tuple, list):
+        raise UsageRefused('complete bounded turn population required')
+    assert isinstance(value, (tuple, list))
+    if not 1 <= len(value) <= 65:
         raise UsageRefused('complete bounded turn population required')
     if value[0] != 'initial':
         raise UsageRefused('initial turn identity required')
@@ -129,8 +132,8 @@ def parse_context(value: object) -> Context:
     if type(roles) not in (tuple, list) or not 1 <= len(roles) <= 64:
         raise UsageRefused('bounded accounting role population required')
     bindings = []
-    for value in roles:
-        role = _object(value, {'role', 'session_id', 'turns'})
+    for entry in roles:
+        role = _object(entry, {'role', 'session_id', 'turns'})
         bindings.append(RoleBinding(role['role'], role['session_id'], _turns(role['turns'])))
     return Context(**{**row, 'roles': tuple(bindings)})
 
@@ -187,8 +190,8 @@ def _role_usage(value: object, binding: RoleBinding) -> dict[str, Any]:
     durations = []
     previous = 0.0
     first = None
-    for turn_id, value in zip(binding.turns, turns, strict=True):
-        turn = _object(value, {'turn_id', 'started_at', 'ended_at', 'samples'})
+    for turn_id, entry in zip(binding.turns, turns, strict=True):
+        turn = _object(entry, {'turn_id', 'started_at', 'ended_at', 'samples'})
         if turn['turn_id'] != turn_id:
             raise UsageRefused('accounting turn identity differs')
         start, end = _number(turn['started_at']), _number(turn['ended_at'])
@@ -225,9 +228,9 @@ def _project(data: object, context: Context) -> dict[str, Any]:
         obj = _object(role, {'role', 'session_id', 'turns'})
         names.append(wake._role(obj['role']))
     population_complete = names == [role.role for role in context.roles]
-    records = []
+    records: list[dict[str, Any]] = []
     for binding in context.roles:
-        item = {'role': binding.role, 'session_id': binding.session_id, 'status': 'UNKNOWN',
+        item: dict[str, Any] = {'role': binding.role, 'session_id': binding.session_id, 'status': 'UNKNOWN',
                 'tokens': None, 'active_seconds': None, 'session_elapsed': None, 'last_ended_at': None,
                 'turns': None}
         if names.count(binding.role) == 1:
