@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "sizing_report_digest": "sha256:0303030303030303030303030303030303030303030303030303030303030303",
+  "concurrency": "all-roles-simultaneous",
+  "roles": [
+    {
+      "role": "orchestrator",
+      "cpu_millicores": 1000,
+      "memory_bytes": 1024
+    },
+    {
+      "role": "worker-a",
+      "cpu_millicores": 1000,
+      "memory_bytes": 1024
+    },
+    {
+      "role": "worker-b",
+      "cpu_millicores": 1000,
+      "memory_bytes": 1024
+    }
+  ],
+  "auxiliaries": [
+    {
+      "name": "controller",
+      "cpu_millicores": 400,
+      "memory_bytes": 200,
+      "multiplicity": 1
+    },
+    {
+      "name": "fixture",
+      "cpu_millicores": 100,
+      "memory_bytes": 100,
+      "multiplicity": 1
+    },
+    {
+      "name": "role-proxy",
+      "cpu_millicores": 20,
+      "memory_bytes": 20,
+      "multiplicity": 3
+    }
+  ],
+  "reservations": [
+    {
+      "name": "other-work",
+      "cpu_millicores": 200,
+      "memory_bytes": 512,
+      "multiplicity": 1
+    }
+  ],
+  "max_age_seconds": 30,
+  "max_collection_seconds": 5
+}

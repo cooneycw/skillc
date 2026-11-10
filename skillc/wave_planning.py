@@ -60,10 +60,16 @@ def _validate(declaration: object) -> dict[str, Any]:
         raise PlanningRefused('critical path cannot cover a role allowance')
     overhead = sum(_number(raw[key]) for key in ('setup_seconds', 'capture_seconds', 'cleanup_seconds'))
     wave_seconds = _number(path + overhead, positive=True)
-    return {'mode': limits['mode'], 'declared_limits': limits, 'roles': planned, 'wave_seconds': wave_seconds,
+    result = {'mode': limits['mode'], 'declared_limits': limits, 'roles': planned, 'wave_seconds': wave_seconds,
             'input_tokens': _integer(sum(role['input_tokens'] for role in planned), 1),
             'output_tokens': _integer(sum(role['output_tokens'] for role in planned), 1),
             'sizing_report_digest': raw['sizing_report_digest']}
+    if 'wave_resources' in declaration:
+        from .wave_resources import parse
+
+        result['wave_resources'] = parse(declaration['wave_resources'],
+            expected_roles=tuple(role['role'] for role in planned), expected_sizing_digest=raw['sizing_report_digest'])
+    return result
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,1 @@
+- Add declaration-bound simultaneous three-role CPU/memory demands and pure owner-fact capacity checks, with explicit auxiliary/reservation accounting and no host collection or admission authority.
