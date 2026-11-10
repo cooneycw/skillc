@@ -1,0 +1,7 @@
+[
+  {"id":"zero","statuses":["PASS"],"grading_basis":"graded only via planted cases (#634)","grading_status":"NOT_GRADED","source_coverage":"COMPLETE","counts":[1,0,0],"planted_cases_required":true},
+  {"id":"nonzero","statuses":["PASS","DISCREPANCY"],"grading_basis":"graded by real discrepancies","grading_status":"NOT_GRADED","source_coverage":"COMPLETE","counts":[1,1,0],"planted_cases_required":false},
+  {"id":"all-unavailable","statuses":["UNAVAILABLE","UNAVAILABLE"],"grading_basis":"UNKNOWN","grading_status":"NOT_GRADED","source_coverage":"UNAVAILABLE","counts":[0,0,2],"planted_cases_required":true},
+  {"id":"mixed-zero","statuses":["PASS","UNAVAILABLE"],"grading_basis":"graded only via planted cases (#634)","grading_status":"NOT_GRADED","source_coverage":"PARTIAL","counts":[1,0,1],"planted_cases_required":true},
+  {"id":"mixed-nonzero","statuses":["DISCREPANCY","UNAVAILABLE"],"grading_basis":"graded by real discrepancies","grading_status":"NOT_GRADED","source_coverage":"PARTIAL","counts":[0,1,1],"planted_cases_required":false}
+]
