@@ -81,12 +81,13 @@ def _turns(value: object) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class RoleBinding:
     role: str
-    session_id: str
+    session_id: str | None
     turns: tuple[str, ...]
 
     def __post_init__(self) -> None:
         wake._role(self.role)
-        wake._session(self.session_id)
+        if self.session_id is not None:
+            wake._session(self.session_id)
         if type(self.turns) is not tuple:
             raise UsageRefused('immutable turn population required')
         _turns(self.turns)
@@ -118,7 +119,8 @@ class Context:
         wake._roles(tuple(role.role for role in self.roles))
         for role in self.roles:
             RoleBinding(role.role, role.session_id, role.turns)
-        if len({role.session_id for role in self.roles}) != len(self.roles):
+        observed = [role.session_id for role in self.roles if role.session_id is not None]
+        if len(set(observed)) != len(observed):
             raise UsageRefused('distinct accounting sessions required')
 
     @property
@@ -180,6 +182,8 @@ def _last_counter(samples: list[int]) -> int:
 
 
 def _role_usage(value: object, binding: RoleBinding) -> dict[str, Any]:
+    if binding.session_id is None:
+        raise UsageRefused('accounting session unobserved')
     row = _object(value, {'role', 'session_id', 'turns'})
     if row['role'] != binding.role or row['session_id'] != binding.session_id:
         raise UsageRefused('accounting session binding differs')
@@ -210,7 +214,13 @@ def _role_usage(value: object, binding: RoleBinding) -> dict[str, Any]:
     return {'role': binding.role, 'session_id': binding.session_id, 'status': 'COMPLETE',
             'tokens': _last_counter(samples), 'active_seconds': _number(sum(durations)),
             'session_elapsed': _number(previous - first), 'last_ended_at': previous,
-            'turns': len(turns)}
+            'turns': len(turns), 'planned_turns': len(binding.turns)}
+
+
+def _unknown_role(binding: RoleBinding) -> dict[str, Any]:
+    return {'role': binding.role, 'session_id': binding.session_id, 'status': 'UNKNOWN',
+            'tokens': None, 'active_seconds': None, 'session_elapsed': None, 'last_ended_at': None,
+            'turns': None, 'planned_turns': len(binding.turns)}
 
 
 def _project(data: object, context: Context) -> dict[str, Any]:
@@ -230,9 +240,7 @@ def _project(data: object, context: Context) -> dict[str, Any]:
     population_complete = names == [role.role for role in context.roles]
     records: list[dict[str, Any]] = []
     for binding in context.roles:
-        item: dict[str, Any] = {'role': binding.role, 'session_id': binding.session_id, 'status': 'UNKNOWN',
-                'tokens': None, 'active_seconds': None, 'session_elapsed': None, 'last_ended_at': None,
-                'turns': None}
+        item = _unknown_role(binding)
         if names.count(binding.role) == 1:
             try:
                 item = _role_usage(roles[names.index(binding.role)], binding)
@@ -261,11 +269,15 @@ def _project(data: object, context: Context) -> dict[str, Any]:
 
 def evaluate(raw: object, receipt: object, expected: object) -> dict[str, Any]:
     """Pure retained-byte reader; never choose the expected hash from a report."""
+    known_context = None
     try:
-        if type(raw) is not bytes or type(receipt) is not Reference or type(expected) is not Context:
+        if type(expected) is not Context:
+            raise UsageRefused('independently held accounting binding required')
+        expected = parse_context(asdict(expected))
+        known_context = expected
+        if type(raw) is not bytes or type(receipt) is not Reference:
             raise UsageRefused('independently held accounting binding required')
         receipt = parse_reference(asdict(receipt))
-        expected = parse_context(asdict(expected))
         if (not 0 < len(raw) <= MAX_BYTES or len(raw) != receipt.size or _hash(raw) != receipt.digest
                 or receipt.context_digest != expected.digest):
             raise UsageRefused('accounting byte custody differs')
@@ -273,5 +285,8 @@ def evaluate(raw: object, receipt: object, expected: object) -> dict[str, Any]:
     except (ValueError, RecursionError):
         return {'version': 1, 'status': 'UNKNOWN', 'tokens_complete': False, 'tokens': None,
                 'known_tokens_subtotal': None, 'known_roles': 0,
+                'wave_id': known_context.wave_id if known_context is not None else None,
+                'planned_roles': len(known_context.roles) if known_context is not None else None,
+                'roles': [_unknown_role(role) for role in known_context.roles] if known_context is not None else [],
                 'enforcement_authority': False, 'admission_authority': False,
                 'reason': 'accounting capture unavailable or unverifiable'}

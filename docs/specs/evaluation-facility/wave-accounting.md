@@ -9,7 +9,10 @@ actual subscription concurrency and final study sizing remain separate work.
 
 `wave_usage.Context` binds the wave, whole declaration digest, original deadline
 digest/duration, common clock domain, pinned client version and exact ordered
-role/session/turn population. Each role has one `initial` turn followed by its
+role/session/turn population. A planned nonstart has a null expected session;
+it stays in that population, and no raw counter claim can make its usage complete.
+Distinctness applies to observed session IDs; several nonstarts may be null.
+Each role has one planned `initial` turn followed by its
 expected controller poke nonces. The caller obtains those identities from its
 independently retained launch/wake evidence, not the usage document. A poke
 attempt is not proof of a model turn or any token consumption. Missing or
@@ -41,6 +44,12 @@ known/planned role counts retains partial information. No observed roles means
 subtotal null, not an invented zero. Population order, duplicate roles/turns,
 changed sessions, unknown fields, malformed/duplicate/deep JSON and custody loss
 cannot yield complete coverage.
+
+Even when bytes, receipt or their hash are unavailable, a valid independently
+held context supplies the full planned denominator, role/session rows and each
+role's planned turn count. Their measured counters, times and observed turn
+counts stay null. An invalid context cannot supply trusted metadata. No placeholder
+session UUID or measured zero is invented for a nonstart.
 
 Role active seconds sum all its turn intervals, including resumes. Session
 elapsed spans its first start through last end. Whole-wave wall seconds comes

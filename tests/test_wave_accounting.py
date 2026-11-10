@@ -52,7 +52,7 @@ def change(value: Any, path: list[Any], replacement: object) -> Any:
 
 
 def test_complete_three_role_resumed_capture_uses_final_counters_and_common_wall() -> None:
-    assert len(SHAPES) == 58 and sum(len(row['values']) for row in SHAPES) == 365
+    assert len(SHAPES) == 58 and sum(len(row['values']) for row in SHAPES) == 364
     result = observed(fixture('complete'))
     assert result['status'] == 'COMPLETE' and result['tokens_complete']
     assert [row['tokens'] for row in result['roles']] == [9, 6, 8]
@@ -398,3 +398,68 @@ def test_each_owned_nested_object_refuses_missing_and_extra_members() -> None:
                             raw = fixture('plan')
                             raw['wave_accounting' if kind == 'plan' else 'nhl_limits'] = value
                             plan(raw)
+
+
+@pytest.mark.parametrize('fault', ['raw-none', 'hash', 'size', 'receipt-type', 'empty', 'context-digest'])
+def test_existing_reader_preserves_independent_planned_population_on_custody_loss(fault: str) -> None:
+    raw: Any = encoded(fixture('complete'))
+    expected = context()
+    receipt: Any = usage.reference(raw, expected)
+    if fault == 'raw-none':
+        raw = None
+    elif fault == 'hash':
+        receipt = replace(receipt, digest='sha256:' + 'ff' * 32)
+    elif fault == 'size':
+        receipt = replace(receipt, size=receipt.size + 1)
+    elif fault == 'receipt-type':
+        receipt = asdict(receipt)
+    elif fault == 'empty':
+        raw = b''
+    else:
+        receipt = replace(receipt, context_digest='sha256:' + 'ff' * 32)
+    result = usage.evaluate(raw, receipt, expected)
+    assert result['status'] == 'UNKNOWN'
+    assert result.get('planned_roles') == 3
+    assert [(role['role'], role['session_id']) for role in result['roles']] == [
+        (role.role, role.session_id) for role in expected.roles]
+    assert all(role['tokens'] is None and role['turns'] is None for role in result['roles'])
+    assert [role['planned_turns'] for role in result['roles']] == [2, 2, 2]
+    assert result['known_tokens_subtotal'] is None and result['known_roles'] == 0
+
+
+@pytest.mark.parametrize('unstarted', [(2,), (1, 2), (0, 1, 2)], ids=['one', 'two', 'all'])
+def test_existing_context_keeps_planned_nonstarts_with_null_session(unstarted: tuple[int, ...]) -> None:
+    raw_context = fixture('context')
+    data = fixture('complete')
+    for index in unstarted:
+        raw_context['roles'][index]['session_id'] = None
+        raw_context['roles'][index]['turns'] = ['initial']
+        data['roles'][index]['session_id'] = None
+        data['roles'][index]['turns'] = []
+    try:
+        expected = usage.parse_context(raw_context)
+    except ValueError:
+        pytest.fail('planned nonstart with unobserved session was refused')
+    raw = encoded(data)
+    result = usage.evaluate(raw, usage.reference(raw, expected), expected)
+    assert result['status'] == 'UNKNOWN' and result['planned_roles'] == 3
+    assert result['known_roles'] == 3 - len(unstarted) and result['tokens'] is None
+    assert len(result['roles']) == 3
+    for index in unstarted:
+        assert result['roles'][index]['session_id'] is None and result['roles'][index]['tokens'] is None
+        assert result['roles'][index]['planned_turns'] == 1 and result['roles'][index]['turns'] is None
+
+
+def test_null_expected_session_cannot_be_promoted_by_claimed_usage() -> None:
+    raw_context = fixture('context')
+    raw_context['roles'][2]['session_id'] = None
+    try:
+        expected = usage.parse_context(raw_context)
+    except ValueError:
+        pytest.fail('planned nonstart with unobserved session was refused')
+    data = fixture('complete')
+    data['roles'][2]['session_id'] = None
+    raw = encoded(data)
+    result = usage.evaluate(raw, usage.reference(raw, expected), expected)
+    assert result['tokens'] is None and result['known_tokens_subtotal'] == 15
+    assert result['roles'][2]['tokens'] is None and result['known_roles'] == 2
