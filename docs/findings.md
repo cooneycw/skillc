@@ -152,3 +152,5 @@ when it catches the planted defect.
 `pip install`, a different Python, a different OS) and does not replace
 `skillc selftest` against the real `controls/` tree in a repo checkout, which
 CI still runs on every push.
+
+- 2026-11-13: skillc merges to `main` go through the shared Kyle `main-merge` lock (the coordination service; kyle #2130), not a host lock file.
