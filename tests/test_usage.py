@@ -808,3 +808,56 @@ def test_a_bare_repository_still_records_nothing_silently(tmp_path: Path) -> Non
     _git(tmp_path, "init", "-q", "--bare", str(bare))
     assert usage.destination(bare) is None
     assert _hook(_skill_call(bare), tmp_path / "home") == ""
+
+
+# --------- a semantic usage rule needs a READABLE good control (#723)
+#
+# The fields, privacy and pairing rules read only envelope-accepted lines. A
+# control whose every line has an unreadable envelope gives them nothing to
+# read, so a quiet rule there is no evidence it accepts good records.
+
+SEMANTIC_USAGE_RULES = sorted(r.id for r in checks.USAGE_RULES if not r.parser)
+
+
+def test_the_semantic_usage_rule_selector_is_exactly_the_three_line_rules() -> None:
+    """#723 keys the stricter population on `not rule.parser`. A rule mis-flagged
+    later must turn this red, not silently leave (or join) that population."""
+    assert SEMANTIC_USAGE_RULES == ["skill-usage-fields", "skill-usage-pairing", "skill-usage-privacy"]
+    assert [r.id for r in checks.USAGE_RULES if r.parser] == ["skill-usage-envelope"]
+
+
+def _unreadable_envelopes(directory: Path) -> None:
+    """Rewrite every line of every log in `directory` to envelope version 2."""
+    for log in directory.glob("*.jsonl"):
+        lines = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        log.write_text("".join(json.dumps({**line, "version": 2}) + "\n" for line in lines), encoding="utf-8")
+
+
+@pytest.mark.parametrize("rule_id", SEMANTIC_USAGE_RULES)
+def test_NEGATIVE_CONTROL_selftest_refuses_a_good_usage_control_with_no_readable_envelope(
+    rule_id: str, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Sabotage: a good control the rule cannot read must stop certification."""
+    copy = tmp_path / "controls"
+    shutil.copytree(CONTROLS, copy)
+    _unreadable_envelopes(copy / rule_id / "good")
+    assert cli.main(["selftest", "--controls", str(copy)]) != 0
+    assert "envelope-readable" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("rule_id", SEMANTIC_USAGE_RULES)
+def test_selftest_refuses_a_bad_usage_control_with_no_readable_envelope(rule_id: str, tmp_path: Path) -> None:
+    """The bad side refused before #723 (BLIND) and still does (now UNPARSED)."""
+    copy = tmp_path / "controls"
+    shutil.copytree(CONTROLS, copy)
+    _unreadable_envelopes(copy / rule_id / "bad")
+    assert cli.main(["selftest", "--controls", str(copy)]) != 0
+
+
+def test_the_committed_usage_controls_still_certify(capsys: pytest.CaptureFixture[str]) -> None:
+    """The positive half: the stricter population must not refuse the real controls,
+    including the envelope rule's own one-readable-line good control."""
+    assert cli.main(["selftest", "--controls", str(CONTROLS)]) == 0
+    out = capsys.readouterr().out
+    for rule in checks.USAGE_RULES:
+        assert rule.id in out
