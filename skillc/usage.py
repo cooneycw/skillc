@@ -363,6 +363,23 @@ def _git(cwd: Path, *args: str) -> str | None:
     return out if done.returncode == 0 and out else None
 
 
+#: Bound on the `git check-ignore` call (#722). An answer git could not give in
+#: time is treated as "not ignored" - the writer refuses rather than guesses.
+CHECK_IGNORE_TIMEOUT = 5
+
+
+def _git_status(cwd: Path, *args: str, timeout: float = CHECK_IGNORE_TIMEOUT) -> int | None:
+    """git's EXIT CODE for `args` in `cwd`, or None when git could not answer
+    (missing, timed out, killed). `_git` hides exit codes, and `check-ignore`
+    answers through its exit code alone."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(cwd), *args], capture_output=True, timeout=timeout, check=False,
+        ).returncode
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def destination(cwd: Path) -> Path | None:
     """`<main checkout>/.skillc/usage.jsonl`, resolved through `git-common-dir`
     so a run from a linked worktree lands in the SAME file as one from the main
@@ -540,7 +557,7 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     try:
         for name in (".gitignore", path.name):
             _check_entry(state_fd, name)
-        ensure_ignored(state_fd)
+        ensure_ignored(state_fd, path.parent.parent)
         fd = _open_file(state_fd, path.name, os.O_RDWR | os.O_CREAT | os.O_APPEND)
     finally:
         os.close(state_fd)
@@ -569,13 +586,37 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     return new
 
 
-def ensure_ignored(state_fd: int) -> None:
-    """The log is ignored by default, even when `.skillc/` already existed
-    without an ignore file (counter-model review, pass 2): create
-    `.skillc/.gitignore` (`*`) when it is missing, and add `usage.jsonl` to an
-    existing one that ignores neither everything nor the log. Opened relative
-    to the state descriptor and never through a symlink (#721): O_EXCL on the
-    create does not follow a planted link, and the fallback open refuses one."""
+class LogNotIgnored(ValueError):
+    """Git would not ignore the usage log, or could not be asked (#722). The
+    log holds session ids and skill history the owner decided stay local
+    (#718, decision 2), so it is not written; the callers' fail-open paths
+    print the refusal."""
+
+
+def _log_ignored(checkout: Path) -> bool:
+    """Ask GIT whether `.skillc/usage.jsonl` is ignored - never a parse of the
+    rules, because git applies them in order and a later `!usage.jsonl`
+    cancels an earlier `*` (#722). Exit 0 is ignored, 1 is not; anything else
+    (an error, a timeout, no git) could not be answered and raises."""
+    rc = _git_status(checkout, "check-ignore", "-q", "--", f"{STATE_DIR}/{LOG_NAME}")
+    if rc == 0:
+        return True
+    if rc == 1:
+        return False
+    raise LogNotIgnored(
+        f"git check-ignore could not say whether {STATE_DIR}/{LOG_NAME} is ignored "
+        f"({'no answer' if rc is None else f'exit {rc}'}); usage log not written"
+    )
+
+
+def ensure_ignored(state_fd: int, checkout: Path) -> None:
+    """The log is written only once GIT says it is ignored (#722), on every
+    path - a freshly created `.gitignore` is asked about too, so no branch
+    trusts its own write. Create `.skillc/.gitignore` (`*`) when it is missing;
+    when git says the log is not ignored, append a final `/usage.jsonl` (the
+    last matching rule wins) and ask again. Still not ignored - a TRACKED log,
+    which no ignore rule can hide - raises `LogNotIgnored`. Opened relative to
+    the state descriptor and never through a symlink (#721)."""
     try:
         fd = os.open(".gitignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o644, dir_fd=state_fd)
     except FileExistsError:
@@ -583,15 +624,18 @@ def ensure_ignored(state_fd: int) -> None:
     else:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write("*\n")
+    if _log_ignored(checkout):
         return
-    # Read-only first: an ignore file that already ignores the log needs no
-    # write permission (counter-model review). Append only when a line is owed.
+    # Read-only first: only the append needs write permission (counter-model review, #721).
     with os.fdopen(_open_file(state_fd, ".gitignore", os.O_RDONLY | os.O_NONBLOCK), "r", encoding="utf-8") as handle:
         existing = handle.read()
-    lines = {line.strip() for line in existing.splitlines()}
-    if not lines & {"*", LOG_NAME, f"/{LOG_NAME}"}:
-        with os.fdopen(_open_file(state_fd, ".gitignore", os.O_WRONLY | os.O_APPEND), "w", encoding="utf-8") as handle:
-            handle.write(("" if not existing or existing.endswith("\n") else "\n") + f"{LOG_NAME}\n")
+    with os.fdopen(_open_file(state_fd, ".gitignore", os.O_WRONLY | os.O_APPEND), "w", encoding="utf-8") as handle:
+        handle.write(("" if not existing or existing.endswith("\n") else "\n") + f"/{LOG_NAME}\n")
+    if not _log_ignored(checkout):
+        raise LogNotIgnored(
+            f"{STATE_DIR}/{LOG_NAME} is not ignored by git even after adding /{LOG_NAME} "
+            "(is it tracked?); usage log not written"
+        )
 
 
 def _open_starts(log: UsageLog, session: str, skill: str | None = None) -> list[Entry]:

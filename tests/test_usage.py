@@ -581,3 +581,87 @@ def test_a_read_only_ignore_file_that_already_ignores_the_log_still_records(repo
         assert len(_lines(repo)) == 1 and ignore.read_text(encoding="utf-8") == "*\n"
     finally:
         ignore.chmod(0o644)
+
+
+# ------------------------- git decides whether the log is ignored (#722)
+#
+# The writer used to look for a `*` / `usage.jsonl` line in `.skillc/.gitignore`.
+# Git applies those rules in order, so a later `!usage.jsonl` cancels them and
+# the private log becomes committable while the guard reads "ignored". Git is
+# the judge here, never a parse of the rules.
+
+
+def _untracked_log(repo: Path) -> bool:
+    return ".skillc/usage.jsonl" in _git(repo, "status", "--porcelain", "--untracked-files=all")
+
+
+@needs_git
+@pytest.mark.parametrize("ignore", ["*\n!usage.jsonl\n", "usage.jsonl\n!usage.jsonl\n"])
+def test_NEGATIVE_CONTROL_a_later_negation_does_not_leave_the_log_committable(
+    repo: Path, tmp_path: Path, ignore: str,
+) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / ".gitignore").write_text(ignore, encoding="utf-8")
+    _hook(_skill_call(repo), tmp_path / "home")
+    assert len(_lines(repo)) == 1, "the hook should still record once git ignores the log"
+    assert not _untracked_log(repo), f"git would commit the usage log under {ignore!r}"
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_tracked_log_git_cannot_ignore_is_never_appended_to(repo: Path, tmp_path: Path) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / ".gitignore").write_text("*\n", encoding="utf-8")
+    log = state / "usage.jsonl"
+    log.write_text(json.dumps(_rec(session="s-0")) + "\n", encoding="utf-8")
+    _git(repo, "add", "-f", ".skillc/usage.jsonl")
+    _git(repo, "commit", "-q", "-m", "a tracked usage log")
+    before = log.read_bytes()
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert log.read_bytes() == before, "appended to a log git tracks"
+    assert "nothing recorded" in err and "not ignored by git" in err
+
+
+def _break_check_ignore(monkeypatch: pytest.MonkeyPatch, exc: BaseException) -> None:
+    """Make ONLY `git check-ignore` unanswerable; every other git call is real."""
+    real = subprocess.run
+
+    def run(argv: list[str], *args: object, **kwargs: object) -> object:
+        if "check-ignore" in argv:
+            raise exc
+        return real(argv, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(usage.subprocess, "run", run)
+
+
+@needs_git
+@pytest.mark.parametrize("fresh", [True, False], ids=["fresh-state-dir", "existing-ignore-file"])
+@pytest.mark.parametrize("exc", [subprocess.TimeoutExpired(["git"], 5), FileNotFoundError("git")],
+                         ids=["timeout", "no-git"])
+def test_NEGATIVE_CONTROL_an_unanswerable_ignore_check_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh: bool, exc: BaseException,
+) -> None:
+    """Every path asks git, including the freshly-created `.gitignore` one, and an
+    answer git could not give refuses rather than trusting the writer's own rule."""
+    if not fresh:
+        (repo / ".skillc").mkdir()
+        (repo / ".skillc" / ".gitignore").write_text("*\n", encoding="utf-8")
+    _break_check_ignore(monkeypatch, exc)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert _lines(repo) == [] and "nothing recorded" in err and "check-ignore" in err
+
+
+@needs_git
+def test_usage_end_refuses_a_log_git_cannot_ignore(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _hook(_skill_call(repo), tmp_path / "home")
+    _git(repo, "add", "-f", ".skillc/usage.jsonl")
+    _git(repo, "commit", "-q", "-m", "now tracked")
+    before = (repo / ".skillc" / "usage.jsonl").read_bytes()
+    monkeypatch.chdir(repo)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", "approval-gate", "s-1", repo, out) == 0
+    assert "SKILLC_USAGE: not recorded" in out.getvalue() and "not ignored by git" in out.getvalue()
+    assert (repo / ".skillc" / "usage.jsonl").read_bytes() == before

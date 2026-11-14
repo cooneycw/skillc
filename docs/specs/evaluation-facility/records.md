@@ -980,7 +980,9 @@ checkout's file (CPP #471's lesson). Creating `.skillc/` also writes
 `.skillc/.gitignore` (`*`): ignored by default, without touching the
 repository's own ignore file. A symlinked `.skillc/`, `.skillc/.gitignore`
 or log is refused and nothing is written (#721): every open is relative to a
-`.skillc/` descriptor opened with `O_NOFOLLOW`. The hook never reads the transcript, writes
+`.skillc/` descriptor opened with `O_NOFOLLOW`. Whether the log is ignored is asked of
+git (`git check-ignore`), never parsed from the rules: a log git would not
+ignore, or a check git cannot answer, is not written (#722). The hook never reads the transcript, writes
 nothing its own rules would refuse, and always exits 0. A typed `/<name>` is
 recorded only when `name` resolves by exact lookup to an installed skill or
 command (`~/.claude/` first, then the project's `.claude/`); `/clear` or
