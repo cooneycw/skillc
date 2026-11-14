@@ -3351,7 +3351,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--exclude", action="append", metavar="GLOB", help="drop matching subjects")
     p_inspect.add_argument("--map", action="append", metavar="FROM=TO",
                            help="an installed-path prefix and where it lives in the collection, "
-                                "e.g. '~/.claude/scripts/=scripts/'")
+                                "e.g. '~/.agent/bin/=bin/' (see docs/specs/inspect.md)")
     p_inspect.add_argument("--own-prefix", action="append", metavar="PREFIX",
                            help="a path prefix the text uses for its own files "
                                 "(default: scripts/, references/, assets/)")
