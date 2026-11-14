@@ -190,6 +190,26 @@ execute repository-controlled code on the host.
   `echo "..."` string, and a script named mid-sentence in a prose code span
   (`(re-run scripts/x.sh --write later)`) - their flags are not examined.
 
+**Known false negatives until #741 lands.** A CLEAN `dangling-reference`
+verdict does NOT cover these five shapes. Each one is missed today, and each
+names its tracking item:
+- **a quoted separator** - `scripts/helper.sh ";" --absent`: shlex returns `;`
+  for a quoted and an unquoted separator alike, so the command is reset and
+  `--absent` is never examined;
+- **a path beside a substitution in one quoted argument** -
+  `echo "$(pwd) scripts/gone.sh"`: the whole token is skipped as a
+  substitution, so the missing `scripts/gone.sh` is not reported;
+- **wrapper state across a substitution with a separator inside** -
+  `sudo -u $(id -un; echo root) -g root scripts/helper.sh --absent`: the inner
+  `;` clears the outer `sudo` prefix, `root` is then taken as the command and
+  `--absent` is skipped;
+- **`env -S` / `--split-string`** - `env -S "bash scripts/helper.sh" --absent`:
+  the operand is command text but is consumed as an option value, so neither
+  the flag nor an unowned flag is counted;
+- **(copied-passage) a rare anchor starving a repetitive match** - A = 70 x
+  `same` + a 20-word tail, B = 100 x `same` + a separator + 31 x `same` + the
+  same tail: 51 words are reported, unlabelled, where 70 are shared.
+
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,
 because it cannot tell the two apart. The real-collection measurement shows the
