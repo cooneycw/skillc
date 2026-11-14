@@ -227,6 +227,8 @@ def conditional_exemptions() -> frozenset[str]:
         agent reads (cpp-codex's flow-auto `reference.md`).
       - `/home/u`: CPP's fixed developer example; `/home/proof`: the disposable
         flow-auto cold-profile identity (#581). Neither is a blanket prefix.
+      - the ENCODED twin of each of those three homes (`-home-user`, #729),
+        which CPP's redacted counter-model receipts carry.
 
     Exact match only: the operator's own uid, a longer number that starts
     with 10001, and a longer home directory name all still fire. A scan run on a host that HAS such an
@@ -241,6 +243,12 @@ def conditional_exemptions() -> frozenset[str]:
     for name in ("user", "u", "proof"):
         if not _host_has_account(name):
             exempt.add(f"/home/{name}")
+            # #729: the ENCODED twin (`ENCODED_HOME_RE`, #470) under the same
+            # rule. CPP's receipt writer (CPP #1689) replaces the host account
+            # with `user` and records Claude's encoded transcript path,
+            # `-home-user-Projects/<session>.jsonl`; without this a correctly
+            # redacted receipt was refused. Exact match only, as above.
+            exempt.add(f"-home-{name}")
     return frozenset(exempt)
 
 #: `--denylist`, then this environment variable, then nothing (#63). Real host

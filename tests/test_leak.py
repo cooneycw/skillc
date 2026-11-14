@@ -606,6 +606,28 @@ def test_the_generic_example_home_path_is_exempt_and_nothing_longer() -> None:
     assert [k for _l, k, _d in leak.scan_text("see /home/username", frozenset())] == ["home-path"]
 
 
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+def test_the_ENCODED_twin_of_a_placeholder_home_is_exempt_and_nothing_longer(
+    name: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#729: CPP's receipt writer replaces the host account with the `user`
+    placeholder and records Claude's encoded transcript path,
+    `-home-user-Projects/<session>.jsonl`. The encoded twin of an exempt
+    placeholder is exempt under the same rule: exact match, no such host account."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda account: False)
+    assert list(leak.scan_text(f'"transcript": "-home-{name}-Projects/x.jsonl"', frozenset())) == []
+    for longer in (f"-home-{name}s-Projects/x", f"-home-{name}name"):
+        assert [k for _l, k, _d in leak.scan_text(longer, frozenset())] == ["encoded-home-path"], longer
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_a_host_with_an_account_named_user_keeps_its_ENCODED_home_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#729: the encoded exemption is conditional exactly as the slash form is."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: True)
+    assert [k for _l, k, _d in leak.scan_text("-home-user-Projects/x.jsonl", frozenset())] == ["encoded-home-path"]
+
+
 @pytest.fixture
 def _fresh_exemptions() -> object:
     leak.conditional_exemptions.cache_clear()
