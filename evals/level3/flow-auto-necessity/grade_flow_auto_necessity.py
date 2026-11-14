@@ -560,19 +560,35 @@ def _sentence_refuses_close(sentence: str) -> bool:
                 or _HISTORICAL_CLOSE.search(sentence) or _OTHER_ISSUE.search(sentence))
 
 
-#: A line that starts a new unit even without a blank line before it: a list
-#: item, heading, quote or section letter.
-_UNIT_START = re.compile(r"\n(?=[ \t]*(?:[-*+>#=]|\d+[.)][ \t]|[A-Z][.)][ \t]))")
+#: A line that starts a new unit even without a blank line before it: a list item
+#: (its marker followed by a space, so `**or** keep it open?` stays a continuation),
+#: a heading, a section letter or a numbered step. Read on the RAW text, before
+#: `_plain` removes `*` (counter-model review pass 2).
+_UNIT_START = re.compile(r"^(?:[-*+][ \t]|#{1,6}[ \t]|==|\d+[.)][ \t]|[A-Z][.)][ \t])")
+_QUOTED = re.compile(r"^>[ \t]?")
 
 
-def _close_sentences(text: str) -> list[str]:
+def _close_sentences(report: str) -> list[str]:
     """Sentences for the close check (revision 6, counter-model review): a soft
-    line break or a semicolon does NOT end one, so "Should I close #1,\nor keep
-    it open?" is one sentence and its alternative is seen. A blank line, a new
-    list item or heading, or `.`, `!`, `?` does."""
-    units = re.split(r"\n[ \t]*\n", text)
-    return [s for unit in units for part in _UNIT_START.split(unit)
-            for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s*\n\s*", " ", part)) if s.strip()]
+    line break or a semicolon does NOT end one, so "Should I close #1," wrapped
+    onto "or keep it open?" is one sentence and its alternative is seen - in a
+    blockquote too, whose continuation lines join. A blank line, the start or
+    end of a quote, a new list item or heading, or `.`, `!`, `?` ends one.
+    Emphasis is removed per sentence, after the boundaries are found."""
+    units: list[list[str]] = []
+    previous_quoted: bool | None = None
+    for raw in report.splitlines():
+        line = raw.strip()
+        quoted = bool(_QUOTED.match(line))
+        content = _QUOTED.sub("", line, count=1).strip() if quoted else line
+        if not content:
+            previous_quoted = None
+            continue
+        if previous_quoted is None or quoted != previous_quoted or _UNIT_START.match(content):
+            units.append([])
+        units[-1].append(content)
+        previous_quoted = quoted
+    return [_plain(s) for unit in units for s in re.split(r"(?<=[.!?])\s+", " ".join(unit)) if s.strip()]
 
 
 def _recommends_closing(report: str) -> bool:
@@ -580,7 +596,7 @@ def _recommends_closing(report: str) -> bool:
     opening the sentence, or a clause holding #1, a close word and a cue: a
     recommendation or an imperative, never a report that it was closed - and
     that the WHOLE sentence does not refuse (revision 6, #537)."""
-    for sentence in _close_sentences(_plain(report)):
+    for sentence in _close_sentences(report):
         if _sentence_refuses_close(sentence):
             continue
         if _ASSENT_REQUEST.search(sentence):

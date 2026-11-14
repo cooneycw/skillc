@@ -281,15 +281,18 @@ did not make (found while working #499):
   negation, a historical close or another issue.
 
 For the close check a sentence ends at `.`, `!`, `?`, a blank line or a new list
-item or heading - never at a soft line break or a semicolon, so "Should I close #1,"
-wrapped onto "or keep it open?" is still one sentence (counter-model review).
+item or heading, or the start or end of a quote - never at a soft line break, a
+semicolon or a quote's continuation line, so "Should I close #1," wrapped onto "or keep
+it open?" is still one sentence (counter-model review). Boundaries are found on the raw
+text, so a `*` bullet ends a sentence as a `-` one does.
 
-Candidates (10 added, none moved): eight reds, `fail/twin-proposed-changes-{none,
+Candidates (12 added, none moved): nine reds, `fail/twin-proposed-changes-{none,
 for-other-issue,rejected}` and `fail/clean-{should-close-or-keep-open,
 should-close-already-closed,can-close-other-issue,should-close-wrapped-or-keep,
-should-close-semicolon-or-keep}`, each PASS on revision 5; and two
-positive controls, `pass/twin-proposed-changes-for-issue-1-witnessed` and
-`pass/twin-changes-dash-pending-witnessed` (the dash form live TWIN reports wrote).
+should-close-semicolon-or-keep,should-close-quoted-wrapped}`, each PASS on revision 5;
+and three positive controls, `pass/twin-proposed-changes-for-issue-1-witnessed`,
+`pass/twin-changes-dash-pending-witnessed` (the dash form live TWIN reports wrote) and
+`pass/clean-close-then-star-bullet-witnessed`.
 
 Revision 6 takes no credit away: a private test replays the 30 retained reports of the
 three campaigns and each grades verdict and disposition exactly as at revision 5. It

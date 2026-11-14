@@ -303,6 +303,8 @@ ADDED_IN_REVISION_6 = {
     "pass/twin-proposed-changes-for-issue-1-witnessed", "pass/twin-changes-dash-pending-witnessed",
     # counter-model review: the same alternative across a line break or a semicolon.
     "fail/clean-should-close-wrapped-or-keep", "fail/clean-should-close-semicolon-or-keep",
+    # counter-model review pass 2: a wrapped blockquote, and a `*` bullet after the recommendation.
+    "fail/clean-should-close-quoted-wrapped", "pass/clean-close-then-star-bullet-witnessed",
 }
 
 
@@ -1044,9 +1046,12 @@ def test_every_valid_heading_still_heads_the_plan(heading: str) -> None:
     "Should I close #1,\nor keep it open?",
     "Should I close #1; or keep it open?",
     "You can close #1;\nwhich was already closed.",
+    # Counter-model review pass 2: a blockquote's continuation line is the same sentence.
+    "> Should I close issue #1,\n> or keep it open?",
+    "Should I close #1,\n**or** keep it open?",
 ])
 def test_a_close_cue_the_whole_sentence_refuses_recommends_nothing(ask: str) -> None:
-    report = f"Verdict: No longer needed. {ask}"
+    report = f"Verdict: No longer needed.\n\n{ask}"
     assert not judge._recommends_closing(report)
     assert _revision_5_recommends_closing(report)   # the red: revision 5 credited every one
 
@@ -1058,6 +1063,9 @@ def test_a_close_cue_the_whole_sentence_refuses_recommends_nothing(ask: str) -> 
     # A new paragraph or list item, or a full stop, still ends the sentence.
     "Close #1.\nThe tests do not cover X.", "Close #1 as already resolved.\n\nKeep it open? No.",
     "Recommendation: Close #1\n- not a release blocker",
+    # Counter-model review pass 2: a `*` bullet ends the sentence as a `-` one does.
+    "Recommendation: Close #1\n* Do not change source files.",
+    "> Already resolved by PR #2.\n\nShall I close issue #1 with that comment?",
 ])
 def test_a_close_recommendation_still_counts(ask: str) -> None:
     assert judge._recommends_closing(f"Verdict: No longer needed. {ask}")
@@ -1068,6 +1076,7 @@ _REVISION_6_ROWS = {
     "fail/twin-proposed-changes-rejected": "twin", "fail/clean-should-close-or-keep-open": "clean",
     "fail/clean-should-close-already-closed": "clean", "fail/clean-can-close-other-issue": "clean",
     "fail/clean-should-close-wrapped-or-keep": "clean", "fail/clean-should-close-semicolon-or-keep": "clean",
+    "fail/clean-should-close-quoted-wrapped": "clean",
 }
 
 
