@@ -25,6 +25,10 @@ specification rejects, and it proves its own rules can fail before reporting the
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
 - `skillc/records.py` - the evaluation-record contracts and bundle rules; the authoritative kind table is in the [records spec](docs/specs/evaluation-facility/records.md)
+- `skillc/usage.py` - `skill-usage` records (#719): the append-only per-repo usage log
+  (`<main checkout>/.skillc/usage.jsonl`), its four rules, the fail-open Claude Code hook that
+  writes it (`skillc usage hook`), `usage end` and `usage report`; see
+  [docs/skill-usage-hook.md](docs/skill-usage-hook.md) and the records spec's `skill-usage` section
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module

@@ -33,6 +33,7 @@ from . import (
     materialize,
     profile,
     records,
+    usage,
 )
 
 # `demo` is NOT imported here at module load (EF-11, #80's own no-Docker-
@@ -63,7 +64,10 @@ def _controls_root(explicit: str | None) -> Path:
 
 def _unknown_rule_message(
     only: str | None,
-    family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
+    family: (
+        tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...]
+        | tuple[checks.RecordRule | checks.BundleRule | checks.UsageRule, ...]
+    ),
 ) -> str | None:
     """The refusal message for an unknown `--rule`, or None when it is known.
 
@@ -81,7 +85,10 @@ def _unknown_rule_message(
 
 def _unknown_rule(
     only: str | None,
-    family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
+    family: (
+        tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...]
+        | tuple[checks.RecordRule | checks.BundleRule | checks.UsageRule, ...]
+    ),
 ) -> bool:
     """`check-records` has no `--json` mode; keep its plain stderr-and-refuse shape."""
     message = _unknown_rule_message(only, family)
@@ -278,7 +285,11 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         return 2
 
     found = records.discover(root)
-    if not found:
+    # #719: skill-usage logs are their own subject - one record per LINE of a
+    # `*usage.jsonl` file - and count toward the population like any record.
+    logs = usage.discover_logs(root)
+    usage_records = sum(len(log.entries) for log in logs)
+    if not found and not usage_records and not any(log.parse_error for log in logs):
         # An empty population must not render as a clean one (AGENTS.md).
         print(f"skillc: no record found under {root} - nothing was checked")
         return 2
@@ -300,7 +311,13 @@ def cmd_check_records(args: argparse.Namespace) -> int:
     # case above already does for its own family.
     selected_record_rule = checks.record_rule_by_id(args.rule) if args.rule else None
     applicable = None
-    if selected_record_rule is not None:
+    if args.rule and any(r.id == args.rule for r in checks.USAGE_RULES):
+        applicable = len(logs)
+        if applicable == 0:
+            print(f"skillc: no usage log (usage.jsonl or *.usage.jsonl) under {root} - "
+                  f"{args.rule} checked nothing")
+            return 2
+    elif selected_record_rule is not None:
         applicable = checks.applicable_population(selected_record_rule, found)
         if applicable == 0:
             print(f"skillc: no {selected_record_rule.id}-applicable record "
@@ -313,6 +330,8 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         findings.extend(checks.run_record(record, only=args.rule))
     for bundle in bundles:
         findings.extend(checks.run_bundle(bundle, only=args.rule))
+    for log in logs:
+        findings.extend(checks.run_usage_log(log, only=args.rule))
 
     base = root if root.is_dir() else root.parent
     for finding in findings:
@@ -325,7 +344,15 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         f"\nskillc: {len(found)} record(s) in {len(bundles)} bundle(s) checked, "
         f"{errors} error(s)"
     )
-    if applicable is not None:
+    if logs:
+        open_ended = sum(len(usage.unended(log)) for log in logs)
+        print(
+            f"skillc: {usage_records} skill-usage record(s) in {len(logs)} usage log(s) checked; "
+            f"{open_ended} start(s) without an end, read as outcome UNKNOWN (reported, not refused)"
+        )
+    if applicable is not None and any(r.id == args.rule for r in checks.USAGE_RULES):
+        print(f"skillc: {applicable} usage log(s) were {args.rule}-applicable")
+    elif applicable is not None:
         print(f"skillc: {applicable} of {len(found)} record(s) were {args.rule}-applicable")
     if loose:
         print(
@@ -350,7 +377,7 @@ class _Subject:
 
 
 def _population(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.UsageRule,
     where: Path,
     target: str = DEFAULT_TARGET,
 ) -> list[_Subject]:
@@ -379,6 +406,12 @@ def _population(
             own = sum(1 for f in case_findings if f.rule == rule.id)
             subjects.append(_Subject(case, load_error, own))
         return subjects
+    if isinstance(rule, checks.UsageRule):
+        return [
+            _Subject(log.path, log.parse_error,
+                     sum(f.rule == rule.id for f in checks.run_usage_log(log, only=rule.id)))
+            for log in usage.discover_logs(where)
+        ]
     if isinstance(rule, checks.RecordRule):
         return [
             _Subject(r.path, r.parse_error,
@@ -393,7 +426,7 @@ def _population(
 
 
 def _refusal(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.UsageRule,
     bad: list[_Subject], good: list[_Subject],
 ) -> tuple[str, str] | None:
     """Why this rule's control does not prove it, or None when it does.
@@ -2504,6 +2537,19 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_usage_hook(args: argparse.Namespace) -> int:
+    return usage.run_hook(sys.stdin, sys.stderr)
+
+
+def cmd_usage_end(args: argparse.Namespace) -> int:
+    session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    return usage.declare_end(args.skill, args.outcome, args.stop_reason, session, Path.cwd(), sys.stdout)
+
+
+def cmd_usage_report(args: argparse.Namespace) -> int:
+    return usage.cmd_report(Path(args.path))
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -3260,6 +3306,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="the one identity field allowed to differ between --a and --b; every other one must match",
     )
     p_config_compare.set_defaults(func=cmd_configuration_compare)
+
+    p_usage = sub.add_parser("usage", help="write, close and read skill-usage records (#719)")
+    usage_sub = p_usage.add_subparsers(dest="usage_command", required=True)
+    p_usage_hook = usage_sub.add_parser(
+        "hook", help="Claude Code hook: read the event payload on stdin, append to .skillc/usage.jsonl; always exits 0"
+    )
+    p_usage_hook.set_defaults(func=cmd_usage_hook)
+    p_usage_end = usage_sub.add_parser("end", help="declare how a skill ended (optional; closes its open start)")
+    p_usage_end.add_argument("--skill", required=True, help="the skill name its start recorded")
+    p_usage_end.add_argument("--outcome", required=True, choices=[o for o in usage.OUTCOMES if o != usage.UNKNOWN])
+    p_usage_end.add_argument("--stop-reason", help="a short token, e.g. approval-gate")
+    p_usage_end.add_argument("--session", help="session id (default: $CLAUDE_CODE_SESSION_ID)")
+    p_usage_end.set_defaults(func=cmd_usage_end)
+    p_usage_report = usage_sub.add_parser("report", help="counts by skill and digest, outcome mix, UNKNOWN rate")
+    p_usage_report.add_argument("path", help="a usage log, e.g. .skillc/usage.jsonl")
+    p_usage_report.set_defaults(func=cmd_usage_report)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

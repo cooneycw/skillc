@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from skillc import checks, cli, records
+from skillc import checks, cli, records, usage
 from skillc.spec import DEFAULT_TARGET, discover
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
@@ -127,6 +127,11 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
         recs = records.discover(bad_dir)
         own = [f for r in recs for f in checks.run_record(r, only=rule.id)]
         every = [f for r in recs for f in checks.run_record(r)]
+    elif isinstance(rule, checks.UsageRule):
+        # #719: the subject is one usage log; minimal means no OTHER usage rule fires.
+        logs = usage.discover_logs(bad_dir)
+        own = [f for log in logs for f in checks.run_usage_log(log, only=rule.id)]
+        every = [f for log in logs for f in checks.run_usage_log(log)]
     elif isinstance(rule, checks.ManifestRule):
         # Same shape as the BundleRule branch above: every CASE DIRECTORY is
         # the subject, and `run_manifest` returns `(findings, load_error)`.

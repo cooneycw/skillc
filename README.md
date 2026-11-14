@@ -96,6 +96,7 @@ remaining obligation and evidence limit.
 skillc check ./skills         # check a collection after validating the rules
 skillc selftest                # prove every rule can still report the other verdict
 skillc check-records <path>    # refuse evaluation records the contract rejects
+skillc usage report <usage.jsonl> # #719: skill-usage counts by skill and digest, outcome mix, UNKNOWN rate (`usage hook`/`usage end` write them; see docs/skill-usage-hook.md)
 skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
@@ -171,7 +172,7 @@ ok       frontmatter           red on bad (3), green on good (2)
 ok       record-envelope       red on bad (7), green on good (2)
 ...
 
-skillc selftest: 31/31 rule(s) discriminate
+skillc selftest: 35/35 rule(s) discriminate
 ```
 
 Six verdicts fail the run:
