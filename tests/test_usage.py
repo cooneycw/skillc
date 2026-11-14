@@ -592,7 +592,19 @@ def test_a_read_only_ignore_file_that_already_ignores_the_log_still_records(repo
 
 
 def _untracked_log(repo: Path) -> bool:
-    return ".skillc/usage.jsonl" in _git(repo, "status", "--porcelain", "--untracked-files=all")
+    """Exactly `.skillc/usage.jsonl`, never a neighbour such as `usage.jsonl.backup`
+    (counter-model review): git lists the one path or prints nothing."""
+    return _git(repo, "ls-files", "--others", "--exclude-standard", "--", ".skillc/usage.jsonl") != ""
+
+
+@needs_git
+def test_the_untracked_log_probe_tells_the_log_from_a_neighbour(repo: Path) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / "usage.jsonl.backup").write_text("x\n", encoding="utf-8")
+    assert not _untracked_log(repo)
+    (state / "usage.jsonl").write_text("x\n", encoding="utf-8")
+    assert _untracked_log(repo)
 
 
 @needs_git
@@ -650,6 +662,23 @@ def test_NEGATIVE_CONTROL_an_unanswerable_ignore_check_refuses(
     _break_check_ignore(monkeypatch, exc)
     err = _hook(_skill_call(repo), tmp_path / "home")
     assert _lines(repo) == [] and "nothing recorded" in err and "check-ignore" in err
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_check_ignore_error_exit_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exit 128 (git's fatal error) is neither ignored (0) nor not-ignored (1)."""
+    real = subprocess.run
+
+    def run(argv: list[str], *args: object, **kwargs: object) -> object:
+        if "check-ignore" in argv:
+            return subprocess.CompletedProcess(argv, 128, b"", b"fatal")
+        return real(argv, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(usage.subprocess, "run", run)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert _lines(repo) == [] and "exit 128" in err
 
 
 @needs_git
