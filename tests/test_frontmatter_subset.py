@@ -47,3 +47,16 @@ def test_a_list_of_mappings_ends_at_the_next_item_and_at_a_dedent() -> None:
     data = parse_contract_block(doc)[0]
     assert data["provides"] == [{"id": "a", "test": "x"}, {"id": "b", "test": "y"}]
     assert data["owner"] == "o"
+
+
+@pytest.mark.parametrize("levels", [40, 400])
+def test_alternating_list_and_mapping_nesting_is_bounded(levels: int) -> None:
+    """Counter-model review on #720: every list item restarted the depth at 1, so
+    deep `- k:` nesting passed MAX_DEPTH and 400 levels raised RecursionError."""
+    lines = ["---"]
+    for n in range(levels):
+        lines.append("  " * (2 * n) + "k:")
+        lines.append("  " * (2 * n + 1) + "- id: x")
+    lines.append("---")
+    with pytest.raises(FrontmatterError, match="nesting deeper than"):
+        parse_contract_block("\n".join(lines) + "\n")

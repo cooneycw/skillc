@@ -371,7 +371,7 @@ class _Parser:
             child = self.lines[j]
             child_indent = _indent(child, self.no(j))
             if _is_item(child.strip()) and child_indent >= indent:
-                return self.sequence(j, child_indent)
+                return self.sequence(j, child_indent, depth + 1)
             if child_indent > indent:
                 return self.mapping(j, child_indent, depth + 1)
         return None, i
@@ -427,7 +427,9 @@ class _Parser:
             return text + "\n" * breaks, i
         return text + ("\n" if breaks else ""), i
 
-    def sequence(self, i: int, indent: int) -> tuple[list[object], int]:
+    def sequence(self, i: int, indent: int, depth: int = 0) -> tuple[list[object], int]:
+        if depth > MAX_DEPTH:
+            raise _unsupported(self.no(i), f"nesting deeper than {MAX_DEPTH} levels")
         items: list[object] = []
         while True:
             i = self.next_significant(i)
@@ -452,7 +454,10 @@ class _Parser:
                 # right of the dash. Re-indent this one line in place and read the
                 # mapping at that column; it ends at the next item or a dedent.
                 self.lines[i] = " " * (ind + 2) + value
-                item, i = self.mapping(i, ind + 2, depth=1)
+                # The depth carries through (counter-model review): restarting it
+                # let alternating list/mapping nesting pass MAX_DEPTH and recurse
+                # until RecursionError aborted the whole scan.
+                item, i = self.mapping(i, ind + 2, depth + 1)
                 items.append(item)
                 continue
             if self.contracts and value[:1] == "[":

@@ -163,3 +163,54 @@ def test_a_malformed_consumes_entry_is_a_shape_error(tmp_path: Path) -> None:
     beta = case / "beta/CHARTER.md"
     beta.write_text(beta.read_text(encoding="utf-8").replace("alpha.out@1", "alpha.out"), encoding="utf-8")
     assert _rules(case) == ["contract-shape"]
+
+
+# ---------------------------------------------------------------- counter-model review, pass 1
+
+
+def test_a_clause_provided_twice_is_a_shape_error_and_stops_the_hand_off_rules(tmp_path: Path) -> None:
+    """File order must never pick which provider's version a consumer is judged against."""
+    assert _rules(CONTROLS / "contract-shape/bad/duplicate-provider") == ["contract-shape"]
+    details = [f.detail for f in checks.run_contracts(
+        contracts.load_collection(CONTROLS / "contract-shape/bad/duplicate-provider"), only="contract-shape")]
+    assert any("provided by 2 contracts" in d for d in details)
+
+
+def test_a_duplicate_contract_name_stops_the_hand_off_rules(tmp_path: Path) -> None:
+    case = tmp_path / "c"
+    shutil.copytree(CONTROLS / "reader-exists/good/owner-contract-and-clause", case)
+    # A second "beta" WITHOUT the approve clause: before the fix it could shadow
+    # the real one and make reader-exists blame alpha's valid reader.
+    (case / "zz-beta").mkdir()
+    (case / "zz-beta/CHARTER.md").write_text(
+        (case / "beta/CHARTER.md").read_text(encoding="utf-8").replace("- id: approve", "- id: other"),
+        encoding="utf-8")
+    assert _rules(case) == ["contract-shape"]
+
+
+def test_a_symlink_out_of_the_collection_does_not_back_a_clause(tmp_path: Path) -> None:
+    case = tmp_path / "c"
+    shutil.copytree(CONTROLS / "clause-backed/good/every-test-exists", case)
+    outside = tmp_path / "outside"
+    (outside / "bad").mkdir(parents=True)
+    (outside / "good").mkdir()
+    charter = case / "alpha/CHARTER.md"
+    charter.write_text(charter.read_text(encoding="utf-8").replace(
+        "checks/alpha-out/{bad,good}", "checks/external/{bad,good}"), encoding="utf-8")
+    (case / "checks/external").symlink_to(outside, target_is_directory=True)
+    details = [f.detail for f in checks.run_contracts(contracts.load_collection(case), only="clause-backed")]
+    assert details and all("outside the collection" in d for d in details)
+
+
+def test_a_brace_option_is_a_literal_path_fragment_not_a_regex_escape() -> None:
+    assert contracts.expand("checks/{bad,\\q}")[0] == ["checks/bad", "checks/\\q"]
+    assert contracts.expand("a/{x,\\1}/b")[0] == ["a/x/b", "a/\\1/b"]
+
+
+def test_an_oversized_consumed_version_is_a_shape_finding_not_a_crash(tmp_path: Path) -> None:
+    case = tmp_path / "c"
+    shutil.copytree(CONTROLS / "handoff-bilateral/good/provided", case)
+    beta = case / "beta/CHARTER.md"
+    beta.write_text(beta.read_text(encoding="utf-8").replace("alpha.out@1", "alpha.out@" + "9" * 4400),
+                    encoding="utf-8")
+    assert _rules(case) == ["contract-shape"]

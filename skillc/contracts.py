@@ -45,7 +45,7 @@ KNOWN_FIELDS = frozenset((*REQUIRED, *OPTIONAL))
 
 NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 CLAUSE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
-CONSUMES_RE = re.compile(rf"({CLAUSE_ID_RE.pattern})@([1-9][0-9]*)")
+CONSUMES_RE = re.compile(rf"({CLAUSE_ID_RE.pattern})@([1-9][0-9]{{0,8}})")  # bounded: int() never sees 4,000 digits
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 BRACE_RE = re.compile(r"\{([^{}]*)\}")
 OWNER_READER = "owner"
@@ -239,11 +239,37 @@ def _shape_ok(collection: Collection) -> list[Contract]:
     return [c for c in collection.contracts if not _contract_shape_problems(c)]
 
 
+def _collection_problems(collection: Collection) -> list[Finding]:
+    """Facts that are wrong only BETWEEN contracts: a contract name declared
+    twice, or a provided clause id two contracts both provide. Either makes
+    every cross-contract lookup depend on file order (counter-model review)."""
+    found: list[Finding] = []
+    names: Counter[str] = Counter(c.name for c in collection.contracts if c.name)
+    for contract in collection.contracts:
+        if contract.name and names[contract.name] > 1:
+            found.append((contract.path, f"contract name {contract.name!r} is declared by {names[contract.name]} CHARTER.md files"))
+    providers: dict[str, list[Contract]] = {}
+    for contract in _shape_ok(collection):
+        for section, clause in _clauses(contract):
+            if section == "provides" and isinstance(clause.get("id"), str):
+                providers.setdefault(str(clause["id"]), []).append(contract)
+    for clause_id, owners in sorted(providers.items()):
+        if len(owners) > 1:
+            who = ", ".join(repr(c.name) for c in owners)
+            for contract in owners:
+                detail = (f"provided clause {clause_id!r} is provided by {len(owners)} contracts "
+                          f"({who}); a consumer cannot tell which version it is handed")
+                found.append((contract.path, detail))
+    return found
+
+
 def _cross_ready(collection: Collection) -> bool:
-    """Cross-contract rules run only when EVERY contract has a valid shape: a
-    hand-off naming a provider that failed to parse would otherwise read as
-    "nothing provides it", which blames the wrong contract."""
-    return bool(collection.contracts) and len(_shape_ok(collection)) == len(collection.contracts)
+    """Cross-contract rules run only when EVERY contract has a valid shape AND
+    the collection itself is unambiguous: a hand-off naming a provider that
+    failed to parse would otherwise read as "nothing provides it", and a
+    duplicate name or provider would let file order pick the answer."""
+    return (bool(collection.contracts) and len(_shape_ok(collection)) == len(collection.contracts)
+            and not _collection_problems(collection))
 
 
 Finding = tuple[Path, str]
@@ -251,12 +277,10 @@ Finding = tuple[Path, str]
 
 def contract_shape(collection: Collection) -> Iterator[Finding]:
     """Each block parses and declares the required fields in their types."""
-    names: Counter[str] = Counter(c.name for c in collection.contracts if c.name)
     for contract in collection.contracts:
         for problem in _contract_shape_problems(contract):
             yield contract.path, problem
-        if contract.name and names[contract.name] > 1:
-            yield contract.path, f"contract name {contract.name!r} is declared by {names[contract.name]} CHARTER.md files"
+    yield from _collection_problems(collection)
 
 
 # ---------------------------------------------------------------- tests named
@@ -274,7 +298,10 @@ def expand(test: str) -> tuple[list[str], str | None]:
     options = [o.strip() for o in groups[0].split(",")]
     if any(not o for o in options):
         return [], f"test path {test!r} has an empty brace option"
-    return [BRACE_RE.sub(o, test, count=1) for o in options], None
+    # Literal concatenation, never a regex replacement: an option is a path
+    # fragment, and `\q` in one must not be read as a replacement escape.
+    start, end = test.index("{"), test.index("}")
+    return [test[:start] + option + test[end + 1:] for option in options], None
 
 
 def _tests(clause: dict[str, object]) -> list[str]:
@@ -287,8 +314,15 @@ def _tests(clause: dict[str, object]) -> list[str]:
 
 
 def _inside(root: Path, rel: str) -> bool:
+    """Lexically AND after symlink resolution: a `checks/external -> /outside`
+    link must not let a path outside the collection back a clause."""
     pure = PurePosixPath(rel)
-    return not pure.is_absolute() and ".." not in pure.parts
+    if pure.is_absolute() or ".." in pure.parts:
+        return False
+    try:
+        return (root / rel).resolve().is_relative_to(root.resolve())
+    except (OSError, RuntimeError):
+        return False
 
 
 def clause_backed(collection: Collection) -> Iterator[Finding]:
