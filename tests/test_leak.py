@@ -606,6 +606,85 @@ def test_the_generic_example_home_path_is_exempt_and_nothing_longer() -> None:
     assert [k for _l, k, _d in leak.scan_text("see /home/username", frozenset())] == ["home-path"]
 
 
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("name", ["user", "u", "proof"])
+def test_the_ENCODED_twin_of_a_placeholder_home_is_exempt_and_nothing_longer(
+    name: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#729: CPP's receipt writer replaces the host account with the `user`
+    placeholder and records Claude's encoded transcript path,
+    `-home-user-Projects/<session>.jsonl`. The encoded twin of an exempt
+    placeholder is exempt under the same rule: exact match, no such host account."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda account: False)
+    monkeypatch.setattr(leak, "_host_encoded_accounts", lambda: frozenset({"root", "operator"}))
+    assert list(leak.scan_text(f'"transcript": "-home-{name}-Projects/x.jsonl"', frozenset())) == []
+    for longer in (f"-home-{name}s-Projects/x", f"-home-{name}name"):
+        assert [k for _l, k, _d in leak.scan_text(longer, frozenset())] == ["encoded-home-path"], longer
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("account", ["user-operator", "user.operator", "user"])
+def test_a_real_account_the_placeholder_PREFIXES_keeps_the_encoded_home_a_finding(
+    account: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review on #729: Claude's encoding is lossy, so a real
+    `user-operator` (or `user.operator`) account encodes as
+    `-home-user-operator`, which the regex matches as `-home-user`. With only
+    that account on the host, the placeholder must not be exempt."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
+    monkeypatch.setattr(leak, "_host_encoded_accounts", lambda: frozenset({account.replace(".", "-")}))
+    assert [k for _l, k, _d in leak.scan_text("-home-user-operator-Projects/x.jsonl", frozenset())] == [
+        "encoded-home-path"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize(("listing", "fires"), [
+    (["root", "operator"], False),           # enumerated, no collision: exempt
+    (["root", "user-operator"], True),       # a real account the placeholder prefixes
+    (["root", "user.operator"], True),       # dotted: encodes the same way
+    ([], True),                              # EMPTY listing is unknown, never "no collision"
+    (OSError("nss unavailable"), True),      # unenumerable: unknown
+])
+def test_the_encoded_exemption_through_the_REAL_account_listing(
+    listing: list[str] | OSError, fires: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review on #729, pass 2: drive `pwd.getpwall()` itself,
+    not a replacement for the helper, so an empty or failed enumeration is
+    exercised the way a host with unavailable account lookup produces it."""
+    import types
+
+    def getpwall() -> list[types.SimpleNamespace]:
+        if isinstance(listing, OSError):
+            raise listing
+        return [types.SimpleNamespace(pw_name=name) for name in listing]
+
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
+    monkeypatch.setattr(leak.pwd, "getpwall", getpwall)
+    kinds = [k for _l, k, _d in leak.scan_text("-home-user-Projects/x.jsonl", frozenset())]
+    assert kinds == (["encoded-home-path"] if fires else [])
+
+
+def test_leak_module_source_carries_no_home_path_of_its_own() -> None:
+    """Counter-model review on #729, pass 2: the detector's own docstrings
+    must pass the repository's leak gate, which scans skillc/leak.py."""
+    source = Path(leak.__file__).read_text(encoding="utf-8")
+    assert [k for _l, k, _d in leak.scan_text(source, frozenset()) if k in ("home-path", "encoded-home-path")] == []
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_an_unenumerable_account_database_grants_no_encoded_exemption(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
+    monkeypatch.setattr(leak, "_host_encoded_accounts", lambda: frozenset({"\0unenumerable"}))
+    assert [k for _l, k, _d in leak.scan_text("-home-user-Projects/x.jsonl", frozenset())] == ["encoded-home-path"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_a_host_with_an_account_named_user_keeps_its_ENCODED_home_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#729: the encoded exemption is conditional exactly as the slash form is."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: True)
+    assert [k for _l, k, _d in leak.scan_text("-home-user-Projects/x.jsonl", frozenset())] == ["encoded-home-path"]
+
+
 @pytest.fixture
 def _fresh_exemptions() -> object:
     leak.conditional_exemptions.cache_clear()
