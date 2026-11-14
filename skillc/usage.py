@@ -43,7 +43,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
@@ -137,6 +137,10 @@ def load_log(path: Path) -> UsageLog:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return UsageLog(path=path, parse_error=str(exc))
+    return parse_log(path, text)
+
+
+def parse_log(path: Path, text: str) -> UsageLog:
     entries: list[Entry] = []
     for number, raw in enumerate(text.splitlines(), start=1):
         if not raw.strip():
@@ -198,6 +202,11 @@ def _readable(log: UsageLog) -> Iterator[Entry]:
     for entry in log.entries:
         if _envelope_problem(entry.data) is None:
             yield entry
+
+
+def readable_count(log: UsageLog) -> int:
+    """How many lines the semantic rules can read: the envelope-accepted ones."""
+    return sum(1 for _ in _readable(log))
 
 
 def _value_problem(key: str, value: object) -> str | None:
@@ -449,28 +458,38 @@ def record_problems(record: Mapping[str, object]) -> list[str]:
     return [*usage_envelope(log), *usage_fields(log), *usage_privacy(log)]
 
 
-def append(path: Path, new: Sequence[Mapping[str, object]]) -> None:
-    """Append under an exclusive lock. Creating the state directory also
-    writes its own `.gitignore` (`*`), so the log is ignored by default
-    without editing the repository's own ignore file."""
+def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]]]) -> list[Mapping[str, object]]:
+    """Read, decide and append as ONE operation under an exclusive lock.
+
+    `build` receives the log as it stands UNDER the lock and returns what to
+    append; any record its own checker would refuse is dropped. Deciding
+    outside the lock let two closers both close the same start, and the
+    second end was an orphan that refused the whole log (counter-model
+    review). Creating the state directory also writes its own `.gitignore`
+    (`*`), so the log is ignored by default without editing the repository's
+    own ignore file. Returns what was written."""
     state = path.parent
     if not state.is_dir():
         state.mkdir(parents=True, exist_ok=True)
         (state / ".gitignore").write_text("*\n", encoding="utf-8")
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
+            handle.seek(0)
+            current = parse_log(path, handle.read())
+            new = [r for r in build(current) if not record_problems(r)]
             for record in new:
                 handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+    return new
 
 
-def _open_starts(path: Path, session: str, skill: str | None = None) -> list[Entry]:
-    if not path.is_file():
-        return []
+def _open_starts(log: UsageLog, session: str, skill: str | None = None) -> list[Entry]:
     return [
-        start for start in unended(load_log(path))
+        start for start in unended(log)
         if start.data.get("session") == session and (skill is None or start.data.get("skill") == skill)
     ]
 
@@ -486,8 +505,11 @@ def _end_for(start: Entry, cwd: Path, **values: object) -> dict[str, object]:
 TYPED_RE = re.compile(rf"/({SKILL_NAME_RE.pattern})(?:\s|$)")
 
 
-def hook_records(payload: Mapping[str, object], home: Path) -> tuple[Path | None, list[dict[str, object]]]:
-    """`(destination, records to append)` for one Claude Code hook payload.
+def hook_records(
+    payload: Mapping[str, object], home: Path,
+) -> tuple[Path | None, Callable[[UsageLog], list[dict[str, object]]] | None]:
+    """`(destination, builder)` for one Claude Code hook payload; the builder
+    runs under `append`'s lock against the log as it stands then.
 
     - `PreToolUse` on the `Skill` tool: a `start`, `invocation: model-selected`.
     - `UserPromptSubmit` whose prompt begins `/<name>` naming an installed skill
@@ -500,10 +522,10 @@ def hook_records(payload: Mapping[str, object], home: Path) -> tuple[Path | None
     cwd = Path(str(payload.get("cwd") or os.getcwd()))
     event = payload.get("hook_event_name")
     if not isinstance(session, str) or not records.ID_RE.fullmatch(session):
-        return None, []
+        return None, None
     path = destination(cwd)
     if path is None:
-        return None, []
+        return None, None
     model = payload.get("model")
     model = model if isinstance(model, str) and MODEL_RE.fullmatch(model) else UNKNOWN
 
@@ -520,18 +542,21 @@ def hook_records(payload: Mapping[str, object], home: Path) -> tuple[Path | None
         if match and resolve_skill(match.group(1), cwd, home) is not None:
             name, invocation = match.group(1), "explicit"
     elif event in ("Stop", "SessionEnd"):
-        return path, [_end_for(start, cwd, origin="observed") for start in _open_starts(path, session)]
+        if not path.is_file():
+            return path, None
+        return path, lambda log: [_end_for(start, cwd, origin="observed") for start in _open_starts(log, session)]
 
     if name is None:
-        return path, []
+        return path, None
     entry_file = resolve_skill(name, cwd, home)
     repo, commit = repo_identity(cwd)
-    return path, [make_record(
+    start = make_record(
         event="start", skill=name, skill_digest=skill_digest(entry_file),
         collection=collection_of(entry_file), invocation=invocation, origin="observed",
         coverage="partial", repo=repo, commit=commit, outcome=UNKNOWN, session=session,
         client="claude-code", model=model, at=now_utc(),
-    )]
+    )
+    return path, lambda log: [start]
 
 
 def run_hook(stdin: TextIO, stderr: TextIO, home: Path | None = None) -> int:
@@ -542,10 +567,9 @@ def run_hook(stdin: TextIO, stderr: TextIO, home: Path | None = None) -> int:
         payload = json.loads(stdin.read() or "{}")
         if not isinstance(payload, dict):
             return 0
-        path, new = hook_records(payload, home or Path.home())
-        new = [r for r in new if not record_problems(r)] if new else []
-        if path is not None and new:
-            append(path, new)
+        path, build = hook_records(payload, home or Path.home())
+        if path is not None and build is not None:
+            append(path, build)
     except Exception as exc:  # noqa: BLE001 - fail-open by contract
         print(f"skillc usage hook: nothing recorded ({type(exc).__name__}: {exc})", file=stderr)
     return 0
@@ -557,22 +581,37 @@ def declare_end(
     """`skillc usage end`: the skill's own account of how it ended, closing
     the oldest open start of (session, skill). With no open start nothing is
     written - an end without a start is exactly what the pairing rule refuses
-    - and the exit is still 0, so a skill calling this never fails for it."""
-    path = destination(cwd)
-    if not session or path is None:
-        print("SKILLC_USAGE: no-destination (no session id, or not inside a git checkout)", file=out)
+    - and EVERY exit is 0, so a skill calling this (even under `set -e`)
+    never fails for it: a refused value or a failed write is a printed
+    `SKILLC_USAGE:` line, not an exit code (counter-model review)."""
+    try:
+        path = destination(cwd)
+        if not session or path is None:
+            print("SKILLC_USAGE: no-destination (no session id, or not inside a git checkout)", file=out)
+            return 0
+        if not path.is_file():
+            print(f"SKILLC_USAGE: no-open-start for {skill!r} in this session; nothing written", file=out)
+            return 0
+        refused: list[str] = []
+
+        def build(log: UsageLog) -> list[dict[str, object]]:
+            starts = _open_starts(log, session, skill)
+            if not starts:
+                return []
+            record = _end_for(starts[0], cwd, origin="declared", outcome=outcome, stop_reason=stop_reason)
+            refused.extend(record_problems(record))
+            return [record]
+
+        written = append(path, build)
+    except Exception as exc:  # noqa: BLE001 - fail-open by contract
+        print(f"SKILLC_USAGE: not recorded ({type(exc).__name__}: {exc})", file=out)
         return 0
-    starts = _open_starts(path, session, skill)
-    if not starts:
+    if refused:
+        print(f"SKILLC_USAGE: refused ({refused[0]}); nothing written", file=out)
+    elif not written:
         print(f"SKILLC_USAGE: no-open-start for {skill!r} in this session; nothing written", file=out)
-        return 0
-    record = _end_for(starts[0], cwd, origin="declared", outcome=outcome, stop_reason=stop_reason)
-    problems = record_problems(record)
-    if problems:
-        print(f"SKILLC_USAGE: refused ({problems[0]}); nothing written", file=out)
-        return 2
-    append(path, [record])
-    print(f"SKILLC_USAGE: recorded end {outcome} for {skill!r}", file=out)
+    else:
+        print(f"SKILLC_USAGE: recorded end {outcome} for {skill!r}", file=out)
     return 0
 
 

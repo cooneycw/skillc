@@ -327,3 +327,62 @@ def test_report_refuses_a_log_check_records_refuses(tmp_path: Path) -> None:
     err = io.StringIO()
     assert usage.cmd_report(tmp_path / "usage.jsonl", io.StringIO(), err) == 1
     assert "no report drawn" in err.getvalue()
+
+
+# ------------------------------------------------------- counter-model review fixes
+
+
+@needs_git
+def test_concurrent_closers_close_ONE_start_exactly_once(repo: Path, tmp_path: Path) -> None:
+    """Read-decide-append is one locked operation: eight closers racing for
+    one open start write exactly one end, and the log stays valid."""
+    import threading
+
+    _hook(_skill_call(repo), tmp_path / "home")
+    barrier = threading.Barrier(8)
+
+    def close() -> None:
+        barrier.wait()
+        usage.declare_end("hello-probe", "completed", None, "s-1", repo, io.StringIO())
+
+    threads = [threading.Thread(target=close) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert [line["event"] for line in _lines(repo)] == ["start", "end"]
+    assert checks.run_usage_log(usage.load_log(repo / ".skillc" / "usage.jsonl")) == []
+
+
+@needs_git
+def test_usage_end_never_fails_its_skill(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _hook(_skill_call(repo), tmp_path / "home")
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", "waiting for approval", "s-1", repo, out) == 0
+    assert "refused" in out.getvalue() and len(_lines(repo)) == 1
+
+    def disk_full(*_: object, **__: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(usage, "append", disk_full)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", None, "s-1", repo, out) == 0
+    assert "not recorded (OSError: disk full)" in out.getvalue()
+
+
+def test_a_semantic_rule_over_an_unreadable_log_checked_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    bad = CONTROLS / "skill-usage-envelope/bad/unreadable.usage.jsonl"
+    assert cli.main(["check-records", str(bad), "--rule", "skill-usage-fields"]) == 2
+    assert "checked nothing" in capsys.readouterr().out
+    assert cli.main(["check-records", str(bad), "--rule", "skill-usage-envelope"]) == 1
+
+
+@pytest.mark.parametrize("rule_id", [r.id for r in checks.USAGE_RULES])
+def test_selftest_refuses_an_EMPTIED_good_usage_control(rule_id: str, tmp_path: Path) -> None:
+    """Sabotage: truncating a rule's good control to zero bytes must stop
+    certification, not leave a rule that refuses every real record green."""
+    copy = tmp_path / "controls"
+    shutil.copytree(CONTROLS, copy)
+    for good in (copy / rule_id / "good").glob("*.jsonl"):
+        good.write_text("", encoding="utf-8")
+    assert cli.main(["selftest", "--controls", str(copy)]) != 0

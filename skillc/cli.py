@@ -312,9 +312,17 @@ def cmd_check_records(args: argparse.Namespace) -> int:
     selected_record_rule = checks.record_rule_by_id(args.rule) if args.rule else None
     applicable = None
     if args.rule and any(r.id == args.rule for r in checks.USAGE_RULES):
-        applicable = len(logs)
+        # The envelope rule reads every log (an unreadable one is its finding);
+        # the semantic rules read only the lines the envelope accepts, so a log
+        # FILE is not their population - its readable records are (counter-
+        # model review: an unreadable log under --rule skill-usage-fields
+        # "checked one log" and exited 0 having examined nothing).
+        applicable = (
+            len(logs) if args.rule == "skill-usage-envelope"
+            else sum(usage.readable_count(log) for log in logs)
+        )
         if applicable == 0:
-            print(f"skillc: no usage log (usage.jsonl or *.usage.jsonl) under {root} - "
+            print(f"skillc: no {args.rule}-applicable usage record under {root} - "
                   f"{args.rule} checked nothing")
             return 2
     elif selected_record_rule is not None:
@@ -350,8 +358,10 @@ def cmd_check_records(args: argparse.Namespace) -> int:
             f"skillc: {usage_records} skill-usage record(s) in {len(logs)} usage log(s) checked; "
             f"{open_ended} start(s) without an end, read as outcome UNKNOWN (reported, not refused)"
         )
-    if applicable is not None and any(r.id == args.rule for r in checks.USAGE_RULES):
+    if applicable is not None and args.rule == "skill-usage-envelope":
         print(f"skillc: {applicable} usage log(s) were {args.rule}-applicable")
+    elif applicable is not None and any(r.id == args.rule for r in checks.USAGE_RULES):
+        print(f"skillc: {applicable} usage record(s) were {args.rule}-applicable")
     elif applicable is not None:
         print(f"skillc: {applicable} of {len(found)} record(s) were {args.rule}-applicable")
     if loose:
@@ -407,8 +417,12 @@ def _population(
             subjects.append(_Subject(case, load_error, own))
         return subjects
     if isinstance(rule, checks.UsageRule):
+        # An EMPTY usage log is an unexercised subject, never a passing one: a
+        # good control emptied to zero bytes would otherwise certify a rule that
+        # refuses every real record (counter-model review). It reads as
+        # unparsed, so a good side refuses UNPARSED and a bad side BLIND.
         return [
-            _Subject(log.path, log.parse_error,
+            _Subject(log.path, log.parse_error or (None if log.entries else "empty usage log: no record to examine"),
                      sum(f.rule == rule.id for f in checks.run_usage_log(log, only=rule.id)))
             for log in usage.discover_logs(where)
         ]
