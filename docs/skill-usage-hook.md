@@ -7,7 +7,11 @@ shape and its four rules are defined in the
 [records spec's `skill-usage` section](specs/evaluation-facility/records.md#skill-usage-a-per-repo-usage-log-719).
 
 Records go to `<main checkout>/.skillc/usage.jsonl`. A run from a linked
-worktree lands in the same file. The `.skillc/` directory ignores itself
+worktree lands in the same file. The main checkout is asked of git, so a submodule
+and a `--separate-git-dir` checkout record too (#724). A linked worktree of a
+`--separate-git-dir` repository is the one layout where git records no main
+checkout: there the hook records nothing and says why. Tested by the
+submodule and separate-git-dir cases in `tests/test_usage.py`. The `.skillc/` directory ignores itself
 (`.skillc/.gitignore` holds `*`), so nothing is committed by accident.
 Nothing is sent anywhere.
 

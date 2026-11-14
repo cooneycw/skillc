@@ -380,17 +380,54 @@ def _git_status(cwd: Path, *args: str, timeout: float = CHECK_IGNORE_TIMEOUT) ->
         return None
 
 
-def destination(cwd: Path) -> Path | None:
-    """`<main checkout>/.skillc/usage.jsonl`, resolved through `git-common-dir`
-    so a run from a linked worktree lands in the SAME file as one from the main
-    checkout (CPP #471's lesson). None outside a non-bare git checkout."""
-    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if common is None:
+class MainCheckoutUnknown(ValueError):
+    """Git records no main checkout for this linked worktree (#724): a linked
+    worktree of a `--separate-git-dir` repository. Writing into the linked
+    worktree instead would split one collection's history across files (CPP
+    #471), so the callers print why nothing was recorded rather than going
+    silent."""
+
+
+def main_checkout(cwd: Path) -> Path | None:
+    """The MAIN checkout of the repository `cwd` is in, asked of git (#724).
+
+    `git worktree list` cannot answer this: in a submodule or a
+    `--separate-git-dir` checkout it names the git dir as the main worktree.
+    So, in ONE `rev-parse`:
+    - outside git, or a bare repository: None (nothing to write into);
+    - in the main worktree (git dir == common dir): `--show-toplevel`;
+    - in a linked worktree: the common dir's own `core.worktree` (a submodule
+      records it there, relative to the common dir), else the parent of a
+      common dir named `.git` (a plain repository);
+    - otherwise git records no main checkout: `MainCheckoutUnknown`."""
+    out = _git(cwd, "rev-parse", "--is-bare-repository", "--path-format=absolute",
+               "--git-dir", "--git-common-dir", "--show-toplevel")
+    if out is None:
+        return None  # outside git, or bare (--show-toplevel refuses there)
+    lines = out.splitlines()
+    if len(lines) != 4 or lines[0] != "false":
         return None
-    common_dir = Path(common)
-    if common_dir.name != ".git":
-        return None  # a bare repository has no main checkout to write into
-    return common_dir.parent / STATE_DIR / LOG_NAME
+    git_dir, common, toplevel = (Path(line) for line in lines[1:])
+    if git_dir.resolve() == common.resolve():
+        return toplevel
+    configured = _git(cwd, "config", "--file", str(common / "config"), "--get", "core.worktree")
+    if configured is not None:
+        return (common / configured).resolve()
+    if common.name == ".git":
+        return common.parent
+    raise MainCheckoutUnknown(
+        "a linked worktree of a --separate-git-dir repository: git records no main checkout for it; "
+        "nothing written"
+    )
+
+
+def destination(cwd: Path) -> Path | None:
+    """`<main checkout>/.skillc/usage.jsonl` (see `main_checkout`), so a run
+    from a linked worktree lands in the SAME file as one from the main checkout
+    (CPP #471's lesson). None outside a non-bare git checkout; raises
+    `MainCheckoutUnknown` where git records no main checkout (#724)."""
+    root = main_checkout(cwd)
+    return None if root is None else root / STATE_DIR / LOG_NAME
 
 
 def repo_identity(cwd: Path) -> tuple[str, str]:
@@ -450,12 +487,17 @@ def collection_of(entry_file: Path | None) -> str:
     if entry_file is None:
         return UNKNOWN
     real = entry_file.resolve().parent
-    common, head = _git(real, "rev-parse", "--path-format=absolute", "--git-common-dir"), _git(real, "rev-parse", "HEAD")
-    if common is None or head is None or Path(common).name != ".git":
+    try:
+        root = main_checkout(real)
+    except MainCheckoutUnknown:
+        root = None
+    head = _git(real, "rev-parse", "HEAD")
+    if root is None or head is None:
         return UNKNOWN
-    # The MAIN checkout's name (via git-common-dir), never a linked worktree's:
+    # The MAIN checkout's name (#724: asked of git, so a submodule and a
+    # --separate-git-dir checkout are named too), never a linked worktree's:
     # one collection keeps one name however many worktrees it is run from.
-    value = f"{Path(common).parent.name}@{head}"
+    value = f"{root.name}@{head}"
     return value if COLLECTION_RE.fullmatch(value) else UNKNOWN
 
 
