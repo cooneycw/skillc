@@ -337,3 +337,49 @@ def test_repeated_text_reports_one_maximal_run(tmp_path: Path) -> None:
     _skill(tmp_path, "b", same + "\n")
     [hit] = decay.copied_passage(_load(tmp_path)).hits
     assert hit.data["runs"] == 1 and hit.data["longest_words"] == 60
+
+
+# ------------------------------------------------- counter-model review, pass 2
+
+def test_a_flag_after_a_subshell_still_belongs_to_the_outer_script(tmp_path: Path) -> None:
+    """Pass 2 finding 2: `$(...)` ends; the outer command's flags resume."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--path\n", encoding="utf-8")
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --path "$(git rev-parse --show-toplevel)" --absent\n```\n')
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/helper.sh --absent"]
+
+
+def test_a_single_star_does_not_cross_a_directory(tmp_path: Path) -> None:
+    """Pass 2 finding 3."""
+    for rel in (".claude/skills/x/SKILL.md", ".claude/skills/x/references/nested/SKILL.md"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("text\n", encoding="utf-8")
+    coll = _load(tmp_path, include=[".claude/skills/*/SKILL.md"])
+    assert [s.rel for s in coll.subjects] == [".claude/skills/x/SKILL.md"]
+    coll = _load(tmp_path, include=["**/SKILL.md"])
+    assert len(coll.subjects) == 2
+
+
+def test_repetitive_text_stays_bounded(tmp_path: Path) -> None:
+    """Pass 2 finding 5: no occurrence cross-product on repeated words."""
+    import tracemalloc
+
+    same = " ".join(["same"] * 5000)
+    _skill(tmp_path, "a", same + "\n")
+    _skill(tmp_path, "b", same + "\n")
+    tracemalloc.start()
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    _current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < 64 * 1024 * 1024, f"peak {peak} bytes"
+    assert hit.data["longest_words"] == 5000
+
+
+def test_a_url_encoded_link_resolves_to_its_decoded_file(tmp_path: Path) -> None:
+    """Pass 2 finding 6."""
+    _skill(tmp_path, "a", "[guide](references/my%20guide.md) and [gone](references/no%20such.md)\n")
+    (tmp_path / "skills" / "a" / "references").mkdir()
+    (tmp_path / "skills" / "a" / "references" / "my guide.md").write_text("x", encoding="utf-8")
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["references/no%20such.md"]

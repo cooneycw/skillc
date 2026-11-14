@@ -256,9 +256,20 @@ def load_exposure(path: Path) -> dict[str, Any]:
         raise Refused(f"exposure report {path} is not a skillc exposure-report")
     if data.get("status") == "refused":
         raise Refused(f"exposure report {path} records a REFUSED run: {data.get('reason')}")
+    if data.get("status") != "ok":
+        # `skillc exposure` writes "ok" (a verdict for every declared item) or
+        # "refused"; anything else is not a report this build can read.
+        raise Refused(f"exposure report {path}: status {data.get('status')!r} is not 'ok'")
     for key in ("markers", "skills"):
-        if not isinstance(data.get(key), list) or not all(isinstance(i, dict) for i in data[key]):
-            raise Refused(f"exposure report {path}: {key!r} is not a list of items")
+        items = data.get(key)
+        if not isinstance(items, list) or not all(
+            isinstance(i, dict) and isinstance(i.get("verdict"), str) for i in items
+        ):
+            raise Refused(f"exposure report {path}: {key!r} is not a list of items with a verdict")
+    if not data["markers"] and not data["skills"]:
+        # An empty population measured nothing; supplying it must not read as
+        # "exposure measured, nothing hidden".
+        raise Refused(f"exposure report {path} measured no marker and no skill - nothing to fold in")
     return data
 
 

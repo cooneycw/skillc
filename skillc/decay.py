@@ -24,7 +24,7 @@ docs/specs/inspect.md.
 
 from __future__ import annotations
 
-import fnmatch
+import functools
 import json
 import re
 import shutil
@@ -33,6 +33,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import unquote
 
 from .spec import FrontmatterError, parse_frontmatter
 
@@ -57,6 +58,8 @@ DEFAULT_OWN_PREFIXES: tuple[str, ...] = ("scripts/", "references/", "assets/")
 #: not fire, short enough that a pasted paragraph or code block does. Measured
 #: on CPP and mattpocock/skills (docs/measurements/inspect/).
 COPIED_MIN_WORDS = 40
+#: Starting points tried in the other document per window: bounds repetitive text.
+COPIED_CANDIDATES = 8
 
 #: `emphasis-density`: these words, uppercase and whole, count as emphasis.
 EMPHASIS_WORDS: tuple[str, ...] = ("MUST", "NEVER", "CRITICAL", "ALWAYS", "IMPORTANT")
@@ -115,14 +118,42 @@ class Collection:
     excluded_count: int = 0
 
 
+_GLOB_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _glob_re(pattern: str) -> re.Pattern[str]:
+    """Path-segment glob: only `**` crosses `/`. `fnmatch`'s `*` crosses it,
+    so `.claude/skills/*/SKILL.md` would also select a SKILL.md nested inside
+    a skill's references - a neighbour's tree in the declared surface."""
+    cached = _GLOB_CACHE.get(pattern)
+    if cached is not None:
+        return cached
+    out, i = [], 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:[^/]+/)*")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    compiled = re.compile("".join(out) + r"\Z")
+    _GLOB_CACHE[pattern] = compiled
+    return compiled
+
+
 def _matches(rel: str, pattern: str) -> bool:
-    """A glob over a POSIX relative path. `**/` also matches zero directories,
+    """A glob over a POSIX relative path; `**/` also matches zero directories,
     so `**/SKILL.md` finds a SKILL.md at the root as well."""
-    if fnmatch.fnmatchcase(rel, pattern):
-        return True
-    if pattern.startswith("**/") and fnmatch.fnmatchcase(rel, pattern[3:]):
-        return True
-    return "/**/" in pattern and fnmatch.fnmatchcase(rel, pattern.replace("/**/", "/"))
+    return _glob_re(pattern).match(rel) is not None
 
 
 def _split_body(text: str) -> tuple[str, int]:
@@ -396,9 +427,10 @@ def _exists(ref: Ref, root: Path) -> Path | None:
 
 
 SHELL_SEPARATORS = {"|", "||", "&&", ";", "&"}
-SHELL_BREAKS = ("$(", "`", "|", ";", "&&")
+SHELL_BREAKS = ("`", "|", ";", "&&")
 
 
+@functools.lru_cache(maxsize=1024)
 def _script_source(script: Path, root: Path) -> str:
     """The text a flag is looked up in: the script, plus every file beside it
     that the script names by basename - a wrapper such as
@@ -414,6 +446,11 @@ def _script_source(script: Path, root: Path) -> str:
     except OSError:
         siblings = []
     for sibling in siblings:
+        # A plain substring test first: the boundary regex below is the
+        # actual rule (`elper.sh` is not `helper.sh`), but running it over a
+        # large script once per sibling made a CPP-sized run take 40 s.
+        if sibling.name not in text:
+            continue
         named = re.search(r"(?<![A-Za-z0-9_.-])" + re.escape(sibling.name) + r"(?![A-Za-z0-9_-])", text)
         if named and _inside(sibling, root):
             try:
@@ -437,6 +474,12 @@ def _links(subject: Subject) -> list[tuple[int, str]]:
     return out
 
 
+def _decoded(target: str) -> str:
+    """A Markdown link target as the filesystem names it: `my%20guide.md`
+    is the file `my guide.md`. The boundary check runs on the DECODED path."""
+    return unquote(target)
+
+
 def dangling_reference(coll: Collection) -> Result:
     result = Result()
     links = prefixed = flags = 0
@@ -446,7 +489,7 @@ def dangling_reference(coll: Collection) -> Result:
     for subject in coll.subjects:
         for index, target in _links(subject):
             links += 1
-            ref = Ref(target, (subject.path.parent / target,))
+            ref = Ref(target, (subject.path.parent / _decoded(target),))
             if _exists(ref, coll.root) is None:
                 result.hits.append(Hit(
                     subject.rel, subject.lineno(index),
@@ -454,17 +497,32 @@ def dangling_reference(coll: Collection) -> Result:
                     {"reference": target, "kind": "link"},
                 ))
         for span in code_spans(subject.lines):
-            words = [_clean_word(w) for w in span.text.split()]
             script: Path | None = None
             script_word = ""
-            for word in words:
+            outer: list[tuple[Path | None, str]] = []  # commands suspended by `$(`
+            for raw in span.text.split():
+                word = _clean_word(raw)
+                opens = raw.count("$(")
+                closes = raw.count(")") if outer or opens else 0
+                if opens:
+                    # A flag inside `$(...)` belongs to the nested command; the
+                    # outer command resumes when the substitution closes.
+                    for _ in range(opens):
+                        outer.append((script, script_word))
+                    script, script_word = None, ""
+                    closes -= min(opens, closes)
+                if closes and outer:
+                    for _ in range(min(closes, len(outer))):
+                        script, script_word = outer.pop()
+                    continue
+                if opens:
+                    continue
                 if not word:
                     continue
-                if any(sep in word for sep in SHELL_BREAKS) or word in SHELL_SEPARATORS:
-                    # A flag after `|`, `;`, `&&` or inside `$(...)` belongs to
-                    # another command, not to the script named before it.
-                    script = None
-                    if not word.strip("|;&()$"):
+                if any(sep in raw for sep in SHELL_BREAKS) or word in SHELL_SEPARATORS:
+                    # A flag after `|`, `;` or `&&` belongs to another command.
+                    script, script_word = None, ""
+                    if not word.strip("|;&()$`"):
                         continue
                 if script is not None and FLAG_RE.match(word.split("=", 1)[0]):
                     flag = word.split("=", 1)[0]
@@ -665,64 +723,63 @@ def copied_passage(coll: Collection, min_words: int = COPIED_MIN_WORDS) -> Resul
         return result
     words = [_words(s) for s in subjects]
     tokens = [[w for w, _ in ws] for ws in words]
-    # Keyed on the window's HASH, not the window itself: a 40-word tuple per
-    # position costs hundreds of megabytes on a CPP-sized collection. A hash
-    # collision cannot fire the rule - every candidate is compared word for
-    # word below before it counts.
-    shingles: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    # Keyed on the window's HASH: a 40-word tuple per position costs hundreds
+    # of megabytes on a CPP-sized collection. A collision cannot fire the rule;
+    # every candidate is compared word for word before it counts.
+    positions: list[dict[int, list[int]]] = []
+    owners: dict[int, list[int]] = defaultdict(list)
     for si, toks in enumerate(tokens):
+        index: dict[int, list[int]] = defaultdict(list)
         for pos in range(len(toks) - min_words + 1):
-            shingles[hash(tuple(toks[pos:pos + min_words]))].append((si, pos))
-    # pair -> (position in the pair's first subject, position in its second)
-    pairs: dict[tuple[int, int], set[tuple[int, int]]] = defaultdict(set)
-    for occurrences in shingles.values():
-        if len({si for si, _ in occurrences}) < 2:
-            continue
-        for a_si, a_pos in occurrences:
-            for b_si, b_pos in occurrences:
-                if a_si < b_si and (
-                    tokens[a_si][a_pos:a_pos + min_words] == tokens[b_si][b_pos:b_pos + min_words]
-                ):
-                    pairs[(a_si, b_si)].add((a_pos, b_pos))
+            index[hash(tuple(toks[pos:pos + min_words]))].append(pos)
+        positions.append(index)
+        for h in index:
+            owners[h].append(si)
+    common: dict[tuple[int, int], set[int]] = defaultdict(set)
+    for h, here in owners.items():
+        for i, a in enumerate(here):
+            for b in here[i + 1:]:
+                common[(a, b)].add(h)
     total_pairs = 0
-    for (a, b), matches in sorted(pairs.items()):
-        # Merge shingle matches into maximal runs ALONG ONE ALIGNMENT at a time
-        # (a_pos - b_pos fixed): sorting across alignments interleaves them and
-        # splits one long run into many short ones on repeated text.
-        by_alignment: dict[int, list[int]] = defaultdict(list)
-        for a_pos, b_pos in matches:
-            by_alignment[a_pos - b_pos].append(a_pos)
-        candidates: list[tuple[int, int, int]] = []  # (a_start, b_start, length in words)
-        for offset, starts in by_alignment.items():
-            starts.sort()
-            run_start = prev = starts[0]
-            for a_pos in starts[1:]:
-                if a_pos != prev + 1:
-                    candidates.append((run_start, run_start - offset, prev - run_start + min_words))
-                    run_start = a_pos
-                prev = a_pos
-            candidates.append((run_start, run_start - offset, prev - run_start + min_words))
-        # A run whose span in the first document lies inside a longer one is
-        # the same copied text seen at a shifted alignment, not a second copy.
-        candidates.sort(key=lambda r: (-r[2], r[0]))
-        runs: list[tuple[int, int, int]] = []
-        for ra, rb, length in candidates:
-            if not any(oa <= ra and ra + length <= oa + olen for oa, _ob, olen in runs):
-                runs.append((ra, rb, length))
-        runs.sort()
-        covered: set[int] = set()
-        for ra, _rb, length in runs:
-            covered.update(range(ra, ra + length))
+    for (a, b), hashes in sorted(common.items()):
+        ta, tb = tokens[a], tokens[b]
+        visit = sorted(p for h in hashes for p in positions[a][h])
+        runs: list[tuple[int, int, int]] = []  # (a_start, b_start, length in words)
+        covered_until = 0
+        for pos in visit:
+            if pos < covered_until:
+                continue
+            best_len, best_b = 0, 0
+            window = ta[pos:pos + min_words]
+            # At most COPIED_CANDIDATES starting points in the other document:
+            # repetitive text cannot multiply into a cross-product, and each
+            # candidate is EXTENDED to its full length, so a long run is still
+            # measured whole (the bound is on where a run may start, not on
+            # how long it may be).
+            for bp in positions[b][hash(tuple(window))][:COPIED_CANDIDATES]:
+                if tb[bp:bp + min_words] != window:
+                    continue
+                length = min_words
+                while pos + length < len(ta) and bp + length < len(tb) and ta[pos + length] == tb[bp + length]:
+                    length += 1
+                if length > best_len:
+                    best_len, best_b = length, bp
+            if best_len:
+                runs.append((pos, best_b, best_len))
+                covered_until = pos + best_len
+        if not runs:
+            continue
         longest = max(length for _a, _b, length in runs)
         first_a, first_b, _ = runs[0]
         sa, sb = subjects[a], subjects[b]
         total_pairs += 1
+        shared = sum(length for _a, _b, length in runs)
         result.hits.append(Hit(
             sa.rel, sa.lineno(words[a][first_a][1]),
             f"shares {len(runs)} copied run(s) with {sb.rel} (line {sb.lineno(words[b][first_b][1])}), "
-            f"longest {longest} words, {len(covered)} words in all - a rule held in both places "
+            f"longest {longest} words, {shared} words in all - a rule held in both places "
             f"must be changed in both",
-            {"other": sb.rel, "runs": len(runs), "longest_words": longest, "shared_words": len(covered)},
+            {"other": sb.rel, "runs": len(runs), "longest_words": longest, "shared_words": shared},
         ))
     result.population = {"subjects": len(subjects), "min_words": min_words, "pairs_sharing": total_pairs}
     return result

@@ -753,13 +753,37 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
 
+    out: Path | None = None
+    if args.out:
+        # inspect never edits a skill (its charter): the report may not land
+        # inside the collection, through a symlink, or over an earlier report.
+        out = Path(args.out).absolute()
+        targets = [out / "report.json", out / "report.md"]
+        if out.resolve().is_relative_to(coll.root) or any(
+            t.resolve().is_relative_to(coll.root) for t in targets
+        ):
+            print(f"skillc: --out {out} is inside the inspected collection; refusing to write there",
+                  file=sys.stderr)
+            return 2
+        if any(t.exists() or t.is_symlink() for t in targets):
+            print(f"skillc: {out} already holds a report; refusing to overwrite it", file=sys.stderr)
+            return 2
+
     report = inspect.run(coll, exposure=exposure_data, strict=args.strict)
     markdown = inspect.render_markdown(report)
-    if args.out:
-        out = Path(args.out).resolve()
+    if out is not None:
         out.mkdir(parents=True, exist_ok=True)
-        (out / "report.json").write_text(json.dumps(report.data, indent=1) + "\n", encoding="utf-8")
-        (out / "report.md").write_text(markdown, encoding="utf-8")
+        for target, text in ((out / "report.json", json.dumps(report.data, indent=1) + "\n"),
+                             (out / "report.md", markdown)):
+            try:
+                # Exclusive create: refuses a path that appeared (or became a
+                # symlink) after the check above.
+                with target.open("x", encoding="utf-8") as handle:
+                    handle.write(text)
+            except FileExistsError:
+                print(f"skillc: {target} appeared while inspecting; refusing to overwrite it",
+                      file=sys.stderr)
+                return 2
     if args.json:
         print(json.dumps(report.data, indent=1))
     else:

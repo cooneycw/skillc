@@ -112,7 +112,7 @@ def test_exposure_not_supplied_is_said(capsys: pytest.CaptureFixture[str]) -> No
 def test_a_supplied_exposure_report_folds_in_what_did_not_reach_the_model(tmp_path: Path) -> None:
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps({
-        "kind": "exposure-report", "status": "measured", "client": "claude-code",
+        "kind": "exposure-report", "status": "ok", "client": "claude-code",
         "markers": [{"layer": "always_loaded", "verdict": "TRUNCATED", "note": "at 25 KB"}],
         "skills": [{"skill": "tidy", "verdict": "EXPOSED"}, {"skill": "release", "verdict": "HIDDEN", "cause": "policy"}],
     }), encoding="utf-8")
@@ -263,3 +263,38 @@ def test_pinning_does_not_match_a_neighbouring_document() -> None:
     assert inspect.pinned_by(".claude/commands/flow/auto.md", tests) == []
     tests = {"tests/test_y.py": 'open(".claude/commands/flow/auto.md")'}
     assert inspect.pinned_by(".claude/commands/flow/auto.md", tests) == ["tests/test_y.py"]
+
+
+# ------------------------------------------------- counter-model review, pass 2
+
+def test_out_inside_the_collection_is_refused(tmp_path: Path) -> None:
+    """Pass 2 finding 1: the report must never land on an inspected file."""
+    import shutil
+
+    case = tmp_path / "repaired"
+    shutil.copytree(FIXTURES / "repaired", case)
+    before = {p: p.read_bytes() for p in case.rglob("*") if p.is_file()}
+    assert cli.main(_cli(case, "--out", str(case / "skills" / "tidy"))) == 2
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "report.md").symlink_to(case / "skills" / "tidy" / "SKILL.md")
+    assert cli.main(_cli(case, "--out", str(out))) == 2
+    assert {p: p.read_bytes() for p in case.rglob("*") if p.is_file()} == before
+
+
+def test_an_existing_report_is_not_overwritten(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    assert cli.main(_cli(FIXTURES / "repaired", "--out", str(out))) == 0
+    assert cli.main(_cli(FIXTURES / "repaired", "--out", str(out))) == 2
+
+
+def test_an_exposure_report_with_nothing_measured_is_refused(tmp_path: Path) -> None:
+    """Pass 2 finding 4: an empty exposure population is not evidence."""
+    empty = tmp_path / "report.json"
+    empty.write_text(json.dumps({"kind": "exposure-report", "status": "ok",
+                                 "markers": [], "skills": []}), encoding="utf-8")
+    assert cli.main(_cli(FIXTURES / "repaired", "--exposure", str(empty))) == 2
+    nostatus = tmp_path / "nostatus.json"
+    nostatus.write_text(json.dumps({"kind": "exposure-report", "markers": [],
+                                    "skills": [{"skill": "x", "verdict": "EXPOSED"}]}), encoding="utf-8")
+    assert cli.main(_cli(FIXTURES / "repaired", "--exposure", str(nostatus))) == 2
