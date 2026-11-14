@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -525,3 +526,58 @@ def test_a_real_state_dir_is_still_written_after_the_symlink_guard(repo: Path, t
     _hook(_skill_call(repo, session="s-2"), tmp_path / "home")
     assert len(_lines(repo)) == 2
     assert (repo / ".skillc" / ".gitignore").read_text(encoding="utf-8") == "*\n"
+
+
+def _tree(state: Path) -> list[tuple[str, bool, bytes | str]]:
+    """Every entry under `.skillc/` as (name, is-link, bytes or link target)."""
+    return sorted(
+        (p.name, p.is_symlink(), str(p.readlink()) if p.is_symlink() else p.read_bytes())
+        for p in state.iterdir()
+    )
+
+
+@needs_git
+@pytest.mark.parametrize("ignore", [None, "notes.txt\n"])
+def test_NEGATIVE_CONTROL_a_symlinked_log_refusal_writes_nothing_at_all(
+    repo: Path, tmp_path: Path, ignore: str | None,
+) -> None:
+    """Counter-model review: with the log symlinked and `.gitignore` missing or
+    incomplete, the refusal came AFTER `.gitignore` was written. Nothing in
+    `.skillc/` may change, not only the outside target."""
+    state = repo / ".skillc"
+    state.mkdir()
+    target = tmp_path / "config"
+    target.write_text(OUTSIDE_TEXT, encoding="utf-8")
+    (state / "usage.jsonl").symlink_to(target)
+    if ignore is not None:
+        (state / ".gitignore").write_text(ignore, encoding="utf-8")
+    before = _tree(state)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "symlink" in err
+    assert _tree(state) == before and target.read_text(encoding="utf-8") == OUTSIDE_TEXT
+
+
+@needs_git
+@pytest.mark.parametrize("name", [".gitignore", "usage.jsonl"])
+def test_NEGATIVE_CONTROL_a_fifo_entry_is_refused_not_opened(repo: Path, tmp_path: Path, name: str) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    os.mkfifo(state / name)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "non-regular" in err
+    assert (state / name).is_fifo()
+
+
+@needs_git
+def test_a_read_only_ignore_file_that_already_ignores_the_log_still_records(repo: Path, tmp_path: Path) -> None:
+    """Counter-model review: a sufficient `.gitignore` needs no write permission."""
+    state = repo / ".skillc"
+    state.mkdir()
+    ignore = state / ".gitignore"
+    ignore.write_text("*\n", encoding="utf-8")
+    ignore.chmod(0o444)
+    try:
+        _hook(_skill_call(repo), tmp_path / "home")
+        assert len(_lines(repo)) == 1 and ignore.read_text(encoding="utf-8") == "*\n"
+    finally:
+        ignore.chmod(0o644)

@@ -505,6 +505,26 @@ def _open_file(state_fd: int, name: str, flags: int) -> int:
     return fd
 
 
+def _check_entry(state_fd: int, name: str) -> None:
+    """Refuse `.skillc/<name>` if it exists as a symlink or a non-regular
+    file, WITHOUT creating or changing anything (#721). Run for every entry
+    before the first write, so a refusal really means nothing was written
+    (counter-model review: refusing the log after writing `.gitignore` did not)."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW, dir_fd=state_fd)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise _refusal(f"{STATE_DIR}/{name}") from None
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise _refusal(f"{STATE_DIR}/{name}")
+    finally:
+        os.close(fd)
+
+
 def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]]]) -> list[Mapping[str, object]]:
     """Read, decide and append as ONE operation under an exclusive lock.
 
@@ -518,6 +538,8 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     refused before anything is written (#721). Returns what was written."""
     state_fd = _open_state_dir(path.parent)
     try:
+        for name in (".gitignore", path.name):
+            _check_entry(state_fd, name)
         ensure_ignored(state_fd)
         fd = _open_file(state_fd, path.name, os.O_RDWR | os.O_CREAT | os.O_APPEND)
     finally:
@@ -562,10 +584,13 @@ def ensure_ignored(state_fd: int) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write("*\n")
         return
-    with os.fdopen(_open_file(state_fd, ".gitignore", os.O_RDWR | os.O_APPEND), "r+", encoding="utf-8") as handle:
+    # Read-only first: an ignore file that already ignores the log needs no
+    # write permission (counter-model review). Append only when a line is owed.
+    with os.fdopen(_open_file(state_fd, ".gitignore", os.O_RDONLY | os.O_NONBLOCK), "r", encoding="utf-8") as handle:
         existing = handle.read()
-        lines = {line.strip() for line in existing.splitlines()}
-        if not lines & {"*", LOG_NAME, f"/{LOG_NAME}"}:
+    lines = {line.strip() for line in existing.splitlines()}
+    if not lines & {"*", LOG_NAME, f"/{LOG_NAME}"}:
+        with os.fdopen(_open_file(state_fd, ".gitignore", os.O_WRONLY | os.O_APPEND), "w", encoding="utf-8") as handle:
             handle.write(("" if not existing or existing.endswith("\n") else "\n") + f"{LOG_NAME}\n")
 
 
