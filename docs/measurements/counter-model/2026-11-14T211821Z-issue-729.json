@@ -1,0 +1,70 @@
+{
+  "branch": "issue-729-leak-check-refuses-a-redacted-receipt-encoded-plac",
+  "counts": {
+    "accepted": 4,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "extra_passes_reason": "pass 2 found 2 MEDIUM defects in the pass-1 fixes; the owner (cooneycw) ruled in-session: fix both, run one final pass 3, defer whatever pass 3 finds (filed #730)",
+  "head": "773fdfc00b37f4066a20a3f81f5944eecd126b9c",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "4442f745-f19b-4ef8-bdb6-71fc92ee505a",
+    "sources": [
+      {
+        "bytes": 4491223,
+        "path": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl",
+        "sha256": "096d47f56dd6c016212a9f9a5e738f6b5a39391a85646e7a8002bf699d49b391"
+      }
+    ],
+    "transcript": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl"
+  },
+  "issue": "729",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-11-14T21:18:21Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewed_artifact": {
+    "base_sha": "26e686aea67467e80e66f7d622950d0702c0a092",
+    "merge_base": "26e686aea67467e80e66f7d622950d0702c0a092",
+    "method": "runtime-head",
+    "patch_sha256": "e676e2233626e7d98e74f0f542f22093f053a4d18846a977760c731a8d648faa",
+    "report_record": 85,
+    "target_head": "773fdfc00b37f4066a20a3f81f5944eecd126b9c"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.OuHsVW",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/14/rollout-2026-11-14T16-15-46-01a1dbea-9643-7fa3-99dc-5391380fa8f1.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 103436,
+        "path": "codex-review-stream.OuHsVW",
+        "sha256": "7309b5e769ae08afa715b2b777f6d678d55008480e16b61d82e14116b72e2732"
+      },
+      {
+        "bytes": 490645,
+        "path": "2026/11/14/rollout-2026-11-14T16-15-46-01a1dbea-9643-7fa3-99dc-5391380fa8f1.jsonl",
+        "sha256": "8ad6e533e9850c101a67797940d7ae9dcc71722056e5fd2e658a7297b3a5b99d"
+      }
+    ],
+    "thread_id": "01a1dbea-9643-7fa3-99dc-5391380fa8f1"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}
