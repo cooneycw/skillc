@@ -209,6 +209,30 @@ def _host_has_account(name: str) -> bool:
     return True
 
 
+def _host_encoded_accounts() -> frozenset[str]:
+    """Every host account name in Claude's directory encoding: each
+    non-alphanumeric character becomes a dash (#729). The encoding is lossy, so
+    `-home-user` is also how `/home/user-operator` and `/home/user.operator`
+    begin; an encoded exemption must consult these, not one exact name. An
+    account database that cannot be enumerated yields no names here, and the
+    caller then grants no encoded exemption (see `_encoded_exempt`)."""
+    try:
+        names = [entry.pw_name for entry in pwd.getpwall()]
+    except OSError:
+        return frozenset({"\0unenumerable"})
+    return frozenset(re.sub(r"[^A-Za-z0-9]", "-", name) for name in names)
+
+
+def _encoded_exempt(name: str) -> bool:
+    """`-home-<name>` may be exempt only when no host account encodes to
+    `<name>` or to `<name>-...` (counter-model review on #729): otherwise a real
+    hyphenated or dotted account would hide behind the placeholder."""
+    encoded = _host_encoded_accounts()
+    if "\0unenumerable" in encoded:
+        return False
+    return not any(account == name or account.startswith(f"{name}-") for account in encoded)
+
+
 @functools.lru_cache(maxsize=1)
 def conditional_exemptions() -> frozenset[str]:
     """Exact values exempt ONLY while this host holds no real identity they
@@ -228,7 +252,10 @@ def conditional_exemptions() -> frozenset[str]:
       - `/home/u`: CPP's fixed developer example; `/home/proof`: the disposable
         flow-auto cold-profile identity (#581). Neither is a blanket prefix.
       - the ENCODED twin of each of those three homes (`-home-user`, #729),
-        which CPP's redacted counter-model receipts carry.
+        which CPP's redacted counter-model receipts carry - and only while no
+        host account ENCODES to that name or that name plus a dash, because
+        the encoding is lossy (`user-operator` and `user.operator` both begin
+        `-home-user-`).
 
     Exact match only: the operator's own uid, a longer number that starts
     with 10001, and a longer home directory name all still fire. A scan run on a host that HAS such an
@@ -247,8 +274,10 @@ def conditional_exemptions() -> frozenset[str]:
             # rule. CPP's receipt writer (CPP #1689) replaces the host account
             # with `user` and records Claude's encoded transcript path,
             # `-home-user-Projects/<session>.jsonl`; without this a correctly
-            # redacted receipt was refused. Exact match only, as above.
-            exempt.add(f"-home-{name}")
+            # redacted receipt was refused. Exact match only, as above, AND no
+            # host account whose encoded name this placeholder is a prefix of.
+            if _encoded_exempt(name):
+                exempt.add(f"-home-{name}")
     return frozenset(exempt)
 
 #: `--denylist`, then this environment variable, then nothing (#63). Real host

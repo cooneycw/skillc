@@ -616,9 +616,32 @@ def test_the_ENCODED_twin_of_a_placeholder_home_is_exempt_and_nothing_longer(
     `-home-user-Projects/<session>.jsonl`. The encoded twin of an exempt
     placeholder is exempt under the same rule: exact match, no such host account."""
     monkeypatch.setattr(leak, "_host_has_account", lambda account: False)
+    monkeypatch.setattr(leak, "_host_encoded_accounts", lambda: frozenset({"root", "operator"}))
     assert list(leak.scan_text(f'"transcript": "-home-{name}-Projects/x.jsonl"', frozenset())) == []
     for longer in (f"-home-{name}s-Projects/x", f"-home-{name}name"):
         assert [k for _l, k, _d in leak.scan_text(longer, frozenset())] == ["encoded-home-path"], longer
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("account", ["user-operator", "user.operator", "user"])
+def test_a_real_account_the_placeholder_PREFIXES_keeps_the_encoded_home_a_finding(
+    account: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review on #729: Claude's encoding is lossy, so a real
+    `user-operator` (or `user.operator`) account encodes as
+    `-home-user-operator`, which the regex matches as `-home-user`. With only
+    that account on the host, the placeholder must not be exempt."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
+    monkeypatch.setattr(leak, "_host_encoded_accounts", lambda: frozenset({account.replace(".", "-")}))
+    assert [k for _l, k, _d in leak.scan_text("-home-user-operator-Projects/x.jsonl", frozenset())] == [
+        "encoded-home-path"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_an_unenumerable_account_database_grants_no_encoded_exemption(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
+    monkeypatch.setattr(leak, "_host_encoded_accounts", lambda: frozenset({"\0unenumerable"}))
+    assert [k for _l, k, _d in leak.scan_text("-home-user-Projects/x.jsonl", frozenset())] == ["encoded-home-path"]
 
 
 @pytest.mark.usefixtures("_fresh_exemptions")
