@@ -280,9 +280,14 @@ did not make (found while working #499):
   close. Both close paths now share one whole-sentence refusal: an alternative, a
   negation, a historical close or another issue.
 
-Candidates (8 added, none moved): six reds, `fail/twin-proposed-changes-{none,
+For the close check a sentence ends at `.`, `!`, `?`, a blank line or a new list
+item or heading - never at a soft line break or a semicolon, so "Should I close #1,"
+wrapped onto "or keep it open?" is still one sentence (counter-model review).
+
+Candidates (10 added, none moved): eight reds, `fail/twin-proposed-changes-{none,
 for-other-issue,rejected}` and `fail/clean-{should-close-or-keep-open,
-should-close-already-closed,can-close-other-issue}`, each PASS on revision 5; and two
+should-close-already-closed,can-close-other-issue,should-close-wrapped-or-keep,
+should-close-semicolon-or-keep}`, each PASS on revision 5; and two
 positive controls, `pass/twin-proposed-changes-for-issue-1-witnessed` and
 `pass/twin-changes-dash-pending-witnessed` (the dash form live TWIN reports wrote).
 

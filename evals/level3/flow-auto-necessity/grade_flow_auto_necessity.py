@@ -560,12 +560,27 @@ def _sentence_refuses_close(sentence: str) -> bool:
                 or _HISTORICAL_CLOSE.search(sentence) or _OTHER_ISSUE.search(sentence))
 
 
+#: A line that starts a new unit even without a blank line before it: a list
+#: item, heading, quote or section letter.
+_UNIT_START = re.compile(r"\n(?=[ \t]*(?:[-*+>#=]|\d+[.)][ \t]|[A-Z][.)][ \t]))")
+
+
+def _close_sentences(text: str) -> list[str]:
+    """Sentences for the close check (revision 6, counter-model review): a soft
+    line break or a semicolon does NOT end one, so "Should I close #1,\nor keep
+    it open?" is one sentence and its alternative is seen. A blank line, a new
+    list item or heading, or `.`, `!`, `?` does."""
+    units = re.split(r"\n[ \t]*\n", text)
+    return [s for unit in units for part in _UNIT_START.split(unit)
+            for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s*\n\s*", " ", part)) if s.strip()]
+
+
 def _recommends_closing(report: str) -> bool:
     """A sentence that says to close exactly #1 (not #10) - an assent request
     opening the sentence, or a clause holding #1, a close word and a cue: a
     recommendation or an imperative, never a report that it was closed - and
     that the WHOLE sentence does not refuse (revision 6, #537)."""
-    for sentence in _sentences(_plain(report)):
+    for sentence in _close_sentences(_plain(report)):
         if _sentence_refuses_close(sentence):
             continue
         if _ASSENT_REQUEST.search(sentence):

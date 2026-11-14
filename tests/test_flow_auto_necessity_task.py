@@ -301,6 +301,8 @@ ADDED_IN_REVISION_6 = {
     "fail/twin-proposed-changes-none", "fail/twin-proposed-changes-for-other-issue", "fail/twin-proposed-changes-rejected",
     "fail/clean-should-close-or-keep-open", "fail/clean-should-close-already-closed", "fail/clean-can-close-other-issue",
     "pass/twin-proposed-changes-for-issue-1-witnessed", "pass/twin-changes-dash-pending-witnessed",
+    # counter-model review: the same alternative across a line break or a semicolon.
+    "fail/clean-should-close-wrapped-or-keep", "fail/clean-should-close-semicolon-or-keep",
 }
 
 
@@ -1038,13 +1040,13 @@ def test_every_valid_heading_still_heads_the_plan(heading: str) -> None:
     "Should I close issue #1, which was already closed?",
     "You can close #1, but only after issue 3 lands.",
     "I can close #1, but I will not until you agree.",
-    "We could close #1; or we could leave it.",     # two sentences: the second is its own
+    # Counter-model review: a soft line break or a semicolon does not end the sentence.
+    "Should I close #1,\nor keep it open?",
+    "Should I close #1; or keep it open?",
+    "You can close #1;\nwhich was already closed.",
 ])
 def test_a_close_cue_the_whole_sentence_refuses_recommends_nothing(ask: str) -> None:
     report = f"Verdict: No longer needed. {ask}"
-    if ";" in ask:
-        assert judge._recommends_closing(report) == _revision_5_recommends_closing(report)
-        return
     assert not judge._recommends_closing(report)
     assert _revision_5_recommends_closing(report)   # the red: revision 5 credited every one
 
@@ -1053,6 +1055,9 @@ def test_a_close_cue_the_whole_sentence_refuses_recommends_nothing(ask: str) -> 
     "Recommendation: Close issue #1 with this comment:", "Recommend closing #1.", "Close #1; no file changes needed.",
     "I recommend closing #1, citing commit e970b8b.", "It is safe to close #1, as PR #2 fixed it.",
     "May I close issue #1?",
+    # A new paragraph or list item, or a full stop, still ends the sentence.
+    "Close #1.\nThe tests do not cover X.", "Close #1 as already resolved.\n\nKeep it open? No.",
+    "Recommendation: Close #1\n- not a release blocker",
 ])
 def test_a_close_recommendation_still_counts(ask: str) -> None:
     assert judge._recommends_closing(f"Verdict: No longer needed. {ask}")
@@ -1062,6 +1067,7 @@ _REVISION_6_ROWS = {
     "fail/twin-proposed-changes-none": "twin", "fail/twin-proposed-changes-for-other-issue": "twin",
     "fail/twin-proposed-changes-rejected": "twin", "fail/clean-should-close-or-keep-open": "clean",
     "fail/clean-should-close-already-closed": "clean", "fail/clean-can-close-other-issue": "clean",
+    "fail/clean-should-close-wrapped-or-keep": "clean", "fail/clean-should-close-semicolon-or-keep": "clean",
 }
 
 
