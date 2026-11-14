@@ -211,14 +211,18 @@ def _host_has_account(name: str) -> bool:
 
 def _host_encoded_accounts() -> frozenset[str]:
     """Every host account name in Claude's directory encoding: each
-    non-alphanumeric character becomes a dash (#729). The encoding is lossy, so
-    `-home-user` is also how `/home/user-operator` and `/home/user.operator`
-    begin; an encoded exemption must consult these, not one exact name. An
-    account database that cannot be enumerated yields no names here, and the
-    caller then grants no encoded exemption (see `_encoded_exempt`)."""
+    non-alphanumeric character becomes a dash (#729). The encoding is lossy: an
+    account named `user-operator` or `user.operator` encodes with the same
+    `user-` prefix as the bare `user` placeholder, so an encoded exemption must
+    consult every account, not one exact name. An account database that cannot
+    be enumerated - an error, OR an empty listing, which is what unavailable
+    account lookup produces (counter-model review, pass 2) - is UNKNOWN, and
+    the caller then grants no encoded exemption (see `_encoded_exempt`)."""
     try:
         names = [entry.pw_name for entry in pwd.getpwall()]
     except OSError:
+        return frozenset({"\0unenumerable"})
+    if not names:
         return frozenset({"\0unenumerable"})
     return frozenset(re.sub(r"[^A-Za-z0-9]", "-", name) for name in names)
 
@@ -254,8 +258,8 @@ def conditional_exemptions() -> frozenset[str]:
       - the ENCODED twin of each of those three homes (`-home-user`, #729),
         which CPP's redacted counter-model receipts carry - and only while no
         host account ENCODES to that name or that name plus a dash, because
-        the encoding is lossy (`user-operator` and `user.operator` both begin
-        `-home-user-`).
+        the encoding is lossy (accounts `user-operator` and `user.operator`
+        encode with the placeholder as their prefix).
 
     Exact match only: the operator's own uid, a longer number that starts
     with 10001, and a longer home directory name all still fire. A scan run on a host that HAS such an
