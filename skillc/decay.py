@@ -427,6 +427,14 @@ def _exists(ref: Ref, root: Path) -> Path | None:
 
 
 SHELL_SEPARATORS = {"|", "||", "&&", ";", "&"}
+#: Words that run the NEXT word as the command, so the command position moves past them.
+COMMAND_PREFIXES = frozenset({
+    "bash", "sh", "zsh", "dash", "python", "python3", "node", "perl", "ruby",
+    "env", "exec", "source", ".", "sudo", "time", "nohup", "command",
+    # shell keywords that introduce a command in the same position
+    "if", "elif", "then", "else", "while", "until", "do", "!", "{", "(",
+})
+ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_BREAKS = ("`", "|", ";", "&&")
 
 
@@ -499,31 +507,43 @@ def dangling_reference(coll: Collection) -> Result:
         for span in code_spans(subject.lines):
             script: Path | None = None
             script_word = ""
-            outer: list[tuple[Path | None, str]] = []  # commands suspended by `$(`
+            # The command a flag belongs to is the segment's FIRST word, after
+            # any interpreter prefix or VAR=value (#731): a path seen later is
+            # an ARGUMENT, checked for existence but never the flag owner.
+            expect_command = True
+            outer: list[tuple[Path | None, str, bool]] = []  # commands suspended by `$(`
+            reset_after = False
             for raw in span.text.split():
+                if reset_after:
+                    script, script_word, expect_command = None, "", True
+                    reset_after = False
                 word = _clean_word(raw)
                 opens = raw.count("$(")
-                closes = raw.count(")") if outer or opens else 0
-                if opens:
-                    # A flag inside `$(...)` belongs to the nested command; the
-                    # outer command resumes when the substitution closes.
+                closes = raw.count(")") if (outer or opens) else 0
+                if opens or closes:
+                    # A substitution is a command of its own. Process the token's
+                    # delimiters in order - pushes, then pops - so `"$(pwd)"`,
+                    # which opens and closes in one token, restores the outer
+                    # command at once (#731).
                     for _ in range(opens):
-                        outer.append((script, script_word))
-                    script, script_word = None, ""
-                    closes -= min(opens, closes)
-                if closes and outer:
+                        outer.append((script, script_word, expect_command))
+                        script, script_word, expect_command = None, "", True
                     for _ in range(min(closes, len(outer))):
-                        script, script_word = outer.pop()
-                    continue
-                if opens:
+                        script, script_word, expect_command = outer.pop()
                     continue
                 if not word:
                     continue
-                if any(sep in raw for sep in SHELL_BREAKS) or word in SHELL_SEPARATORS:
+                # A separator ends the command. One that TRAILS the word
+                # (`--bad;`) ends it after this word is read, so the word's own
+                # flag still belongs to the command it was written against.
+                trailing_break = raw.rstrip("\"'").endswith((";", "|", "&"))
+                if (any(sep in raw for sep in SHELL_BREAKS) and not trailing_break) or word in SHELL_SEPARATORS:
                     # A flag after `|`, `;` or `&&` belongs to another command.
-                    script, script_word = None, ""
+                    script, script_word, expect_command = None, "", True
                     if not word.strip("|;&()$`"):
                         continue
+                word = word.rstrip(";|&")
+                reset_after = trailing_break
                 if script is not None and FLAG_RE.match(word.split("=", 1)[0]):
                     flag = word.split("=", 1)[0]
                     flags += 1
@@ -535,6 +555,11 @@ def dangling_reference(coll: Collection) -> Result:
                             {"reference": f"{script_word} {flag}", "kind": "flag"},
                         ))
                     continue
+                is_command_position = expect_command
+                if expect_command and not word.startswith("-") and not (
+                    word in COMMAND_PREFIXES or ASSIGNMENT_RE.match(word)
+                ):
+                    expect_command = False
                 if _is_placeholder(word):
                     if "/" in word:
                         placeholders += 1
@@ -559,8 +584,7 @@ def dangling_reference(coll: Collection) -> Result:
                         f"names {word}, which does not exist in the collection",
                         {"reference": word, "kind": "path"},
                     ))
-                    script = None
-                elif found.is_file():
+                elif found.is_file() and is_command_position:
                     script, script_word = found, word
     result.population = {
         "links_examined": links,
@@ -741,48 +765,85 @@ def copied_passage(coll: Collection, min_words: int = COPIED_MIN_WORDS) -> Resul
             for b in here[i + 1:]:
                 common[(a, b)].add(h)
     total_pairs = 0
+    estimated_pairs = 0
     for (a, b), hashes in sorted(common.items()):
-        ta, tb = tokens[a], tokens[b]
-        visit = sorted(p for h in hashes for p in positions[a][h])
-        runs: list[tuple[int, int, int]] = []  # (a_start, b_start, length in words)
-        covered_until = 0
-        for pos in visit:
-            if pos < covered_until:
-                continue
-            best_len, best_b = 0, 0
-            window = ta[pos:pos + min_words]
-            # At most COPIED_CANDIDATES starting points in the other document:
-            # repetitive text cannot multiply into a cross-product, and each
-            # candidate is EXTENDED to its full length, so a long run is still
-            # measured whole (the bound is on where a run may start, not on
-            # how long it may be).
-            for bp in positions[b][hash(tuple(window))][:COPIED_CANDIDATES]:
-                if tb[bp:bp + min_words] != window:
-                    continue
-                length = min_words
-                while pos + length < len(ta) and bp + length < len(tb) and ta[pos + length] == tb[bp + length]:
-                    length += 1
-                if length > best_len:
-                    best_len, best_b = length, bp
-            if best_len:
-                runs.append((pos, best_b, best_len))
-                covered_until = pos + best_len
+        runs = _pair_runs(tokens[a], tokens[b], positions[a], positions[b], hashes, min_words)
         if not runs:
             continue
-        longest = max(length for _a, _b, length in runs)
-        first_a, first_b, _ = runs[0]
+        longest = max(length for _a, _b, length, _est in runs)
+        first_a, first_b, _, _ = runs[0]
         sa, sb = subjects[a], subjects[b]
         total_pairs += 1
-        shared = sum(length for _a, _b, length in runs)
+        shared = sum(length for _a, _b, length, _est in runs)
+        estimate = any(est for *_rest, est in runs)
+        estimated_pairs += estimate
+        label = (" - a bounded estimate: repetitive text was measured from at most "
+                 f"{COPIED_CANDIDATES} starting points" if estimate else "")
         result.hits.append(Hit(
             sa.rel, sa.lineno(words[a][first_a][1]),
             f"shares {len(runs)} copied run(s) with {sb.rel} (line {sb.lineno(words[b][first_b][1])}), "
-            f"longest {longest} words, {shared} words in all - a rule held in both places "
+            f"longest {longest} words, {shared} words in all{label} - a rule held in both places "
             f"must be changed in both",
-            {"other": sb.rel, "runs": len(runs), "longest_words": longest, "shared_words": shared},
+            {"other": sb.rel, "runs": len(runs), "longest_words": longest, "shared_words": shared,
+             "estimate": estimate},
         ))
-    result.population = {"subjects": len(subjects), "min_words": min_words, "pairs_sharing": total_pairs}
+    result.population = {"subjects": len(subjects), "min_words": min_words, "pairs_sharing": total_pairs,
+                         "estimated_pairs": estimated_pairs}
     return result
+
+
+def _pair_runs(
+    ta: Sequence[str], tb: Sequence[str],
+    pa: Mapping[int, Sequence[int]], pb: Mapping[int, Sequence[int]],
+    hashes: set[int], min_words: int,
+) -> list[tuple[int, int, int, bool]]:
+    """Maximal copied runs between two token sequences, `(a, b, length, estimate)`.
+
+    Phase 1 ANCHORS on windows that are rare in the other document (at most
+    COPIED_CANDIDATES occurrences) and extends each match backward and forward,
+    so a repetitive prefix is recovered whole from the first distinctive word
+    after it, in either document order (#731). Phase 2 covers only what no
+    anchor reached - purely repetitive text - from the first COPIED_CANDIDATES
+    starting points, forward only; those runs are flagged as ESTIMATES. No word
+    on either side is counted in two runs, so repeated text is not double counted.
+    """
+    used_a, used_b = bytearray(len(ta)), bytearray(len(tb))
+    visit = sorted(p for h in hashes for p in pa[h])
+    runs: list[tuple[int, int, int, bool]] = []
+
+    def free(i: int, j: int) -> bool:
+        return not used_a[i] and not used_b[j]
+
+    for phase in (1, 2):
+        for pos in visit:
+            if used_a[pos]:
+                continue
+            window = ta[pos:pos + min_words]
+            candidates = pb.get(hash(tuple(window)), ())
+            if phase == 1 and len(candidates) > COPIED_CANDIDATES:
+                continue  # repetitive here: let a distinctive anchor reach it
+            best: tuple[int, int, int] | None = None
+            for bp in candidates[:COPIED_CANDIDATES]:
+                if tb[bp:bp + min_words] != window or not all(
+                    free(pos + k, bp + k) for k in range(min_words)
+                ):
+                    continue
+                sa, sb = pos, bp
+                if phase == 1:
+                    while sa > 0 and sb > 0 and free(sa - 1, sb - 1) and ta[sa - 1] == tb[sb - 1]:
+                        sa, sb = sa - 1, sb - 1
+                ea, eb = pos + min_words, bp + min_words
+                while ea < len(ta) and eb < len(tb) and free(ea, eb) and ta[ea] == tb[eb]:
+                    ea, eb = ea + 1, eb + 1
+                if best is None or ea - sa > best[2]:
+                    best = (sa, sb, ea - sa)
+            if best is not None:
+                sa, sb, length = best
+                used_a[sa:sa + length] = b"\x01" * length
+                used_b[sb:sb + length] = b"\x01" * length
+                runs.append((sa, sb, length, phase == 2))
+    runs.sort()
+    return runs
 
 
 # ------------------------------------------------------------- emphasis-density

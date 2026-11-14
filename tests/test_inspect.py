@@ -12,6 +12,7 @@ import pytest
 from skillc import cli, decay, inspect
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect"
+REPO_CONTROLS = Path(__file__).resolve().parent.parent / "controls"
 
 
 def _cli(case: Path, *extra: str) -> list[str]:
@@ -298,3 +299,33 @@ def test_an_exposure_report_with_nothing_measured_is_refused(tmp_path: Path) -> 
     nostatus.write_text(json.dumps({"kind": "exposure-report", "markers": [],
                                     "skills": [{"skill": "x", "verdict": "EXPOSED"}]}), encoding="utf-8")
     assert cli.main(_cli(FIXTURES / "repaired", "--exposure", str(nostatus))) == 2
+
+
+# ------------------------------------------------- #731 (counter-model pass 3, deferred)
+
+def test_731_a_known_bad_input_is_never_the_enforcer(tmp_path: Path) -> None:
+    """#731 item 1, the issue's exact line: a file INSIDE a control's bad/ is an
+    input to the check, not the check."""
+    import shutil
+
+    shutil.copytree(REPO_CONTROLS / "dangling-reference", tmp_path / "controls" / "dangling-reference")
+    [line] = _enforced(tmp_path, "You MUST reject `controls/dangling-reference/bad/dead-link/skills/demo/SKILL.md`")
+    assert line["bucket"] == inspect.UNSORTED
+
+
+def test_731_the_control_root_is_still_an_enforcer(tmp_path: Path) -> None:
+    import shutil
+
+    shutil.copytree(REPO_CONTROLS / "dangling-reference", tmp_path / "controls" / "dangling-reference")
+    [line] = _enforced(tmp_path, "You MUST resolve every path - `controls/dangling-reference/` refuses one that is gone.")
+    assert line["bucket"] == inspect.A and line["red_case"] == "controls/dangling-reference/bad"
+
+
+def test_731_the_report_summary_says_when_a_copy_count_is_an_estimate(tmp_path: Path) -> None:
+    same = " ".join(["same"] * 200)
+    _skill(tmp_path, "a", same + "\n")
+    _skill(tmp_path, "b", same + "\n")
+    report = inspect.run(decay.load(tmp_path, offline=True))
+    assert "bounded estimate" in report.data["summary"]
+    assert report.data["rules"]["copied-passage"]["population"]["estimated_pairs"] == 1
+    assert "bounded estimate" in inspect.render_markdown(report)

@@ -383,3 +383,65 @@ def test_a_url_encoded_link_resolves_to_its_decoded_file(tmp_path: Path) -> None
     (tmp_path / "skills" / "a" / "references" / "my guide.md").write_text("x", encoding="utf-8")
     hits = decay.dangling_reference(_load(tmp_path)).hits
     assert [h.data["reference"] for h in hits] == ["references/no%20such.md"]
+
+
+# ------------------------------------------------- #731 (counter-model pass 3, deferred)
+
+def test_731_a_single_token_substitution_restores_the_outer_command(tmp_path: Path) -> None:
+    """#731 item 2, the issue's exact input."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("#!/bin/sh\n# helper.sh [--verbose]\n", encoding="utf-8")
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --verbose "$(pwd)" --absent\n```\n')
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/helper.sh --absent"]
+
+
+def test_731_a_file_argument_does_not_own_later_flags(tmp_path: Path) -> None:
+    """#731 item 3, the issue's exact input against controls/dangling-reference/good/present."""
+    import shutil
+
+    case = tmp_path / "present"
+    shutil.copytree(CONTROLS / "dangling-reference" / "good" / "present", case)
+    skill_md = case / "skills" / "demo" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text(encoding="utf-8")
+                        + "\nRun `scripts/helper.sh references/guide.md --verbose`.\n", encoding="utf-8")
+    assert decay.dangling_reference(_load(case)).hits == []
+
+
+def _prefix_case(root: Path, swap: bool) -> list[decay.Hit]:
+    tail = " ".join(f"t{i}" for i in range(50))
+    first, second = " ".join(["same"] * 60) + " " + tail, " ".join(["same"] * 100) + " " + tail
+    if swap:
+        first, second = second, first
+    _skill(root, "a", first + "\n")
+    _skill(root, "b", second + "\n")
+    return decay.copied_passage(_load(root)).hits
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["60-first", "100-first"])
+def test_731_a_repetitive_prefix_is_measured_whole_in_both_orders(tmp_path: Path, swap: bool) -> None:
+    """#731 item 4, the issue's exact case: 110 words, in either document order,
+    and not labelled an estimate - an anchor measured it exactly."""
+    [hit] = _prefix_case(tmp_path, swap)
+    assert (hit.data["longest_words"], hit.data["runs"], hit.data["shared_words"]) == (110, 1, 110)
+    assert hit.data["estimate"] is False and "bounded estimate" not in hit.detail
+
+
+def test_731_purely_repetitive_text_is_labelled_a_bounded_estimate(tmp_path: Path) -> None:
+    """The orchestrator's condition: where the first-8 fallback measured a
+    position, the finding says it is an estimate."""
+    same = " ".join(["same"] * 200)
+    _skill(tmp_path, "a", same + "\n")
+    _skill(tmp_path, "b", same + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
+
+
+def test_731_a_shell_keyword_keeps_the_command_position(tmp_path: Path) -> None:
+    """`if ! scripts/x.sh --bad` and `elif scripts/x.sh --bad`: the script IS the
+    command, so its flags are still checked (found on CPP's update.md/wave.md)."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "x.sh").write_text("--check\n", encoding="utf-8")
+    _skill(tmp_path, "a", "```bash\nif ! scripts/x.sh --check --bad; then :; fi\nelif scripts/x.sh --worse\n```\n")
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/x.sh --bad", "scripts/x.sh --worse"]

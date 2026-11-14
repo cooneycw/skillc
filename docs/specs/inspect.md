@@ -54,6 +54,10 @@ Must never:
 A zero in the C or B column means **not assigned**, never "none". The report
 says so.
 
+A file *inside* a control's `bad/`, `good/` or `targets/` is an input the check
+runs on, never the enforcer: naming `controls/x/bad/case/SKILL.md` sorts
+UNSORTED, while naming the control itself (`controls/x/`) can sort A (#731).
+
 "A check exists" is not "a check goes red" (#1830 Part 3). An enforcer that is
 named but has no red case found is UNSORTED: *enforcer named, but no known-bad
 case found - run its failing case before trimming*.
@@ -139,7 +143,17 @@ A neighbour's name never satisfies it, and neither does `../` out of the root
 resolved script, in the same span or line, is looked up in the script's
 **source text**, plus any sibling file the script names. A wrapper such as
 `flow-preflight.sh` that execs `flow-preflight.py "$@"` takes the flags its
-target defines. The rule never runs a collection's script: `--help` would
+target defines.
+
+**Which command a flag belongs to** (#731). A flag belongs to its segment's
+COMMAND: the first word after any interpreter or shell keyword (`bash`,
+`python3`, `env`, `if`, `elif`, `!`, ...) and any `VAR=value`. A path seen later
+in the segment is an argument - it must exist, but never takes the flags (so
+`scripts/helper.sh references/guide.md --verbose` checks `--verbose` against the
+helper, not the guide). A separator (`|`, `;`, `&&`) ends the command - after
+the word it trails, so `--bad;` is still checked. `$(...)` is a command of its
+own, and the outer command resumes when it closes, including when it opens and
+closes in one token (`"$(pwd)"`). The rule never runs a collection's script: `--help` would
 execute repository-controlled code on the host.
 
 **Cannot see, and counts instead of firing** (`population` in the report):
@@ -154,7 +168,11 @@ execute repository-controlled code on the host.
 - prefixed words with no file extension, such as `scripts/foo`, which are as
   often prose examples as references;
 - references in prose without backticks, flags assembled at run time, and
-  directories referenced without a trailing `/`.
+  directories referenced without a trailing `/`;
+- a script that is not in command position: `a.sh b.sh --x` checks `--x`
+  against `a.sh` (shell semantics; approved on #731), a script named inside an
+  `echo "..."` string, and a script named mid-sentence in a prose code span
+  (`(re-run scripts/x.sh --write later)`) - their flags are not examined.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,
@@ -192,6 +210,16 @@ places has to be changed in N places.
 *measuring* sharing, but as a *finding* floor it fires on shared idioms and
 one-line commands. 40 is a paragraph or a pasted block. Exactly 39 does not
 fire, and 40 does (`test_a_run_one_word_short_of_the_floor_does_not_fire`).
+
+**How a run is measured** (#731). Matching anchors on windows that are RARE
+in the other document (at most 8 occurrences) and extends each match backward
+and forward, so a repetitive prefix is recovered whole from the first
+distinctive word after it, in either document order. Only what no anchor
+reached - purely repetitive text - falls back to the first 8 starting points,
+forward only; such a finding and the report summary say **bounded estimate**,
+and `population.estimated_pairs` counts them. No word on either side is counted
+in two runs. Memory stays bounded on repetitive text (no occurrence
+cross-product).
 
 **Cannot see.** Paraphrase, and meaning-level overlap. Both belong to round 1's
 overlap view (#726). It also cannot tell a deliberate, checked copy from a

@@ -158,6 +158,32 @@ has a test):
    by hand: `PHASE-BOUNDARIES.md`, `LOGIC.md`, `UI.md` exist beside their
    skills).
 
+## Re-run after #731 (same SHAs)
+
+#731 fixed four precise false verdicts (enforcer from a `bad/` input, a
+single-token `$(...)`, file arguments owning flags, and a bounded copy-run
+estimate). The three collections were re-run and compared with the #733 reports
+finding by finding:
+
+| Run | Errors | Buckets / rule lines | Copied-passage (pairs, numbers) | Flags examined |
+|---|---|---|---|---|
+| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 |
+| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 |
+| mattpocock `5863806` | 0 | identical | 2, identical; 0 estimates | 0 -> 0 |
+
+The only change is the flag population, and both lost flags are the new
+command-position rule working as documented:
+- `cpp/init.md:2834` - `echo "... bash ~/.claude/scripts/bash-prep.sh --check"`:
+  the script is inside a string passed to `echo`, so it is no longer read as a
+  command;
+- `cpp/update.md:2017` - a prose code span, `(re-run
+  scripts/commands-mirror-sync.sh --write later)`: the script is not in command
+  position (a listed blind spot).
+
+A first cut also dropped `if ! scripts/commands-mirror-sync.sh --check` and
+`elif ~/.claude/scripts/speckit-context.py refresh --body-file`; shell keywords
+were then added to the command prefixes, and a test now holds both.
+
 ## Reproducing
 
 The SHAs above are public. `--issue-states` makes a run deterministic: issue
