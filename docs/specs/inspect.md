@@ -147,13 +147,18 @@ target defines.
 
 **Which command a flag belongs to** (#731). A flag belongs to its segment's
 COMMAND: the first word after any interpreter or shell keyword (`bash`,
-`python3`, `env`, `if`, `elif`, `!`, ...) and any `VAR=value`. A path seen later
+`python3`, `env`, `if`, `elif`, `!`, ...), its options and their values
+(`sudo -u root`, `env -u VAR`), and any `VAR=value`. A path seen later
 in the segment is an argument - it must exist, but never takes the flags (so
 `scripts/helper.sh references/guide.md --verbose` checks `--verbose` against the
 helper, not the guide). A separator (`|`, `;`, `&&`) ends the command - after
 the word it trails, so `--bad;` is still checked. `$(...)` is a command of its
 own, and the outer command resumes when it closes, including when it opens and
-closes in one token (`"$(pwd)"`). The rule never runs a collection's script: `--help` would
+closes in one token (`"$(pwd)"`), and a separator after it (`"$(pwd)"; echo
+--x`) ends that command too. A flag that follows a path which is NOT the
+command (an unknown wrapper: `mystery --opt scripts/x.sh --flag`) has no known
+owner: it is never fired on, and it is counted in
+`population.flags_after_a_non_command_path` rather than dropped silently. The rule never runs a collection's script: `--help` would
 execute repository-controlled code on the host.
 
 **Cannot see, and counts instead of firing** (`population` in the report):
@@ -213,8 +218,9 @@ fire, and 40 does (`test_a_run_one_word_short_of_the_floor_does_not_fire`).
 
 **How a run is measured** (#731). Matching anchors on windows that are RARE
 in the other document (at most 8 occurrences) and extends each match backward
-and forward, so a repetitive prefix is recovered whole from the first
-distinctive word after it, in either document order. Only what no anchor
+and forward, then accepts the runs longest first - so a repetitive prefix is
+recovered whole from the first distinctive word after it, and an early short
+match never starves a later longer one, in either document order. Only what no anchor
 reached - purely repetitive text - falls back to the first 8 starting points,
 forward only; such a finding and the report summary say **bounded estimate**,
 and `population.estimated_pairs` counts them. No word on either side is counted

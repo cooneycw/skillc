@@ -167,12 +167,13 @@ finding by finding:
 
 | Run | Errors | Buckets / rule lines | Copied-passage (pairs, numbers) | Flags examined |
 |---|---|---|---|---|
-| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 |
-| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 |
+| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 examined + 2 counted unowned |
+| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 examined + 2 counted unowned |
 | mattpocock `5863806` | 0 | identical | 2, identical; 0 estimates | 0 -> 0 |
 
-The only change is the flag population, and both lost flags are the new
-command-position rule working as documented:
+The only change is the flag population. The 2 flags no longer examined are
+exactly the 2 now counted in `flags_after_a_non_command_path`, which is the
+new command-position rule working as documented:
 - `cpp/init.md:2834` - `echo "... bash ~/.claude/scripts/bash-prep.sh --check"`:
   the script is inside a string passed to `echo`, so it is no longer read as a
   command;

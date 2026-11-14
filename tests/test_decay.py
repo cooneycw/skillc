@@ -445,3 +445,52 @@ def test_731_a_shell_keyword_keeps_the_command_position(tmp_path: Path) -> None:
     _skill(tmp_path, "a", "```bash\nif ! scripts/x.sh --check --bad; then :; fi\nelif scripts/x.sh --worse\n```\n")
     hits = decay.dangling_reference(_load(tmp_path)).hits
     assert [h.data["reference"] for h in hits] == ["scripts/x.sh --bad", "scripts/x.sh --worse"]
+
+
+# ------------------------------------------------- #731 counter-model pass 1
+
+def test_731_r1_a_separator_after_a_substitution_ends_the_command(tmp_path: Path) -> None:
+    """Reviewer's exact input: `echo --absent` is echo's flag, not the helper's."""
+    import shutil
+
+    case = tmp_path / "present"
+    shutil.copytree(CONTROLS / "dangling-reference" / "good" / "present", case)
+    skill_md = case / "skills" / "demo" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text(encoding="utf-8")
+                        + '\n```bash\nscripts/helper.sh --verbose "$(pwd)"; echo --absent\n```\n', encoding="utf-8")
+    assert decay.dangling_reference(_load(case)).hits == []
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["A-first", "B-first"])
+def test_731_r1_a_longer_match_is_not_starved_by_an_earlier_shorter_one(tmp_path: Path, swap: bool) -> None:
+    """Reviewer's exact P/T case: the longest run is 60 words in BOTH orders."""
+    p = " ".join(f"p{i}" for i in range(40))
+    t = " ".join(f"t{i}" for i in range(20))
+    first = " ".join(f"{p} sep{i}" for i in range(9)) + f" {p} {t}"
+    second = f"{p} {t}"
+    if swap:
+        first, second = second, first
+    _skill(tmp_path, "a", first + "\n")
+    _skill(tmp_path, "b", second + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["longest_words"] == 60
+
+
+@pytest.mark.parametrize("wrapper", ["sudo -u root", "env -u VAR"])
+def test_731_r1_a_wrapper_option_operand_is_not_the_command(tmp_path: Path, wrapper: str) -> None:
+    """Reviewer's exact inputs: the helper is still the command, so --absent fires."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
+    _skill(tmp_path, "a", f"```bash\n{wrapper} scripts/helper.sh --absent\n```\n")
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/helper.sh --absent"]
+
+
+def test_731_r1_flags_after_a_non_command_path_are_counted_not_silent(tmp_path: Path) -> None:
+    """A path outside command position keeps its flags unexamined - but SAYS so."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
+    _skill(tmp_path, "a", "```bash\nmystery-wrapper --odd scripts/helper.sh --absent\n```\n")
+    result = decay.dangling_reference(_load(tmp_path))
+    assert result.hits == []
+    assert result.population["flags_after_a_non_command_path"] == 1

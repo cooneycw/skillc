@@ -435,6 +435,16 @@ COMMAND_PREFIXES = frozenset({
     "if", "elif", "then", "else", "while", "until", "do", "!", "{", "(",
 })
 ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: A prefix's options that take the NEXT word as their value (`sudo -u root`), so
+#: that value is not mistaken for the command (#731 review).
+OPTION_OPERANDS: dict[str, frozenset[str]] = {
+    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"}),
+    "env": frozenset({"-u", "-C", "-S"}),
+    "time": frozenset({"-o", "-f"}),
+    "exec": frozenset({"-a"}),
+    "python": frozenset({"-W", "-X"}),
+    "python3": frozenset({"-W", "-X"}),
+}
 SHELL_BREAKS = ("`", "|", ";", "&&")
 
 
@@ -490,7 +500,7 @@ def _decoded(target: str) -> str:
 
 def dangling_reference(coll: Collection) -> Result:
     result = Result()
-    links = prefixed = flags = 0
+    links = prefixed = flags = flags_unowned = 0
     unexamined_paths = 0
     placeholders = 0
     seen_unexamined: set[str] = set()
@@ -511,11 +521,15 @@ def dangling_reference(coll: Collection) -> Result:
             # any interpreter prefix or VAR=value (#731): a path seen later is
             # an ARGUMENT, checked for existence but never the flag owner.
             expect_command = True
+            pending_operand = False
+            prefix = ""
+            arg_path_seen = False
             outer: list[tuple[Path | None, str, bool]] = []  # commands suspended by `$(`
             reset_after = False
             for raw in span.text.split():
                 if reset_after:
                     script, script_word, expect_command = None, "", True
+                    pending_operand, prefix, arg_path_seen = False, "", False
                     reset_after = False
                 word = _clean_word(raw)
                 opens = raw.count("$(")
@@ -530,6 +544,9 @@ def dangling_reference(coll: Collection) -> Result:
                         script, script_word, expect_command = None, "", True
                     for _ in range(min(closes, len(outer))):
                         script, script_word, expect_command = outer.pop()
+                    # `"$(pwd)";` - a separator after the substitution ends the
+                    # restored command too (#731 review).
+                    reset_after = raw.rstrip("\"'").endswith((";", "|", "&"))
                     continue
                 if not word:
                     continue
@@ -540,6 +557,7 @@ def dangling_reference(coll: Collection) -> Result:
                 if (any(sep in raw for sep in SHELL_BREAKS) and not trailing_break) or word in SHELL_SEPARATORS:
                     # A flag after `|`, `;` or `&&` belongs to another command.
                     script, script_word, expect_command = None, "", True
+                    pending_operand, prefix, arg_path_seen = False, "", False
                     if not word.strip("|;&()$`"):
                         continue
                 word = word.rstrip(";|&")
@@ -555,11 +573,20 @@ def dangling_reference(coll: Collection) -> Result:
                             {"reference": f"{script_word} {flag}", "kind": "flag"},
                         ))
                     continue
-                is_command_position = expect_command
-                if expect_command and not word.startswith("-") and not (
-                    word in COMMAND_PREFIXES or ASSIGNMENT_RE.match(word)
-                ):
-                    expect_command = False
+                is_command_position = expect_command and not pending_operand
+                if expect_command:
+                    if pending_operand:
+                        pending_operand = False  # `sudo -u root`: `root` is the option's value
+                    elif word.startswith("-"):
+                        pending_operand = word in OPTION_OPERANDS.get(prefix, ())
+                    elif word in COMMAND_PREFIXES:
+                        prefix = word
+                    elif not ASSIGNMENT_RE.match(word):
+                        expect_command = False
+                if script is None and arg_path_seen and FLAG_RE.match(word.split("=", 1)[0]):
+                    # A flag after a path that was NOT the command: its owner is
+                    # unknown here, so it is counted, never silently dropped.
+                    flags_unowned += 1
                 if _is_placeholder(word):
                     if "/" in word:
                         placeholders += 1
@@ -586,10 +613,13 @@ def dangling_reference(coll: Collection) -> Result:
                     ))
                 elif found.is_file() and is_command_position:
                     script, script_word = found, word
+                elif found.is_file():
+                    arg_path_seen = True
     result.population = {
         "links_examined": links,
         "prefixed_references_examined": prefixed,
         "flags_examined": flags,
+        "flags_after_a_non_command_path": flags_unowned,
         "path_like_not_examined": unexamined_paths,
         "placeholder_paths_not_examined": placeholders,
         "own_prefixes": list(coll.own_prefixes),
@@ -800,9 +830,10 @@ def _pair_runs(
     """Maximal copied runs between two token sequences, `(a, b, length, estimate)`.
 
     Phase 1 ANCHORS on windows that are rare in the other document (at most
-    COPIED_CANDIDATES occurrences) and extends each match backward and forward,
-    so a repetitive prefix is recovered whole from the first distinctive word
-    after it, in either document order (#731). Phase 2 covers only what no
+    COPIED_CANDIDATES occurrences), extends each match backward and forward,
+    and accepts the runs LONGEST FIRST, so a repetitive prefix is recovered
+    whole and an early short match cannot starve a later longer one, in either
+    document order (#731). Phase 2 covers only what no
     anchor reached - purely repetitive text - from the first COPIED_CANDIDATES
     starting points, forward only; those runs are flagged as ESTIMATES. No word
     on either side is counted in two runs, so repeated text is not double counted.
@@ -814,34 +845,67 @@ def _pair_runs(
     def free(i: int, j: int) -> bool:
         return not used_a[i] and not used_b[j]
 
-    for phase in (1, 2):
-        for pos in visit:
-            if used_a[pos]:
+    def take(sa: int, sb: int, length: int, estimate: bool) -> None:
+        used_a[sa:sa + length] = b"\x01" * length
+        used_b[sb:sb + length] = b"\x01" * length
+        runs.append((sa, sb, length, estimate))
+
+    # Phase 1: every anchored run, extended both ways WITHOUT consuming words,
+    # then accepted LONGEST FIRST, so an early short match cannot starve a later
+    # longer one in either document order (#731 review). A diagonal already
+    # extended through this position is not extended again, which keeps
+    # identical documents linear.
+    extended: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    found: list[tuple[int, int, int]] = []
+    for pos in visit:
+        window = ta[pos:pos + min_words]
+        candidates = pb.get(hash(tuple(window)), ())
+        if len(candidates) > COPIED_CANDIDATES:
+            continue  # repetitive here: a distinctive anchor (or phase 2) reaches it
+        for bp in candidates:
+            diagonal = pos - bp
+            if any(lo <= pos < hi for lo, hi in extended[diagonal]):
                 continue
-            window = ta[pos:pos + min_words]
-            candidates = pb.get(hash(tuple(window)), ())
-            if phase == 1 and len(candidates) > COPIED_CANDIDATES:
-                continue  # repetitive here: let a distinctive anchor reach it
-            best: tuple[int, int, int] | None = None
-            for bp in candidates[:COPIED_CANDIDATES]:
-                if tb[bp:bp + min_words] != window or not all(
-                    free(pos + k, bp + k) for k in range(min_words)
-                ):
-                    continue
-                sa, sb = pos, bp
-                if phase == 1:
-                    while sa > 0 and sb > 0 and free(sa - 1, sb - 1) and ta[sa - 1] == tb[sb - 1]:
-                        sa, sb = sa - 1, sb - 1
-                ea, eb = pos + min_words, bp + min_words
-                while ea < len(ta) and eb < len(tb) and free(ea, eb) and ta[ea] == tb[eb]:
-                    ea, eb = ea + 1, eb + 1
-                if best is None or ea - sa > best[2]:
-                    best = (sa, sb, ea - sa)
-            if best is not None:
-                sa, sb, length = best
-                used_a[sa:sa + length] = b"\x01" * length
-                used_b[sb:sb + length] = b"\x01" * length
-                runs.append((sa, sb, length, phase == 2))
+            if tb[bp:bp + min_words] != window:
+                continue
+            sa, sb = pos, bp
+            while sa > 0 and sb > 0 and ta[sa - 1] == tb[sb - 1]:
+                sa, sb = sa - 1, sb - 1
+            ea, eb = pos + min_words, bp + min_words
+            while ea < len(ta) and eb < len(tb) and ta[ea] == tb[eb]:
+                ea, eb = ea + 1, eb + 1
+            extended[diagonal].append((sa, ea))
+            found.append((ea - sa, sa, sb))
+    for length, sa, sb in sorted(found, key=lambda c: (-c[0], c[1], c[2])):
+        start = None
+        for k in range(length + 1):
+            ok = k < length and free(sa + k, sb + k)
+            if ok and start is None:
+                start = k
+            elif not ok and start is not None:
+                if k - start >= min_words:
+                    take(sa + start, sb + start, k - start, False)
+                start = None
+
+    # Phase 2: what no anchor reached - purely repetitive text - from the first
+    # COPIED_CANDIDATES starting points, forward only; flagged as an ESTIMATE.
+    for pos in visit:
+        if used_a[pos]:
+            continue
+        window = ta[pos:pos + min_words]
+        best: tuple[int, int, int] | None = None
+        for bp in pb.get(hash(tuple(window)), ())[:COPIED_CANDIDATES]:
+            if tb[bp:bp + min_words] != window or not all(
+                free(pos + k, bp + k) for k in range(min_words)
+            ):
+                continue
+            ea, eb = pos + min_words, bp + min_words
+            while ea < len(ta) and eb < len(tb) and free(ea, eb) and ta[ea] == tb[eb]:
+                ea, eb = ea + 1, eb + 1
+            if best is None or ea - pos > best[2]:
+                best = (pos, bp, ea - pos)
+        if best is not None:
+            take(*best, True)
     runs.sort()
     return runs
 
