@@ -152,6 +152,7 @@ def _enforced(tmp_path: Path, rule_line: str) -> list[dict[str, Any]]:
 
 def test_A_when_the_named_control_has_a_bad_case(tmp_path: Path) -> None:
     (tmp_path / "controls" / "lanes" / "bad").mkdir(parents=True)
+    (tmp_path / "controls" / "lanes" / "bad" / "no-lane-rows.md").write_text("x", encoding="utf-8")
     (tmp_path / "controls" / "lanes" / "check.sh").write_text("x", encoding="utf-8")
     [line] = _enforced(tmp_path, "You MUST answer every lane; `controls/lanes/check.sh` refuses one left out.")
     assert line["bucket"] == inspect.A and line["red_case"] == "controls/lanes/bad"
@@ -160,6 +161,7 @@ def test_A_when_the_named_control_has_a_bad_case(tmp_path: Path) -> None:
 def test_A_when_the_named_helper_declares_an_existing_negative_control(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "controls" / "guard-bad").mkdir(parents=True)
+    (tmp_path / "controls" / "guard-bad" / "case.txt").write_text("x", encoding="utf-8")
     (tmp_path / "scripts" / "guard.sh").write_text("#: NEGATIVE-CONTROL: controls/guard-bad\n", encoding="utf-8")
     [line] = _enforced(tmp_path, "NEVER skip it.\n`~/.claude/scripts/guard.sh` refuses the skip.")
     assert line["bucket"] == inspect.A and line["enforcer"] == "scripts/guard.sh"
@@ -189,12 +191,14 @@ def test_B_only_for_a_named_check_that_does_not_exist(tmp_path: Path) -> None:
 
 def test_a_rule_line_sorts_on_its_paragraph_not_its_line(tmp_path: Path) -> None:
     (tmp_path / "controls" / "x" / "bad").mkdir(parents=True)
+    (tmp_path / "controls" / "x" / "bad" / "case.txt").write_text("x", encoding="utf-8")
     [line] = _enforced(tmp_path, "NEVER skip the gate.\nThe gate is `controls/x/`.\n\n`controls/x/` again, next paragraph.")
     assert line["bucket"] == inspect.A
 
 
 def test_a_rule_line_does_not_borrow_an_enforcer_from_the_next_paragraph(tmp_path: Path) -> None:
     (tmp_path / "controls" / "x" / "bad").mkdir(parents=True)
+    (tmp_path / "controls" / "x" / "bad" / "case.txt").write_text("x", encoding="utf-8")
     [line] = _enforced(tmp_path, "NEVER skip the gate.\n\nThe gate is `controls/x/`.")
     assert line["bucket"] == inspect.UNSORTED
 
@@ -226,3 +230,36 @@ def test_a_single_subject_collection_is_incomplete_not_clean(tmp_path: Path) -> 
     _skill(tmp_path, "a", "plain\n")
     report = inspect.run(decay.load(tmp_path, offline=True))
     assert report.verdict == inspect.INCOMPLETE and "copied-passage" in report.data["summary"]
+
+
+# ------------------------------------------------- counter-model review, pass 1
+
+def test_an_empty_bad_directory_is_not_a_red_case(tmp_path: Path) -> None:
+    """Review finding 3: a `bad/` with nothing in it has no input to run."""
+    (tmp_path / "controls" / "x" / "bad").mkdir(parents=True)
+    [line] = _enforced(tmp_path, "NEVER skip it - `controls/x/` refuses the skip.")
+    assert line["bucket"] == inspect.UNSORTED
+
+
+def test_a_B_only_rule_line_is_a_finding_and_fails_strict(tmp_path: Path) -> None:
+    """Review finding 5."""
+    _skill(tmp_path, "a", "You MUST run `tests/test_missing.py` first.\n")
+    _skill(tmp_path, "b", "other\n")
+    report = inspect.run(decay.load(tmp_path, offline=True), strict=True)
+    assert report.verdict == inspect.FINDINGS and report.exit_code == 1
+
+
+def test_markdown_shows_unsorted_rule_statements_with_reasons(tmp_path: Path) -> None:
+    """Review finding 6."""
+    _skill(tmp_path, "a", "You MUST keep the branch current.\n")
+    _skill(tmp_path, "b", "other\n")
+    md = inspect.render_markdown(inspect.run(decay.load(tmp_path, offline=True)))
+    assert "You MUST keep the branch current." in md and "no enforcer named" in md
+
+
+def test_pinning_does_not_match_a_neighbouring_document() -> None:
+    """Review finding 7."""
+    tests = {"tests/test_x.py": 'open(".claude/commands/workflow/auto.md")'}
+    assert inspect.pinned_by(".claude/commands/flow/auto.md", tests) == []
+    tests = {"tests/test_y.py": 'open(".claude/commands/flow/auto.md")'}
+    assert inspect.pinned_by(".claude/commands/flow/auto.md", tests) == ["tests/test_y.py"]

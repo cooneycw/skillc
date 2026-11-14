@@ -414,7 +414,8 @@ def _script_source(script: Path, root: Path) -> str:
     except OSError:
         siblings = []
     for sibling in siblings:
-        if sibling.name in text and _inside(sibling, root):
+        named = re.search(r"(?<![A-Za-z0-9_.-])" + re.escape(sibling.name) + r"(?![A-Za-z0-9_-])", text)
+        if named and _inside(sibling, root):
             try:
                 parts.append(sibling.read_text(encoding="utf-8", errors="replace"))
             except OSError:
@@ -685,15 +686,30 @@ def copied_passage(coll: Collection, min_words: int = COPIED_MIN_WORDS) -> Resul
                     pairs[(a_si, b_si)].add((a_pos, b_pos))
     total_pairs = 0
     for (a, b), matches in sorted(pairs.items()):
-        # Merge shingle matches that continue each other into maximal runs.
-        runs: list[tuple[int, int, int]] = []  # (a_start, b_start, length in words)
-        for a_pos, b_pos in sorted(matches):
-            if runs:
-                ra, rb, length = runs[-1]
-                if a_pos - ra == b_pos - rb and a_pos <= ra + length - min_words + 1:
-                    runs[-1] = (ra, rb, a_pos - ra + min_words)
-                    continue
-            runs.append((a_pos, b_pos, min_words))
+        # Merge shingle matches into maximal runs ALONG ONE ALIGNMENT at a time
+        # (a_pos - b_pos fixed): sorting across alignments interleaves them and
+        # splits one long run into many short ones on repeated text.
+        by_alignment: dict[int, list[int]] = defaultdict(list)
+        for a_pos, b_pos in matches:
+            by_alignment[a_pos - b_pos].append(a_pos)
+        candidates: list[tuple[int, int, int]] = []  # (a_start, b_start, length in words)
+        for offset, starts in by_alignment.items():
+            starts.sort()
+            run_start = prev = starts[0]
+            for a_pos in starts[1:]:
+                if a_pos != prev + 1:
+                    candidates.append((run_start, run_start - offset, prev - run_start + min_words))
+                    run_start = a_pos
+                prev = a_pos
+            candidates.append((run_start, run_start - offset, prev - run_start + min_words))
+        # A run whose span in the first document lies inside a longer one is
+        # the same copied text seen at a shifted alignment, not a second copy.
+        candidates.sort(key=lambda r: (-r[2], r[0]))
+        runs: list[tuple[int, int, int]] = []
+        for ra, rb, length in candidates:
+            if not any(oa <= ra and ra + length <= oa + olen for oa, _ob, olen in runs):
+                runs.append((ra, rb, length))
+        runs.sort()
         covered: set[int] = set()
         for ra, _rb, length in runs:
             covered.update(range(ra, ra + length))

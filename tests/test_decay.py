@@ -304,3 +304,36 @@ def test_repo_from_git_reads_origin_in_a_main_checkout_and_a_linked_worktree(tmp
     assert decay.repo_from_git(main) == "example/collection"
     assert decay.repo_from_git(tmp_path / "linked") == "example/collection"
     assert decay.repo_from_git(tmp_path) is None
+
+
+# ------------------------------------------------- counter-model review, pass 1
+
+def test_a_good_control_whose_states_are_UNKNOWN_does_not_certify(tmp_path: Path) -> None:
+    """Review finding 1: a good case whose issue states were never established
+    is silent because nothing was known, not because it is good."""
+    import shutil
+
+    case = tmp_path / "open"
+    shutil.copytree(CONTROLS / "expired-marker" / "good" / "open", case)
+    (case / "issue-states.json").write_text("{}", encoding="utf-8")
+    findings, error = checks.collection_findings(case, only="expired-marker")
+    assert findings == [] and error and "UNKNOWN" in error
+
+
+def test_a_neighbouring_filename_cannot_lend_a_flag(tmp_path: Path) -> None:
+    """Review finding 2: `elper.sh` occurs inside `helper.sh`, but is not it."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "helper.sh").write_text("#!/bin/sh\n# helper.sh [--verbose]\n", encoding="utf-8")
+    (scripts / "elper.sh").write_text("--dry-run\n", encoding="utf-8")
+    _skill(tmp_path, "a", "Run `scripts/helper.sh --dry-run`.\n")
+    assert decay.dangling_reference(_load(tmp_path)).hits
+
+
+def test_repeated_text_reports_one_maximal_run(tmp_path: Path) -> None:
+    """Review finding 4: alignments must not interleave."""
+    same = " ".join(["same"] * 60)
+    _skill(tmp_path, "a", same + "\n")
+    _skill(tmp_path, "b", same + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["runs"] == 1 and hit.data["longest_words"] == 60

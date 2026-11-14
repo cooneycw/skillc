@@ -623,6 +623,10 @@ def collection_findings(case: Path, only: str | None = None) -> tuple[list[Findi
             vacuous = decay.not_exercised(only, result)
             if vacuous is not None:
                 return [], vacuous
+            if result.unknown:
+                # A control whose facts were never established is silent (or
+                # red) because nothing was KNOWN - it certifies nothing.
+                return [], f"{only}: {len(result.unknown)} UNKNOWN - the control's facts were not established"
     findings = [
         Finding(rule.id, rule.severity, collection.root / hit.rel, f"{hit.line}: {hit.detail}")
         for rule, result in results

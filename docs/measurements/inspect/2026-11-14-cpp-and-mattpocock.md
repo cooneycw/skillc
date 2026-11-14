@@ -128,6 +128,12 @@ its helper, it would sort into A (`test_A_when_the_named_helper_declares_an_exis
    files (see the spec, "Known ambiguity"). These two are the only reason
    CPP's run would still be STOPPED once items 1-2 are fixed.
 
+**Measurement defect found by the counter-model review and fixed.** The first
+version merged copied-run matches across alignments. On the driver-doc pairs it
+reported about 214 runs with a longest of 692 words; grouped by alignment, the same
+pairs give 36-47 runs with a longest of about 1,011 words (codex/gemma at main). The
+shared-word totals above were unaffected, and so were the buckets.
+
 **False-positive classes found and fixed during development** (each one now
 has a test):
 - a flag belonging to a wrapper's exec target (`flow-preflight.sh` execs

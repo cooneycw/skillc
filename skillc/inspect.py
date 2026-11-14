@@ -104,6 +104,15 @@ def _rel(path: Path, root: Path) -> str | None:
         return None
 
 
+def _has_input(path: Path) -> bool:
+    """A known-bad case is evidence only if there is something in it to run:
+    a file, or a directory holding at least one file. An empty `bad/` is a
+    control with no input, the EMPTY verdict selftest refuses."""
+    if path.is_file():
+        return True
+    return path.is_dir() and any(p.is_file() for p in path.rglob("*"))
+
+
 def _red_case(path: Path, root: Path) -> str | None:
     """The known-bad case that shows this enforcer can fail, or None.
 
@@ -117,7 +126,7 @@ def _red_case(path: Path, root: Path) -> str | None:
     parts = rel.split("/")
     if parts[0] == "controls" and len(parts) >= 2:
         bad = root / "controls" / parts[1] / "bad"
-        if bad.is_dir():
+        if _has_input(bad):
             return f"controls/{parts[1]}/bad"
     if path.is_file():
         try:
@@ -126,7 +135,7 @@ def _red_case(path: Path, root: Path) -> str | None:
             return None
         for match in NEGATIVE_CONTROL_RE.finditer(text):
             target = (root / match.group(1)).resolve()
-            if target.exists() and _rel(target, root) is not None:
+            if _has_input(target) and _rel(target, root) is not None:
                 return match.group(1).rstrip("/")
     return None
 
@@ -232,7 +241,8 @@ def pinned_by(rel: str, tests: Mapping[str, str]) -> list[str]:
     needles = {rel}
     if len(parts) >= 2:
         needles.add("/".join(parts[-2:]))
-    return sorted(t for t, text in tests.items() if any(n in text for n in needles))
+    patterns = [re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(n) + r"(?![A-Za-z0-9_-])") for n in needles]
+    return sorted(t for t, text in tests.items() if any(p.search(text) for p in patterns))
 
 
 # ------------------------------------------------------------ exposure (D9)
@@ -381,9 +391,10 @@ def run(
         if unexamined:
             gaps.append(f"not examined: {', '.join(unexamined)}")
         summary = f"INCOMPLETE - {'; '.join(gaps)} - NOT clean"
-    elif items:
+    elif items or any(r.bucket in (A, B) for r in rule_lines):
+        actionable = sum(r.bucket in (A, B) for r in rule_lines)
         verdict, code = FINDINGS, (1 if strict else 0)
-        summary = f"{len(items)} finding(s) sorted"
+        summary = f"{len(items)} finding(s) sorted, {actionable} rule statement(s) in A or B"
     else:
         verdict, code = CLEAN, 0
         summary = "clean - every rule examined, no finding, no UNKNOWN"
@@ -447,7 +458,7 @@ def render_markdown(report: Report, limit: int = 50) -> str:
         section(f"Findings - {b}", rows, lambda r: (
             f"- `{r['path']}:{r['line']}` {r['rule']}: {r['detail']} - _{r['reason']}_"
             + (f" (pinned by {', '.join(r['pinned_by'])})" if r.get("pinned_by") else "")))
-    for b in (A, B):
+    for b in BUCKETS:
         rows = [f for f in d["rule_lines"] if f["bucket"] == b]
         section(f"Rule lines - {b}", rows, lambda r: f"- `{r['path']}:{r['line']}` {r['detail']} - _{r['reason']}_")
     section("Notes", d["notes"], lambda r: f"- `{r['path']}:{r['line']}` {r['detail']}")
