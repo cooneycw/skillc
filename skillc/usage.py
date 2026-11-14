@@ -469,15 +469,24 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     (`*`), so the log is ignored by default without editing the repository's
     own ignore file. Returns what was written."""
     state = path.parent
-    if not state.is_dir():
-        state.mkdir(parents=True, exist_ok=True)
-        (state / ".gitignore").write_text("*\n", encoding="utf-8")
+    state.mkdir(parents=True, exist_ok=True)
+    ensure_ignored(state)
     with path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             handle.seek(0)
-            current = parse_log(path, handle.read())
+            text = handle.read()
+            current = parse_log(path, text)
+            if current.parse_error is not None:
+                # Appending to an unreadable log would bury its defect under
+                # valid lines; refuse, and let the caller's fail-open path say so.
+                raise ValueError(f"usage log is unreadable ({current.parse_error}); nothing appended")
             new = [r for r in build(current) if not record_problems(r)]
+            if new and text and not text.endswith("\n"):
+                # A final line with no newline parses, but the next object would
+                # land on it as `}{` and make the whole log unreadable
+                # (counter-model review, pass 2).
+                handle.write("\n")
             for record in new:
                 handle.write(json.dumps(record, separators=(",", ":")) + "\n")
             handle.flush()
@@ -485,6 +494,22 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
     return new
+
+
+def ensure_ignored(state: Path) -> None:
+    """The log is ignored by default, even when `.skillc/` already existed
+    without an ignore file (counter-model review, pass 2): create
+    `.skillc/.gitignore` (`*`) when it is missing, and add `usage.jsonl` to an
+    existing one that ignores neither everything nor the log."""
+    ignore = state / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n", encoding="utf-8")
+        return
+    lines = {line.strip() for line in ignore.read_text(encoding="utf-8").splitlines()}
+    if not lines & {"*", LOG_NAME, f"/{LOG_NAME}"}:
+        existing = ignore.read_text(encoding="utf-8")
+        ignore.write_text(existing + ("" if not existing or existing.endswith("\n") else "\n") + f"{LOG_NAME}\n",
+                          encoding="utf-8")
 
 
 def _open_starts(log: UsageLog, session: str, skill: str | None = None) -> list[Entry]:

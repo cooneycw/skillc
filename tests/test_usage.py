@@ -386,3 +386,47 @@ def test_selftest_refuses_an_EMPTIED_good_usage_control(rule_id: str, tmp_path: 
     for good in (copy / rule_id / "good").glob("*.jsonl"):
         good.write_text("", encoding="utf-8")
     assert cli.main(["selftest", "--controls", str(copy)]) != 0
+
+
+@needs_git
+def test_an_append_after_a_final_line_without_newline_keeps_the_log_readable(repo: Path, tmp_path: Path) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / ".gitignore").write_text("*\n", encoding="utf-8")
+    (state / "usage.jsonl").write_text(json.dumps(_rec(session="s-0")), encoding="utf-8")  # no trailing newline
+    _hook(_skill_call(repo), tmp_path / "home")
+    log = usage.load_log(state / "usage.jsonl")
+    assert log.parse_error is None and len(log.entries) == 2
+
+
+@needs_git
+def test_an_unreadable_log_is_never_appended_to(repo: Path, tmp_path: Path) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / "usage.jsonl").write_text("{not json\n", encoding="utf-8")
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "unreadable" in err
+    assert (state / "usage.jsonl").read_text(encoding="utf-8") == "{not json\n"
+
+
+@needs_git
+@pytest.mark.parametrize("existing", [None, "notes.txt\n", "notes.txt"])
+def test_a_preexisting_state_dir_still_ignores_the_log(repo: Path, tmp_path: Path, existing: str | None) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    if existing is not None:
+        (state / ".gitignore").write_text(existing, encoding="utf-8")
+    _hook(_skill_call(repo), tmp_path / "home")
+    assert len(_lines(repo)) == 1
+    # git itself is the judge: the log must not show as untracked.
+    assert "usage.jsonl" not in _git(repo, "status", "--porcelain", "--untracked-files=all")
+
+
+def test_an_empty_usage_log_beside_a_neighbour_record_checked_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy(CONTROLS / "result-evidence/good/record.json", tmp_path / "record.json")
+    (tmp_path / "usage.jsonl").write_text("", encoding="utf-8")
+    for rule in ("skill-usage-envelope", "skill-usage-fields"):
+        assert cli.main(["check-records", str(tmp_path), "--rule", rule]) == 2, rule
+        assert "checked nothing" in capsys.readouterr().out

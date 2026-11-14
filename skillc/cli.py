@@ -317,8 +317,11 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         # FILE is not their population - its readable records are (counter-
         # model review: an unreadable log under --rule skill-usage-fields
         # "checked one log" and exited 0 having examined nothing).
+        # The envelope's population is every log with something to read or an
+        # unreadable one; a readable EMPTY log is nothing, even beside an
+        # unrelated record that let the population guard above pass (pass 2).
         applicable = (
-            len(logs) if args.rule == "skill-usage-envelope"
+            sum(1 for log in logs if log.parse_error or log.entries) if args.rule == "skill-usage-envelope"
             else sum(usage.readable_count(log) for log in logs)
         )
         if applicable == 0:
