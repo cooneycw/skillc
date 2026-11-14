@@ -350,7 +350,7 @@ class _Subject:
 
 
 def _population(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.CollectionRule,
     where: Path,
     target: str = DEFAULT_TARGET,
 ) -> list[_Subject]:
@@ -379,6 +379,15 @@ def _population(
             own = sum(1 for f in case_findings if f.rule == rule.id)
             subjects.append(_Subject(case, load_error, own))
         return subjects
+    if isinstance(rule, checks.CollectionRule):
+        # Same shape as BundleRule (issue #725): every CASE DIRECTORY is one
+        # collection, loaded offline, whether or not it loads; a case that
+        # does not load is UNPARSED rather than dropping out of the population.
+        subjects = []
+        for case in sorted(p for p in where.iterdir() if p.is_dir()):
+            case_findings, load_error = checks.collection_findings(case, only=rule.id)
+            subjects.append(_Subject(case, load_error, sum(f.rule == rule.id for f in case_findings)))
+        return subjects
     if isinstance(rule, checks.RecordRule):
         return [
             _Subject(r.path, r.parse_error,
@@ -393,7 +402,7 @@ def _population(
 
 
 def _refusal(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.CollectionRule,
     bad: list[_Subject], good: list[_Subject],
 ) -> tuple[str, str] | None:
     """Why this rule's control does not prove it, or None when it does.
@@ -711,6 +720,53 @@ def cmd_exposure(args: argparse.Namespace) -> int:
         return 1
     print(f"\nskillc: measured - evidence in {out}")
     return 0
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    """Round 2 of the skill-gauntlet (issue #725): run the decay rules over a
+    collection and sort what they find into A/B/C/D or UNSORTED. Reports;
+    never edits. Exit 2 when nothing was inspected or an input is refused,
+    1 when STOPPED (a hard error) or INCOMPLETE (an UNKNOWN or an unexamined
+    rule), 0 otherwise (1 under --strict when anything was found)."""
+    from . import decay, inspect
+
+    root = Path(args.path).resolve()
+    try:
+        states = decay.read_issue_states(Path(args.issue_states)) if args.issue_states else None
+        maps = [decay.parse_map(m) for m in (args.map or [])]
+        repo = args.repo or decay.repo_from_git(root)
+        if repo is not None and not decay.REPO_RE.fullmatch(repo):
+            raise decay.CollectionError(f"--repo {repo!r} is not owner/name")
+        coll = decay.load(
+            root,
+            include=args.include or decay.DEFAULT_INCLUDE,
+            exclude=args.exclude or (),
+            maps=maps,
+            own_prefixes=args.own_prefix or decay.DEFAULT_OWN_PREFIXES,
+            repo=repo,
+            issue_states=states,
+            offline=args.offline,
+            enforcement_roots=args.enforcement_root,
+        )
+        exposure_data = inspect.load_exposure(Path(args.exposure)) if args.exposure else None
+    except (decay.CollectionError, inspect.Refused) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    report = inspect.run(coll, exposure=exposure_data, strict=args.strict)
+    markdown = inspect.render_markdown(report)
+    if args.out:
+        out = Path(args.out).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "report.json").write_text(json.dumps(report.data, indent=1) + "\n", encoding="utf-8")
+        (out / "report.md").write_text(markdown, encoding="utf-8")
+    if args.json:
+        print(json.dumps(report.data, indent=1))
+    else:
+        print(markdown, end="")
+    if report.verdict == inspect.NOTHING_INSPECTED:
+        print(f"skillc: nothing inspected under {root} - not a clean result", file=sys.stderr)
+    return report.exit_code
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
@@ -3260,6 +3316,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="the one identity field allowed to differ between --a and --b; every other one must match",
     )
     p_config_compare.set_defaults(func=cmd_configuration_compare)
+
+    p_inspect = sub.add_parser(
+        "inspect",
+        help="skill-gauntlet round 2: decay rules over a collection, sorted into A/B/C/D",
+    )
+    p_inspect.add_argument("path", help="the collection root")
+    p_inspect.add_argument("--include", action="append", metavar="GLOB",
+                           help="subject glob, repeatable (default: **/SKILL.md)")
+    p_inspect.add_argument("--exclude", action="append", metavar="GLOB", help="drop matching subjects")
+    p_inspect.add_argument("--map", action="append", metavar="FROM=TO",
+                           help="an installed-path prefix and where it lives in the collection, "
+                                "e.g. '~/.claude/scripts/=scripts/'")
+    p_inspect.add_argument("--own-prefix", action="append", metavar="PREFIX",
+                           help="a path prefix the text uses for its own files "
+                                "(default: scripts/, references/, assets/)")
+    p_inspect.add_argument("--repo", metavar="OWNER/NAME",
+                           help="repository a bare #N belongs to (default: the origin remote)")
+    p_inspect.add_argument("--issue-states", metavar="FILE",
+                           help="offline issue states, {\"owner/name#N\": \"OPEN\"|\"CLOSED\"}")
+    p_inspect.add_argument("--offline", action="store_true",
+                           help="never ask gh; every marker without a state is UNKNOWN")
+    p_inspect.add_argument("--enforcement-root", action="append", metavar="PREFIX",
+                           help="where checks live (default: tests/, controls/, ci/, .github/workflows/)")
+    p_inspect.add_argument("--exposure", metavar="REPORT", help="a `skillc exposure` report.json to fold in")
+    p_inspect.add_argument("--out", metavar="DIR", help="also write report.json and report.md here")
+    p_inspect.add_argument("--json", action="store_true", help="print the JSON report instead of Markdown")
+    p_inspect.add_argument("--strict", action="store_true", help="exit 1 when anything was found")
+    p_inspect.set_defaults(func=cmd_inspect)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

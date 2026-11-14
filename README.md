@@ -100,6 +100,7 @@ skillc retained-export --reproduce <export> # #556: reproduce a retained histori
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
+skillc inspect <collection>    # #725: skill-gauntlet round 2 - decay rules, findings sorted A/B/C/D; never edits
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)
@@ -171,7 +172,7 @@ ok       frontmatter           red on bad (3), green on good (2)
 ok       record-envelope       red on bad (7), green on good (2)
 ...
 
-skillc selftest: 31/31 rule(s) discriminate
+skillc selftest: 35/35 rule(s) discriminate
 ```
 
 Six verdicts fail the run:
@@ -252,6 +253,20 @@ directory's records to its one trial ledger. A record outside any bundle is
 reported as checked alone, not against a ledger. See the
 [records spec](docs/specs/evaluation-facility/records.md).) An unknown `--rule` is refused with exit 2 before
 anything is scanned; a selector that matched nothing used to read as a clean run.
+
+**Decay rules (`skillc inspect`, #725).** `dangling-reference`,
+`expired-marker`, `copied-passage` and `emphasis-density` read the prose of a
+whole collection, not one SKILL.md's shape: a reference to a deleted helper, an
+`until #N` rule whose issue has closed, a passage copied word for word between
+two documents, emphasis piled up until nothing stands out. They are in
+`skillc rules` and `skillc selftest` like every other rule, but run under
+`skillc inspect`, which sorts each finding into the four groups of
+[claude-power-pack discussion #1830](https://github.com/cooneycw/claude-power-pack/discussions/1830)
+(A enforced by a check shown to fail, B propose a check, C keep, D move to a
+reference) or `UNSORTED` with a reason - never a guess. `UNKNOWN` (an issue
+state it could not read) is never fine, an empty collection is "nothing
+inspected", and `inspect` never edits a skill. Charter, populations and blind
+spots: [docs/specs/inspect.md](docs/specs/inspect.md).
 
 `error` means the checker rejects it under its format rules. `warn` flags a
 heuristic concern; it does not prove poorer agent performance. `--strict` makes
