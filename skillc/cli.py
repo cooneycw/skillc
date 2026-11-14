@@ -28,6 +28,7 @@ from . import (
     __version__,
     checks,
     configuration_compare,
+    contracts,
     exposure,
     leak,
     materialize,
@@ -350,7 +351,7 @@ class _Subject:
 
 
 def _population(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.ContractRule,
     where: Path,
     target: str = DEFAULT_TARGET,
 ) -> list[_Subject]:
@@ -369,6 +370,16 @@ def _population(
                 continue
             own = sum(f.rule == rule.id for f in checks.run_bundle(bundle, only=rule.id))
             subjects.append(_Subject(case, bundle.parse_error, own))
+        return subjects
+    if isinstance(rule, checks.ContractRule):
+        # #720: every CASE DIRECTORY is a collection subject. A case with no
+        # CHARTER.md at all is an unexercised subject, never a passing one.
+        subjects = []
+        for case in sorted(p for p in where.iterdir() if p.is_dir()):
+            collection = contracts.load_collection(case)
+            error = collection.parse_error or (None if collection.contracts else "no CHARTER.md in this case")
+            own = sum(f.rule == rule.id for f in checks.run_contracts(collection, only=rule.id))
+            subjects.append(_Subject(case, error, own))
         return subjects
     if isinstance(rule, checks.ManifestRule):
         # Same shape as BundleRule: every CASE DIRECTORY is a subject (issue
@@ -393,7 +404,7 @@ def _population(
 
 
 def _refusal(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.ContractRule,
     bad: list[_Subject], good: list[_Subject],
 ) -> tuple[str, str] | None:
     """Why this rule's control does not prove it, or None when it does.
@@ -2504,6 +2515,43 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_contracts(args: argparse.Namespace) -> int:
+    """`skillc contracts <collection>` (#720): every CHARTER.md read together.
+
+    Exit codes (docs/specs/contracts.md): 0 every contract clean (warnings
+    allowed), 1 an error finding, 2 a usage error, 3 none declared - an empty
+    population is never a clean one (AGENTS.md)."""
+    root = Path(args.path).resolve()
+    if not root.is_dir():
+        print(f"skillc: no such collection directory: {root}", file=sys.stderr)
+        return contracts.EXIT_USAGE
+    collection = contracts.load_collection(root)
+    if not collection.contracts:
+        print(f"CONTRACTS: none declared under {root} - no CHARTER.md, nothing was checked")
+        return contracts.EXIT_NONE_DECLARED
+    findings = checks.run_contracts(collection)
+    for finding in findings:
+        print(finding.render(root))
+    print()
+    bad = 0
+    for contract in collection.contracts:
+        own = [f for f in findings if f.path == contract.path]
+        errors = sum(f.severity == ERROR for f in own)
+        warns = len(own) - errors
+        bad += bool(errors)
+        label = contract.name or "(unnamed)"
+        print(f"CONTRACT {label} ({contract.path.relative_to(root)}): {'BAD' if errors else 'GOOD'} "
+              f"({errors} error(s), {warns} warning(s))")
+    if not contracts._cross_ready(collection):
+        print("skillc: hand-off rules (handoff-bilateral, handoff-version, reader-exists, scope-owned, "
+              "duty-single-owner) did NOT run: a contract failed contract-shape")
+    errors_total = sum(f.severity == ERROR for f in findings)
+    print(f"CONTRACTS: {len(collection.contracts)} declared, {bad} bad, {len(collection.contracts) - bad} good; "
+          f"{errors_total} error(s), {len(findings) - errors_total} warning(s)")
+    print(f"skillc: examined {contracts.WHAT_WAS_EXAMINED}")
+    return contracts.EXIT_FINDINGS if errors_total else contracts.EXIT_CLEAN
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -3260,6 +3308,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="the one identity field allowed to differ between --a and --b; every other one must match",
     )
     p_config_compare.set_defaults(func=cmd_configuration_compare)
+
+    p_contracts = sub.add_parser(
+        "contracts", help="check every CHARTER.md contract in a collection together (#720)"
+    )
+    p_contracts.add_argument("path", help="collection root; test paths resolve from here")
+    p_contracts.set_defaults(func=cmd_contracts)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

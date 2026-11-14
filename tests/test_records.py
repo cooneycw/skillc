@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from skillc import checks, cli, records
+from skillc import checks, cli, contracts, records
 from skillc.spec import DEFAULT_TARGET, discover
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
@@ -127,6 +127,11 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
         recs = records.discover(bad_dir)
         own = [f for r in recs for f in checks.run_record(r, only=rule.id)]
         every = [f for r in recs for f in checks.run_record(r)]
+    elif isinstance(rule, checks.ContractRule):
+        # #720: every CASE DIRECTORY is one collection of CHARTER.md contracts.
+        collections = [contracts.load_collection(case) for case in sorted(p for p in bad_dir.iterdir() if p.is_dir())]
+        own = [f for c in collections for f in checks.run_contracts(c, only=rule.id)]
+        every = [f for c in collections for f in checks.run_contracts(c)]
     elif isinstance(rule, checks.ManifestRule):
         # Same shape as the BundleRule branch above: every CASE DIRECTORY is
         # the subject, and `run_manifest` returns `(findings, load_error)`.

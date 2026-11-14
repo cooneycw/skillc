@@ -25,6 +25,9 @@ specification rejects, and it proves its own rules can fail before reporting the
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
 - `skillc/records.py` - the evaluation-record contracts and bundle rules; the authoritative kind table is in the [records spec](docs/specs/evaluation-facility/records.md)
+- `skillc/contracts.py` - `skillc contracts` (#720): the `CHARTER.md` contract beside each `SKILL.md`,
+  nine rules read across a whole collection (unbacked clauses, missing bad cases, two-sided hand-offs,
+  readers, duty ownership); reads declarations only and runs no test - see [docs/specs/contracts.md](docs/specs/contracts.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module

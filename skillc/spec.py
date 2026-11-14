@@ -303,9 +303,14 @@ MAX_DEPTH = 32
 
 
 class _Parser:
-    def __init__(self, lines: list[str], first_lineno: int) -> None:
+    def __init__(self, lines: list[str], first_lineno: int, contracts: bool = False) -> None:
         self.lines = [line.rstrip("\r") for line in lines]
         self.first = first_lineno
+        #: #720: the CHARTER.md contract block needs two shapes SKILL.md frontmatter
+        #: deliberately refuses - a list of mappings and a one-line flow list of
+        #: scalars. OPT-IN only (`parse_contract_block`), so every SKILL.md keeps
+        #: exactly the subset docs/frontmatter.md documents.
+        self.contracts = contracts
 
     def no(self, i: int) -> int:
         return self.first + i
@@ -356,6 +361,8 @@ class _Parser:
         header = _BLOCK_HEADER_RE.match(text) if text[:1] in {"|", ">"} else None
         if header:
             return self.block_scalar(i, indent, header, lineno)
+        if self.contracts and text[:1] == "[":
+            return _flow_sequence(text, lineno), i
         if _strip_comment(text):
             return _scalar(text, lineno), i
         # An empty value: a nested mapping, a list, or null.
@@ -439,13 +446,48 @@ class _Parser:
             if value[:1] in {"|", ">"}:
                 raise _unsupported(lineno, "block text inside a list")
             if value[:1] not in {'"', "'"} and _key_split(_strip_comment(value)):
-                raise _unsupported(lineno, "a list of mappings")
+                if not self.contracts:
+                    raise _unsupported(lineno, "a list of mappings")
+                # #720: `- key: value` opens a mapping whose keys sit two columns
+                # right of the dash. Re-indent this one line in place and read the
+                # mapping at that column; it ends at the next item or a dedent.
+                self.lines[i] = " " * (ind + 2) + value
+                item, i = self.mapping(i, ind + 2, depth=1)
+                items.append(item)
+                continue
+            if self.contracts and value[:1] == "[":
+                raise _unsupported(lineno, "a flow list inside a list")
             items.append(_scalar(value, lineno) if value else None)
             i += 1
 
 
-def _parse_mapping_document(lines: list[str], first_lineno: int) -> dict[str, object]:
-    parser = _Parser(lines, first_lineno=first_lineno)
+def _flow_sequence(text: str, lineno: int) -> list[object]:
+    """#720: a ONE-LINE flow list of scalars, `[a, b, "c"]`. Nothing nests: an
+    inner `[`/`{`, a quoted item holding a comma, or a list continued onto the
+    next line is refused by name, never split on a guess."""
+    body = _strip_comment(text)
+    if not body.endswith("]"):
+        raise _unsupported(lineno, "a flow list continued onto the next line, or text after its ']'")
+    inner = body[1:-1].strip()
+    if not inner:
+        return []
+    if any(ch in inner for ch in "[]{}"):
+        raise _unsupported(lineno, "a nested flow collection")
+    items: list[object] = []
+    for part in inner.split(","):
+        part = part.strip()
+        if not part:
+            raise _invalid(lineno, "an empty item in a flow list")
+        if part[:1] in {'"', "'"} and (len(part) < 2 or part[-1] != part[0]):
+            raise _unsupported(lineno, "a quoted flow-list item containing a comma")
+        items.append(_scalar(part, lineno))
+    return items
+
+
+def _parse_mapping_document(
+    lines: list[str], first_lineno: int, contracts: bool = False,
+) -> dict[str, object]:
+    parser = _Parser(lines, first_lineno=first_lineno, contracts=contracts)
     root, end = parser.mapping(0, 0)
     if end < len(parser.lines):  # pragma: no cover - mapping(…, 0) consumes all
         raise _invalid(parser.no(end), "unexpected content")
@@ -465,6 +507,19 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     if not match:
         raise FrontmatterError("no YAML frontmatter block")
     root = _parse_mapping_document(match.group(1).split("\n"), first_lineno=2)
+    return root, text[match.end():]
+
+
+def parse_contract_block(text: str) -> tuple[dict[str, object], str]:
+    """Parse the YAML block at the top of a `CHARTER.md` (#720,
+    docs/specs/contracts.md): the frontmatter subset PLUS lists of mappings and
+    one-line flow lists of scalars. Everything else is refused under the same
+    rules as `parse_frontmatter` - including a plain scalar wrapped onto an
+    indented next line, which must use a `>` block. Raises `FrontmatterError`."""
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        raise FrontmatterError("no YAML block at the top of the file (expected '---' delimiters)")
+    root = _parse_mapping_document(match.group(1).split("\n"), first_lineno=2, contracts=True)
     return root, text[match.end():]
 
 
