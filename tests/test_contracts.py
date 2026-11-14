@@ -214,3 +214,43 @@ def test_an_oversized_consumed_version_is_a_shape_finding_not_a_crash(tmp_path: 
     beta.write_text(beta.read_text(encoding="utf-8").replace("alpha.out@1", "alpha.out@" + "9" * 4400),
                     encoding="utf-8")
     assert _rules(case) == ["contract-shape"]
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2
+
+
+def test_an_unreadable_subtree_refuses_certification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A contract in a subtree discovery could not read must not drop out and
+    leave a clean verdict behind (it read `1 declared, 0 bad`, exit 0)."""
+    import os
+
+    case = tmp_path / "c"
+    shutil.copytree(CONTROLS / "reader-exists/bad/clause-typo", case)
+    real_scandir = os.scandir
+
+    def scandir(path: Path) -> object:
+        if str(path).endswith(os.sep + "alpha"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    collection = contracts.load_collection(case)
+    assert collection.unreadable
+    assert "contract-shape" in _rules(case)
+    assert cli.main(["contracts", str(case)]) == contracts.EXIT_FINDINGS
+    assert "could not be read" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("value", ['"\\0"', '"\\udc80"'])
+def test_an_unusable_filesystem_path_is_a_finding_not_a_crash(tmp_path: Path, value: str) -> None:
+    case = tmp_path / "c"
+    shutil.copytree(CONTROLS / "clause-backed/good/every-test-exists", case)
+    charter = case / "alpha/CHARTER.md"
+    charter.write_text(charter.read_text(encoding="utf-8").replace(
+        "test: checks/alpha-out/{bad,good}", f"test: {value}"), encoding="utf-8")
+    details = [f.detail for f in checks.run_contracts(contracts.load_collection(case), only="clause-backed")]
+    # An attributed clause-backed finding and a completed run - never a traceback.
+    assert any("unbacked" in d and "alpha.out" in d for d in details)
+    assert cli.main(["contracts", str(case)]) == contracts.EXIT_FINDINGS

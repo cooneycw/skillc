@@ -378,6 +378,11 @@ def _population(
         for case in sorted(p for p in where.iterdir() if p.is_dir()):
             collection = contracts.load_collection(case)
             error = collection.parse_error or (None if collection.contracts else "no CHARTER.md in this case")
+            if error is None and not rule.parser and checks.run_contracts(collection, only="contract-shape"):
+                # A shape failure makes the hand-off rules SKIP (and the per-contract
+                # rules skip the broken contract). A skipped evaluation is an
+                # unexercised subject, never a passing one (#720 counter-model review).
+                error = f"a contract fails contract-shape, so {rule.id} did not examine it"
             own = sum(f.rule == rule.id for f in checks.run_contracts(collection, only=rule.id))
             subjects.append(_Subject(case, error, own))
         return subjects

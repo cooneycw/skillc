@@ -22,6 +22,7 @@ Stdlib only (AGENTS.md).
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 from collections import Counter
 from collections.abc import Iterator
@@ -77,6 +78,9 @@ class Collection:
 
     root: Path
     contracts: list[Contract]
+    #: Directories discovery could not enumerate (#720 counter-model review): a
+    #: contract inside one is UNEXAMINED, and the collection is never clean.
+    unreadable: list[str] = field(default_factory=list)
 
     @property
     def parse_error(self) -> str | None:
@@ -96,9 +100,40 @@ def load(path: Path) -> Contract:
     return Contract(path=path, data=data)
 
 
+def _discover(root: Path) -> tuple[list[Path], list[str]]:
+    """Every CHARTER.md under `root`, and every directory that could not be read.
+
+    `Path.rglob` swallows a traversal error, so an unreadable subtree's contracts
+    simply vanished from the population (counter-model review). Symlinked
+    directories are not followed, exactly as `rglob` did not follow them."""
+    found: list[Path] = []
+    unreadable: list[str] = []
+    stack = [root]
+    while stack:
+        directory = stack.pop()
+        try:
+            with os.scandir(directory) as entries:
+                listed = list(entries)
+        except OSError as exc:
+            unreadable.append(f"{directory.relative_to(root) if directory != root else '.'} ({type(exc).__name__})")
+            continue
+        for entry in listed:
+            path = Path(entry.path)
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(path)
+                elif entry.name == CHARTER and entry.is_file():
+                    found.append(path)
+            except OSError as exc:
+                unreadable.append(f"{path.relative_to(root)} ({type(exc).__name__})")
+    return sorted(found), sorted(unreadable)
+
+
 def load_collection(root: Path) -> Collection:
-    found = sorted(p for p in root.rglob(CHARTER) if p.is_file()) if root.is_dir() else []
-    return Collection(root=root, contracts=[load(p) for p in found])
+    if not root.is_dir():
+        return Collection(root=root, contracts=[])
+    found, unreadable = _discover(root)
+    return Collection(root=root, contracts=[load(p) for p in found], unreadable=unreadable)
 
 
 # ---------------------------------------------------------------- shape
@@ -243,7 +278,11 @@ def _collection_problems(collection: Collection) -> list[Finding]:
     """Facts that are wrong only BETWEEN contracts: a contract name declared
     twice, or a provided clause id two contracts both provide. Either makes
     every cross-contract lookup depend on file order (counter-model review)."""
-    found: list[Finding] = []
+    found: list[Finding] = [
+        (collection.root, (f"directory {where} could not be read; any contract inside it is unexamined, "
+                           f"so this collection cannot be certified"))
+        for where in collection.unreadable
+    ]
     names: Counter[str] = Counter(c.name for c in collection.contracts if c.name)
     for contract in collection.contracts:
         if contract.name and names[contract.name] > 1:
@@ -321,8 +360,17 @@ def _inside(root: Path, rel: str) -> bool:
         return False
     try:
         return (root / rel).resolve().is_relative_to(root.resolve())
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError, UnicodeError):
         return False
+
+
+def _usable(rel: str) -> bool:
+    """A string the filesystem can be asked about: no NUL, encodable."""
+    try:
+        os.fsencode(rel)
+    except UnicodeError:
+        return False
+    return "\0" not in rel
 
 
 def clause_backed(collection: Collection) -> Iterator[Finding]:
@@ -340,7 +388,12 @@ def clause_backed(collection: Collection) -> Iterator[Finding]:
                     yield contract.path, f"{section} clause {clause_id!r}: {problem}: unbacked"
                     continue
                 for rel in expanded:
-                    if not _inside(collection.root, rel):
+                    if not _usable(rel):
+                        yield contract.path, (
+                            f"{section} clause {clause_id!r} test {rel!r} is not a usable filesystem path "
+                            f"(a NUL or an unencodable character): unbacked"
+                        )
+                    elif not _inside(collection.root, rel):
                         yield contract.path, f"{section} clause {clause_id!r} test {rel!r} is outside the collection: unbacked"
                     elif not (collection.root / rel).exists():
                         yield contract.path, (

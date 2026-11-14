@@ -77,6 +77,8 @@ plain value **wrapped onto an indented next line**. Wrap long text in a `>` bloc
 #718's own example wraps a plain `what:`, which this subset refuses; that is a
 correction to the discussion text, not to this format.
 
+In a flow list, quotes are honoured: `['a, b']` is one item, as YAML reads it. A quoted item must be the whole item, and a `#` inside the brackets is refused, so `["owner"#x"]` is refused rather than read as `["owner"]`. A trailing comment after the closing `]` is fine.
+
 ## The two rules that make it a contract
 
 1. **Every clause needs a test that can fail.** A clause with no test, or whose
@@ -106,7 +108,7 @@ contract's `version:`.
 | `approval-present` | **warn only** | an `intent` or `authority` clause has no owner `approved: YYYY-MM-DD` | `intent-string`, `authority-unapproved` |
 
 `skillc selftest` proves each rule BAD on its bad cases and GOOD on its good cases,
-and `tests/test_records.py` proves each bad case trips its own rule and no other.
+and `tests/test_records.py` proves each bad case trips its own rule and no other. A control case whose contract fails `contract-shape` is UNPARSED for every other rule, because those rules skip it and a skipped evaluation is not a pass.
 
 **Test paths** resolve from the collection root (the path given to `skillc
 contracts`), never from the `CHARTER.md` file. Expansion of `{a,b}` is **one
@@ -120,6 +122,8 @@ not that it can fail.** `negative-backed` checks that a safety line (`never`,
 Whether that test can actually go red is rounds 3 and 4 of the gauntlet (#718),
 which run the tests. No `skillc contracts` result, including a green one, says a
 clause's test can fail.
+
+**A directory discovery cannot read refuses certification.** Any contract inside it is unexamined, so the collection is reported as a `contract-shape` error (exit 1), never as a smaller clean population.
 
 **Hand-off rules run only when every contract has a valid shape.** If any
 contract fails `contract-shape`, `handoff-bilateral`, `handoff-version`,

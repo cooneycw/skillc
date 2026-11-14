@@ -466,26 +466,79 @@ class _Parser:
             i += 1
 
 
+def _flow_items(text: str, lineno: int) -> tuple[list[str], str]:
+    """Split a one-line flow list into raw items, honouring quotes. Returns
+    (items, tail): `tail` is whatever follows the closing `]`. A `#` starts a
+    comment only OUTSIDE quotes and after whitespace, as in YAML; inside the
+    brackets it is refused rather than allowed to eat the closing `]`."""
+    items: list[str] = []
+    current: list[str] = []
+    quote = ""
+    i = 1  # text[0] is '['
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                if quote == "'" and text[i + 1: i + 2] == "'":
+                    current.append("'")
+                    i += 2
+                    continue
+                quote = ""
+            elif quote == '"' and ch == "\\":
+                current.append(text[i + 1: i + 2])
+                i += 2
+                continue
+            i += 1
+            continue
+        if ch in {'"', "'"}:
+            if "".join(current).strip():
+                raise _invalid(lineno, "a quote in the middle of a flow-list item")
+            quote = ch
+            current.append(ch)
+        elif ch == "#" and (not current or current[-1] in {" ", "\t"}):
+            raise _unsupported(lineno, "a comment inside a flow list")
+        elif ch in "[{}":
+            raise _unsupported(lineno, "a nested flow collection")
+        elif ch == ",":
+            items.append("".join(current))
+            current = []
+        elif ch == "]":
+            items.append("".join(current))
+            return items, text[i + 1:]
+        else:
+            current.append(ch)
+        i += 1
+    if quote:
+        raise _invalid(lineno, "an unterminated quote in a flow list")
+    raise _unsupported(lineno, "a flow list continued onto the next line, or with no closing ']'")
+
+
 def _flow_sequence(text: str, lineno: int) -> list[object]:
-    """#720: a ONE-LINE flow list of scalars, `[a, b, "c"]`. Nothing nests: an
-    inner `[`/`{`, a quoted item holding a comma, or a list continued onto the
-    next line is refused by name, never split on a guess."""
-    body = _strip_comment(text)
-    if not body.endswith("]"):
-        raise _unsupported(lineno, "a flow list continued onto the next line, or text after its ']'")
-    inner = body[1:-1].strip()
-    if not inner:
+    """#720: a ONE-LINE flow list of scalars, `[a, b, "c"]`. Nothing nests. A
+    quoted item must be the whole item - `"owner"#x` or `"a" b` is refused, never
+    read as `"owner"` (counter-model review: a YAML loader rejects both)."""
+    raw_items, tail = _flow_items(text, lineno)
+    tail = tail.strip()
+    if tail and not (tail.startswith("#") and text[len(text) - len(tail) - 1: len(text) - len(tail)] in {" ", "\t", "]"}):
+        raise _unsupported(lineno, "text after a flow list's closing ']'")
+    if tail.startswith("#") and not text[: len(text) - len(tail)].rstrip().endswith("]"):
+        raise _unsupported(lineno, "text after a flow list's closing ']'")
+    if len(raw_items) == 1 and not raw_items[0].strip():
         return []
-    if any(ch in inner for ch in "[]{}"):
-        raise _unsupported(lineno, "a nested flow collection")
     items: list[object] = []
-    for part in inner.split(","):
+    for part in raw_items:
         part = part.strip()
         if not part:
             raise _invalid(lineno, "an empty item in a flow list")
-        if part[:1] in {'"', "'"} and (len(part) < 2 or part[-1] != part[0]):
-            raise _unsupported(lineno, "a quoted flow-list item containing a comma")
-        items.append(_scalar(part, lineno))
+        if part[0] in {'"', "'"}:
+            if len(part) < 2 or part[-1] != part[0]:
+                raise _invalid(lineno, "text after a closing quote in a flow list")
+            items.append(_quoted(part, lineno))
+        else:
+            if any(q in part for q in "\"'"):
+                raise _invalid(lineno, "a quote inside an unquoted flow-list item")
+            items.append(_scalar(part, lineno))
     return items
 
 

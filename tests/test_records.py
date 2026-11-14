@@ -162,6 +162,19 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
 
 # --------------------------------------------------------------- the machinery
 
+def test_a_contract_rule_good_control_whose_rule_was_skipped_is_not_certified(tmp_path: Path) -> None:
+    """#720 counter-model review, pass 2: a good control with a shape-invalid
+    contract makes the hand-off rules skip, and selftest counted that skip as
+    green. A skipped evaluation is an unexercised subject, never a passing one."""
+    copy = tmp_path / "controls"
+    shutil.copytree(CONTROLS, copy)
+    provider = copy / "handoff-bilateral/good/provided/alpha/CHARTER.md"
+    provider.write_text(provider.read_text(encoding="utf-8").replace("version: 1", "version: 0"), encoding="utf-8")
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(copy)))
+    assert rc != 0
+
+
+
 def test_an_uncontrolled_record_rule_is_UNPROVEN(monkeypatch: pytest.MonkeyPatch) -> None:
     """The new arm is covered by the coverage guarantee, not merely beside it.
 

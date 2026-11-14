@@ -31,7 +31,6 @@ def test_the_contract_block_reads_both() -> None:
 @pytest.mark.parametrize(("doc", "reason"), [
     ("---\nk: [a, [b]]\n---\n", "nested flow collection"),
     ("---\nk: [a, b\n---\n", "continued onto the next line"),
-    ("---\nk: ['a, b']\n---\n", "quoted flow-list item containing a comma"),
     ("---\nk: [a, , b]\n---\n", "empty item"),
     ("---\nk:\n  - [a, b]\n---\n", "a flow list inside a list"),
     ("---\nk: one\n  two\n---\n", "use a '>' block"),
@@ -60,3 +59,31 @@ def test_alternating_list_and_mapping_nesting_is_bounded(levels: int) -> None:
     lines.append("---")
     with pytest.raises(FrontmatterError, match="nesting deeper than"):
         parse_contract_block("\n".join(lines) + "\n")
+
+
+@pytest.mark.parametrize("doc", [
+    '---\nk: ["owner"#comment"]\n---\n',     # the comment would consume the closing bracket
+    '---\nk: ["a" b]\n---\n',                 # text after a closing quote
+    '---\nk: [a, "b]\n---\n',                 # an unterminated quote
+    '---\nk: [a] b\n---\n',                   # text after the closing bracket
+])
+def test_a_flow_list_a_yaml_loader_rejects_is_refused_too(doc: str) -> None:
+    """Counter-model review on #720, pass 2: differential against PyYAML (test-only).
+    Every input PyYAML refuses, the contract parser must refuse rather than read."""
+    yaml = pytest.importorskip("yaml")
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(doc.split("---\n")[1])
+    with pytest.raises(FrontmatterError):
+        parse_contract_block(doc)
+
+
+@pytest.mark.parametrize(("doc", "expected"), [
+    ("---\nk: [a, b]  # note\n---\n", ["a", "b"]),
+    ('---\nk: ["a", \'b\']\n---\n', ["a", "b"]),
+    ("---\nk: []\n---\n", []),
+    ("---\nk: ['a, b']\n---\n", ["a, b"]),          # a quoted comma is one item, as YAML reads it
+])
+def test_a_flow_list_both_parsers_accept_reads_the_same(doc: str, expected: list[str]) -> None:
+    yaml = pytest.importorskip("yaml")
+    assert yaml.safe_load(doc.split("---\n")[1])["k"] == expected
+    assert parse_contract_block(doc)[0]["k"] == expected
