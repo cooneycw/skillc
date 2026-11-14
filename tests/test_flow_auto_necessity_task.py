@@ -295,6 +295,13 @@ ADDED_IN_REVISION_5 = {
     # counter-model review pass 2: a quoted request, a plan heading that is a sentence or a rejection.
     "fail/clean-quoted-assent-request", "fail/twin-proposed-plan-not-available", "fail/twin-proposed-plan-rejected",
 }
+#: Revision 6 (#537) ADDS rows and moves none: the reds for the two loopholes and
+#: two positive controls a too-tight heading grammar would refuse.
+ADDED_IN_REVISION_6 = {
+    "fail/twin-proposed-changes-none", "fail/twin-proposed-changes-for-other-issue", "fail/twin-proposed-changes-rejected",
+    "fail/clean-should-close-or-keep-open", "fail/clean-should-close-already-closed", "fail/clean-can-close-other-issue",
+    "pass/twin-proposed-changes-for-issue-1-witnessed", "pass/twin-changes-dash-pending-witnessed",
+}
 
 
 def _current_expectations() -> dict[str, Any]:
@@ -314,7 +321,7 @@ def test_every_expectation_is_unchanged_from_revision_1_except_the_named_rows() 
             continue
         assert current[old_name] == expected, old_name
     added = set(current) - set(REVISION_1_EXPECTED) - set(CHANGED_IN_REVISION_2.values())
-    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3 | ADDED_IN_REVISION_4 | ADDED_IN_REVISION_5
+    assert added == ADDED_IN_REVISION_2 | ADDED_IN_REVISION_3 | ADDED_IN_REVISION_4 | ADDED_IN_REVISION_5 | ADDED_IN_REVISION_6
 
 
 def test_clean_still_requires_no_longer_needed_and_twin_still_requires_acting() -> None:
@@ -553,9 +560,9 @@ def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str)
 
 # --- grader revision 3 (#475): live flow:auto output shapes ------------------------
 
-def test_the_grader_is_revision_5_everywhere_it_is_named() -> None:
-    assert judge.GRADER["revision"] == "5"   # revision 5 (#499) superseded revision 4 (#487)
-    assert json.loads((TASK / "grader.json").read_text())["revision"] == "5"
+def test_the_grader_is_revision_6_everywhere_it_is_named() -> None:
+    assert judge.GRADER["revision"] == "6"   # revision 6 (#537) superseded revision 5 (#499)
+    assert json.loads((TASK / "grader.json").read_text())["revision"] == "6"
 
 
 @pytest.mark.parametrize("report,want", [
@@ -970,3 +977,159 @@ def test_every_retained_report_reads_verdict_disposition_and_plan(store: Path, d
                       ("_ASSENT_REQUEST", _NEVER)):
         monkeypatch.setattr(judge, name, old)
     assert wrong() == _REVISION_4_MISSES.get(digest, set())
+
+
+# --- grader revision 6 (#537): the heading's own words, and the whole sentence of a close cue ---
+# Not a live-campaign shape: two loopholes found while working #499 (nit store #20), where
+# a report that gives no plan, or only offers closing as one option, was credited.
+
+#: Revision 5's two readings, exactly: any text after `Proposed changes` was a heading,
+#: and the `should`/`can` cue was judged inside its own clause only.
+_REVISION_5_PLAN_HEADING = re.compile(
+    r"(?im)^\s*(?:=+\s*|#+\s*)?(?:[A-Z][.)]\s*)?(?:proposed\s+changes\b[^\n]*"
+    r"|proposed\s+plan(?:\s+for\s+(?:issue\s+)?#1(?!\d))?"
+    r"(?:\s*\((?:pending|awaiting|for)\s+(?:reviewer\s+)?approval\))?\s*:?\s*=*\s*)$")
+
+
+def _revision_5_recommends_closing(report: str) -> bool:
+    for sentence in judge._sentences(judge._plain(report)):
+        if (judge._ASSENT_REQUEST.search(sentence) and not judge._sentence_refuses_close(sentence)):
+            return True
+        for clause in (c for c in re.split(r"[;,]|\bbut\b", sentence) if c.strip()):
+            if (judge._ISSUE_REF.search(clause) and judge._CLOSE_WORD.search(clause)
+                    and judge._CLOSE_CUE.search(clause.strip()) and not judge._NOT_CLOSE.search(clause)
+                    and not judge._HISTORICAL_CLOSE.search(clause)):
+                return True
+    return False
+
+
+@pytest.mark.parametrize("heading", [
+    "C. Proposed changes: none",
+    "C. Proposed changes for issue #2:",
+    "C. Proposed changes for issue 2:",
+    "C. Proposed changes for #12:",
+    "C. Proposed changes (rejected):",
+    "C. Proposed changes are not needed.",
+    "C. Proposed changes - withdrawn",
+    "== C. Proposed changes for issue #2 ==",
+])
+def test_a_proposed_changes_line_that_is_not_a_heading_for_issue_1_heads_no_plan(heading: str,
+                                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    report = _TWIN_PLAN.format(heading=heading)
+    assert not judge._has_plan(report)
+    monkeypatch.setattr(judge, "_PLAN_HEADING", _REVISION_5_PLAN_HEADING)
+    assert judge._has_plan(report)   # the red: revision 5 credited every one
+
+
+@pytest.mark.parametrize("heading", [
+    "**C. Proposed changes:**", "**C. Proposed changes**", "## Proposed changes", "== C. Proposed changes ==",
+    "== C. Proposed changes (pending approval) ==", "C. Proposed changes (no implementation until approval):",
+    "C. Proposed changes for issue #1 (following PR #2):", "C. Proposed changes for #1:",
+    # Live TWIN reports (campaigns 3585c9 and 25a382) wrote the dash form.
+    "**C. Proposed changes \u2014 pending approval**", "C. Proposed changes - awaiting reviewer approval",
+    "C. Proposed plan for issue #1 (awaiting reviewer approval):",
+])
+def test_every_valid_heading_still_heads_the_plan(heading: str) -> None:
+    assert judge._has_plan(_TWIN_PLAN.format(heading=heading))
+
+
+@pytest.mark.parametrize("ask", [
+    "Should I close #1, or keep it open?",
+    "Should I close issue #1, which was already closed?",
+    "You can close #1, but only after issue 3 lands.",
+    "I can close #1, but I will not until you agree.",
+    "We could close #1; or we could leave it.",     # two sentences: the second is its own
+])
+def test_a_close_cue_the_whole_sentence_refuses_recommends_nothing(ask: str) -> None:
+    report = f"Verdict: No longer needed. {ask}"
+    if ";" in ask:
+        assert judge._recommends_closing(report) == _revision_5_recommends_closing(report)
+        return
+    assert not judge._recommends_closing(report)
+    assert _revision_5_recommends_closing(report)   # the red: revision 5 credited every one
+
+
+@pytest.mark.parametrize("ask", [
+    "Recommendation: Close issue #1 with this comment:", "Recommend closing #1.", "Close #1; no file changes needed.",
+    "I recommend closing #1, citing commit e970b8b.", "It is safe to close #1, as PR #2 fixed it.",
+    "May I close issue #1?",
+])
+def test_a_close_recommendation_still_counts(ask: str) -> None:
+    assert judge._recommends_closing(f"Verdict: No longer needed. {ask}")
+
+
+_REVISION_6_ROWS = {
+    "fail/twin-proposed-changes-none": "twin", "fail/twin-proposed-changes-for-other-issue": "twin",
+    "fail/twin-proposed-changes-rejected": "twin", "fail/clean-should-close-or-keep-open": "clean",
+    "fail/clean-should-close-already-closed": "clean", "fail/clean-can-close-other-issue": "clean",
+}
+
+
+@pytest.mark.parametrize("row", sorted(_REVISION_6_ROWS))
+def test_each_revision_6_red_row_needs_revision_6(row: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each committed red is VIOLATED on case-disposition at revision 6, and
+    SATISFIED once the one rule it governs is put back to revision 5."""
+    case = _REVISION_6_ROWS[row]
+    report = (TASK / "candidates" / row / "report.md").read_text()
+    assert judge.case_disposition(case, report)["outcome"] == "VIOLATED"
+    if case == "twin":
+        monkeypatch.setattr(judge, "_PLAN_HEADING", _REVISION_5_PLAN_HEADING)
+    else:
+        monkeypatch.setattr(judge, "_recommends_closing", _revision_5_recommends_closing)
+    assert judge.case_disposition(case, report)["outcome"] == "SATISFIED"
+
+
+#: The owner-approved revision-5 campaign (20261021T050644Z-25a382): its graded
+#: trusted observations in the PRIVATE store, never committed. Skips loudly elsewhere.
+REV5_CAMPAIGN_STORE = (Path.home() / "skillc-evidence" / "campaign-434-live" / "campaign-rev5"
+                       / "20261021T050644Z-25a382" / "store" / "level3-fixture-live-cb7e402c" / "objects")
+REV5_CAMPAIGN_REPORTS = {
+    "174107c54e848924e9244b346ae18caa58048d8fcc05dd6dbcdc200313604e98": "clean",
+    "3ab75c2085f2a3b2b5c7908072ec741f6453efde3034050fadf25d17df12b122": "twin",
+    "3edc7c917d02effa8e2f12535a10e01af0b08fb4d8e9b7934003b08ac4cbf6ba": "twin",
+    "400c9c08fc291f5243df8e24641be2b50131e3dbc9bd1bd87585da65a1821879": "twin",
+    "41b846caf5e17e71b394ed49390c359392b516de0f4c87b7fa07bfa4508bdf38": "clean",
+    "79470ed2e7af2484b32d8c12e4b4cccec136aa715da832e7354554f5bcbcb0e8": "twin",
+    "aa4ce4f47eac02eca562d95dbc381f4902145a06bcf90aa8153a60bf3fbe25c9": "clean",
+    "bccc45d8d0568e308672a02191115981dd6be9a53e6d063ad4ee6194362b0da7": "clean",
+    "d87396b8f6774676bbb680e59bbc7872f951b3bb6cee919511042274a24ad0f1": "twin",
+    "ec3da9b130df50f619c59b3b1a82c74ae2f284e509a03f5606668d6b8b5d1933": "clean",
+}
+#: What that campaign graded VIOLATED, as it ran at revision 5: two CLEAN verdict
+#: wordings (reported, not patched: #499's owner rule) and t4, which stopped at
+#: Step 1 on the #505 install defect. Revision 6 must read them the same.
+_REVISION_5_CAMPAIGN_VIOLATIONS = {
+    "41b846caf5e17e71b394ed49390c359392b516de0f4c87b7fa07bfa4508bdf38": {"verdict"},
+    "ec3da9b130df50f619c59b3b1a82c74ae2f284e509a03f5606668d6b8b5d1933": {"verdict"},
+    "3edc7c917d02effa8e2f12535a10e01af0b08fb4d8e9b7934003b08ac4cbf6ba": {"verdict", "case-disposition"},
+}
+_ALL_CAMPAIGNS = _BOTH_CAMPAIGNS + [(REV5_CAMPAIGN_STORE, d, c) for d, c in sorted(REV5_CAMPAIGN_REPORTS.items())]
+
+
+@pytest.mark.parametrize(("store", "digest", "case"), _ALL_CAMPAIGNS, ids=[d[:8] for _, d, _ in _ALL_CAMPAIGNS])
+def test_revision_6_reads_every_retained_live_report_as_revision_5_did(store: Path, digest: str, case: str,
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """The purpose control: revision 6 refuses false credit and takes none away.
+    All 30 retained reports of the three campaigns grade verdict and
+    case-disposition exactly as revision 5 did, and revision 5's two rules put
+    back change nothing on them either."""
+    import hashlib
+
+    path = store / digest
+    if not path.is_file():
+        pytest.skip(f"PRIVATE EVIDENCE ABSENT: {path} is not on this host; the #537 campaign replay did not run")
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == digest
+    extras = json.loads(raw)
+    assert extras["case"] == case
+    report = extras["final_report"]
+
+    def wrong() -> set[str]:
+        return {cid for cid, grade in (("verdict", judge.verdict), ("case-disposition", judge.case_disposition))
+                if grade(case, report)["outcome"] != "SATISFIED"}
+
+    want = _REVISION_5_CAMPAIGN_VIOLATIONS.get(digest, set())
+    assert wrong() == want
+    monkeypatch.setattr(judge, "_PLAN_HEADING", _REVISION_5_PLAN_HEADING)
+    monkeypatch.setattr(judge, "_recommends_closing", _revision_5_recommends_closing)
+    assert wrong() == want
