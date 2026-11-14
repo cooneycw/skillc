@@ -27,6 +27,7 @@ from __future__ import annotations
 import functools
 import json
 import re
+import shlex
 import shutil
 import subprocess
 from collections import defaultdict
@@ -60,6 +61,8 @@ DEFAULT_OWN_PREFIXES: tuple[str, ...] = ("scripts/", "references/", "assets/")
 COPIED_MIN_WORDS = 40
 #: Starting points tried in the other document per window: bounds repetitive text.
 COPIED_CANDIDATES = 8
+#: How many cut-off candidates are probed for a free alignment before a cut is assumed lossy.
+TRUNCATION_PROBE = 64
 
 #: `emphasis-density`: these words, uppercase and whole, count as emphasis.
 EMPHASIS_WORDS: tuple[str, ...] = ("MUST", "NEVER", "CRITICAL", "ALWAYS", "IMPORTANT")
@@ -426,7 +429,7 @@ def _exists(ref: Ref, root: Path) -> Path | None:
     return None
 
 
-SHELL_SEPARATORS = {"|", "||", "&&", ";", "&"}
+SHELL_SEPARATORS = {"|", "||", "&&", ";", "&", ";;", "|&"}
 #: Words that run the NEXT word as the command, so the command position moves past them.
 COMMAND_PREFIXES = frozenset({
     "bash", "sh", "zsh", "dash", "python", "python3", "node", "perl", "ruby",
@@ -437,15 +440,36 @@ COMMAND_PREFIXES = frozenset({
 ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: A prefix's options that take the NEXT word as their value (`sudo -u root`), so
 #: that value is not mistaken for the command (#731 review).
+#: Long forms too (#731 review); the `--opt=value` form carries its value inline.
 OPTION_OPERANDS: dict[str, frozenset[str]] = {
-    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"}),
-    "env": frozenset({"-u", "-C", "-S"}),
-    "time": frozenset({"-o", "-f"}),
+    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U",
+                       "--user", "--group", "--close-from", "--chdir", "--host",
+                       "--prompt", "--role", "--type", "--other-user"}),
+    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "time": frozenset({"-o", "-f", "--output", "--format"}),
     "exec": frozenset({"-a"}),
     "python": frozenset({"-W", "-X"}),
     "python3": frozenset({"-W", "-X"}),
 }
 SHELL_BREAKS = ("`", "|", ";", "&&")
+
+
+def _command_tokens(text: str) -> tuple[list[str], bool]:
+    """Words of one piece of COMMAND-SHAPED text (an inline code span or one
+    fenced-block line - never running prose, where apostrophes would pair up and
+    swallow a reference, #731), and whether they are quote-aware.
+
+    stdlib `shlex` (posix) keeps a quoted argument as ONE word - `"$(printf x);"`
+    stays a value, its `;` no separator - and gives an unquoted `;`, `|`, `&&`
+    a token of its own. Text whose quotes do not balance is read as plain
+    whitespace words instead, the reading this rule used before shlex."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        return list(lexer), True
+    except ValueError:  # unterminated quote or escape
+        return text.split(), False
 
 
 @functools.lru_cache(maxsize=1024)
@@ -514,6 +538,39 @@ def dangling_reference(coll: Collection) -> Result:
                     f"links to {target}, which does not exist",
                     {"reference": target, "kind": "link"},
                 ))
+        def check_path(word: str, index: int, subject: Subject = subject) -> tuple[str, Path | None]:
+            """Classify one word as a path reference: `skip`, `unexamined`,
+            `missing` (a finding is raised) or `exists`."""
+            nonlocal placeholders, unexamined_paths, prefixed
+            if not word:
+                return "skip", None
+            if _is_placeholder(word):
+                if "/" in word:
+                    placeholders += 1
+                return "skip", None
+            if not PATH_WORD_RE.match(word):
+                return "skip", None
+            pref: Ref | None = _resolve_prefixed(word, subject, coll)
+            if pref is not None and not (_looks_like_file(word) or word.endswith("/")):
+                # `scripts/foo` with no extension is as often a prose example
+                # as a reference; counted, not fired on.
+                pref = None
+            if pref is None:
+                if _looks_like_file(word) and word not in seen_unexamined:
+                    seen_unexamined.add(word)
+                    unexamined_paths += 1
+                return "unexamined", None
+            prefixed += 1
+            found = _exists(pref, coll.root)
+            if found is None:
+                result.hits.append(Hit(
+                    subject.rel, subject.lineno(index),
+                    f"names {word}, which does not exist in the collection",
+                    {"reference": word, "kind": "path"},
+                ))
+                return "missing", None
+            return "exists", found
+
         for span in code_spans(subject.lines):
             script: Path | None = None
             script_word = ""
@@ -526,7 +583,8 @@ def dangling_reference(coll: Collection) -> Result:
             arg_path_seen = False
             outer: list[tuple[Path | None, str, bool]] = []  # commands suspended by `$(`
             reset_after = False
-            for raw in span.text.split():
+            tokens, quote_aware = _command_tokens(span.text)
+            for raw in tokens:
                 if reset_after:
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
@@ -539,6 +597,10 @@ def dangling_reference(coll: Collection) -> Result:
                     # delimiters in order - pushes, then pops - so `"$(pwd)"`,
                     # which opens and closes in one token, restores the outer
                     # command at once (#731).
+                    if pending_operand:
+                        # `sudo -u "$(id -un)"`: the substitution IS the option's
+                        # value; the command is still to come (#731 review).
+                        pending_operand = False
                     for _ in range(opens):
                         outer.append((script, script_word, expect_command))
                         script, script_word, expect_command = None, "", True
@@ -546,15 +608,25 @@ def dangling_reference(coll: Collection) -> Result:
                         script, script_word, expect_command = outer.pop()
                     # `"$(pwd)";` - a separator after the substitution ends the
                     # restored command too (#731 review).
-                    reset_after = raw.rstrip("\"'").endswith((";", "|", "&"))
+                    reset_after = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
+                    continue
+                if raw in SHELL_SEPARATORS:
+                    # A separator token of its own (quote-aware text): the next
+                    # word starts a new command. Checked before cleaning, which
+                    # would strip `;` to nothing (#731 review).
+                    script, script_word, expect_command = None, "", True
+                    pending_operand, prefix, arg_path_seen = False, "", False
                     continue
                 if not word:
                     continue
                 # A separator ends the command. One that TRAILS the word
                 # (`--bad;`) ends it after this word is read, so the word's own
                 # flag still belongs to the command it was written against.
-                trailing_break = raw.rstrip("\"'").endswith((";", "|", "&"))
-                if (any(sep in raw for sep in SHELL_BREAKS) and not trailing_break) or word in SHELL_SEPARATORS:
+                # Quote-aware text gives every separator a token of its own, so
+                # only the whitespace fallback has to find one inside a word.
+                trailing_break = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
+                inner_break = not quote_aware and any(sep in raw for sep in SHELL_BREAKS)
+                if (inner_break and not trailing_break) or raw in SHELL_SEPARATORS or word in SHELL_SEPARATORS:
                     # A flag after `|`, `;` or `&&` belongs to another command.
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
@@ -587,31 +659,19 @@ def dangling_reference(coll: Collection) -> Result:
                     # A flag after a path that was NOT the command: its owner is
                     # unknown here, so it is counted, never silently dropped.
                     flags_unowned += 1
-                if _is_placeholder(word):
-                    if "/" in word:
-                        placeholders += 1
+                if quote_aware and any(ch.isspace() for ch in raw):
+                    # A quoted multi-word argument is a STRING (`echo "run
+                    # scripts/x.sh"`): its words still name paths that must
+                    # exist, but none of them is a command or owns a flag. The
+                    # whitespace reading checked them before shlex; shlex alone
+                    # would hide them in one word (#731 review).
+                    for inner in raw.split():
+                        check_path(_clean_word(inner), span.index)
                     continue
-                if not PATH_WORD_RE.match(word):
+                state, found = check_path(word, span.index)
+                if state != "exists" or found is None:
                     continue
-                pref: Ref | None = _resolve_prefixed(word, subject, coll)
-                if pref is not None and not (_looks_like_file(word) or word.endswith("/")):
-                    # `scripts/foo` with no extension is as often a prose
-                    # example as a reference; counted, not fired on.
-                    pref = None
-                if pref is None:
-                    if _looks_like_file(word) and word not in seen_unexamined:
-                        seen_unexamined.add(word)
-                        unexamined_paths += 1
-                    continue
-                prefixed += 1
-                found = _exists(pref, coll.root)
-                if found is None:
-                    result.hits.append(Hit(
-                        subject.rel, subject.lineno(span.index),
-                        f"names {word}, which does not exist in the collection",
-                        {"reference": word, "kind": "path"},
-                    ))
-                elif found.is_file() and is_command_position:
+                if found.is_file() and is_command_position:
                     script, script_word = found, word
                 elif found.is_file():
                     arg_path_seen = True
@@ -797,7 +857,7 @@ def copied_passage(coll: Collection, min_words: int = COPIED_MIN_WORDS) -> Resul
     total_pairs = 0
     estimated_pairs = 0
     for (a, b), hashes in sorted(common.items()):
-        runs = _pair_runs(tokens[a], tokens[b], positions[a], positions[b], hashes, min_words)
+        runs, truncated = _pair_runs(tokens[a], tokens[b], positions[a], positions[b], hashes, min_words)
         if not runs:
             continue
         longest = max(length for _a, _b, length, _est in runs)
@@ -805,7 +865,9 @@ def copied_passage(coll: Collection, min_words: int = COPIED_MIN_WORDS) -> Resul
         sa, sb = subjects[a], subjects[b]
         total_pairs += 1
         shared = sum(length for _a, _b, length, _est in runs)
-        estimate = any(est for *_rest, est in runs)
+        # An estimate means exactly one thing: a candidate search was CUT while
+        # a free alignment beyond the cut existed, so a run may be missing.
+        estimate = truncated
         estimated_pairs += estimate
         label = (" - a bounded estimate: repetitive text was measured from at most "
                  f"{COPIED_CANDIDATES} starting points" if estimate else "")
@@ -826,7 +888,7 @@ def _pair_runs(
     ta: Sequence[str], tb: Sequence[str],
     pa: Mapping[int, Sequence[int]], pb: Mapping[int, Sequence[int]],
     hashes: set[int], min_words: int,
-) -> list[tuple[int, int, int, bool]]:
+) -> tuple[list[tuple[int, int, int, bool]], bool]:
     """Maximal copied runs between two token sequences, `(a, b, length, estimate)`.
 
     Phase 1 ANCHORS on windows that are rare in the other document (at most
@@ -889,12 +951,25 @@ def _pair_runs(
 
     # Phase 2: what no anchor reached - purely repetitive text - from the first
     # COPIED_CANDIDATES starting points, forward only; flagged as an ESTIMATE.
+    truncated = False
     for pos in visit:
         if used_a[pos]:
             continue
         window = ta[pos:pos + min_words]
+        candidates = pb.get(hash(tuple(window)), ())
+        # An uncovered position whose candidate list was CUT is a search that may
+        # have missed a run, whether or not it accepts one here: an estimate too
+        # (#731 review). Only a cut-off candidate that is still FREE could have
+        # been missed, so look for one - a bounded look, and a look that hits
+        # its bound counts as truncated, since it could not rule one out.
+        if not truncated and len(candidates) > COPIED_CANDIDATES:
+            beyond = candidates[COPIED_CANDIDATES:COPIED_CANDIDATES + TRUNCATION_PROBE]
+            truncated = len(candidates) > COPIED_CANDIDATES + TRUNCATION_PROBE or any(
+                bp + min_words <= len(tb) and all(free(pos + k, bp + k) for k in range(min_words))
+                for bp in beyond
+            )
         best: tuple[int, int, int] | None = None
-        for bp in pb.get(hash(tuple(window)), ())[:COPIED_CANDIDATES]:
+        for bp in candidates[:COPIED_CANDIDATES]:
             if tb[bp:bp + min_words] != window or not all(
                 free(pos + k, bp + k) for k in range(min_words)
             ):
@@ -907,7 +982,7 @@ def _pair_runs(
         if best is not None:
             take(*best, True)
     runs.sort()
-    return runs
+    return runs, truncated
 
 
 # ------------------------------------------------------------- emphasis-density

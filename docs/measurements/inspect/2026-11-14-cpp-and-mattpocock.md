@@ -167,21 +167,33 @@ finding by finding:
 
 | Run | Errors | Buckets / rule lines | Copied-passage (pairs, numbers) | Flags examined |
 |---|---|---|---|---|
-| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 examined + 2 counted unowned |
-| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 examined + 2 counted unowned |
+| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 examined; 1 counted unowned |
+| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 242 -> 240 examined; 1 counted unowned |
 | mattpocock `5863806` | 0 | identical | 2, identical; 0 estimates | 0 -> 0 |
 
-The only change is the flag population. The 2 flags no longer examined are
-exactly the 2 now counted in `flags_after_a_non_command_path`, which is the
-new command-position rule working as documented:
-- `cpp/init.md:2834` - `echo "... bash ~/.claude/scripts/bash-prep.sh --check"`:
-  the script is inside a string passed to `echo`, so it is no longer read as a
-  command;
-- `cpp/update.md:2017` - a prose code span, `(re-run
-  scripts/commands-mirror-sync.sh --write later)`: the script is not in command
-  position (a listed blind spot).
+Only population counters moved, and each delta is accounted for:
+- **flags examined, 242 -> 240.**
+  - `cpp/init.md:2834`, `echo "... bash ~/.claude/scripts/bash-prep.sh --check"`:
+    the script is inside a quoted string passed to `echo`. Its path is still
+    checked for existence, but a string has no command, so `--check` has no
+    owner to check against.
+  - `cpp/update.md:2017`, a prose code span `(re-run
+    scripts/commands-mirror-sync.sh --write later)`: the script is not in
+    command position. This is the 1 flag counted in
+    `flags_after_a_non_command_path` (a listed blind spot).
+- **prefixed references examined: 336 -> 336, unchanged.** An intermediate
+  shlex build hid the paths inside quoted strings (-7). They are checked again,
+  and a test now holds that.
+- **placeholder paths not examined, 1137 -> 1092 on CPP (-45), 33 -> 30 on
+  mattpocock.** This is only how shlex spells words that were never examined:
+  quotes are stripped (`"$X/y"` and `$X/y` are now one spelling), and
+  redirections are split (`&>/dev/null` becomes `&` plus `>/dev/null`). No
+  examined reference is among them.
 
-A first cut also dropped `if ! scripts/commands-mirror-sync.sh --check` and
+The shlex tokeniser is a design change, ratified by the orchestrator, with the
+guard that it reads command-shaped text only and never running prose.
+
+An earlier cut also dropped `if ! scripts/commands-mirror-sync.sh --check` and
 `elif ~/.claude/scripts/speckit-context.py refresh --body-file`; shell keywords
 were then added to the command prefixes, and a test now holds both.
 

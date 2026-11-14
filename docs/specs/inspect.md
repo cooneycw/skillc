@@ -145,10 +145,21 @@ resolved script, in the same span or line, is looked up in the script's
 `flow-preflight.sh` that execs `flow-preflight.py "$@"` takes the flags its
 target defines.
 
+**How command text is split into words** (#731, a design change). Inline code
+spans and fenced-block lines - command-shaped text only, never running prose,
+where two apostrophes ("don't ... isn't") would pair up and swallow a reference
+- are tokenised with stdlib `shlex` (posix, `punctuation_chars=";&|"`). A
+quoted argument stays one word, so `"$(printf x);"` is a value and its `;` no
+separator, while an unquoted `;`, `|` or `&&` is a token of its own. A quoted
+argument that holds several words is a STRING: each of its paths must still
+exist, but none of them is a command or owns a flag. Text whose quotes do not
+balance falls back to plain whitespace words, the reading used before shlex.
+
 **Which command a flag belongs to** (#731). A flag belongs to its segment's
 COMMAND: the first word after any interpreter or shell keyword (`bash`,
 `python3`, `env`, `if`, `elif`, `!`, ...), its options and their values
-(`sudo -u root`, `env -u VAR`), and any `VAR=value`. A path seen later
+(`sudo -u root`, `sudo --user root`, `env --unset VAR`; a substitution can
+be that value, `sudo -u "$(id -un)"`), and any `VAR=value`. A path seen later
 in the segment is an argument - it must exist, but never takes the flags (so
 `scripts/helper.sh references/guide.md --verbose` checks `--verbose` against the
 helper, not the guide). A separator (`|`, `;`, `&&`) ends the command - after
@@ -222,8 +233,10 @@ and forward, then accepts the runs longest first - so a repetitive prefix is
 recovered whole from the first distinctive word after it, and an early short
 match never starves a later longer one, in either document order. Only what no anchor
 reached - purely repetitive text - falls back to the first 8 starting points,
-forward only; such a finding and the report summary say **bounded estimate**,
-and `population.estimated_pairs` counts them. No word on either side is counted
+forward only. A pair is an **estimate** exactly when a candidate search was
+cut while a free alignment beyond the cut existed - whether or not the cut
+search then accepted a run - and that finding and the report summary say
+**bounded estimate**; `population.estimated_pairs` counts them. No word on either side is counted
 in two runs. Memory stays bounded on repetitive text (no occurrence
 cross-product).
 

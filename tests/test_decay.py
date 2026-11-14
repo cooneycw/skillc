@@ -494,3 +494,85 @@ def test_731_r1_flags_after_a_non_command_path_are_counted_not_silent(tmp_path: 
     result = decay.dangling_reference(_load(tmp_path))
     assert result.hits == []
     assert result.population["flags_after_a_non_command_path"] == 1
+
+
+# ------------------------------------------------- #731 counter-model pass 2 (ratified: shlex)
+
+def _helper(root: Path) -> None:
+    (root / "scripts").mkdir(exist_ok=True)
+    (root / "scripts" / "helper.sh").write_text("#!/bin/sh\n# helper.sh [--verbose]\n", encoding="utf-8")
+
+
+def _flag_refs(root: Path) -> list[str]:
+    return [str(h.data["reference"]) for h in decay.dangling_reference(_load(root)).hits]
+
+
+def test_731_r2_a_substitution_as_an_option_value_is_that_value(tmp_path: Path) -> None:
+    """Reviewer's exact input: `"$(id -un)"` IS sudo's -u value; the helper is the command."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nsudo -u "$(id -un)" scripts/helper.sh --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+@pytest.mark.parametrize("wrapper", ["sudo --user root", "sudo --user=root", "env --unset VAR", "env --unset=VAR"])
+def test_731_r2_long_wrapper_options_take_their_value(tmp_path: Path, wrapper: str) -> None:
+    """Reviewer's exact inputs, separate and `=` forms."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", f"```bash\n{wrapper} scripts/helper.sh --absent\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_a_quoted_separator_is_not_a_separator(tmp_path: Path) -> None:
+    """Reviewer's exact input: the `;` is inside a quoted argument."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh "$(printf x);" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_prose_apostrophes_never_hide_a_command(tmp_path: Path) -> None:
+    """The orchestrator's guard: shlex reads command-shaped text only, so two
+    apostrophes in the surrounding prose cannot swallow the code span."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "Don't run `scripts/helper.sh --absent` if it isn't needed.\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_an_unbalanced_quote_falls_back_to_whitespace_words(tmp_path: Path) -> None:
+    """shlex refuses an unterminated quote; the span is then read as plain
+    whitespace-separated words, so the command and its flag are still checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh "unterminated --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_a_truncated_fallback_search_is_an_estimate_even_when_it_finds_nothing(tmp_path: Path) -> None:
+    """Reviewer's exact case: 100 `same` + 50 distinct + a different separator +
+    100 `same`, in both documents. The anchor takes the first 150; the fallback's
+    first candidates are already consumed, so the last 100 are not measured - and
+    the finding must SAY so."""
+    from skillc import inspect
+
+    distinct = " ".join(f"d{i}" for i in range(50))
+    same = " ".join(["same"] * 100)
+    _skill(tmp_path, "a", f"{same} {distinct} sepA {same}\n")
+    _skill(tmp_path, "b", f"{same} {distinct} sepB {same}\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
+    assert "bounded estimate" in inspect.run(decay.load(tmp_path, offline=True)).data["summary"]
+
+
+def test_731_r2_the_fallback_still_ends_a_command_after_a_substitution(tmp_path: Path) -> None:
+    """The whitespace fallback (an unterminated quote later on the line) keeps
+    the separator rule: `"$(pwd)";` ends the helper, so `echo --absent` is echo's."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --verbose "$(pwd)"; echo --absent \'dangling\n```\n')
+    assert _flag_refs(tmp_path) == []
+
+
+def test_731_r2_a_path_inside_a_quoted_string_is_still_checked_for_existence(tmp_path: Path) -> None:
+    """shlex keeps `"..."` as one word; its inner paths must still exist (a
+    deleted helper named in an echo string is still a dangling reference), but
+    none of them is a command, so no flag is checked against them."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\necho "run scripts/gone.sh, then scripts/helper.sh --absent"\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/gone.sh,"[:-1]]
