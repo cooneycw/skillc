@@ -54,3 +54,7 @@ Scope: ~9 paths plus fixtures, ~700-900 lines. Risks: a heading-based extractor 
 Readers:
 - Reader: PR B's `charter create` and the `/charter-create` dialogue skill read evidence.json. Compatibility: the shape is versioned (`schema: 1`) and fixed in the spec.
 - Reader: the owner reads the suggestions. Compatibility: every suggestion carries its citation and kind; observational items are labelled so.
+
+### Plan deviations
+- 2026-11-15, Checkout lane corrected (owner question "did you examine the lanes?"): the plan answered Checkout "not applicable". The counter-model pass-1 fix (`6a9b50b`) made `charter evidence` read the gauntlet's own draft from the MAIN checkout's `.skillc/gauntlet/<slug>/` through `gauntlet.main_checkout`, which resolves a linked worktree to its main checkout. So the lane applies: **will test - main checkout and linked worktree**. `test_the_gauntlets_own_draft_under_skillc_gauntlet_is_found` covers the main checkout, and `test_from_a_linked_worktree_the_draft_in_the_main_checkout_is_found` covers a collection opened from `git worktree add`. The latter passed on `6a9b50b` too: coverage the code already earned, not a regression test.
+- 2026-11-15, counter-model passes 1 and 2 added paths to the plan's list: `skillc/repo_reader.py` (named in Section C item 2), `--draft` on the CLI, and `tests/fixtures/charter-evidence/` (item 5).

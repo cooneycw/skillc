@@ -34,7 +34,7 @@ is written, and 2 on a usage error. **No model is called.**
 
 | Source | What is read | Kind |
 |---|---|---|
-| `repository evidence` | each `--ref` (a discussion, issue or PR, with every comment and reply); with `--search`, also what a search of the repository for the skill's name finds | observational |
+| `repository evidence` | each `--ref`: a discussion with its comments and replies, an issue with its comments, or a PR with its comments, review bodies and inline review-thread comments; with `--search`, also what a search of the repository for the skill's name finds | observational |
 | `existing charter` | the skill's `CHARTER.md`; every `CHARTER.draft.md` (beside it, where `skillc gauntlet run` keeps it before a charter exists, `<main checkout>/.skillc/gauntlet/<slug>/`, and any `--draft`); every clause, including one with only an `id` and a `test`; plus each file's git history | stated |
 | `skill text` | the SKILL.md description and its MUST/ALWAYS/NEVER sentences (the `charter draft` rules), and each `--doc` | stated |
 | `usage records` | the `stop_reason` tokens the skill's #719 records carry, each cited by `<log>:<line>` (up to 5 lines, then a count) | observed |
@@ -49,8 +49,10 @@ off by default**, because a search for a common word matches noisily.
 
 A discussion, issue or PR is prose, and prose is not a charter. The extractor
 takes only the items under a **charter-shaped label**. The label is a heading
-(`## Must never`) or a bold label on a line of its own (`**Must never**`,
-`**Job:** text`), and it must be one of:
+(`## Must never`) or a bold label: a bold span alone on its line
+(`**Must never**`), or one followed by a colon and text (`**Job:** text`,
+`**Job**: text`). Bold words opening a sentence (`**Never** assume ...`) are
+emphasis, not a label. The label must be one of:
 
 | Label | Section |
 |---|---|
@@ -71,6 +73,8 @@ These rules decide what counts as an item:
   after the section's list.
 - Fenced code is skipped, using `charter draft`'s CommonMark rule (#749). A
   `## Must never` inside a code block is an example, never a duty.
+- HTML comments are skipped too, across lines: a commented-out label is not
+  evidence.
 - A bold label inside a bullet (`- **Must always:** 2-4 outcomes.`) is NOT a
   label. Discussion #718's body uses that shape to describe charters, and it
   yields nothing.
@@ -150,5 +154,8 @@ read, reported as `not examined`.
   (`tests/fixtures/charter-evidence/`) stands in for the live read.
 - **Earlier charter versions' clauses.** The git history lists the versions;
   only the current file's clauses are offered.
+- **Failures that stop one source, never the run.** An unreadable or undecodable
+  SKILL.md reads `skill text: not examined`, and git missing from PATH reads the
+  gauntlet's draft location as `not examined`. The other sources still run.
 - **Meaning.** Nothing is compared by meaning, and no model is called. Two
   suggestions that say the same thing in different words are both offered.

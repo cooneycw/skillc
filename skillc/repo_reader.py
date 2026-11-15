@@ -111,13 +111,18 @@ def parse_ref(text: str, default_repo: str | None) -> Ref:
 
 
 _THREAD = f"url title body comments(first:{PAGE}){{pageInfo{{hasNextPage}} nodes{{url body}}}}"
+#: A PR also has review bodies and inline review-thread comments (counter-model
+#: review): both are read, with their own truncation accounting.
+_PR = (_THREAD + f" reviews(first:{PAGE}){{pageInfo{{hasNextPage}} nodes{{url body}}}} "
+       f"reviewThreads(first:{PAGE}){{pageInfo{{hasNextPage}} nodes{{comments(first:{REPLY_PAGE})"
+       "{pageInfo{hasNextPage} nodes{url body}}}}")
 _DISCUSSION = (f"url title body comments(first:{PAGE}){{pageInfo{{hasNextPage}} "
                f"nodes{{url body replies(first:{REPLY_PAGE}){{pageInfo{{hasNextPage}} nodes{{url body}}}}}}}}")
 _QUERIES = {
     "discussion": "query($o:String!,$n:String!,$k:Int!){repository(owner:$o,name:$n){discussion(number:$k){"
                   + _DISCUSSION + "}}}",
     "issue": "query($o:String!,$n:String!,$k:Int!){repository(owner:$o,name:$n){issueOrPullRequest(number:$k){"
-             "__typename ... on Issue{" + _THREAD + "} ... on PullRequest{" + _THREAD + "}}}}",
+             "__typename ... on Issue{" + _THREAD + "} ... on PullRequest{" + _PR + "}}}}",
 }
 SEARCH_PAGE = 20
 _SEARCH = (f"query($q:String!){{issues:search(query:$q,type:ISSUE,first:{SEARCH_PAGE}){{pageInfo{{hasNextPage}} "
@@ -236,6 +241,19 @@ def _document(ref: Ref, kind: str, node: dict[str, Any]) -> Document:
         for reply in replies.get("nodes") or []:
             if isinstance(reply, dict):
                 parts.append(Part(str(reply.get("url") or ""), str(reply.get("body") or "")))
+    reviews: dict[str, Any] = node["reviews"] if isinstance(node.get("reviews"), dict) else {}
+    truncated = truncated or bool((reviews.get("pageInfo") or {}).get("hasNextPage"))
+    for review in reviews.get("nodes") or []:
+        if isinstance(review, dict):
+            parts.append(Part(str(review.get("url") or ""), str(review.get("body") or "")))
+    threads: dict[str, Any] = node["reviewThreads"] if isinstance(node.get("reviewThreads"), dict) else {}
+    truncated = truncated or bool((threads.get("pageInfo") or {}).get("hasNextPage"))
+    for thread in threads.get("nodes") or []:
+        inner: dict[str, Any] = thread["comments"] if isinstance(thread, dict) and isinstance(thread.get("comments"), dict) else {}
+        truncated = truncated or bool((inner.get("pageInfo") or {}).get("hasNextPage"))
+        for comment in inner.get("nodes") or []:
+            if isinstance(comment, dict):
+                parts.append(Part(str(comment.get("url") or ""), str(comment.get("body") or "")))
     return Document(Ref(ref.repo, ref.number, kind), kind, str(node.get("url") or ""), str(node.get("title") or ""),
                     tuple(parts), truncated)
 

@@ -83,8 +83,10 @@ LABELS = {
 }
 
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(?P<label>.+?)\s*#*\s*$")
-#: A line that IS a bold label: `**Must never**`, `**Job:** text`, `**Job**: text`.
-BOLD_RE = re.compile(r"^ {0,3}(?:\*\*|__)(?P<label>[^*_]+?)(?:\*\*|__)\s*:?\s*(?P<rest>.*)$")
+#: A line that IS a bold label: `**Must never**` alone, or `**Job:** text` /
+#: `**Job**: text` with a colon. `**Never** assume ...` is emphasis in prose,
+#: never a label (counter-model review).
+BOLD_RE = re.compile(r"^ {0,3}(?:\*\*|__)(?P<label>[^*_]+?)(?:\*\*|__)(?P<after>.*)$")
 ITEM_RE = re.compile(r"^(?P<indent> {0,3})(?:[-*+]|\d{1,9}[.)])\s+(?P<text>.*)$")
 
 #: Test files are recognised by name; nothing larger than this is read.
@@ -146,7 +148,12 @@ def _unfenced(text: str) -> Iterator[str | None]:
     more of one character indented 0-3 spaces, and closes only on the same
     character, at least as long, followed by nothing but spaces or tabs."""
     fenced: str | None = None
+    in_comment = False
     for raw in text.splitlines():
+        if fenced is None:
+            # HTML comments hide what they hold (counter-model review): a
+            # commented-out "## Must never" is not evidence.
+            raw, in_comment = charter._strip_comments(raw, in_comment)
         fence = charter.FENCE_RE.match(raw)
         if fenced is None:
             if fence and not (fence["run"][0] == "`" and "`" in fence["info"]):
@@ -194,13 +201,16 @@ def extract(body: str) -> list[tuple[str, str]]:
         line = raw.rstrip()
         heading = HEADING_RE.match(line)
         bold = BOLD_RE.match(line) if not heading else None
+        if bold and bold["after"].strip() and not (bold["label"].rstrip().endswith(":")
+                                                   or bold["after"].lstrip().startswith(":")):
+            bold = None  # bold words that open a sentence: emphasis, not a label
         if heading or bold:
             flush_item()
             flush_paragraph()
             label = heading["label"] if heading else bold["label"] if bold else ""
             section = _label(label)
             seen_item = False
-            rest = bold["rest"].strip() if bold else ""
+            rest = bold["after"].strip().lstrip(":").strip() if bold else ""
             if section and rest:
                 # `**Job:** take any skill ...` is the item itself.
                 found.append((section, rest))
@@ -391,12 +401,10 @@ def _skill_text(b: _Builder, skill_file: Path, label: str, docs: Sequence[tuple[
         b.status(SKILL_TEXT, EXAMINED if b.n > before else NONE_FOUND, f"{b.n - before} item(s)", ref=doc_label)
 
 
-def _usage(b: _Builder, skill_file: Path, usage_paths: Sequence[Path], aliases: Sequence[str]) -> None:
+def _usage(b: _Builder, names: set[str], usage_paths: Sequence[Path]) -> None:
     if not usage_paths:
         b.status(USAGE, f"{NOT_EXAMINED}: no --usage given; absences are UNKNOWN")
         return
-    front, _, _, _ = charter.read_skill(skill_file)
-    names = charter.skill_names(skill_file, front, aliases)
     logs: list[usage.UsageLog] = []
     for path in usage_paths:
         logs.extend(usage.discover_logs(path))
@@ -536,7 +544,10 @@ def gather(
     label = target.text.relative_to(root).as_posix()
     out = EvidenceFile(target.rel, label)
     b = _Builder(out)
-    front, _, _, _ = charter.read_skill(target.text)
+    try:
+        front: dict[str, object] = charter.read_skill(target.text)[0]
+    except (OSError, UnicodeDecodeError):
+        front = {}  # _skill_text reports it; the other sources still run (counter-model review)
     names = charter.skill_names(target.text, front, aliases)
     term = str(front.get("name") or charter.primary_name(target.text)) if search else None
     _repository(b, reader, refs, repo, term)
@@ -546,7 +557,12 @@ def gather(
     # before a charter exists (the main checkout's .skillc/gauntlet/<slug>/,
     # counter-model review), and any the caller names.
     candidates = [target.charter.parent / DRAFT_NAME]
-    main = main_checkout(root)
+    try:
+        main = main_checkout(root)
+    except (OSError, subprocess.SubprocessError) as exc:
+        main = None
+        b.status(EXISTING_CHARTER, f"{NOT_EXAMINED}: the gauntlet's draft location (git could not run: "
+                                   f"{exc.__class__.__name__})")
     if main is not None:
         candidates.append(main / ".skillc" / "gauntlet" / target.slug / DRAFT_NAME)
     candidates.extend(drafts)
@@ -565,10 +581,10 @@ def gather(
         try:
             doc_label = path.resolve().relative_to(root).as_posix()
         except ValueError:
-            doc_label = path.name
+            doc_label = str(d)  # outside the collection: the path as given, which resolves (counter-model review)
         doc_pairs.append((path, doc_label))
     _skill_text(b, target.text, label, doc_pairs)
-    _usage(b, target.text, usage_paths, aliases)
+    _usage(b, names, usage_paths)
     _tests(b, root, names)
     missing = [s for s in SOURCES if all(st.source != s for st in out.sources)]
     assert not missing, f"a source reported no status: {missing}"  # never silently empty

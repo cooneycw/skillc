@@ -430,3 +430,87 @@ def test_a_usage_suggestion_cites_its_log_and_line(tmp_path: Path) -> None:
     assert items
     for item in items:
         assert re.search(r"usage\.jsonl:\d+", item.cite), item.cite
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2; the Checkout lane
+
+
+def test_an_unreadable_skill_md_is_not_examined_and_the_other_sources_still_run(tmp_path: Path) -> None:
+    root = _collection(tmp_path)
+    (root / "skills/demo/SKILL.md").write_bytes(b"---\nname: demo\n---\n\xff\xfe bad bytes\n")
+    reader = FakeReader({("o/n", 9): _doc("**Must never**\n- X.\n")})
+    found = gather(root, "skills/demo", reader=reader, refs=["9"], repo="o/n")
+    (row,) = [s for s in found.sources if s.source == charter_evidence.SKILL_TEXT]
+    assert row.status.startswith(f"{NOT_EXAMINED}: skills/demo/SKILL.md not read")
+    assert [s.text for s in _repo_suggestions(found)] == ["X."]
+
+
+def test_no_git_reads_the_gauntlet_draft_location_as_not_examined(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _collection(tmp_path)
+
+    def no_git(*a: object, **k: object) -> object:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", no_git)
+    found = gather(root, "skills/demo", reader=None)
+    rows = [s for s in found.sources if s.source == charter_evidence.EXISTING_CHARTER]
+    assert any(r.status.startswith(NOT_EXAMINED) and "gauntlet" in r.status for r in rows)
+
+
+def test_a_pr_read_includes_review_bodies_and_review_thread_comments() -> None:
+    reply = json.dumps({"data": {"repository": {"issueOrPullRequest": {
+        "__typename": "PullRequest", "url": "https://github.com/o/n/pull/7", "title": "t", "body": "",
+        "comments": {"pageInfo": {"hasNextPage": False}, "nodes": []},
+        "reviews": {"pageInfo": {"hasNextPage": False},
+                    "nodes": [{"url": "https://github.com/o/n/pull/7#pullrequestreview-1", "body": "**Must never**\n- A.\n"}]},
+        "reviewThreads": {"pageInfo": {"hasNextPage": False}, "nodes": [{"comments": {
+            "pageInfo": {"hasNextPage": False},
+            "nodes": [{"url": "https://github.com/o/n/pull/7#discussion_r2", "body": "**Must never**\n- B.\n"}]}}]}}}}})
+    doc = GhReader(runner=_Recorder([reply]), gh="gh").read(Ref("o/n", 7, "pr"))
+    assert [p.url.rsplit("#", 1)[1] for p in doc.parts[1:]] == ["pullrequestreview-1", "discussion_r2"]
+
+
+def test_bold_emphasis_in_prose_is_not_a_label() -> None:
+    assert extract("**Never** assume the examples below are charter clauses.\n\n- Delete things.\n") == []
+    assert extract("**Must always** be careful here, it said.\n") == []
+    assert extract("**Must never:** delete data.\n") == [("never", "delete data.")]
+    assert extract("**Must never**: delete data.\n") == [("never", "delete data.")]
+
+
+def test_a_heading_inside_an_html_comment_is_ignored() -> None:
+    assert extract("<!--\n## Must never\n- Delete everything.\n-->\n") == []
+    assert extract("<!-- old --> **Must never**\n- Keep it.\n") == [("never", "Keep it.")]
+
+
+def test_a_doc_outside_the_collection_keeps_a_citation_that_resolves(tmp_path: Path) -> None:
+    root = _collection(tmp_path / "c")
+    outside = tmp_path / "elsewhere" / "spec.md"
+    outside.parent.mkdir()
+    outside.write_text("It NEVER edits the skill.\n", encoding="utf-8")
+    found = gather(root, "skills/demo", reader=None, docs=[outside])
+    (item,) = [s for s in found.suggestions if s.cite.endswith(":1") and s.source == charter_evidence.SKILL_TEXT]
+    assert Path(item.cite.rsplit(":", 1)[0]) == outside
+
+
+def test_from_a_linked_worktree_the_draft_in_the_main_checkout_is_found(tmp_path: Path) -> None:
+    """The Checkout lane: `skillc gauntlet run` keeps the draft in the MAIN
+    checkout's .skillc/, so a collection opened from a linked worktree must
+    still find it."""
+    main = _collection(tmp_path / "main")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "init", "-q", str(main)], check=True)
+    subprocess.run([*git, "-C", str(main), "add", "-A"], check=True)
+    subprocess.run([*git, "-C", str(main), "commit", "-qm", "x"], check=True)
+    linked = tmp_path / "linked"
+    subprocess.run([*git, "-C", str(main), "worktree", "add", "-q", str(linked)], check=True)
+    from skillc.gauntlet import resolve_skill
+    slug = resolve_skill(linked, "skills/demo").slug
+    draft_dir = main / ".skillc" / "gauntlet" / slug
+    draft_dir.mkdir(parents=True)
+    (draft_dir / "CHARTER.draft.md").write_text(
+        '---\ncontract: "demo"\nversion: 1\nintent: "Main-checkout draft."\npurpose: "p"\nowner: "owner"\n---\n',
+        encoding="utf-8")
+    found = gather(linked, "skills/demo", reader=None)
+    assert ("intent", "Main-checkout draft.") in [
+        (s.section, s.text) for s in found.suggestions if s.source == charter_evidence.EXISTING_CHARTER]
