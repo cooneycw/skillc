@@ -95,7 +95,7 @@ def test_a_stub_is_refused_by_the_grader_loader(work: Path) -> None:
 
 def test_approved_lands_only_on_intent_and_authority(work: Path) -> None:
     _run(work, _answers())
-    data, _ = charter_create.parse_contract_block((work / "c/skills/demo/CHARTER.md").read_text(encoding="utf-8"))
+    data: Any = charter_create.parse_contract_block((work / "c/skills/demo/CHARTER.md").read_text(encoding="utf-8"))[0]
     assert data["intent"]["approved"] == "2026-11-15"
     assert data["authority"][0]["approved"] == "2026-11-15"
     invariants = data["invariants"]
@@ -141,7 +141,7 @@ def test_a_clause_naming_an_existing_test_uses_it_and_a_safety_clause_still_gets
     answers["clauses"][0]["test"] = "tests/test_demo.py"
     answers["clauses"][1]["test"] = "tests/test_demo.py"
     made = _run(work, answers)
-    data, _ = charter_create.parse_contract_block(made.charter.read_text(encoding="utf-8"))
+    data: Any = charter_create.parse_contract_block(made.charter.read_text(encoding="utf-8"))[0]
     assert data["invariants"]["always"][0]["test"] == "tests/test_demo.py"
     assert data["invariants"]["never"][0]["test"] == ["tests/test_demo.py", "evals/trap-tasks/demo/never-approve/{bad,good}"]
     assert not (work / "c/evals/trap-tasks/demo/cite-every-claim").exists()
