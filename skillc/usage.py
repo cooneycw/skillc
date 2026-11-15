@@ -36,10 +36,12 @@ that runs it, and writes nothing it would itself refuse.
 from __future__ import annotations
 
 import datetime as _dt
+import errno
 import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from collections import Counter
@@ -361,17 +363,71 @@ def _git(cwd: Path, *args: str) -> str | None:
     return out if done.returncode == 0 and out else None
 
 
-def destination(cwd: Path) -> Path | None:
-    """`<main checkout>/.skillc/usage.jsonl`, resolved through `git-common-dir`
-    so a run from a linked worktree lands in the SAME file as one from the main
-    checkout (CPP #471's lesson). None outside a non-bare git checkout."""
-    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if common is None:
+#: Bound on the `git check-ignore` call (#722). An answer git could not give in
+#: time is treated as "not ignored" - the writer refuses rather than guesses.
+CHECK_IGNORE_TIMEOUT = 5
+
+
+def _git_status(cwd: Path, *args: str, timeout: float = CHECK_IGNORE_TIMEOUT) -> int | None:
+    """git's EXIT CODE for `args` in `cwd`, or None when git could not answer
+    (missing, timed out, killed). `_git` hides exit codes, and `check-ignore`
+    answers through its exit code alone."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(cwd), *args], capture_output=True, timeout=timeout, check=False,
+        ).returncode
+    except (OSError, subprocess.SubprocessError):
         return None
-    common_dir = Path(common)
-    if common_dir.name != ".git":
-        return None  # a bare repository has no main checkout to write into
-    return common_dir.parent / STATE_DIR / LOG_NAME
+
+
+class MainCheckoutUnknown(ValueError):
+    """Git records no main checkout for this linked worktree (#724): a linked
+    worktree of a `--separate-git-dir` repository. Writing into the linked
+    worktree instead would split one collection's history across files (CPP
+    #471), so the callers print why nothing was recorded rather than going
+    silent."""
+
+
+def main_checkout(cwd: Path) -> Path | None:
+    """The MAIN checkout of the repository `cwd` is in, asked of git (#724).
+
+    `git worktree list` cannot answer this: in a submodule or a
+    `--separate-git-dir` checkout it names the git dir as the main worktree.
+    So, in ONE `rev-parse`:
+    - outside git, or a bare repository: None (nothing to write into);
+    - in the main worktree (git dir == common dir): `--show-toplevel`;
+    - in a linked worktree: the common dir's own `core.worktree` (a submodule
+      records it there, relative to the common dir), else the parent of a
+      common dir named `.git` (a plain repository);
+    - otherwise git records no main checkout: `MainCheckoutUnknown`."""
+    out = _git(cwd, "rev-parse", "--is-bare-repository", "--path-format=absolute",
+               "--git-dir", "--git-common-dir", "--show-toplevel")
+    if out is None:
+        return None  # outside git, or bare (--show-toplevel refuses there)
+    lines = out.splitlines()
+    if len(lines) != 4 or lines[0] != "false":
+        return None
+    git_dir, common, toplevel = (Path(line) for line in lines[1:])
+    if git_dir.resolve() == common.resolve():
+        return toplevel
+    configured = _git(cwd, "config", "--file", str(common / "config"), "--get", "core.worktree")
+    if configured is not None:
+        return (common / configured).resolve()
+    if common.name == ".git":
+        return common.parent
+    raise MainCheckoutUnknown(
+        "a linked worktree of a --separate-git-dir repository: git records no main checkout for it; "
+        "nothing written"
+    )
+
+
+def destination(cwd: Path) -> Path | None:
+    """`<main checkout>/.skillc/usage.jsonl` (see `main_checkout`), so a run
+    from a linked worktree lands in the SAME file as one from the main checkout
+    (CPP #471's lesson). None outside a non-bare git checkout; raises
+    `MainCheckoutUnknown` where git records no main checkout (#724)."""
+    root = main_checkout(cwd)
+    return None if root is None else root / STATE_DIR / LOG_NAME
 
 
 def repo_identity(cwd: Path) -> tuple[str, str]:
@@ -431,12 +487,17 @@ def collection_of(entry_file: Path | None) -> str:
     if entry_file is None:
         return UNKNOWN
     real = entry_file.resolve().parent
-    common, head = _git(real, "rev-parse", "--path-format=absolute", "--git-common-dir"), _git(real, "rev-parse", "HEAD")
-    if common is None or head is None or Path(common).name != ".git":
+    try:
+        root = main_checkout(real)
+    except MainCheckoutUnknown:
+        root = None
+    head = _git(real, "rev-parse", "HEAD")
+    if root is None or head is None:
         return UNKNOWN
-    # The MAIN checkout's name (via git-common-dir), never a linked worktree's:
+    # The MAIN checkout's name (#724: asked of git, so a submodule and a
+    # --separate-git-dir checkout are named too), never a linked worktree's:
     # one collection keeps one name however many worktrees it is run from.
-    value = f"{Path(common).parent.name}@{head}"
+    value = f"{root.name}@{head}"
     return value if COLLECTION_RE.fullmatch(value) else UNKNOWN
 
 
@@ -458,6 +519,71 @@ def record_problems(record: Mapping[str, object]) -> list[str]:
     return [*usage_envelope(log), *usage_fields(log), *usage_privacy(log)]
 
 
+class SymlinkRefused(ValueError):
+    """A path under `.skillc/` the writer would have followed out of the
+    checkout (#721). The callers' fail-open paths turn it into a printed
+    "nothing recorded", never an exit code."""
+
+
+_NOFOLLOW = os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _refusal(name: str) -> SymlinkRefused:
+    return SymlinkRefused(f"refusing to write through a symlink or non-regular file: {name}; nothing written")
+
+
+def _open_state_dir(state: Path) -> int:
+    """A descriptor for `.skillc/`, created if absent, opened WITHOUT following
+    a symlink (#721). A checkout controls what `.skillc` is; if it is a link,
+    every file under it is wherever the link points. Every later open is
+    relative to this descriptor, so nothing is checked and then swapped."""
+    try:
+        os.mkdir(state, 0o755)
+    except FileExistsError:
+        pass
+    try:
+        return os.open(state, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise _refusal(STATE_DIR) from None
+        raise
+
+
+def _open_file(state_fd: int, name: str, flags: int) -> int:
+    """Open `.skillc/<name>` relative to the state descriptor, refusing a
+    symlink (O_NOFOLLOW) or anything that is not a regular file (#721)."""
+    try:
+        fd = os.open(name, flags | _NOFOLLOW, 0o644, dir_fd=state_fd)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise _refusal(f"{STATE_DIR}/{name}") from None
+        raise
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise _refusal(f"{STATE_DIR}/{name}")
+    return fd
+
+
+def _check_entry(state_fd: int, name: str) -> None:
+    """Refuse `.skillc/<name>` if it exists as a symlink or a non-regular
+    file, WITHOUT creating or changing anything (#721). Run for every entry
+    before the first write, so a refusal really means nothing was written
+    (counter-model review: refusing the log after writing `.gitignore` did not)."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW, dir_fd=state_fd)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise _refusal(f"{STATE_DIR}/{name}") from None
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise _refusal(f"{STATE_DIR}/{name}")
+    finally:
+        os.close(fd)
+
+
 def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]]]) -> list[Mapping[str, object]]:
     """Read, decide and append as ONE operation under an exclusive lock.
 
@@ -467,11 +593,17 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     second end was an orphan that refused the whole log (counter-model
     review). Creating the state directory also writes its own `.gitignore`
     (`*`), so the log is ignored by default without editing the repository's
-    own ignore file. Returns what was written."""
-    state = path.parent
-    state.mkdir(parents=True, exist_ok=True)
-    ensure_ignored(state)
-    with path.open("a+", encoding="utf-8") as handle:
+    own ignore file. A symlinked `.skillc/`, `.skillc/.gitignore` or log is
+    refused before anything is written (#721). Returns what was written."""
+    state_fd = _open_state_dir(path.parent)
+    try:
+        for name in (".gitignore", path.name):
+            _check_entry(state_fd, name)
+        ensure_ignored(state_fd, path.parent.parent)
+        fd = _open_file(state_fd, path.name, os.O_RDWR | os.O_CREAT | os.O_APPEND)
+    finally:
+        os.close(state_fd)
+    with os.fdopen(fd, "a+", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             handle.seek(0)
@@ -496,20 +628,56 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     return new
 
 
-def ensure_ignored(state: Path) -> None:
-    """The log is ignored by default, even when `.skillc/` already existed
-    without an ignore file (counter-model review, pass 2): create
-    `.skillc/.gitignore` (`*`) when it is missing, and add `usage.jsonl` to an
-    existing one that ignores neither everything nor the log."""
-    ignore = state / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8")
+class LogNotIgnored(ValueError):
+    """Git would not ignore the usage log, or could not be asked (#722). The
+    log holds session ids and skill history the owner decided stay local
+    (#718, decision 2), so it is not written; the callers' fail-open paths
+    print the refusal."""
+
+
+def _log_ignored(checkout: Path) -> bool:
+    """Ask GIT whether `.skillc/usage.jsonl` is ignored - never a parse of the
+    rules, because git applies them in order and a later `!usage.jsonl`
+    cancels an earlier `*` (#722). Exit 0 is ignored, 1 is not; anything else
+    (an error, a timeout, no git) could not be answered and raises."""
+    rc = _git_status(checkout, "check-ignore", "-q", "--", f"{STATE_DIR}/{LOG_NAME}")
+    if rc == 0:
+        return True
+    if rc == 1:
+        return False
+    raise LogNotIgnored(
+        f"git check-ignore could not say whether {STATE_DIR}/{LOG_NAME} is ignored "
+        f"({'no answer' if rc is None else f'exit {rc}'}); usage log not written"
+    )
+
+
+def ensure_ignored(state_fd: int, checkout: Path) -> None:
+    """The log is written only once GIT says it is ignored (#722), on every
+    path - a freshly created `.gitignore` is asked about too, so no branch
+    trusts its own write. Create `.skillc/.gitignore` (`*`) when it is missing;
+    when git says the log is not ignored, append a final `/usage.jsonl` (the
+    last matching rule wins) and ask again. Still not ignored - a TRACKED log,
+    which no ignore rule can hide - raises `LogNotIgnored`. Opened relative to
+    the state descriptor and never through a symlink (#721)."""
+    try:
+        fd = os.open(".gitignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o644, dir_fd=state_fd)
+    except FileExistsError:
+        pass
+    else:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("*\n")
+    if _log_ignored(checkout):
         return
-    lines = {line.strip() for line in ignore.read_text(encoding="utf-8").splitlines()}
-    if not lines & {"*", LOG_NAME, f"/{LOG_NAME}"}:
-        existing = ignore.read_text(encoding="utf-8")
-        ignore.write_text(existing + ("" if not existing or existing.endswith("\n") else "\n") + f"{LOG_NAME}\n",
-                          encoding="utf-8")
+    # Read-only first: only the append needs write permission (counter-model review, #721).
+    with os.fdopen(_open_file(state_fd, ".gitignore", os.O_RDONLY | os.O_NONBLOCK), "r", encoding="utf-8") as handle:
+        existing = handle.read()
+    with os.fdopen(_open_file(state_fd, ".gitignore", os.O_WRONLY | os.O_APPEND), "w", encoding="utf-8") as handle:
+        handle.write(("" if not existing or existing.endswith("\n") else "\n") + f"/{LOG_NAME}\n")
+    if not _log_ignored(checkout):
+        raise LogNotIgnored(
+            f"{STATE_DIR}/{LOG_NAME} is not ignored by git even after adding /{LOG_NAME} "
+            "(is it tracked?); usage log not written"
+        )
 
 
 def _open_starts(log: UsageLog, session: str, skill: str | None = None) -> list[Entry]:

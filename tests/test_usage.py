@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -430,3 +431,380 @@ def test_an_empty_usage_log_beside_a_neighbour_record_checked_nothing(
     for rule in ("skill-usage-envelope", "skill-usage-fields"):
         assert cli.main(["check-records", str(tmp_path), "--rule", rule]) == 2, rule
         assert "checked nothing" in capsys.readouterr().out
+
+
+# ------------------------------------------- no write-through a symlink (#721)
+#
+# A checkout controls what `.skillc/` holds. If any of the three paths the
+# writer touches is a symlink, the writer must refuse and write NOTHING, so a
+# cloned repository cannot use an unprompted hook to append to a file outside
+# it (an SSH config, say). Every case below plants the symlink, runs the real
+# writer, and asserts the target's bytes did not move.
+
+OUTSIDE_TEXT = "Host example\n  User someone\n"
+
+
+def _plant(repo: Path, tmp_path: Path, which: str) -> Path:
+    """Plant the symlink `which` names under `repo/.skillc` and return the
+    outside path whose bytes must stay unchanged (a file, or a directory)."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    state = repo / ".skillc"
+    if which == "state":
+        # The whole state dir points outside; the outside dir already holds a
+        # log with an open start, so `usage end` would also have something to close.
+        (outside / "usage.jsonl").write_text(json.dumps(_rec(session="s-1", skill="hello-probe")) + "\n", encoding="utf-8")
+        state.symlink_to(outside, target_is_directory=True)
+        return outside
+    state.mkdir()
+    target = outside / "config"
+    if which == "log-dangling":
+        (state / ".gitignore").write_text("*\n", encoding="utf-8")
+        (state / "usage.jsonl").symlink_to(target)
+        return target
+    target.write_text(OUTSIDE_TEXT if which != "log" else json.dumps(_rec(session="s-1", skill="hello-probe")) + "\n", encoding="utf-8")
+    if which == "log":
+        (state / ".gitignore").write_text("*\n", encoding="utf-8")
+        (state / "usage.jsonl").symlink_to(target)
+    elif which == "gitignore":
+        (state / "usage.jsonl").write_text(json.dumps(_rec(session="s-1", skill="hello-probe")) + "\n", encoding="utf-8")
+        (state / ".gitignore").symlink_to(target)
+    return target
+
+
+def _snapshot(path: Path) -> object:
+    if path.is_dir():
+        return sorted((p.name, p.read_bytes()) for p in path.iterdir())
+    return path.read_bytes() if path.exists() else None
+
+
+SYMLINKED = ["log", "log-dangling", "gitignore", "state"]
+
+
+@needs_git
+@pytest.mark.parametrize("which", SYMLINKED)
+def test_NEGATIVE_CONTROL_the_hook_never_writes_through_a_symlink(repo: Path, tmp_path: Path, which: str) -> None:
+    target = _plant(repo, tmp_path, which)
+    before = _snapshot(target)
+    err = _hook(_skill_call(repo), tmp_path / "home")  # _hook asserts exit 0
+    assert _snapshot(target) == before, f"the hook wrote through the symlinked {which}"
+    assert "nothing recorded" in err and "symlink" in err
+
+
+@needs_git
+@pytest.mark.parametrize("which", SYMLINKED)
+def test_NEGATIVE_CONTROL_usage_end_never_writes_through_a_symlink(
+    repo: Path, tmp_path: Path, which: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _plant(repo, tmp_path, which)
+    before = _snapshot(target)
+    monkeypatch.chdir(repo)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", "approval-gate", "s-1", repo, out) == 0
+    assert _snapshot(target) == before, f"usage end wrote through the symlinked {which}"
+    if which != "log-dangling":  # a dangling log is no log: no-open-start, nothing written
+        assert "SKILLC_USAGE: not recorded" in out.getvalue() and "symlink" in out.getvalue()
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_linked_worktree_run_refuses_the_main_checkouts_symlinked_log(
+    repo: Path, tmp_path: Path,
+) -> None:
+    target = _plant(repo, tmp_path, "log")
+    before = _snapshot(target)
+    worktree = tmp_path / "demo-wt"
+    _git(repo, "worktree", "add", "-q", "-b", "side", str(worktree))
+    err = _hook(_skill_call(worktree), tmp_path / "home")
+    assert _snapshot(target) == before
+    assert "symlink" in err and not (worktree / ".skillc").exists()
+
+
+@needs_git
+def test_a_real_state_dir_is_still_written_after_the_symlink_guard(repo: Path, tmp_path: Path) -> None:
+    """The positive half: the guard must not refuse an ordinary `.skillc/`."""
+    _hook(_skill_call(repo), tmp_path / "home")
+    _hook(_skill_call(repo, session="s-2"), tmp_path / "home")
+    assert len(_lines(repo)) == 2
+    assert (repo / ".skillc" / ".gitignore").read_text(encoding="utf-8") == "*\n"
+
+
+def _tree(state: Path) -> list[tuple[str, bool, bytes | str]]:
+    """Every entry under `.skillc/` as (name, is-link, bytes or link target)."""
+    return sorted(
+        (p.name, p.is_symlink(), str(p.readlink()) if p.is_symlink() else p.read_bytes())
+        for p in state.iterdir()
+    )
+
+
+@needs_git
+@pytest.mark.parametrize("ignore", [None, "notes.txt\n"])
+def test_NEGATIVE_CONTROL_a_symlinked_log_refusal_writes_nothing_at_all(
+    repo: Path, tmp_path: Path, ignore: str | None,
+) -> None:
+    """Counter-model review: with the log symlinked and `.gitignore` missing or
+    incomplete, the refusal came AFTER `.gitignore` was written. Nothing in
+    `.skillc/` may change, not only the outside target."""
+    state = repo / ".skillc"
+    state.mkdir()
+    target = tmp_path / "config"
+    target.write_text(OUTSIDE_TEXT, encoding="utf-8")
+    (state / "usage.jsonl").symlink_to(target)
+    if ignore is not None:
+        (state / ".gitignore").write_text(ignore, encoding="utf-8")
+    before = _tree(state)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "symlink" in err
+    assert _tree(state) == before and target.read_text(encoding="utf-8") == OUTSIDE_TEXT
+
+
+@needs_git
+@pytest.mark.parametrize("name", [".gitignore", "usage.jsonl"])
+def test_NEGATIVE_CONTROL_a_fifo_entry_is_refused_not_opened(repo: Path, tmp_path: Path, name: str) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    os.mkfifo(state / name)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "non-regular" in err
+    assert (state / name).is_fifo()
+
+
+@needs_git
+def test_a_read_only_ignore_file_that_already_ignores_the_log_still_records(repo: Path, tmp_path: Path) -> None:
+    """Counter-model review: a sufficient `.gitignore` needs no write permission."""
+    state = repo / ".skillc"
+    state.mkdir()
+    ignore = state / ".gitignore"
+    ignore.write_text("*\n", encoding="utf-8")
+    ignore.chmod(0o444)
+    try:
+        _hook(_skill_call(repo), tmp_path / "home")
+        assert len(_lines(repo)) == 1 and ignore.read_text(encoding="utf-8") == "*\n"
+    finally:
+        ignore.chmod(0o644)
+
+
+# ------------------------- git decides whether the log is ignored (#722)
+#
+# The writer used to look for a `*` / `usage.jsonl` line in `.skillc/.gitignore`.
+# Git applies those rules in order, so a later `!usage.jsonl` cancels them and
+# the private log becomes committable while the guard reads "ignored". Git is
+# the judge here, never a parse of the rules.
+
+
+def _untracked_log(repo: Path) -> bool:
+    """Exactly `.skillc/usage.jsonl`, never a neighbour such as `usage.jsonl.backup`
+    (counter-model review): git lists the one path or prints nothing."""
+    return _git(repo, "ls-files", "--others", "--exclude-standard", "--", ".skillc/usage.jsonl") != ""
+
+
+@needs_git
+def test_the_untracked_log_probe_tells_the_log_from_a_neighbour(repo: Path) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / "usage.jsonl.backup").write_text("x\n", encoding="utf-8")
+    assert not _untracked_log(repo)
+    (state / "usage.jsonl").write_text("x\n", encoding="utf-8")
+    assert _untracked_log(repo)
+
+
+@needs_git
+@pytest.mark.parametrize("ignore", ["*\n!usage.jsonl\n", "usage.jsonl\n!usage.jsonl\n"])
+def test_NEGATIVE_CONTROL_a_later_negation_does_not_leave_the_log_committable(
+    repo: Path, tmp_path: Path, ignore: str,
+) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / ".gitignore").write_text(ignore, encoding="utf-8")
+    _hook(_skill_call(repo), tmp_path / "home")
+    assert len(_lines(repo)) == 1, "the hook should still record once git ignores the log"
+    assert not _untracked_log(repo), f"git would commit the usage log under {ignore!r}"
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_tracked_log_git_cannot_ignore_is_never_appended_to(repo: Path, tmp_path: Path) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    (state / ".gitignore").write_text("*\n", encoding="utf-8")
+    log = state / "usage.jsonl"
+    log.write_text(json.dumps(_rec(session="s-0")) + "\n", encoding="utf-8")
+    _git(repo, "add", "-f", ".skillc/usage.jsonl")
+    _git(repo, "commit", "-q", "-m", "a tracked usage log")
+    before = log.read_bytes()
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert log.read_bytes() == before, "appended to a log git tracks"
+    assert "nothing recorded" in err and "not ignored by git" in err
+
+
+def _break_check_ignore(monkeypatch: pytest.MonkeyPatch, exc: BaseException) -> None:
+    """Make ONLY `git check-ignore` unanswerable; every other git call is real."""
+    real = subprocess.run
+
+    def run(argv: list[str], *args: object, **kwargs: object) -> object:
+        if "check-ignore" in argv:
+            raise exc
+        return real(argv, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(usage.subprocess, "run", run)
+
+
+@needs_git
+@pytest.mark.parametrize("fresh", [True, False], ids=["fresh-state-dir", "existing-ignore-file"])
+@pytest.mark.parametrize("exc", [subprocess.TimeoutExpired(["git"], 5), FileNotFoundError("git")],
+                         ids=["timeout", "no-git"])
+def test_NEGATIVE_CONTROL_an_unanswerable_ignore_check_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh: bool, exc: BaseException,
+) -> None:
+    """Every path asks git, including the freshly-created `.gitignore` one, and an
+    answer git could not give refuses rather than trusting the writer's own rule."""
+    if not fresh:
+        (repo / ".skillc").mkdir()
+        (repo / ".skillc" / ".gitignore").write_text("*\n", encoding="utf-8")
+    _break_check_ignore(monkeypatch, exc)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert _lines(repo) == [] and "nothing recorded" in err and "check-ignore" in err
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_check_ignore_error_exit_refuses(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exit 128 (git's fatal error) is neither ignored (0) nor not-ignored (1)."""
+    real = subprocess.run
+
+    def run(argv: list[str], *args: object, **kwargs: object) -> object:
+        if "check-ignore" in argv:
+            return subprocess.CompletedProcess(argv, 128, b"", b"fatal")
+        return real(argv, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(usage.subprocess, "run", run)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert _lines(repo) == [] and "exit 128" in err
+
+
+@needs_git
+def test_usage_end_refuses_a_log_git_cannot_ignore(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _hook(_skill_call(repo), tmp_path / "home")
+    _git(repo, "add", "-f", ".skillc/usage.jsonl")
+    _git(repo, "commit", "-q", "-m", "now tracked")
+    before = (repo / ".skillc" / "usage.jsonl").read_bytes()
+    monkeypatch.chdir(repo)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", "approval-gate", "s-1", repo, out) == 0
+    assert "SKILLC_USAGE: not recorded" in out.getvalue() and "not ignored by git" in out.getvalue()
+    assert (repo / ".skillc" / "usage.jsonl").read_bytes() == before
+
+
+# ------------------- submodule and --separate-git-dir checkouts (#724)
+#
+# destination() and collection_of() assumed git's common dir is named `.git`
+# with the checkout beside it, so a submodule (`.git/modules/<name>`) and a
+# `--separate-git-dir` checkout recorded NOTHING, silently. `git worktree list`
+# names the git dir in both layouts (measured, git 2.43), so it is not the
+# source either; see the #724 reframing comment.
+
+
+def _gitc(cwd: Path, *args: str) -> str:
+    return _git(cwd, "-c", "protocol.file.allow=always", *args)
+
+
+def _skill_repo(root: Path, origin: str) -> Path:
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "remote", "add", "origin", origin)
+    skill = root / ".claude" / "skills" / "hello-probe" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: hello-probe\ndescription: Say hello. Use when asked to probe.\n---\nSay hello.\n",
+                     encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+@pytest.fixture
+def submodule(tmp_path: Path) -> tuple[Path, Path]:
+    """(superproject, its submodule checkout `mod`) holding the skill."""
+    source = _skill_repo(tmp_path / "mod-src", "git@github.com:example/mod.git")
+    sup = _skill_repo(tmp_path / "super", "git@github.com:example/super.git")
+    _gitc(sup, "submodule", "-q", "add", str(source), "mod")
+    _git(sup, "commit", "-q", "-m", "add submodule")
+    return sup, sup / "mod"
+
+
+@pytest.fixture
+def separate(tmp_path: Path) -> Path:
+    """A checkout whose git dir lives elsewhere, under a name that is not `.git`."""
+    root = tmp_path / "sep"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main", "--separate-git-dir", str(tmp_path / "gd.weird"))
+    _git(root, "remote", "add", "origin", "git@github.com:example/sep.git")
+    skill = root / ".claude" / "skills" / "hello-probe" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: hello-probe\ndescription: Say hello. Use when asked to probe.\n---\nSay hello.\n",
+                     encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_submodule_checkout_records_into_the_submodule(
+    submodule: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    sup, mod = submodule
+    _hook(_skill_call(mod), tmp_path / "home")
+    lines = _lines(mod)
+    assert len(lines) == 1, "the submodule recorded nothing"
+    assert str(lines[0]["collection"]).startswith("mod@"), lines[0]["collection"]
+    assert checks.run_usage_log(usage.load_log(mod / ".skillc" / "usage.jsonl")) == []
+    # #722 cross-check: git ignores the log inside the submodule, so the
+    # superproject does not see "untracked content" either.
+    assert _git(mod, "status", "--porcelain", "--untracked-files=all") == ""
+    assert _git(sup, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_submodule_linked_worktree_lands_in_the_submodule_checkout(
+    submodule: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    _sup, mod = submodule
+    worktree = tmp_path / "mod-wt"
+    _git(mod, "worktree", "add", "-q", "-b", "side", str(worktree))
+    _hook(_skill_call(worktree), tmp_path / "home")
+    assert len(_lines(mod)) == 1, "the submodule worktree's run did not land in the submodule checkout"
+    assert not (worktree / ".skillc").exists()
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_separate_git_dir_checkout_records(separate: Path, tmp_path: Path) -> None:
+    _hook(_skill_call(separate), tmp_path / "home")
+    lines = _lines(separate)
+    assert len(lines) == 1, "the separate-git-dir checkout recorded nothing"
+    assert str(lines[0]["collection"]).startswith("sep@"), lines[0]["collection"]
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_separate_git_dir_linked_worktree_refuses_loudly(
+    separate: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Git records this layout's main checkout nowhere. Writing into the linked
+    worktree would split one collection's history across files (CPP #471), and
+    silence is the defect #724 is about, so it says why it recorded nothing."""
+    worktree = tmp_path / "sep-wt"
+    _git(separate, "worktree", "add", "-q", "-b", "side", str(worktree))
+    err = _hook(_skill_call(worktree), tmp_path / "home")
+    assert "nothing recorded" in err and "separate-git-dir" in err
+    assert list(tmp_path.rglob("usage.jsonl")) == []
+    monkeypatch.chdir(worktree)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", None, "s-1", worktree, out) == 0
+    assert "SKILLC_USAGE: not recorded" in out.getvalue() and "separate-git-dir" in out.getvalue()
+
+
+@needs_git
+def test_a_bare_repository_still_records_nothing_silently(tmp_path: Path) -> None:
+    bare = tmp_path / "bare.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    assert usage.destination(bare) is None
+    assert _hook(_skill_call(bare), tmp_path / "home") == ""

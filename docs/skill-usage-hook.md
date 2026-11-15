@@ -7,7 +7,11 @@ shape and its four rules are defined in the
 [records spec's `skill-usage` section](specs/evaluation-facility/records.md#skill-usage-a-per-repo-usage-log-719).
 
 Records go to `<main checkout>/.skillc/usage.jsonl`. A run from a linked
-worktree lands in the same file. The `.skillc/` directory ignores itself
+worktree lands in the same file. The main checkout is asked of git, so a submodule
+and a `--separate-git-dir` checkout record too (#724). A linked worktree of a
+`--separate-git-dir` repository is the one layout where git records no main
+checkout: there the hook records nothing and says why. Tested by the
+submodule and separate-git-dir cases in `tests/test_usage.py`. The `.skillc/` directory ignores itself
 (`.skillc/.gitignore` holds `*`), so nothing is committed by accident.
 Nothing is sent anywhere.
 
@@ -51,6 +55,18 @@ skillc on this host: an installed `skillc`, or
 
 The hook always exits 0. A payload it cannot use writes nothing and prints a
 line to stderr. It never reads the transcript.
+
+If `.skillc/`, `.skillc/.gitignore` or `.skillc/usage.jsonl` is a symlink,
+the hook and `usage end` write nothing and say so (#721). A cloned repository
+cannot use them to append to a file outside it. Tested by the
+`test_NEGATIVE_CONTROL_*symlink*` cases in `tests/test_usage.py`.
+
+The hook writes only once git itself says `.skillc/usage.jsonl` is ignored
+(`git check-ignore`), so a later `!usage.jsonl` in `.skillc/.gitignore` cannot
+leave the log committable. If git says no, the hook adds a final `/usage.jsonl`
+and asks again. If the log is still not ignored (it is tracked, say), or git
+cannot answer, nothing is recorded and the refusal is printed (#722). Tested by
+the negation, tracked-log and unanswerable-check cases in `tests/test_usage.py`.
 
 ## Declaring an outcome (optional)
 
