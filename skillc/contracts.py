@@ -269,6 +269,10 @@ def _contract_shape_problems(contract: Contract, root: Path | None = None) -> li
                 for entry in entries:
                     problems.extend(_clause_shape(f"invariants.{kind}", entry, f"invariants.{kind}"))
     ids = Counter(str(c.get("id")) for _s, c in _clauses(contract) if isinstance(c.get("id"), str))
+    if isinstance(intent, dict) and isinstance(intent.get("id"), str):
+        # The intent is a clause too: an intent and an authority clause sharing
+        # one id let a single owner answer approve both (#749).
+        ids[str(intent["id"])] += 1
     for clause_id, count in sorted(ids.items()):
         if count > 1:
             problems.append(f"clause id {clause_id!r} is declared {count} times in this contract")

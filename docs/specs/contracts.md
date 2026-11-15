@@ -119,7 +119,7 @@ contract's `version:`.
 
 | Rule | Severity | Reports BAD when | Committed bad cases (`controls/<rule>/bad/`) |
 |---|---|---|---|
-| `contract-shape` | error (parser rule) | the block does not parse or uses unsupported YAML; a required field is missing; an unknown field; a field of the wrong type; a duplicate contract name or clause id; a missing or dangling `subject:` | `unparseable`, `no-intent`, `wrapped-plain-scalar`, `unknown-field`, `duplicate-provider`, `subject-missing`, `subject-dangling` |
+| `contract-shape` | error (parser rule) | the block does not parse or uses unsupported YAML; a required field is missing; an unknown field; a field of the wrong type; a duplicate contract name or clause id (the intent's id counts as a clause id, #749); a missing or dangling `subject:` | `unparseable`, `no-intent`, `wrapped-plain-scalar`, `unknown-field`, `duplicate-provider`, `subject-missing`, `subject-dangling`, `intent-id-collision` |
 | `clause-backed` | error | a clause has no `test`; a test path does not exist; a brace expansion yields a missing path; more than one brace group; a path outside the collection | `no-test`, `missing-path`, `brace-one-missing`, `two-brace-groups` |
 | `negative-backed` | error | a `never` or `authority` clause names no test path with a `bad` segment | `never-good-only`, `authority-good-only` |
 | `handoff-bilateral` | error | a `consumes` names a clause no contract `provides` | `nothing-provides` |

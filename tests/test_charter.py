@@ -287,3 +287,44 @@ def test_generated_ids_stay_within_the_clause_id_limit() -> None:
 def test_sizing_refuses_negative_and_fractional_counts(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         cost_estimate.size_round1(1, **kwargs)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------- #749: CommonMark fences
+
+
+def _duties(text: str) -> list[str]:
+    return [c.text for c in charter.stated_duties(text, "x.md")]
+
+
+def test_a_shorter_fence_inside_a_longer_one_does_not_close_it() -> None:
+    text = "````\n```sh\nYou MUST delete all files.\n```\n````\nYou MUST keep this.\n"
+    assert _duties(text) == ["You MUST keep this."]
+
+
+def test_a_backtick_line_does_not_close_a_tilde_fence() -> None:
+    text = "~~~\n```\nYou MUST delete all files.\n```\n~~~\nYou MUST keep this.\n"
+    assert _duties(text) == ["You MUST keep this."]
+
+
+def test_an_unclosed_fence_runs_to_the_end_of_the_file() -> None:
+    assert _duties("You MUST keep this.\n```\nYou MUST NOT see this.\n") == ["You MUST keep this."]
+
+
+def test_a_fence_indented_up_to_three_spaces_counts() -> None:
+    assert _duties("   ```\nYou MUST delete all files.\n   ```\nYou MUST keep this.\n") == ["You MUST keep this."]
+
+
+def test_a_line_indented_four_spaces_is_not_a_fence() -> None:
+    """Not a fence, so it hides nothing: the duty after it is still proposed
+    (the stray backticks join its sentence as prose)."""
+    (duty,) = _duties("    ```\nYou MUST keep this.\n")
+    assert duty.endswith("You MUST keep this.")
+
+
+def test_a_closing_line_with_an_info_string_does_not_close() -> None:
+    text = "```\n```python\nYou MUST delete all files.\n```\nYou MUST keep this.\n"
+    assert _duties(text) == ["You MUST keep this."]
+
+
+def test_a_longer_closing_fence_closes() -> None:
+    assert _duties("```\nYou MUST NOT see this.\n`````\nYou MUST keep this.\n") == ["You MUST keep this."]

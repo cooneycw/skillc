@@ -85,7 +85,9 @@ REPOSITORY_SOURCE = "repository evidence"
 NEVER_RE = re.compile(r"\b(?:must\s+never|must\s+not|never)\b", re.IGNORECASE)
 ALWAYS_RE = re.compile(r"\b(?:must|always)\b", re.IGNORECASE)
 UPPER_KEYWORD_RE = re.compile(r"\b(?:MUST|ALWAYS|NEVER)\b")
-FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+#: A CommonMark fence line (#749): up to 3 spaces of indent, then 3 or more of one
+#: fence character. A backtick fence's info string may not contain a backtick.
+FENCE_RE = re.compile(r"^ {0,3}(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 WORD_RE = re.compile(r"[a-z0-9]+")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -348,20 +350,27 @@ def _blocks(text: str, first_line: int) -> list[list[tuple[int, str]]]:
     Headings, tables, quotes and HTML comments are skipped."""
     blocks: list[list[tuple[int, str]]] = []
     current: list[tuple[int, str]] = []
-    fenced = False
+    fenced: str | None = None  # the opening fence run while inside a code block
     in_comment = False
     for offset, raw in enumerate(text.splitlines()):
         number = first_line + offset
         if not fenced:
             raw, in_comment = _strip_comments(raw, in_comment)
         stripped = raw.strip()
-        if FENCE_RE.match(raw):
+        fence = FENCE_RE.match(raw)
+        if fence and fenced is None and not (fence["run"][0] == "`" and "`" in fence["info"]):
             # Flush the prose before the fence (counter-model review: a duty
             # directly above a fence was dropped).
             if current:
                 blocks.append(current)
-            fenced = not fenced
+            fenced = fence["run"]
             current = []
+            continue
+        if fence and fenced is not None and fence["run"][0] == fenced[0] \
+                and len(fence["run"]) >= len(fenced) and not fence["info"].strip():
+            # Closes only on the SAME character, at least as long, with no info
+            # string (CommonMark; #749: a nested shorter fence leaked duties).
+            fenced = None
             continue
         if fenced or not stripped or stripped.startswith(("#", "|", ">")):
             if current:
