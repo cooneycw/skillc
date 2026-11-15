@@ -79,6 +79,9 @@ COMMAND_TIMEOUT = 1800
 #: directories (.venv, node_modules, .skillc, __pycache__) before it reads UNKNOWN
 #: rather than scanning on (orchestrator ruling rev 37).
 SKIPPED_WALK_CAP = 20000
+#: The most entries round 1's charter walk lists: it covers the WHOLE collection,
+#: as `contracts` discovers charters everywhere (a real collection is ~13,000).
+CHARTER_WALK_CAP = 200000
 #: `usage report`'s per-skill block (skillc/usage.py), the lines round 0 counts.
 _USAGE_HEADING = "by skill and digest:"
 _USAGE_ROW = re.compile(r"^  (?P<skill>\S+)\s+(?P<digest>\S+)\s+(?P<count>\d+)$")
@@ -349,16 +352,56 @@ def _inside_collection(root: Path, rel: str) -> bool:
         return False
 
 
+def _glob_variants(pattern: str) -> list[str]:
+    """`fnmatch` patterns matching at least what inspect's glob matches: `**/`
+    may stand for ZERO directories there, so each `**/` is also tried removed.
+    A superset is the safe direction: it can only re-run round 2 more often."""
+    variants, frontier = {pattern}, [pattern]
+    while frontier:
+        v = frontier.pop()
+        for k in range(len(v)):
+            if v.startswith("**/", k) and (new := v[:k] + v[k + 3:]) not in variants:
+                variants.add(new)
+                frontier.append(new)
+    return sorted(variants)
+
+
+def _test_digest(collection: Path, rel: str) -> str:
+    """A declared test path by content, only when `contracts` would read it:
+    relative, no `..`, inside the collection, never through an escaping link."""
+    path = Path(rel)
+    if path.is_absolute() or ".." in path.parts:
+        return "outside"  # a stable sentinel; never read (a declared `/` would walk the disk)
+    target = collection / path
+    try:
+        if not target.resolve().is_relative_to(collection.resolve()):
+            return "outside"
+    except (OSError, RuntimeError):
+        return "unresolvable"
+    if target.is_symlink():
+        return "symlink:" + os.readlink(target)
+    return _tree_digest(target) if target.is_dir() else _file_digest(target)
+
+
 def _declared_tests(collection: Path) -> str:
-    """Every test path any charter in the collection declares, by content
-    ("absent" when missing): `contracts` reads them, wherever they are - under
-    .skillc/ or .venv/ too, which the collection digest skips (#760)."""
+    """Every charter `contracts` would discover - the whole collection, under
+    .skillc/ and .venv/ too - by content, and every test path each declares by
+    content ("absent" when missing): both change round 1's verdict (#760).
+    Past CHARTER_WALK_CAP entries it answers "over-cap": round 1 then reads
+    UNKNOWN rather than scanning on."""
     entries: list[tuple[str, str]] = []
+    listed = 0
     for top, dirs, files in os.walk(collection):
-        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        rel_top = Path(top).relative_to(collection).as_posix()
+        dirs[:] = sorted(d for d in dirs if d != ".git" and not (rel_top == ".skillc" and d == "gauntlet"))
+        listed += len(dirs) + len(files)
+        if listed > CHARTER_WALK_CAP:
+            return "over-cap"
         if "CHARTER.md" not in files:
             continue
-        contract = load(Path(top, "CHARTER.md"))
+        charter = Path(top, "CHARTER.md")
+        entries.append((charter.relative_to(collection).as_posix(), _file_digest(charter)))
+        contract = load(charter)
         sections = [contract.data.get(k) for k in ("requires", "provides", "authority", "failure")]
         invariants = contract.data.get("invariants")
         if isinstance(invariants, dict):
@@ -367,11 +410,11 @@ def _declared_tests(collection: Path) -> str:
             for clause in section if isinstance(section, list) else []:
                 declared = clause.get("test") if isinstance(clause, dict) else None
                 for test in declared if isinstance(declared, list) else [declared] if declared else []:
-                    paths, _why = expand(str(test))
+                    paths, why = expand(str(test))
+                    if why is not None:
+                        entries.append((str(test), "unexpandable"))
                     for rel in paths:
-                        path = collection / rel
-                        digest = _tree_digest(path) if path.is_dir() else _file_digest(path)
-                        entries.append((rel, digest))
+                        entries.append((rel, _test_digest(collection, rel)))
     return _sha(json.dumps(sorted(set(entries))).encode())
 
 
@@ -433,8 +476,14 @@ def _names(skill: Skill, aliases: list[str]) -> set[str]:
     return skill_names(skill.text, front, aliases)
 
 
+def _round0_inputs(skill: Skill, logs: list[Path], aliases: list[str]) -> dict[str, str]:
+    """The logs, the aliases, and the RESOLVED name set: renaming the skill in
+    its frontmatter changes which records are its own (counter-model review)."""
+    return {**_usage_inputs(logs, aliases), "names": _sha(json.dumps(sorted(_names(skill, aliases))).encode())}
+
+
 def round0(skill: Skill, logs: list[Path], aliases: list[str] | None = None) -> Result:
-    inputs = _usage_inputs(logs, aliases or [])
+    inputs = _round0_inputs(skill, logs, aliases or [])
     if not logs:
         return Result("0", "usage", "UNKNOWN", "no usage log found - not a pass; round 1 reads usage as UNKNOWN",
                       proceed=True, inputs=inputs, reason="no-log")
@@ -480,6 +529,10 @@ def _round1_inputs(skill: Skill, logs: list[Path], tool: bool, options: Options)
 
 def round1(skill: Skill, logs: list[Path], options: Options, draft: Path, tool: bool) -> Result:
     inputs = _round1_inputs(skill, logs, tool, options)
+    if inputs["declared-tests"] == "over-cap":
+        return Result("1", "charter", "UNKNOWN", f"the collection holds more than {CHARTER_WALK_CAP} entries, so "
+                      "the charters `contracts` reads were not fingerprinted - not a pass", proceed=False,
+                      inputs=inputs, reason="charter-walk-cap")
     if skill.charter.is_file():
         return _round1_contracts(skill, inputs)
     if not tool:
@@ -623,7 +676,7 @@ def _skipped_subjects(skill: Skill, options: Options) -> str:
                     return "over-cap"
                 for f in sub_files:
                     rel = f"{rel_top}/{f}"
-                    if any(fnmatch.fnmatch(rel, pat) for pat in patterns):
+                    if any(fnmatch.fnmatch(rel, v) for pat in patterns for v in _glob_variants(pat)):
                         matches.append((rel, _file_digest(Path(sub_top, f))))
     return _sha(json.dumps(sorted(matches)).encode())
 
@@ -885,7 +938,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
              (("charter", ["charter", "draft"]), ("overlap", ["charter", "overlap"]),
               ("round3", ["gauntlet", "round3"]))}
     plan = [
-        ("0", lambda: _usage_inputs(logs, options.aliases), lambda: round0(skill, logs, options.aliases)),
+        ("0", lambda: _round0_inputs(skill, logs, options.aliases), lambda: round0(skill, logs, options.aliases)),
         ("1", lambda: _round1_inputs(skill, logs, tools["charter"], options),
          lambda: round1(skill, logs, options, draft, tools["charter"])),
         ("1-overlap", lambda: _overlap_inputs(skill, tools["overlap"]),

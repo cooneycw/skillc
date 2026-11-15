@@ -749,3 +749,47 @@ def test_a_usage_report_whose_shape_changed_reads_unknown(coll: Path, monkeypatc
     monkeypatch.setattr(gauntlet, "_skillc", renamed)
     _, lines = _run(coll, "skills/alpha")
     assert _rounds(lines)["0"].startswith("UNKNOWN"), "an unreadable report shape is never OBSERVED"
+
+
+# ----------------------------------------- #760 counter-model pass 1
+
+def test_a_declared_root_path_is_never_walked(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`test: /` must not hash the filesystem: an outside path is a sentinel."""
+    seen: list[Path] = []
+    real = gauntlet._tree_digest
+
+    def spy(root: Path, **kw: Any) -> str:
+        seen.append(root)
+        return real(root, **kw)
+    monkeypatch.setattr(gauntlet, "_tree_digest", spy)
+    _alpha_declares(coll, "/")
+    gauntlet._declared_tests(coll)
+    assert Path("/") not in seen and all(p.resolve().is_relative_to(coll.resolve()) for p in seen)
+
+
+def test_renaming_the_skill_in_its_frontmatter_reruns_round_0(coll: Path) -> None:
+    _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["0"].endswith("(cached)")
+    skill_md = coll / "skills" / "alpha" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text().replace("name: alpha", "name: gamma", 1))
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["0"].endswith("(cached)"), "the name set is round 0's input"
+
+
+def test_a_double_star_include_matching_zero_directories_reruns_round_2(coll: Path) -> None:
+    """inspect's `**/` matches zero directories: `.venv/**/SKILL.md` covers `.venv/SKILL.md`."""
+    _run(coll, "skills/alpha", include=[".venv/**/SKILL.md"])
+    (coll / ".venv").mkdir()
+    (coll / ".venv" / "SKILL.md").write_text("---\nname: v\ndescription: Use when v.\n---\nDo v.\n")
+    _, after = _run(coll, "skills/alpha", include=[".venv/**/SKILL.md"])
+    assert not _rounds(after)["2"].endswith("(cached)")
+
+
+def test_a_charter_under_a_skipped_directory_reruns_round_1(coll: Path) -> None:
+    """contracts discovers charters under .venv too; round 1's key covers them."""
+    _run(coll, "skills/alpha")
+    (coll / ".venv" / "neighbor").mkdir(parents=True)
+    (coll / ".venv" / "neighbor" / "CHARTER.md").write_text("---\ncontract: neighbor\nnot_a_field: 1\n---\n")
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)")
