@@ -22,7 +22,7 @@ Round 1 (overlap): not examined
 Round 2: pass
   Checked: the skill's own text, for rules that point at things that no longer exist or have expired
   Found:   1 emphasised rule read; 1 rule that can be removed now: line 7, 'until #12' waits on example/gauntlet#12, which is closed
-  Means:   nothing in the text is broken; removable rules are candidates, never removed for you
+  Means:   nothing in the text is broken; removable rules and findings are yours to decide, never changed for you
   Do next: remove line 7 of skills/alpha/SKILL.md by hand if you agree
 
 Round 3: not built

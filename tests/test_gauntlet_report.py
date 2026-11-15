@@ -62,6 +62,18 @@ invariants:
 """
 
 
+COPIED = ("When the owner asks for a change, read the whole request first, list every file it touches, check each "
+          "one still exists, and only then propose the smallest edit that satisfies the request without widening its "
+          "scope or changing unrelated behaviour.")
+
+
+def _copied(coll: Path) -> None:
+    """A real inspect finding outside bucket D: the same paragraph in two skills."""
+    for name in ("alpha", "beta"):
+        path = coll / "skills" / name / "SKILL.md"
+        path.write_text(path.read_text() + "\n" + COPIED + "\n")
+
+
 def _charter(coll: Path) -> Path:
     return coll / "skills" / "alpha" / "CHARTER.md"
 
@@ -78,6 +90,7 @@ CASES: dict[str, tuple[str, Callable[[Path], None], dict[str, object]]] = {
                                                        "\nRun `scripts/deleted-helper.sh` first.\n"), {}),
     "inspect-unknown": ("skills/alpha", lambda c: None, {"issue_states": None, "offline": True}),
     "findings-round3": ("skills/alpha", lambda c: None, {}),
+    "findings-copied": ("skills/alpha", _copied, {}),
 }
 
 
@@ -295,3 +308,37 @@ def test_plain_only_points_at_nothing_it_hides(tmp_path: Path) -> None:
     text = gauntlet_report.render(skill, [odd], odd, draft=coll / "x", charter_create=False, machine_follows=False)
     assert "line below" not in text and "machine lines follow" not in text
     assert "`skillc gauntlet run` without `--plain-only`" in text
+
+
+def test_a_cached_passing_round_without_display_data_invents_no_counts(tmp_path: Path) -> None:
+    _code, _lines, coll = _run(tmp_path, "findings-round3")
+    for display in (coll / ".skillc").rglob("*.json"):
+        if display.name != gauntlet.RECORD_NAME:
+            display.unlink()
+    lines: list[str] = []
+    gauntlet.run(coll, "skills/alpha", gauntlet.Options(issue_states=coll / "issue-states.json",
+                                                        repo="example/gauntlet", usage=[FIXTURES / "usage"]),
+                 out=lines.append)
+    plain = "\n".join(_plain(lines))
+    assert "0 emphasised rules" not in plain and "no rule that can be removed now" not in plain
+    assert "the counts behind it are kept on the host that ran it" in plain
+    assert "Found:   1 finding(s) on this skill" in plain, "the recorded detail, not an invented zero"
+
+
+@pytest.mark.parametrize("test_value", ['[issue-states.json, "{bad,{nested}}"]', "/etc/hostname",
+                                        "../outside.txt"])
+def test_a_test_path_contracts_refuses_backs_nothing(tmp_path: Path, test_value: str) -> None:
+    """The count agrees with the contract checker: a malformed declaration, an
+    absolute path or one outside the collection is not a test."""
+    coll = _collection(tmp_path)
+    (tmp_path / "outside.txt").write_text("x\n")
+    _edit(_charter(coll), "owner: owner\n", "owner: owner\ninvariants:\n  always: []\n  never:\n"
+                                            f"    - id: alpha.never-x\n      test: {test_value}\n")
+    assert gauntlet._charter_facts(_charter(coll), coll)["never"] == {"count": 1, "tested": 0}
+
+
+def test_plain_only_on_no_charter_gives_the_exact_confirm_step(tmp_path: Path) -> None:
+    _code, lines, _coll = _run(tmp_path, "no-charter", mode="plain")
+    text = "\n".join(lines)
+    assert "NEXT line below" not in text and "ROUND " not in text
+    assert "Exact next step: owner reviews the draft" in text and "skillc charter confirm" in text

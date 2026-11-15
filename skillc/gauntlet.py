@@ -323,6 +323,18 @@ def _usage_inputs(logs: list[Path]) -> dict[str, str]:
 
 # --------------------------------------------------------------------- rounds
 
+def _inside_collection(root: Path, rel: str) -> bool:
+    """A test path backs a promise only as `contracts` reads it: relative, no
+    `..`, inside the collection, and present."""
+    path = Path(rel)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    try:
+        return (root / path).resolve().is_relative_to(root.resolve()) and (root / path).exists()
+    except (OSError, ValueError):
+        return False
+
+
 def _charter_facts(charter: Path, root: Path) -> dict[str, object]:
     """Counts the plain report names (#783): the charter's promises, and how
     many name a test that exists. A structural read of a file - `contracts.load`
@@ -344,10 +356,12 @@ def _charter_facts(charter: Path, root: Path) -> dict[str, object]:
             declared = clause.get("test")
             tests = declared if isinstance(declared, list) else [declared] if declared else []
             paths: list[str] = []
+            unreadable = not tests
             for test in tests:
                 expanded, why = expand(str(test))
-                paths += expanded if why is None else []
-            tested += bool(paths) and all((root / p).exists() for p in paths)  # test paths resolve from the collection
+                unreadable |= why is not None  # a declaration `contracts` refuses backs nothing
+                paths += expanded
+            tested += not unreadable and bool(paths) and all(_inside_collection(root, p) for p in paths)
         out[kind] = {"count": len(clauses), "tested": tested}
     return out
 
@@ -546,7 +560,10 @@ def read_round2(skill: Skill, report: dict, inputs: dict[str, str]) -> Result:
         "unknown": [{"line": u.get("line"), "detail": str(u.get("detail") or "")} for u in own_unknown],
         "unexamined": unexamined,
         "removable": [{"line": f.get("line"), "detail": str(f.get("detail") or "")} for f in own
-                      if f.get("bucket") == "D"]}
+                      if f.get("bucket") == "D"],
+        # every OTHER finding is the owner's to decide; the report names them (counter-model review)
+        "to_decide": [{"line": f.get("line"), "detail": str(f.get("detail") or "")} for f in own
+                      if f.get("bucket") != "D" and f not in errors]}
     if errors:
         return Result("2", "inspect", "FAIL", f"{len(errors)} error finding(s) on {skill.text_rel} ({counted})",
                       proceed=False, inputs=inputs, lines=lines, reason="errors", facts=facts)
@@ -790,7 +807,8 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
         from .gauntlet_report import render  # the plain report's wording lives in one module
 
         for line in render(skill, results, stopped, draft=draft, charter_create=available(
-                ["charter", "create"], skill.collection), machine_follows=options.output == "both").splitlines():
+                ["charter", "create"], skill.collection), machine_follows=options.output == "both",
+                next_step=_next_line(skill, stopped, draft)).splitlines():
             final_out(line)
         if options.output == "both":
             final_out("")

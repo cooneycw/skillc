@@ -59,6 +59,12 @@ class Ctx:
     result: Result
     draft: Path
     charter_create: bool
+    machine_follows: bool = True
+
+    @property
+    def below(self) -> str:
+        """Where the exact next step is printed: the NEXT line, or the report's end."""
+        return "as the NEXT line below shows" if self.machine_follows else "as the exact next step at the end shows"
 
     @property
     def collection(self) -> str:
@@ -125,6 +131,23 @@ def _removable(ctx: Ctx) -> str:
     return f"{_count(len(items), 'rule')} that can be removed now: line {first.get('line')}, {first.get('detail')}"
 
 
+def _to_decide(ctx: Ctx) -> str:
+    items = ctx.facts("to_decide")
+    if not isinstance(items, list) or not items:
+        return ""
+    first = _first(items)
+    return f"; {_count(len(items), 'finding')} for you to decide: line {first.get('line')}, {first.get('detail')}"
+
+
+def _round2_next(ctx: Ctx) -> str:
+    removable, decide = _first(ctx.facts("removable")), _first(ctx.facts("to_decide"))
+    if decide:
+        return f"decide on line {decide.get('line')} of {ctx.facts('file')} (keep it, change it or remove it)"
+    if removable:
+        return f"remove line {removable.get('line')} of {ctx.facts('file')} by hand if you agree"
+    return "nothing for this round"
+
+
 def _until_trials(ctx: Ctx) -> str:
     """Round 3 cannot run here: point at what the owner CAN act on now, the
     rules round 2 found removable, by file and line."""
@@ -148,8 +171,8 @@ TABLE: dict[tuple[str, str], Entry] = {
     ("1", "no-charter-draft"): (
         lambda c: f"no charter yet; a draft is ready ({_promises(c)})",
         lambda c: "no keep/trim/retire is possible until you settle what the skill promises; normal for a new skill",
-        lambda c: _create(c, f"Or read the draft {c.rel(c.draft)} and run `skillc charter confirm` on it, as the "
-                             "NEXT line below shows.")),
+        lambda c: _create(c, f"Or read the draft {c.rel(c.draft)} and run `skillc charter confirm` on it, "
+                             f"{c.below}.")),
     ("1", "contract-bad:clause-backed"): (
         lambda c: f"the charter {c.rel(c.skill.charter)} makes {_promises(c)}; {_bad_rules(c)}",
         lambda c: "a promise without a test cannot be checked, so the gauntlet cannot go on",
@@ -194,10 +217,10 @@ TABLE: dict[tuple[str, str], Entry] = {
         lambda c: "the skill's text was not checked, which is not a pass",
         lambda c: f"narrow `--exclude` so it does not match {c.skill.text_rel}"),
     ("2", ""): (
-        lambda c: f"{_count(c.facts('rule_statements'), 'emphasised rule')} read; {_removable(c)}",
-        lambda c: "nothing in the text is broken; removable rules are candidates, never removed for you",
-        lambda c: (f"remove line {_first(c.facts('removable')).get('line')} of {c.facts('file')} by hand if you "
-                   "agree" if c.facts("removable") else "nothing for this round")),
+        lambda c: f"{_count(c.facts('rule_statements'), 'emphasised rule')} read; {_removable(c)}{_to_decide(c)}",
+        lambda c: "nothing in the text is broken; removable rules and findings are yours to decide, never changed "
+                  "for you",
+        lambda c: _round2_next(c)),
     ("3", "not-built"): (
         lambda c: "the trial rounds are not built in this skillc",
         lambda c: "a keep/trim/retire verdict needs rounds 3-5 (skillc #736, #737); none can be given yet",
@@ -235,8 +258,18 @@ def entry(result: Result) -> Entry | None:
     # host-local display data is gone has no reason, and its FAIL must never read
     # as a pass (counter-model review).
     if not result.reason and result.verdict in PASSING and (result.round, "") in TABLE:
+        if not result.facts:
+            return _CACHED  # the counts behind it are not on this host: never invent zeros
         return TABLE[(result.round, "")]
     return None
+
+
+#: A cached PASSING round whose host-local display data is gone: its recorded
+#: detail, and no count the report cannot back (counter-model review).
+_CACHED: Entry = (
+    lambda c: c.result.detail,
+    lambda c: "a cached result; the counts behind it are kept on the host that ran it, not here",
+    lambda c: "nothing for this round")
 
 
 def _unmapped(result: Result, machine_follows: bool) -> Entry:
@@ -254,12 +287,12 @@ def _unmapped(result: Result, machine_follows: bool) -> Entry:
 
 
 def render(skill: Skill, results: list[Result], stopped: Result, *, draft: Path, charter_create: bool,
-           machine_follows: bool = True) -> str:
+           machine_follows: bool = True, next_step: str = "") -> str:
     stands = STANDS.get((stopped.round, stopped.reason),
                         f"it stopped at round {stopped.round} ({stopped.verdict}): {stopped.detail}")
     lines = [f"skill-gauntlet: {skill.rel}", f"Where it stands: {stands}", ""]
     for result in results:
-        ctx = Ctx(skill, result, draft, charter_create)
+        ctx = Ctx(skill, result, draft, charter_create, machine_follows)
         found, means, do_next = entry(result) or _unmapped(result, machine_follows)
         title = {"1-overlap": "Round 1 (overlap)"}.get(result.round, f"Round {result.round}")
         lines += [f"{title}: {result.verdict.lower()}",
@@ -268,6 +301,9 @@ def render(skill: Skill, results: list[Result], stopped: Result, *, draft: Path,
                   f"  Means:   {means(ctx)}",
                   f"  Do next: {do_next(ctx)}",
                   ""]
+    if not machine_follows and next_step:
+        # --plain-only hides the NEXT line, so its exact step is given here
+        lines.append(f"Exact next step: {next_step.removeprefix('NEXT: ')}")
     lines.append("No trials ran; this is not a keep/trim/retire verdict."
                  + (" The machine lines follow." if machine_follows else ""))
     return "\n".join(lines) + "\n"
