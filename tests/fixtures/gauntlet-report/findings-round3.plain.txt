@@ -1,0 +1,35 @@
+skill-gauntlet: skills/alpha
+Where it stands: rounds 0-2 are done; a keep/trim/retire verdict waits on the trial rounds, which are not built yet.
+
+Round 0: observed
+  Checked: whether usage logs show this skill being used
+  Found:   1 usage log read
+  Means:   usage is recorded; the counts stay in the logs
+  Do next: nothing for this round
+
+Round 1: pass
+  Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
+  Found:   the charter is valid and you approved its purpose; it makes no 'never' or 'always' promises yet
+  Means:   the skill has a settled purpose to be judged against
+  Do next: nothing for this round
+
+Round 1 (overlap): not examined
+  Checked: whether another skill's charter already makes the same promises
+  Found:   the charters were not compared
+  Means:   whether another skill already does this job is not known, so 'retire' is not examined
+  Do next: optional: run `skillc charter overlap <COLL> --verdicts <file>` to compare them
+
+Round 2: pass
+  Checked: the skill's own text, for rules that point at things that no longer exist or have expired
+  Found:   1 emphasised rule read; 1 rule that can be removed now: line 7, 'until #12' waits on example/gauntlet#12, which is closed
+  Means:   nothing in the text is broken; removable rules are candidates, never removed for you
+  Do next: remove line 7 of skills/alpha/SKILL.md by hand if you agree
+
+Round 3: not built
+  Checked: trial runs that measure whether each part of the skill changes results
+  Found:   the trial rounds are not built in this skillc
+  Means:   a keep/trim/retire verdict needs rounds 3-5 (skillc #736, #737); none can be given yet
+  Do next: nothing more until the trial rounds land (skillc #736); meanwhile round 2's removable rules in skills/alpha/SKILL.md are yours to act on by hand
+
+No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
+

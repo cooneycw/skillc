@@ -1,0 +1,17 @@
+skill-gauntlet: skills/alpha
+Where it stands: its charter is not valid, so the gauntlet stopped at round 1.
+
+Round 0: observed
+  Checked: whether usage logs show this skill being used
+  Found:   1 usage log read
+  Means:   usage is recorded; the counts stay in the logs
+  Do next: nothing for this round
+
+Round 1: fail
+  Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
+  Found:   the charter skills/alpha/CHARTER.md is not valid: a field is unknown, missing or malformed
+  Means:   the charter cannot be read, so nothing in it can be checked
+  Do next: fix skills/alpha/CHARTER.md where `skillc contracts <COLL>` points
+
+No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
+

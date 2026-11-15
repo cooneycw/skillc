@@ -120,3 +120,117 @@ def test_the_machine_lines_are_byte_identical_to_before(tmp_path: Path, case: st
     verdict` read these lines, so the plain report must never change them."""
     _code, lines, coll = _run(tmp_path, case)
     assert _normal(_machine(lines), coll) == _golden(f"{case}.machine.txt", _normal(_machine(lines), coll))
+
+
+# ------------------------------------------------------------ the plain report
+
+def _plain(lines: list[str]) -> list[str]:
+    return lines[: next(i for i, line in enumerate(lines) if line.startswith("GAUNTLET ")
+                        and not line.startswith("GAUNTLET:"))]
+
+
+def _rule_ids() -> set[str]:
+    """Every internal rule id the report must not show: inspect's own rule
+    names (asked of the real command) and the contract checks."""
+    import json
+
+    from skillc import gauntlet_report
+
+    done = subprocess.run(["python", "-m", "skillc.cli", "inspect", str(FIXTURES / "collection"), "--offline",
+                           "--json"], capture_output=True, text=True, check=False, cwd=ROOT)
+    return set(json.loads(done.stdout)["rules"]) | set(gauntlet_report.RULE_WORDS) | {"rule-line"}
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_each_stop_has_a_golden_plain_report(tmp_path: Path, case: str) -> None:
+    _code, lines, coll = _run(tmp_path, case)
+    text = _normal(_plain(lines), coll)
+    assert text == _golden(f"{case}.plain.txt", text)
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_every_round_has_four_parts_and_no_rule_id(tmp_path: Path, case: str) -> None:
+    _code, lines, _coll = _run(tmp_path, case)
+    plain = _plain(lines)
+    rounds = [i for i, line in enumerate(plain) if re.match(r"Round \S", line)]
+    assert rounds, plain
+    for i in rounds:
+        assert [plain[i + k].split(":")[0].strip() for k in range(1, 5)] == ["Checked", "Found", "Means", "Do next"]
+    text = "\n".join(plain)
+    leaked = sorted(r for r in _rule_ids() if re.search(rf"(?<![\w-]){re.escape(r)}(?![\w-])", text))
+    assert leaked == [], f"rule ids in the plain report: {leaked}"
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_the_stopping_rounds_do_next_names_a_command_or_file(tmp_path: Path, case: str) -> None:
+    _code, lines, _coll = _run(tmp_path, case)
+    plain = _plain(lines)
+    do_next = [line for line in plain if line.startswith("  Do next:")][-1]
+    assert re.search(r"`[^`]+`|\S+/\S+|\S+\.md\b", do_next), do_next
+
+
+def test_the_no_rule_id_scan_finds_one() -> None:
+    """The scan above, on a planted id: it is not blind."""
+    text = "Found: the charter fails clause-backed"
+    assert sorted(r for r in _rule_ids() if re.search(rf"(?<![\w-]){re.escape(r)}(?![\w-])", text)) == \
+        ["clause-backed"]
+
+
+def test_charter_create_is_named_only_when_this_skillc_has_it(tmp_path: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    real = gauntlet.available
+    monkeypatch.setattr(gauntlet, "available",
+                        lambda words, cwd: True if words == ["charter", "create"] else real(words, cwd))
+    _code, lines, coll = _run(tmp_path, "no-charter")
+    assert any(f"`/charter-create {coll} skills/beta`" in line for line in _plain(lines)), _plain(lines)
+    monkeypatch.setattr(gauntlet, "available",
+                        lambda words, cwd: False if words == ["charter", "create"] else real(words, cwd))
+    _code, lines, _coll = _run(tmp_path / "again", "no-charter")
+    plain = "\n".join(_plain(lines))
+    assert "is not in this skillc yet" in plain and "`/charter-create /" not in plain
+
+
+def test_an_unmapped_reason_shows_its_own_detail_never_other_advice(tmp_path: Path) -> None:
+    from skillc import gauntlet_report
+
+    coll = _collection(tmp_path)
+    skill = gauntlet.resolve_skill(coll, "skills/alpha")
+    odd = gauntlet.Result("2", "inspect", "UNKNOWN", "a reason nobody wrote advice for", proceed=False,
+                          reason="brand-new-reason")
+    text = gauntlet_report.render(skill, [odd], odd, draft=coll / "x", charter_create=False)
+    assert "Found:   a reason nobody wrote advice for" in text
+    assert "Do next: act on the ROUND 2 line below" in text
+    for _f, _m, advice in gauntlet_report.TABLE.values():
+        ctx = gauntlet_report.Ctx(skill, odd, coll / "x", False)
+        try:
+            other = advice(ctx)
+        except (AttributeError, TypeError, KeyError):
+            continue
+        assert other not in text or other.startswith("act on"), other
+
+
+def test_a_cached_rerun_reports_the_same(tmp_path: Path) -> None:
+    """reason and facts come back from the host-local display cache."""
+    skill, change, extra = CASES["draft-unbacked"]
+    coll = _collection(tmp_path)
+    change(coll)
+    settings: dict[str, object] = {"issue_states": coll / "issue-states.json", "repo": "example/gauntlet",
+                                   "usage": [FIXTURES / "usage"], **extra}
+    first: list[str] = []
+    gauntlet.run(coll, skill, gauntlet.Options(**settings), out=first.append)  # type: ignore[arg-type]
+    second: list[str] = []
+    gauntlet.run(coll, skill, gauntlet.Options(**settings), out=second.append)  # type: ignore[arg-type]
+    assert any("(cached)" in line for line in second)
+    assert _plain(second) == _plain(first)
+
+
+@pytest.mark.parametrize("flag,plain,machine", [("--plain-only", True, False), ("--machine-only", False, True)])
+def test_the_output_switches_print_only_their_part(tmp_path: Path, flag: str, plain: bool, machine: bool) -> None:
+    coll = _collection(tmp_path)
+    done = subprocess.run(["python", "-m", "skillc.cli", "gauntlet", "run", str(coll), "skills/alpha",
+                           "--issue-states", str(coll / "issue-states.json"), "--repo", "example/gauntlet",
+                           "--usage", str(FIXTURES / "usage"), flag], capture_output=True, text=True,
+                          check=False, cwd=ROOT)
+    assert ("Where it stands:" in done.stdout) is plain
+    assert ("ROUND 0 usage:" in done.stdout) is machine
+    assert done.returncode == gauntlet.EXIT_STOPPED

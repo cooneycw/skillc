@@ -29,11 +29,10 @@ there is no verdict.
 
 ## Read the result
 
-Show the owner every `ROUND` line as printed, the `RECORD:` line, the `NEXT:`
-line and the final `GAUNTLET:` line. Do not summarise them away.
-
-- One line per round reached: round 0 usage, round 1 charter, round 1 overlap,
-  round 2 inspect, round 3 trials.
+The engine prints a plain-English report first: for each round, what was
+Checked, Found, what it Means, and what to Do next. Show it to the owner first,
+as printed. Then show the machine lines (`ROUND`, `RECORD:`, `NEXT:` and the
+final `GAUNTLET:` line); you may collapse them, but never drop or reword them.
 - `UNKNOWN`, `NOT BUILT` and `NOT EXAMINED` are not passes. Say so; never round
   them up.
 - Exactly one `NEXT:` line. Relay it as the next step, word for word.

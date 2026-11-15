@@ -20,7 +20,8 @@ The engine runs each round's own command as a subprocess
 (`python -P -m skillc.cli <command>`; `-P` keeps the collection off `sys.path`,
 so a collection holding its own `skillc/` package is read, never executed). It reads that command's exit code, its
 verdict lines or its report JSON, and nothing else. It imports no round module,
-and it copies no round's rules, so a round changes in one place
+except three pure parser names for the plain report (below), and it copies no
+round's rules, so a round changes in one place
 (cooneycw/claude-power-pack#1830 Part 7). `tests/test_gauntlet.py` holds both
 to it: an AST check of the engine's imports, and a `skillc inspect` check that
 the skill text shares no passage with the round specs.
@@ -62,6 +63,38 @@ item is a stale rule the owner may move or delete; the run trims nothing.
 Round 1 never confirms or writes a charter (#718: "never changes a charter
 without the owner"). With no `CHARTER.md`, it writes a draft into the draft
 location below and names it in `NEXT:`.
+
+## The plain report (#783)
+
+Owner, 2026-11-15: "Output is engine-speak." So `gauntlet run` prints a
+plain-English report FIRST, then the machine lines below, unchanged:
+
+- a first line, **Where it stands**: one sentence on the skill's position;
+- for each round reached: **Checked** (what the round looks at, in owner terms),
+  **Found** (the result, with counts and names), **Means** (what it implies for
+  a verdict) and **Do next** (one action naming a command or file; a round that
+  passed says "nothing for this round");
+- a closing line: no trials ran, and the machine lines follow.
+
+All of its wording lives in `skillc/gauntlet_report.py`, in one table keyed by
+(round, reason). Every non-pass round carries a `reason` code and `facts`
+(counts and names). Both are kept beside the finding lines in the host-local
+display cache, so a cached round reports the same. Neither is ever in
+`GAUNTLET.json` or a cache key. The report shows no internal rule id
+(`clause-backed` reads "a promise names no test that exists"). A reason with no
+entry shows the round's own detail and points at its ROUND line, never another
+reason's advice. Do next names `/charter-create` (#778) only when this skillc
+has `charter create`; otherwise it names the draft-and-confirm path, with a note.
+
+To read the charter's promise counts, the engine takes exactly three pure parser
+names from round modules: `contracts.load`, `contracts.expand` and
+`charter.skill_names` (orchestrator ruling). `tests/test_gauntlet.py` refuses
+any other.
+
+`--plain-only` prints only the report and `--machine-only` only the machine
+lines. One golden per fixture stop pins each part
+(`tests/fixtures/gauntlet-report/`). The machine goldens were captured before
+#783 and must never need rewriting.
 
 ## Exit codes
 
