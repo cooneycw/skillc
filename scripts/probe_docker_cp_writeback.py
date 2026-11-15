@@ -59,7 +59,11 @@ def summarize(lines: list[str], payload_size: int) -> dict[str, object]:
     the copy's states were not observed and the result says so."""
     samples: list[tuple[str, int]] = []
     absent = failed = 0
-    for line in lines:
+    # Nothing before the first SEED sample is about the copy: it is the
+    # container starting up (counter-model review, pass 2).
+    first = next((i for i, line in enumerate(lines) if line.split()[:1] == ["S"] and line.split()[-1:] == [str(len(SEED))]),
+                 len(lines))
+    for line in lines[first:]:
         parts = line.split()
         if parts == ["ABSENT"]:
             absent += 1
@@ -68,7 +72,7 @@ def summarize(lines: list[str], payload_size: int) -> dict[str, object]:
         else:
             failed += 1  # ERR, or anything unparseable: never counted as data
     covered = bool(samples) and samples[0][1] == len(SEED) and samples[-1][1] == payload_size
-    return {"samples": len(lines), "inodes": len({i for i, _ in samples}), "absent": absent,
+    return {"samples": len(lines) - first, "inodes": len({i for i, _ in samples}), "absent": absent,
             "failed": failed, "sizes": len({n for _, n in samples}), "covered": covered}
 
 
@@ -102,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
     _docker("run", "-d", "--rm", "--name", name, args.image, "sh", "-c",
             "mkdir -p /w && printf 'seed\\n' > /w/observations && sleep 120")
     try:
+        # the seed must exist before the watcher starts, so no startup state is sampled
+        _docker("exec", name, "sh", "-c", f"until [ \"$(stat -c %s /w/observations 2>/dev/null)\" = {len(SEED)} ]; "
+                "do sleep 0.01; done")
         _docker("exec", "-d", name, "sh", "-c", LOOP.format(n=args.samples))
         # the loop must be sampling the SEED before the copy starts
         _docker("exec", name, "sh", "-c", "while [ ! -s /tmp/watch.log ]; do sleep 0.01; done")

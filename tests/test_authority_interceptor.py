@@ -444,8 +444,11 @@ def _wait_for(predicate: Any, what: str, timeout: float = 20.0) -> None:
 
 
 def _polls(interceptor: AuthorityInterceptor) -> int:
+    """SUCCESSFUL recording polls only: a failed export observed nothing, so
+    it must never count toward "the held state was seen" (counter-model
+    review, pass 2)."""
     with interceptor._lock:
-        return interceptor._polls_attempted
+        return interceptor._polls_attempted - interceptor._polls_failed
 
 
 def _release_after_polls(interceptor: AuthorityInterceptor, marker: Path, release: Path) -> Any:
@@ -528,7 +531,15 @@ def test_a_clean_run_with_the_write_back_held_open_is_never_flagged(
     interceptor.start()
     result = _held_run(backend, handle, "print('the subject completed cleanly, ' * 20)", docker_state,
                        tmp_path, interceptor, mode)
-    assert result.observations_write is not None and result.observations_capture == "written"
+    write = result.observations_write
+    assert write is not None and result.observations_capture == "written"
+    if seeded or mode != "remove":  # fresh+remove: nothing exists to remove, so nothing to see
+        # The held state WAS observed: a poll that ran entirely inside the
+        # window recorded the transition into it. Without this the control
+        # could pass with the bug intact, on polls that saw nothing.
+        inside = [t for t in interceptor._artifact_history.get("observations", [])
+                  if write.started <= t.poll_started and t.poll_ended <= write.ended]
+        assert inside, "no poll observed the held write-back"
     assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == []
     backend.destroy(handle)
 

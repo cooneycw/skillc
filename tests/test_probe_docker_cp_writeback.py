@@ -49,3 +49,10 @@ def test_sampling_that_missed_the_seed_is_not_covered() -> None:
 
 def test_no_samples_is_not_covered() -> None:
     assert probe.summarize([], 200)["covered"] is False
+
+
+def test_samples_before_the_seed_are_startup_never_the_copy() -> None:
+    """The negative control for pass 2: an ABSENT before the seed existed is
+    the container starting, not a state docker cp exposed."""
+    got = probe.summarize(["ABSENT", "ERR", f"S 10 {SEED}", "S 11 200"], 200)
+    assert got["absent"] == 0 and got["failed"] == 0 and got["samples"] == 2 and got["covered"] is True
