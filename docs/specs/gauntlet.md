@@ -142,9 +142,13 @@ in digest order. The log stays local (#718 decision 2).
 `make install-skill` links `~/.claude/skills/skill-gauntlet` to the main
 checkout's `.claude/skills/skill-gauntlet` (`scripts/install_skill.py`). The skill
 calls its own launcher, `scripts/gauntlet.sh`, which finds skillc through its
-own real path and runs `uv run --project <checkout> --no-sync skillc gauntlet
-run`, so it works from any working directory. No path is committed; every path
-is derived at run time.
+own real path. It then checks that the checkout's environment (`.venv`, or
+`UV_PROJECT_ENVIRONMENT` resolved against the checkout, as uv resolves it)
+imports THIS checkout's gauntlet engine, and runs it directly:
+`<env>/bin/python -P -m skillc.cli gauntlet run`. It drops a caller's
+`PYTHONPATH`, never uses a `skillc` from PATH, and needs no `uv` at run time, so
+it works from any working directory. No path is committed; every path is
+derived at run time.
 
 Two failure cases, ruled on #763:
 
@@ -152,7 +156,8 @@ Two failure cases, ruled on #763:
   no `/skill-gauntlet` and nothing can run. No verdict is possible.
   (`test_a_dangling_link_lists_no_skill_and_gives_no_verdict`.)
 - **The checkout is present but skillc cannot run** (no gauntlet engine, no
-  synced environment, no `uv`). The launcher prints `SKILL_GAUNTLET: cannot find
+  synced environment, or an environment that does not import this checkout's
+  engine). The launcher prints `SKILL_GAUNTLET: cannot find
   a usable skillc (<reason>)` and exits 2, with no ROUND line.
 
 ## Out of scope (part 1)

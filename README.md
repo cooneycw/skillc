@@ -321,8 +321,11 @@ make uninstall-skill   # removes that link, and only that link
   else, so check `ls -l ~/.claude/skills/skill-gauntlet`, remove that stale
   link yourself (`rm ~/.claude/skills/skill-gauntlet`), then run
   `make install-skill` from the new place.
-- **If skillc is present but cannot run** (no `uv sync`, no `uv`): the skill
-  prints `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no verdict.
+- **If skillc is present but cannot run** (never `uv sync`ed, or its environment
+  does not import this checkout's engine): the skill prints
+  `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no verdict. The
+  skill runs the checkout's own environment directly, so `uv` itself is needed
+  only to sync it.
 
 ## Contributing
 
