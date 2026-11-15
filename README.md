@@ -98,6 +98,8 @@ skillc selftest                # prove every rule can still report the other ver
 skillc check-records <path>    # refuse evaluation records the contract rejects
 skillc usage report <usage.jsonl> # #719: skill-usage counts by skill and digest, outcome mix, UNKNOWN rate (`usage hook`/`usage end` write them; see docs/skill-usage-hook.md)
 skillc contracts <collection>  # #720: check every CHARTER.md contract together; exit 0 clean, 1 findings, 2 usage, 3 none declared (docs/specs/contracts.md)
+skillc charter draft <skill> [--usage LOG] [--subject PATH] [--out FILE]  # #726 round 1: a draft CHARTER.md from the skill's text and usage records; approves nothing; exit 3 nothing to draft from (docs/specs/charter-round1.md)
+skillc charter confirm <draft> --answers FILE --out FILE  # #726: apply the owner's answers; refuses without them; stamps approved only on intent and authority
 skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing

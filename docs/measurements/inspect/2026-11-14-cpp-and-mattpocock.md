@@ -197,6 +197,41 @@ An earlier cut also dropped `if ! scripts/commands-mirror-sync.sh --check` and
 `elif ~/.claude/scripts/speckit-context.py refresh --body-file`; shell keywords
 were then added to the command prefixes, and a test now holds both.
 
+## Re-run after #741 (same SHAs, against the #731 numbers)
+
+| Run | Errors | Buckets / rule lines | Copied-passage | Prefixed refs / flags |
+|---|---|---|---|---|
+| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 336 / 240, unchanged |
+| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 336 / 240, unchanged |
+| mattpocock `5863806` | 0 | identical | 2, identical; 0 estimates | unchanged |
+
+The only movement is in the two counters of words this rule does NOT examine:
+`path_like_not_examined` 159 -> 158 and `placeholder_paths_not_examined`
+1092 -> 1136 (CPP, both SHAs; final #741 code). Both were reconciled code span by
+code span. Each version was instrumented to record which span every count came
+from (the instrument reproduces both totals, 1092 and 1136, exactly), the two were diffed
+span by span, and each differing span was classified by its token shapes. The
+categories sum to the totals:
+
+| Placeholder delta | Token shape | Cause |
+|---|---|---|
+| +30 | a quoted string containing `$(...)` (`if ! LANES_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`) | #741 item 2: the string is read word by word; #744 skipped the whole token as a substitution |
+| +13 | a quoted string carrying an unquoted `$(` or `)` (`... sed 's\|branch refs/h...'` closing a `$(`) | the same reading, plus the closer fix: the attached `)` still closes the substitution |
+| +1 | both of the above (`CAND="$(dirname "$(pwd)")/.claude/commands"`) | as above |
+| **+44** | | |
+
+(An interim #741 build also counted +1 for `echo "-> Local-model lanes not
+installed ..."`: a quoted string starting with `-` was read as an option. That
+was fixed during the counter-model review. The string is read word by word again,
+and the +1 is gone.)
+
+| Path-like delta | Span | Cause |
+|---|---|---|
+| -1 | `bdg --chrome-flags="--user-agent='Mozilla/5.0 (...) AppleWebKit/537.36'"` | an option with a quoted value is an option, not a string (the `--opt="x y"` guard), so `AppleWebKit/537.36` is no longer split out |
+
+No examined reference moved, so prefixed references are 336 and flags 240 as
+before.
+
 ## Reproducing
 
 The SHAs above are public. `--issue-states` makes a run deterministic: issue
