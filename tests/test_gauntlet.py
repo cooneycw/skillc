@@ -793,3 +793,56 @@ def test_a_charter_under_a_skipped_directory_reruns_round_1(coll: Path) -> None:
     (coll / ".venv" / "neighbor" / "CHARTER.md").write_text("---\ncontract: neighbor\nnot_a_field: 1\n---\n")
     _, after = _run(coll, "skills/alpha")
     assert not _rounds(after)["1"].endswith("(cached)")
+
+
+# ----------------------------------------- #760 counter-model pass 2
+
+def test_a_declared_symlink_whose_target_is_deleted_reruns_round_1(coll: Path) -> None:
+    (coll / ".skillc").mkdir()
+    (coll / ".skillc" / "check.py").write_text("print('check')\n")
+    (coll / ".skillc" / "alias.py").symlink_to("check.py")
+    _alpha_declares(coll, ".skillc/alias.py")
+    _run(coll, "skills/alpha")
+    (coll / ".skillc" / "check.py").unlink()
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)"), "a dangling link no longer backs the test"
+
+
+def test_a_literal_bracket_include_is_fingerprinted(coll: Path) -> None:
+    _run(coll, "skills/alpha", include=[".venv/[x]/SKILL.md"])
+    (coll / ".venv" / "[x]").mkdir(parents=True)
+    (coll / ".venv" / "[x]" / "SKILL.md").write_text("---\nname: b\ndescription: Use when b.\n---\nDo b.\n")
+    _, after = _run(coll, "skills/alpha", include=[".venv/[x]/SKILL.md"])
+    assert not _rounds(after)["2"].endswith("(cached)")
+
+
+@pytest.mark.parametrize("bad", ["a\\x00b", "\\ud800"])
+def test_an_unusable_declared_path_never_crashes(coll: Path, bad: str) -> None:
+    assert gauntlet._test_digest(coll, bad.encode().decode("unicode_escape", "surrogatepass")
+                                 if "\\" in bad else bad) == "unusable"
+
+
+@pytest.mark.parametrize("where", [".git", ".skillc/gauntlet"])
+def test_a_charter_contracts_discovers_anywhere_reruns_round_1(coll: Path, where: str) -> None:
+    _run(coll, "skills/alpha")
+    (coll / where / "neighbor").mkdir(parents=True, exist_ok=True)
+    (coll / where / "neighbor" / "CHARTER.md").write_text("---\ncontract: neighbor\nnot_a_field: 1\n---\n")
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)")
+
+
+def test_invalid_utf8_skill_text_never_crashes_round_0(coll: Path) -> None:
+    (coll / "skills" / "alpha" / "SKILL.md").write_bytes(b"---\nname: alpha\n---\n\xff\xfe broken\n")
+    code, lines = _run(coll, "skills/alpha")
+    assert "0" in _rounds(lines) and code in (gauntlet.EXIT_STOPPED, gauntlet.EXIT_FAILED)
+
+
+@pytest.mark.parametrize("cap,unknown", [(5, True), (200000, False)])
+def test_the_charter_walk_cap_reads_unknown_without_running_contracts(
+    coll: Path, monkeypatch: pytest.MonkeyPatch, cap: int, unknown: bool,
+) -> None:
+    monkeypatch.setattr(gauntlet, "CHARTER_WALK_CAP", cap)
+    calls = _spy(monkeypatch)
+    _, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["1"].startswith("UNKNOWN") is unknown, _rounds(lines)["1"]
+    assert any(c[:1] == ["contracts"] for c in calls) is not unknown, "over the cap, contracts never runs"

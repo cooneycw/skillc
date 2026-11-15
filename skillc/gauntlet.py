@@ -352,6 +352,11 @@ def _inside_collection(root: Path, rel: str) -> bool:
         return False
 
 
+def _literal_brackets(pattern: str) -> str:
+    """inspect reads `[` literally; fnmatch reads it as a character class."""
+    return pattern.replace("[", "[[]")
+
+
 def _glob_variants(pattern: str) -> list[str]:
     """`fnmatch` patterns matching at least what inspect's glob matches: `**/`
     may stand for ZERO directories there, so each `**/` is also tried removed.
@@ -374,13 +379,14 @@ def _test_digest(collection: Path, rel: str) -> str:
         return "outside"  # a stable sentinel; never read (a declared `/` would walk the disk)
     target = collection / path
     try:
-        if not target.resolve().is_relative_to(collection.resolve()):
+        resolved = target.resolve()
+        if not resolved.is_relative_to(collection.resolve()):
             return "outside"
-    except (OSError, RuntimeError):
-        return "unresolvable"
-    if target.is_symlink():
-        return "symlink:" + os.readlink(target)
-    return _tree_digest(target) if target.is_dir() else _file_digest(target)
+        link = "symlink:" + os.readlink(target) + ":" if target.is_symlink() else ""
+        # a link counts by its text AND what it reaches: deleting the target unbacks the test
+        return link + (_tree_digest(resolved) if resolved.is_dir() else _file_digest(resolved))
+    except (OSError, RuntimeError, ValueError, UnicodeError):
+        return "unusable"  # NUL, an unencodable name, a loop: contracts reads it unbacked; never a crash
 
 
 def _declared_tests(collection: Path) -> str:
@@ -392,8 +398,7 @@ def _declared_tests(collection: Path) -> str:
     entries: list[tuple[str, str]] = []
     listed = 0
     for top, dirs, files in os.walk(collection):
-        rel_top = Path(top).relative_to(collection).as_posix()
-        dirs[:] = sorted(d for d in dirs if d != ".git" and not (rel_top == ".skillc" and d == "gauntlet"))
+        dirs[:] = sorted(dirs)  # the SAME population contracts discovers: nothing is pruned (counter-model review)
         listed += len(dirs) + len(files)
         if listed > CHARTER_WALK_CAP:
             return "over-cap"
@@ -471,8 +476,8 @@ def _invocations(text: str, names: set[str]) -> int | None:
 def _names(skill: Skill, aliases: list[str]) -> set[str]:
     try:
         front, _body = parse_frontmatter(skill.text.read_text())
-    except (OSError, FrontmatterError):
-        front = {}
+    except (OSError, UnicodeError, FrontmatterError):
+        front = {}  # unreadable text keeps the names its path gives (directory, command)
     return skill_names(skill.text, front, aliases)
 
 
@@ -676,7 +681,7 @@ def _skipped_subjects(skill: Skill, options: Options) -> str:
                     return "over-cap"
                 for f in sub_files:
                     rel = f"{rel_top}/{f}"
-                    if any(fnmatch.fnmatch(rel, v) for pat in patterns for v in _glob_variants(pat)):
+                    if any(fnmatch.fnmatch(rel, v) for pat in patterns for v in _glob_variants(_literal_brackets(pat))):
                         matches.append((rel, _file_digest(Path(sub_top, f))))
     return _sha(json.dumps(sorted(matches)).encode())
 
