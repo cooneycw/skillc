@@ -138,6 +138,7 @@ to `invariants.never`, worded "Never: ...".
 |---|---|---|
 | `shared` | two charters both claim the duty | pick one owner; the other points at it |
 | `shadowed` | a skill is only *observed* doing it (column `observed-not-stated`) while another charter claims it | the strongest candidate for removing text |
+| `co-observed` | two skills are both only observed doing one duty, and neither charter states it | give it an owner, or forbid it |
 | `orphan` | an observed-only duty that no other charter's duty matches | add a charter line, or forbid it |
 
 **Proposals, never findings.** Some duplication protects a boundary or helps a
@@ -158,8 +159,13 @@ A later local-model step (permitted only after part B merges, labelled
 - Any disagreement, any `UNKNOWN`, any invalid answer, or a comparator that
   raises makes the pair `UNKNOWN`. A recording with fewer lines than the
   replicates is `UNKNOWN` too.
-- An orphan needs every one of its pairs judged `different`. One `UNKNOWN` pair,
-  or no other duty to compare against, leaves its status `UNKNOWN`.
+- An orphan needs every one of its pairs judged `different`, and the whole
+  collection read. Its status stays `UNKNOWN` when:
+  - one of its pairs is `UNKNOWN`;
+  - there is no other duty to compare it against;
+  - its pair was skipped for sharing a clause id;
+  - any charter in the collection is unparseable or unnamed, or any directory
+    could not be read. The report lists what was unread.
 
 Pairs that share a clause id are skipped: an exact duplicate id is #720's
 `duty-single-owner`.

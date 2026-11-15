@@ -206,3 +206,46 @@ def test_every_overlap_is_framed_as_a_proposal() -> None:
     fake = FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]})
     text = overlap.render(overlap.compare(_collection(PARAPHRASE), fake))
     assert "proposal for the owner" in text and "never a finding" in text
+
+
+# ---------------------------------------------------------------- counter-model review, pass 1
+
+
+def test_an_unparseable_charter_keeps_every_orphan_unknown(tmp_path: Path) -> None:
+    root = _observed(tmp_path)
+    (root / "broken").mkdir()
+    (root / "broken/CHARTER.md").write_text("---\ncontract: [unclosed\n---\n", encoding="utf-8")
+    fake = FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]})
+    report = overlap.compare(_collection(root), fake)
+    assert ("orphan", "beta.always-2") not in overlap.ids(report.overlaps)
+    assert "beta.always-2" in [d.clause_id for d in report.unknown_orphans]
+    assert report.incomplete and "Incomplete collection" in overlap.render(report)
+
+
+def test_an_unreadable_directory_keeps_every_orphan_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _collection(_observed(tmp_path))
+    collection.unreadable.append("hidden")
+    report = overlap.compare(collection, FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]}))
+    assert ("orphan", "beta.always-2") not in overlap.ids(report.overlaps)
+    assert report.incomplete == ["unreadable directory hidden"]
+
+
+def test_a_duty_in_a_skipped_same_id_pair_is_never_an_orphan(tmp_path: Path) -> None:
+    """Adding an unrelated charter must not turn duty-single-owner's case into an absence claim."""
+    root = _observed(tmp_path)
+    alpha = root / "alpha/CHARTER.md"
+    alpha.write_text(alpha.read_text(encoding="utf-8").replace("id: alpha.always-2", "id: beta.always-2"), encoding="utf-8")
+    shutil.copytree(VOCABULARY / "gamma", root / "gamma")
+    report = overlap.compare(_collection(root), FakeComparator({}))
+    assert ("orphan", "beta.always-2") not in overlap.ids(report.overlaps)
+    assert "beta.always-2" in [d.clause_id for d in report.unknown_orphans]
+
+
+def test_two_observed_only_duties_are_co_observed_not_shared(tmp_path: Path) -> None:
+    root = _observed(tmp_path)
+    alpha = root / "alpha/CHARTER.md"
+    alpha.write_text(alpha.read_text(encoding="utf-8").replace(
+        "    - id: alpha.always-1\n", "    - id: alpha.always-1\n      column: observed-not-stated\n", 1), encoding="utf-8")
+    report = overlap.compare(_collection(root), FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]}))
+    assert ("co-observed", "alpha.always-1", "beta.always-1") in overlap.ids(report.overlaps)
+    assert not any(kind == "shared" for kind, *_ in overlap.ids(report.overlaps))

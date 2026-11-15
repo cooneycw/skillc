@@ -8,6 +8,7 @@ against every duty in every OTHER charter **by meaning**, and proposes:
 | `shared` | two charters both claim the same duty | pick one owner; the other points at it |
 | `shadowed` | a skill is only *observed* doing a duty another charter claims | the strongest candidate for removing text |
 | `orphan` | a skill is observed doing something no charter states | add a charter line, or forbid it |
+| `co-observed` | two skills are both only observed doing one duty that neither charter states | give it an owner, or forbid it |
 
 **Every overlap is a proposal, never a finding against a skill.** Some
 duplication protects a boundary or helps a skill be found (Codex's review of
@@ -52,7 +53,7 @@ from . import contracts
 
 SAME, DIFFERENT, UNKNOWN = "same", "different", "UNKNOWN"
 VERDICTS = (SAME, DIFFERENT, UNKNOWN)
-SHARED, SHADOWED, ORPHAN = "shared", "shadowed", "orphan"
+SHARED, SHADOWED, ORPHAN, CO_OBSERVED = "shared", "shadowed", "orphan", "co-observed"
 
 #: The column `charter draft` gives a duty a usage record shows but the text
 #: never states (skillc/charter.py). Only such a duty can shadow or be an orphan.
@@ -173,13 +174,17 @@ class Report:
     source: str | None
     replicates: int
     notes: list[str] = field(default_factory=list)
+    #: What the collection held but this report could not read: an
+    #: unparseable or unnamed charter, or a directory discovery could not open.
+    #: While anything is here, no duty is called an orphan (counter-model review).
+    incomplete: list[str] = field(default_factory=list)
 
     @property
     def examined(self) -> bool:
         return self.source is not None and bool(self.pairs)
 
     def counts(self) -> dict[str, int]:
-        found = {kind: sum(o.kind == kind for o in self.overlaps) for kind in (SHARED, SHADOWED, ORPHAN)}
+        found = {kind: sum(o.kind == kind for o in self.overlaps) for kind in (SHARED, SHADOWED, CO_OBSERVED, ORPHAN)}
         found["unknown pairs"] = len(self.unknown_pairs)
         found["unknown orphans"] = len(self.unknown_orphans)
         return found
@@ -216,6 +221,10 @@ def compare(
     all_duties = duties(collection)
     report = Report(collection.root, all_duties, [], [], [], [], [], comparator.source if comparator else None,
                     replicates)
+    report.incomplete = [f"unread charter {c.path.relative_to(collection.root)}: "
+                         f"{c.parse_error or 'no contract name'}"
+                         for c in collection.contracts if c.parse_error is not None or not c.name]
+    report.incomplete += [f"unreadable directory {where}" for where in collection.unreadable]
     candidates: list[tuple[Duty, Duty]] = []
     for a, b in combinations(all_duties, 2):
         if a.contract == b.contract:
@@ -234,11 +243,15 @@ def compare(
             report.unknown_pairs.append(pair)
         elif pair.verdict == SAME:
             report.overlaps.append(Overlap(_kind(a, b), (a, b), pair.answers))
+    same_id = {d.clause_id for pair in report.skipped_same_id for d in pair}
     for duty in (d for d in all_duties if d.observed_only):
         mine = [p for p in report.pairs if duty in (p.a, p.b)]
         if any(p.verdict == SAME for p in mine):
             continue
-        if mine and all(p.verdict == DIFFERENT for p in mine):
+        # An orphan is an ABSENCE claim over the whole collection: it needs
+        # every charter read, and no pair left unjudged (counter-model review).
+        if mine and all(p.verdict == DIFFERENT for p in mine) and not report.incomplete \
+                and duty.clause_id not in same_id:
             report.overlaps.append(Overlap(ORPHAN, (duty,), ()))
         else:
             report.unknown_orphans.append(duty)  # no other duty, or an UNKNOWN pair: cannot say
@@ -254,9 +267,12 @@ def _answer(comparator: DutyComparator, a: Duty, b: Duty) -> str:
 
 
 def _kind(a: Duty, b: Duty) -> str:
-    """Shadowed when exactly one side is only observed doing what the other
-    claims; shared otherwise (both claim it, or both are only seen doing it)."""
-    return SHADOWED if a.observed_only != b.observed_only else SHARED
+    """`shared` only when BOTH charters claim the duty; `shadowed` when one is
+    only observed doing what the other claims; `co-observed` when both are only
+    observed doing it, so nobody claims it (counter-model review)."""
+    if a.observed_only and b.observed_only:
+        return CO_OBSERVED
+    return SHADOWED if a.observed_only or b.observed_only else SHARED
 
 
 # ---------------------------------------------------------------- the report
@@ -286,6 +302,9 @@ def render(report: Report) -> str:
                         else "none - no pair was judged, so a zero here would claim a comparison nobody made"),
     ]
     lines += [f"- {n}" for n in report.notes]
+    if report.incomplete:
+        lines += ["- **Incomplete collection** - no duty is called an orphan while any of this is unread:"]
+        lines += [f"  - {item}" for item in report.incomplete]
     if report.overlaps:
         lines += ["", "```mermaid", "graph LR"]
         for o in report.overlaps:
@@ -295,7 +314,7 @@ def render(report: Report) -> str:
                 a, b = o.duties
                 lines.append(f"  {_node(a.contract)} -- {o.kind} --- {_node(b.contract)}")
         lines.append("```")
-    for kind in (SHARED, SHADOWED, ORPHAN):
+    for kind in (SHARED, SHADOWED, CO_OBSERVED, ORPHAN):
         found = [o for o in report.overlaps if o.kind == kind]
         if not found:
             continue
