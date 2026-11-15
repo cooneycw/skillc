@@ -440,7 +440,7 @@ def _wait_for(predicate: Any, what: str, timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
     while not predicate():
         assert time.monotonic() < deadline, f"timed out waiting for {what}"
-        time.sleep(0.005)
+        time.sleep(0.005)  # timing: cadence - polls predicate() until it holds; the deadline above (timeout, 20 s) is the bound
 
 
 def _polls(interceptor: AuthorityInterceptor) -> int:
@@ -495,7 +495,7 @@ def _subject_acts(tmp_path: Path, action: str) -> str:
         "import pathlib, time\n"
         f"{action}\n"
         f"pathlib.Path({str(acted)!r}).touch()\n"
-        f"while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.005)\n"
+        f"while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the subject polls for the release file the test writes after two polls; Limits(timeout=30) bounds the run
         "print('the subject finished')\n"
     )
 
@@ -527,7 +527,7 @@ def test_a_clean_run_with_the_write_back_held_open_is_never_flagged(
     handle = _prepared(backend, "a-lc-authority-000000761")
     if seeded:
         backend.install(handle, {"observations": b"an earlier execute's capture\n"})
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
     interceptor.start()
     result = _held_run(backend, handle, "print('the subject completed cleanly, ' * 20)", docker_state,
                        tmp_path, interceptor, mode)
@@ -556,7 +556,7 @@ def test_a_subject_that_creates_observations_is_still_caught_with_the_window_hel
     keeps the prefix rule from hiding it."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000762")
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
     interceptor.start()
     subject = _subject_release(interceptor, tmp_path)
     result = _held_run(backend, handle, _subject_acts(tmp_path, action), docker_state, tmp_path,
@@ -572,7 +572,7 @@ def test_a_subject_that_deletes_observations_is_still_caught(
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000763")
     backend.install(handle, {"observations": b"seeded before the attempt\n"})
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
     interceptor.start()
     subject = _subject_release(interceptor, tmp_path)
     result = _held_run(backend, handle, _subject_acts(tmp_path, "pathlib.Path('observations').unlink()"),
@@ -591,12 +591,12 @@ def test_an_orphan_that_overwrites_observations_after_the_write_back_is_flagged(
     overwrite is flagged - never the backend's own completed write."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000764")
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
     interceptor.start()
     go, done = tmp_path / "orphan-go", tmp_path / "orphan-done"
     orphan = (
         "import pathlib, time\n"
-        f"while not pathlib.Path({str(go)!r}).exists(): time.sleep(0.005)\n"
+        f"while not pathlib.Path({str(go)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the orphan polls for the go file the test writes; _wait_for's 20 s deadline bounds the test
         "pathlib.Path('observations').write_text('orphan-overwrite')\n"
         f"pathlib.Path({str(done)!r}).touch()\n"
     )
@@ -623,7 +623,7 @@ def test_without_a_declared_write_back_todays_rule_is_unchanged(
     the subject's (today's settled-value rule, pinned)."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000765")
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
     interceptor.start()
     _held_run(backend, handle, "print('clean')", docker_state, tmp_path, interceptor, "truncate")
     assert _entries(interceptor.stop_and_finalize()) == [{"action": "create", **OBS}]
@@ -638,7 +638,7 @@ def test_an_oversized_partial_write_keeps_no_bytes_and_is_kept(
     KEPT (a conservative flag), never held in memory without limit."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000766")
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01,
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01,  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
                                        artifact_bytes_max=8)
     interceptor.start()
     result = _held_run(backend, handle, "print('x' * 64)", docker_state, tmp_path, interceptor, "partial")
@@ -658,17 +658,17 @@ def test_a_partial_value_seen_after_the_write_back_window_is_kept(
     a state the write-back cannot explain at that time, and is kept."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000767")
-    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
     interceptor.start()
     line = "the subject's one line of output"
     go1, d1, go2, d2 = (tmp_path / n for n in ("go1", "d1", "go2", "d2"))
     orphan = (
         "import pathlib, time\n"
         f"full = {line!r} + '\\n'\n"
-        f"while not pathlib.Path({str(go1)!r}).exists(): time.sleep(0.005)\n"
+        f"while not pathlib.Path({str(go1)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the orphan polls for go1, written after a poll; _wait_for's 20 s deadline bounds the test
         "pathlib.Path('observations').write_text(full[: len(full) // 2])\n"
         f"pathlib.Path({str(d1)!r}).touch()\n"
-        f"while not pathlib.Path({str(go2)!r}).exists(): time.sleep(0.005)\n"
+        f"while not pathlib.Path({str(go2)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the orphan polls for go2, written after two polls; _wait_for's 20 s deadline bounds the test
         "pathlib.Path('observations').write_text(full)\n"
         f"pathlib.Path({str(d2)!r}).touch()\n"
     )

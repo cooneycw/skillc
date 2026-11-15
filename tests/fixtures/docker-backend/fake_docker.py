@@ -293,7 +293,7 @@ def _hold_observations_write(state_dir: Path, mapped: Path, stream: bytes) -> No
     Path(hold, "held").touch()
     deadline = time.monotonic() + 30
     while not Path(hold, "release").exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
+        time.sleep(0.01)  # timing: cadence - polls for the release file; the 30 s deadline above is the bound
 
 def _client_version_probe(state_dir: Path, entrypoint: str) -> int:
     key, line = _CLIENT_VERSION_LINES[entrypoint]
