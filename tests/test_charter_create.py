@@ -233,8 +233,8 @@ def test_a_failing_final_check_rolls_everything_back(work: Path, monkeypatch: py
     error from it must keep nothing."""
     real = charter_create._findings
 
-    def failing(root: Path, path: Path):  # type: ignore[no-untyped-def]
-        yield from real(root, path)
+    def failing(root: Path, path: Path, before: Any = frozenset()):  # type: ignore[no-untyped-def]
+        yield from real(root, path, before)
         yield "clause-backed", "planted failure"
 
     monkeypatch.setattr(charter_create, "_findings", failing)
@@ -244,7 +244,7 @@ def test_a_failing_final_check_rolls_everything_back(work: Path, monkeypatch: py
 
 def test_an_approval_warning_on_a_clause_the_owner_approved_rolls_back(work: Path,
                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
-    def warn(root: Path, path: Path):  # type: ignore[no-untyped-def]
+    def warn(root: Path, path: Path, before: Any = frozenset()):  # type: ignore[no-untyped-def]
         yield "approval-present", "authority clause 'demo.owner-merges' has no owner 'approved' date; it is a draft"
 
     monkeypatch.setattr(charter_create, "_findings", warn)
@@ -273,3 +273,121 @@ def test_the_cli_refusal_exits_1_and_writes_nothing(work: Path, capsys: pytest.C
                      "--answers", str(work / "answers.json")])
     assert code == 1 and "unanswered suggestion" in capsys.readouterr().err
     assert _files(work / "c") == before
+
+
+# ---------------------------------------------------------------- counter-model review, pass 1
+
+
+def test_a_symlinked_output_ancestor_is_refused_and_nothing_lands_outside(work: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (work / "c/evals").symlink_to(outside, target_is_directory=True)
+    _refused(work, _answers(), "symlink")
+    assert list(outside.iterdir()) == []
+
+
+def test_a_symlinked_charters_dir_for_a_command_is_refused(work: Path, tmp_path: Path) -> None:
+    root = work / "c"
+    (root / ".claude/commands/ns").mkdir(parents=True)
+    (root / ".claude/commands/ns/cmd.md").write_text("---\ndescription: d\n---\n\nYou MUST cite.\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "charters").symlink_to(outside, target_is_directory=True)
+    evidence = gather(root, ".claude/commands/ns/cmd.md", reader=None)
+    (work / "ev2.json").write_text(evidence.to_json(), encoding="utf-8")
+    answers = {"schema": 1, "answers": {s.id: "drop" for s in evidence.suggestions},
+               "intent": {"what": "x"}, "purpose": "p", "clauses": []}
+    (work / "a2.json").write_text(json.dumps(answers), encoding="utf-8")
+    with pytest.raises(CreateRefused, match="symlink"):
+        create(root, ".claude/commands/ns/cmd.md", work / "ev2.json", work / "a2.json", today=TODAY)
+    assert list(outside.iterdir()) == []
+
+
+def _neighbour(root: Path, consumes: str) -> None:
+    (root / "skills/user").mkdir(parents=True, exist_ok=True)
+    (root / "skills/user/SKILL.md").write_text("---\nname: user\ndescription: d\n---\n\nx\n", encoding="utf-8")
+    (root / "checks/u/bad").mkdir(parents=True, exist_ok=True)
+    (root / "checks/u/good").mkdir(parents=True, exist_ok=True)
+    (root / "skills/user/CHARTER.md").write_text(
+        f'---\ncontract: "user"\nversion: 1\nintent:\n  id: "user.intent"\n  what: "u"\n  approved: "2026-11-01"\n'
+        f'purpose: "p"\nowner: "owner"\nconsumes:\n  - "{consumes}"\n---\n', encoding="utf-8")
+
+
+def test_replacing_a_draft_that_breaks_a_neighbours_hand_off_rolls_back(work: Path) -> None:
+    root = work / "c"
+    (root / "checks/o/bad").mkdir(parents=True)
+    (root / "checks/o/good").mkdir(parents=True)
+    draft = root / "skills/demo/CHARTER.md"
+    draft.write_text('---\ncontract: "demo"\nversion: 1\nintent:\n  id: "demo.intent"\n  draft: true\n  what: "x"\n'
+                     'purpose: "p"\nowner: "owner"\nprovides:\n  - id: "demo.old-output"\n    draft: true\n'
+                     '    what: "o"\n    test: "checks/o/{bad,good}"\n---\n', encoding="utf-8")
+    _neighbour(root, "demo.old-output@1")
+    original = draft.read_text(encoding="utf-8")
+    with pytest.raises(CreateRefused, match="handoff-bilateral"):
+        _run(work, _answers(), replace_draft=True)
+    assert draft.read_text(encoding="utf-8") == original
+    assert not (root / "evals").exists()
+
+
+def test_a_collection_whose_cross_rules_cannot_run_is_not_examined_never_clean(work: Path) -> None:
+    root = work / "c"
+    (root / "skills/broken").mkdir()
+    (root / "skills/broken/CHARTER.md").write_text("not a charter\n", encoding="utf-8")
+    _refused(work, _answers(), "not examined")
+
+
+def test_a_partial_write_is_rolled_back(work: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_open = Path.open
+    calls = {"n": 0}
+
+    def flaky(self: Path, mode: str = "r", *a: Any, **k: Any):  # type: ignore[no-untyped-def]
+        handle = real_open(self, mode, *a, **k)
+        if "x" in mode:
+            calls["n"] += 1
+            if calls["n"] == 3:
+                handle.write("partial")
+                handle.close()
+                raise OSError("disk full")
+        return handle
+
+    monkeypatch.setattr(Path, "open", flaky)
+    before = _files(work / "c")
+    with pytest.raises(OSError, match="disk full"):
+        _run(work, _answers())
+    assert _files(work / "c") == before
+
+
+def test_a_draft_with_a_malformed_approved_section_is_not_replaceable(work: Path) -> None:
+    draft = work / "c/skills/demo/CHARTER.md"
+    draft.write_text('---\ncontract: "demo"\nversion: 1\nintent:\n  id: "demo.intent"\n  draft: true\n  what: "x"\n'
+                     'purpose: "p"\nowner: "owner"\nauthority:\n  id: "demo.a"\n  approved: "2026-11-01"\n---\n',
+                     encoding="utf-8")
+    _refused(work, _answers(), "never overwrites a charter", replace_draft=True)
+
+
+def test_a_skill_at_the_collection_root_composes(tmp_path: Path) -> None:
+    root = tmp_path / "skill"
+    shutil.copytree(FIXTURE / "collection/skills/demo", root)
+    evidence = gather(root, ".", reader=None)
+    (tmp_path / "ev.json").write_text(evidence.to_json(), encoding="utf-8")
+    answers = _answers()
+    (tmp_path / "a.json").write_text(json.dumps(answers), encoding="utf-8")
+    made = create(root, ".", tmp_path / "ev.json", tmp_path / "a.json", today=TODAY)
+    assert made.charter == root / "CHARTER.md"
+    assert (root / "evals/trap-tasks/demo/never-approve/bad/STUB.md").is_file()
+
+
+def test_create_in_a_git_main_checkout_writes_and_commits_nothing(work: Path) -> None:
+    import subprocess
+    root = work / "c"
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(root)]
+    subprocess.run([*git[:5], "init", "-q", str(root)], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "x"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
+    _run(work, _answers())
+    assert subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout == head
+    status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
+    assert "?? evals/" in status and "?? skills/demo/CHARTER.md" in status
+    assert subprocess.run([*git, "diff", "--cached", "--name-only"], capture_output=True, text=True,
+                          check=True).stdout == ""

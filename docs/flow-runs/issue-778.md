@@ -110,3 +110,8 @@ Readers:
 - Reader: `skillc contracts` and gauntlet round 1 read the CHARTER. Compatibility: #720's format, checked by the real rules before create reports success.
 - Reader: #736 PR 2 and round 3 read the stubs. Compatibility: the shape is fixed in the spec; a stub has no grader, so `read_task` refuses it until it is filled.
 - Reader: the dialogue skill writes the answers file and create reads it. Compatibility: `schema: 1`, fixed in the spec.
+
+### Plan deviations (run 2)
+- 2026-11-15, counter-model pass 1 (LOW), Checkout lane: the row promised a `git init` main checkout, but no test ran create in one. `test_create_in_a_git_main_checkout_writes_and_commits_nothing` now does, and asserts HEAD is unchanged, nothing is staged, and the charter and stubs are untracked. It passed when added: coverage, not a regression test.
+- 2026-11-15, counter-model pass 1 (LOW), a missing Reader:
+  - Reader: the `/charter-create` dialogue reads create's and the launcher's output: stdout `skillc: charter written to`, `skillc: trap-task stub ...`, `skillc: warn: ...`, `nothing was committed`; stderr `skillc: charter create refused: <reason>`, `CHARTER_CREATE: cannot find a usable skillc (...)`, `CHARTER_CREATE: usage`; exit 0 written, 1 refused, 2 usage. Compatibility: `test_the_cli_reports_the_charter_the_stubs_and_that_nothing_was_committed`, `test_the_cli_refusal_exits_1_and_writes_nothing`, and the launcher tests pin those lines and codes; the spec states them.

@@ -327,21 +327,24 @@ def render(plan_: Plan, subject: str | None, offered: Mapping[str, Mapping[str, 
     return block + body
 
 
-def skill_tree_digest(skill_text: Path, command: bool) -> str:
+def skill_tree_digest(skill_text: Path, command: bool, outputs: tuple[Path, ...] = ()) -> str:
     """The skill's own files, by relative path and content: the whole directory
-    for a native skill (less CHARTER.md and GAUNTLET.json), the file itself for
-    a command."""
+    for a native skill (less CHARTER.md, GAUNTLET.json and anything under
+    `outputs`, the stub directories create itself writes - a skill at the
+    collection root holds them, counter-model review), the file itself for a
+    command."""
     h = hashlib.sha256()
     if command:
         h.update(skill_text.read_bytes())
         return h.hexdigest()
     base = skill_text.parent
+    skip = tuple(o.resolve() for o in outputs)
     for dirpath, dirnames, filenames in os.walk(base):
         dirnames.sort()
         for name in sorted(filenames):
             path = Path(dirpath, name)
             rel = path.relative_to(base).as_posix()
-            if rel in NOT_THE_SKILL:
+            if rel in NOT_THE_SKILL or any(path.resolve().is_relative_to(o) for o in skip):
                 continue
             h.update(rel.encode() + b"\0" + path.read_bytes() + b"\0")
     return h.hexdigest()
@@ -353,32 +356,69 @@ def _all_draft(path: Path) -> bool:
     except (OSError, UnicodeDecodeError, FrontmatterError):
         return False
     clauses: list[object] = [data.get("intent")]
+    # A section that is present but not a list is NOT shown to hold only drafts
+    # (counter-model review: an `authority` mapping hid an approved clause).
     for s in ("provides", "requires", "authority", "failure"):
         entries = data.get(s)
-        if isinstance(entries, list):
-            clauses.extend(entries)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            return False
+        clauses.extend(entries)
     inv = data.get("invariants")
-    if isinstance(inv, dict):
+    if inv is not None:
+        if not isinstance(inv, dict):
+            return False
         for k in ("always", "never"):
             entries = inv.get(k)
-            if isinstance(entries, list):
-                clauses.extend(entries)
+            if entries is None:
+                continue
+            if not isinstance(entries, list):
+                return False
+            clauses.extend(entries)
     return all(isinstance(c, dict) and c.get("draft") is True and "approved" not in c for c in clauses)
 
 
-def _findings(root: Path, charter_path: Path) -> Iterator[tuple[str, str]]:
-    collection = contracts.load_collection(root)
-    rules = {
+RULES = {
         "contract-shape": contracts.contract_shape, "clause-backed": contracts.clause_backed,
         "negative-backed": contracts.negative_backed, "handoff-bilateral": contracts.handoff_bilateral,
         "handoff-version": contracts.handoff_version, "reader-exists": contracts.reader_exists,
         "scope-owned": contracts.scope_owned, "duty-single-owner": contracts.duty_single_owner,
         "approval-present": contracts.approval_present,
-    }
-    for name, rule in rules.items():
-        for path, message in rule(collection):
-            if Path(path).resolve() == charter_path.resolve():
-                yield name, message
+}
+
+
+def _all_findings(root: Path) -> tuple[contracts.Collection, set[tuple[str, str, str]]]:
+    """Every finding of every rule over the whole collection, as (rule, path, message)."""
+    collection = contracts.load_collection(root)
+    found = {(name, str(Path(path).resolve()), message)
+             for name, rule in RULES.items() for path, message in rule(collection)}
+    return collection, found
+
+
+def _findings(root: Path, charter_path: Path, before: set[tuple[str, str, str]] = frozenset()  # type: ignore[assignment]
+              ) -> Iterator[tuple[str, str]]:
+    """Findings this charter introduces: every finding ON it, and every NEW
+    finding on another contract (counter-model review: replacing a draft can
+    break a neighbour's hand-off, which the rule reports against the
+    neighbour). An approval warning on another contract is never ours.
+
+    Raises `CreateRefused` when the charter was not examined: discovery did not
+    find it, or the cross-contract rules could not run."""
+    collection, after = _all_findings(root)
+    target = str(charter_path.resolve())
+    ours = [c for c in collection.contracts if str(c.path.resolve()) == target]
+    if not ours or ours[0].parse_error is not None:
+        raise CreateRefused("not examined: the contracts rules did not read the composed charter")
+    if not contracts._cross_ready(collection):
+        raise CreateRefused("not examined: the collection's cross-contract rules could not run (another CHARTER.md "
+                            "fails contract-shape, a name or provider repeats, or a directory is unreadable), so the "
+                            "hand-offs are unchecked; fix the collection first")
+    for name, path, message in sorted(after):
+        if path == target:
+            yield name, message
+        elif (name, path, message) not in before and name != "approval-present":
+            yield name, f"{Path(path).relative_to(root.resolve()) if Path(path).is_relative_to(root.resolve()) else path}: {message}"
 
 
 def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path, *, replace_draft: bool = False,
@@ -427,8 +467,21 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
     for d in stubs:
         if d.exists() or d.is_symlink():
             raise CreateRefused(f"{d.relative_to(root)} exists; create never overwrites a trap task")
+    # No symlink anywhere between the collection root and any output, and every
+    # output inside the collection (counter-model review: a symlinked
+    # `charters/` or `evals/` redirected writes outside it).
+    real_root = root.resolve()
+    for path in [out, *stubs]:
+        for part in [path, *path.parents]:
+            if part == root:
+                break
+            if part.is_symlink():
+                raise CreateRefused(f"{part.relative_to(root)} is a symlink; create never writes through one")
+        if not path.resolve().is_relative_to(real_root):
+            raise CreateRefused(f"{path} resolves outside the collection; refusing to write there")
 
-    before = skill_tree_digest(target.text, target.command)
+    _, findings_before = _all_findings(root)
+    before = skill_tree_digest(target.text, target.command, tuple(stubs))
     made_files: list[Path] = []
     made_dirs: list[Path] = []
 
@@ -444,10 +497,18 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
 
     def write(path: Path, content: str) -> None:
         mkdirs(path.parent)
-        with path.open("x" if path != out or old is None else "w", encoding="utf-8") as fh:
-            fh.write(content)
-        if path != out or old is None:
+        fresh = path != out or old is None
+        if fresh:
+            # Owned BEFORE it is opened (counter-model review): every target was
+            # checked absent above, so a failure anywhere in creating or writing
+            # it rolls it back. A path that appeared meanwhile is not ours.
             made_files.append(path)
+        try:
+            with path.open("x" if fresh else "w", encoding="utf-8") as fh:
+                fh.write(content)
+        except FileExistsError:
+            made_files.remove(path)
+            raise CreateRefused(f"{path} appeared while composing; create never overwrites") from None
 
     def rollback() -> None:
         for f in reversed(made_files):
@@ -470,7 +531,7 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
         withheld = {f"{plan_.contract}.intent"} if not plan_.intent_approve else set()
         withheld |= {c.id for c in plan_.clauses if c.section == "authority" and not c.approve}
         warnings: list[str] = []
-        for rule, message in _findings(root, out):
+        for rule, message in _findings(root, out, findings_before):
             if rule == "approval-present":
                 named = re.search(r"clause '([^']+)'", message)
                 owner_withheld = (named.group(1) in withheld) if named else (f"{plan_.contract}.intent" in withheld)
@@ -479,7 +540,7 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
                 problems.append(f"{rule}: {message}")
         if problems:
             raise CreateRefused("the composed charter is not clean, so nothing was kept: " + "; ".join(problems))
-        if skill_tree_digest(target.text, target.command) != before:
+        if skill_tree_digest(target.text, target.command, tuple(stubs)) != before:
             raise CreateRefused("the skill's own files changed while composing; nothing was kept")
     except BaseException:
         rollback()

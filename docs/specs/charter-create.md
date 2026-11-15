@@ -217,6 +217,7 @@ The `/charter-create` dialogue writes it from the owner's words:
 | the evidence file is for another skill, or not schema 1 | the answers must match the evidence they answer |
 | the CHARTER.md exists | never overwritten, unless every clause in it is a `draft` and `--replace-draft` is given |
 | a stub directory exists | never overwritten |
+| any output's path from the collection root holds a symlink, or resolves outside the collection | never written through a link (a symlinked `charters/` or `evals/` would redirect it) |
 
 ### The trap-task stubs
 
@@ -252,6 +253,16 @@ reads every finding on this charter:
 - `approval-present` may warn **only** on an intent or authority clause whose
   approval the owner withheld. A warning on a clause the owner approved also
   rolls back.
+- a NEW error on another contract rolls back too: replacing a draft can break
+  a neighbour's hand-off, which `handoff-bilateral` reports against the
+  neighbour. Findings that were there before create ran are not counted.
+- **not examined is never clean:** create refuses when the rules did not read
+  the composed charter, or when the collection's cross-contract rules cannot
+  run (another CHARTER.md fails contract-shape, a name or provider repeats, a
+  directory is unreadable). Fix the collection first.
+
+A skill at the collection root (`<skill>` is `.`) holds its own stubs; the
+skill's digest leaves out the stub directories create writes.
 
 The warnings it keeps are printed as such.
 
