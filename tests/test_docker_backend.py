@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT, TEST_SETUP_BOUND
 
 from skillc import docker_backend as d
 from skillc import lifecycle as lc
@@ -2199,15 +2199,24 @@ def test_a_token_event_before_the_probe_still_vetoes(
 def test_a_stalled_events_client_cannot_outlive_the_daemon_deadline(base: Path, docker_state: Path) -> None:
     """Counter-model case: an events client that keeps stdout open past the
     deadline is killed, and the answer is "unknown". The bound IS the property
-    here: `daemon_timeout` 0.2s against a 3s stall."""
-    backend = _backend(base, docker_state, daemon_timeout=0.2)
+    here: `daemon_timeout` 0.2s against a 3s stall.
+
+    Only the events call runs under that 0.2s (#758, the #462 diagnosis of
+    2026-10-28): `prepare()` is setup, not the property, so it gets the
+    generous fake budget. Under load, setup no longer spends the property's
+    bound and fails before the stall is reached (pipelines 1202, 1477)."""
+    backend = _backend(base, docker_state)  # must-beat: setup under FAKE_DOCKER_DAEMON_TIMEOUT
     handle = backend.prepare("a-lc-000000000186")
     assert isinstance(handle, d._Handle)
     docker_state.mkdir(parents=True, exist_ok=True)
-    (docker_state / ".delay-events").write_text("3")
+    # The stall is far past both bounds, so "it was killed" and "it stalled"
+    # stay distinguishable on a loaded host (#758): elapsed must beat the
+    # generous setup bound and still fall well short of the 60s stall.
+    (docker_state / ".delay-events").write_text("60")
+    bounded = dataclasses.replace(backend, daemon_timeout=0.2)  # timing: must-fire - against a 60 s events stall
     started = time.monotonic()
-    assert backend._exec_events(handle, 0) is None
-    assert time.monotonic() - started < 2.0
+    assert bounded._exec_events(handle, 0) is None
+    assert time.monotonic() - started < TEST_SETUP_BOUND
     (docker_state / ".delay-events").unlink()
     backend.destroy(handle)
 

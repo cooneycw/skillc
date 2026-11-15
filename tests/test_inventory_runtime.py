@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import TEST_SETUP_BOUND
 
 from skillc import fixture_campaign as fc
 from skillc import inventory_oracle as io
@@ -196,7 +197,8 @@ def test_oracle_transport_refuses_incomplete_results_and_always_removes_containe
 
 
 def reviewed_oracle(program: str, *, extra_test: bool = False, empty_tests: bool = False,
-                    renamed_legacy: bool = False, no_legacy: bool = False, search_path: str = "") -> dict[str, Any]:
+                    renamed_legacy: bool = False, no_legacy: bool = False, search_path: str = "",
+                    candidate_seconds: float = TEST_SETUP_BOUND) -> dict[str, Any]:
     """Host test emulator accepts named committed B1 programs only, never an
     arbitrary candidate path or bytes. Production io.run has no such route."""
     engine = load(TASK / 'oracle.py')
@@ -241,10 +243,19 @@ def launch(*args,**kwargs):
  if sys.argv[2]: kwargs['env']={**kwargs['env'],'PATH':sys.argv[2]}
  return real(*args,**kwargs)
 m.subprocess.Popen=launch
+real_execute=m.execute
+def execute(argv,cwd,budget,seconds=float(sys.argv[3]),**kwargs):
+ return real_execute(argv,cwd,budget,seconds,**kwargs)
+m.execute=execute
 m.container_parent=lambda:True
 m.main()
 '''
-    proc = subprocess.run([sys.executable, '-c', driver, str(Path(harness.__file__)), search_path],
+    # The candidate's own `unittest` run is work the test needs to FINISH, not
+    # the property: the product's 5 s per-run default ran out at psi_io10 ~45
+    # (pipeline 1478, "candidate probe timeout"), so the emulator widens it to
+    # the shared must-beat bound (#758). Production's default is unchanged.
+    proc = subprocess.run([sys.executable, '-c', driver, str(Path(harness.__file__)), search_path,
+                           str(candidate_seconds)],
                           input=json.dumps(job), capture_output=True, text=True, timeout=180, check=False)
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout.splitlines()[-1][len(job['nonce']):])

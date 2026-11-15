@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 import pytest
+from conftest import TEST_SETUP_BOUND
 
 from skillc import trial_bootstrap as tb
 
@@ -87,13 +88,13 @@ with open(log, "a") as fh:
     fh.write(json.dumps(argv) + "\\n")
 if argv[0] == "rm":
     if mode == "sleep-rmhang":
-        time.sleep(30)
-    sys.exit(1 if mode == "sleep-rmfail" else 0)
+        time.sleep(3600)  # blocks until the probe's bound kills it (role F, #758)
+    sys.exit(1 if mode in ("sleep-rmfail", "late-rmfail") else 0)
 if mode == "badbytes":
     sys.stdout.buffer.write(b"codex-cli \\xff\\xfe\\n")
     sys.exit(0)
-if mode == "late":
-    time.sleep(1)
+if mode in ("late", "late-rmfail"):
+    time.sleep(1)  # answers AFTER the 0.3 s bound; load only delays it further (#758)
     sys.exit(0)
 if mode in ("signal", "late-signal"):
     import os, signal
@@ -108,7 +109,7 @@ if mode == "nonzero":
     sys.stderr.write("Unable to find image locally\\n")
     sys.exit(125)
 if mode.startswith("sleep"):
-    time.sleep(30)
+    time.sleep(3600)  # blocks until killed: the 0.3 s timeout is the property (role F, #758)
 sys.stdout.write(outputs[mode])
 '''
 
@@ -159,7 +160,9 @@ def test_548_probe_keeps_build_metadata_so_a_custom_build_is_not_the_declared_on
 
 def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path):
     docker_bin, log = _probe_docker(tmp_path, "sleep")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.3)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
+                                       settle=0.3)  # timing: must-fire - the blocked create never settles
     assert probe.version is None and "did not answer within 0.3s" in probe.reason
     assert "removal is unconfirmed" in probe.reason  # the create never settled
     run, rm = _calls(log)
@@ -170,26 +173,39 @@ def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path):
     """#540's race: the CLI answers after the bound. Removal waits for it, so
     the cleanup is confirmed rather than racing a create still landing."""
     docker_bin, log = _probe_docker(tmp_path, "late")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=5)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the CLI sleeps 1 s, so the probe's bound fires
+                                       settle=TEST_SETUP_BOUND)  # must-beat (#758): the late create settles, then rm -f
     assert probe.version is None and probe.reason == "`codex --version` did not answer within 0.3s"
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 
 
-@pytest.mark.parametrize("timeout", [5, 0.3])
+@pytest.mark.parametrize("timeout", [TEST_SETUP_BOUND, 0.3])  # timing: must-fire - 0.3 fires before late-signal's 1 s
 def test_548_probe_removes_and_never_confirms_after_a_signalled_cli(tmp_path, timeout):
     """A CLI killed by a signal - at once, or inside the settle window - never
     heard the daemon's answer: remove the container, and say removal is
     unconfirmed even when `rm -f` finds nothing."""
-    docker_bin, log = _probe_docker(tmp_path, "signal" if timeout == 5 else "late-signal")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=timeout, settle=5)
+    docker_bin, log = _probe_docker(tmp_path, "signal" if timeout == TEST_SETUP_BOUND else "late-signal")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=timeout,
+                                       settle=TEST_SETUP_BOUND)  # must-beat (#758): rm -f answers at once
     assert probe.version is None and "unconfirmed" in probe.reason
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 
 
-@pytest.mark.parametrize(("mode", "reason"), [("sleep-rmfail", "exited 1"), ("sleep-rmhang", "failed")])
-def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, mode, reason):
+@pytest.mark.parametrize(("mode", "reason", "settle"), [
+    # rm -f EXITS 1 at once, after a CLI that answers late but does settle:
+    # both waits inside `settle` must be BEATEN, or a slow host reads "timed
+    # out" where the property is "exited 1" (#758, pipeline 1475). A CLI that
+    # never settles would make this test wait the whole generous bound.
+    ("late-rmfail", "exited 1", TEST_SETUP_BOUND),
+    # rm -f HANGS until killed: the settle window is the property, so it fires.
+    ("sleep-rmhang", "failed", 0.5),  # timing: must-fire - rm -f blocks until this bound kills it
+])
+def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, mode, reason, settle):
     docker_bin, _log = _probe_docker(tmp_path, mode)
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.5)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
+                                       settle=settle)
     assert probe.version is None and "cleanup 'docker rm -f skillc-client-probe-" in probe.reason
     assert reason in probe.reason
 
