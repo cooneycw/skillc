@@ -193,6 +193,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import io
 import json
 import os
 import shutil
@@ -247,6 +248,52 @@ _FLAGS_WITH_VALUE = (
 _PINNED_VERSIONS = Path(__file__).resolve().parents[3] / "docker" / "trial" / "pinned-versions.json"
 _CLIENT_VERSION_LINES = {"codex": ("codex", "codex-cli {}"), "claude": ("claude_code", "{} (Claude Code)")}
 
+
+CP_HOLD_FILE = "cp-hold.json"
+
+
+def _hold_observations_write(state_dir: Path, mapped: Path, stream: bytes) -> None:
+    """#761: hold the backend's `observations` write-back OPEN, so a test can
+    poll it mid-write deterministically, never by a sleep. Opt-in only, by
+    `<state>/cp-hold.json` = `{"dir": DIR, "mode": MODE}` (the backend passes
+    the docker CLI only its own connection variables, so an environment flag
+    would never arrive). MODE:
+
+    - `truncate` (default): the file is emptied, as `tarfile.extractall` does;
+    - `remove`: the file is removed, as real docker cp may do (it replaces
+      the file: a new inode, measured on Docker 29.9.2);
+    - `partial`: the first half of the new bytes is written, as real docker
+      cp shows while it extracts.
+
+    Then `<dir>/held` is created and this waits for `<dir>/release` (30 s at
+    most), before the real extraction runs. Only a stream whose ONLY member
+    is `observations` is held: install() and every other cp is untouched."""
+    try:
+        config = json.loads((state_dir / CP_HOLD_FILE).read_text())
+    except (OSError, ValueError):
+        return
+    hold = str(config.get("dir", ""))
+    if not hold:
+        return
+    try:
+        with tarfile.open(fileobj=io.BytesIO(stream), mode="r:*") as tar:
+            members = tar.getmembers()
+            if [m.name for m in members] != ["observations"]:
+                return
+            extracted = tar.extractfile(members[0])
+            data = extracted.read() if extracted is not None else b""
+    except tarfile.TarError:
+        return
+    target = mapped / "observations"
+    mode = str(config.get("mode", "truncate"))
+    if mode == "remove":
+        target.unlink(missing_ok=True)
+    else:
+        target.write_bytes(data[: len(data) // 2] if mode == "partial" else b"")
+    Path(hold, "held").touch()
+    deadline = time.monotonic() + 30
+    while not Path(hold, "release").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
 
 def _client_version_probe(state_dir: Path, entrypoint: str) -> int:
     key, line = _CLIENT_VERSION_LINES[entrypoint]
@@ -896,8 +943,10 @@ def cmd_cp(state_dir: Path, rest: list[str]) -> int:
             return 1
         mapped = _in_container(state_dir, name, cpath)
         mapped.mkdir(parents=True, exist_ok=True)
+        stream = sys.stdin.buffer.read()
+        _hold_observations_write(state_dir, mapped, stream)
         try:
-            with tarfile.open(fileobj=sys.stdin.buffer, mode="r|*") as tar:
+            with tarfile.open(fileobj=io.BytesIO(stream), mode="r|*") as tar:
                 tar.extractall(mapped, filter="data")
         except tarfile.TarError as exc:
             print(f"Error: bad tar stream: {exc}", file=sys.stderr)
