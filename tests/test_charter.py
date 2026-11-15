@@ -192,3 +192,55 @@ def test_round_one_model_runs_are_sized_not_run() -> None:
     assert sizing.calls == 6 + 102 + 6
     with pytest.raises(ValueError):
         cost_estimate.size_round1(0)
+
+
+# ---------------------------------------------------------------- counter-model review, pass 1
+
+
+def test_an_observation_of_an_undrafted_duty_is_not_called_unstated(tmp_path: Path) -> None:
+    """Five ALWAYS duties, the cap is four, and the record matches the fifth:
+    it is stated, so it must not appear as observed-not-stated."""
+    skill = tmp_path / "five"
+    skill.mkdir()
+    duties = "\n".join(f"ALWAYS do duty {w}." for w in ("alpha", "beta", "gamma", "delta", "retry loop"))
+    (skill / "SKILL.md").write_text(f"---\nname: demo\ndescription: d\n---\n\n{duties}\n", encoding="utf-8")
+    drafted = charter.draft(skill, [LOGS / "complete"])
+    assert "observed, never stated: runs end with stop_reason retry-loop" not in _columns(drafted)
+    assert "(observed: stop_reason retry-loop)" in drafted.render()
+
+
+def test_a_match_beyond_the_quote_cut_still_counts(tmp_path: Path) -> None:
+    skill = tmp_path / "long"
+    skill.mkdir()
+    sentence = "You MUST " + " ".join(["wait"] * 45) + " at the approval gate."
+    (skill / "SKILL.md").write_text(f"---\nname: demo\ndescription: d\n---\n\n{sentence}\n", encoding="utf-8")
+    cols = charter.draft(skill, [LOGS / "complete"]).placed
+    assert [p.column for p in cols if p.kind == "always" and "wait" in p.text] == [charter.OBSERVED_AND_STATED]
+
+
+def test_a_record_the_usage_rules_refuse_grants_no_coverage(tmp_path: Path) -> None:
+    log = tmp_path / "usage.jsonl"
+    log.write_text('{"kind": "skill-usage", "version": true, "skill": "demo", "coverage": "complete"}\n', encoding="utf-8")
+    drafted = charter.draft(SKILL, [log])
+    assert _columns(drafted)[LANE_DUTY] == charter.UNKNOWN_COLUMN
+    assert drafted.evidence.rejected == 1 and drafted.evidence.records == 0
+    assert any("fail #719's usage rules" in w for w in drafted.warnings)
+
+
+def test_a_quote_never_trips_the_copied_passage_detector(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The gate: quotes under 40 words. Run the REAL detector over a long
+    source sentence and the draft that quotes it."""
+    import json
+
+    words = " ".join(f"w{i}" for i in range(80))
+    (tmp_path / "skills/src").mkdir(parents=True)
+    (tmp_path / "skills/src/SKILL.md").write_text(f"---\nname: src\ndescription: d\n---\n\nYou MUST {words}.\n", encoding="utf-8")
+    drafted = charter.draft(tmp_path / "skills/src")
+    (tmp_path / "skills/draft").mkdir()
+    (tmp_path / "skills/draft/SKILL.md").write_text(drafted.render(), encoding="utf-8")
+    capsys.readouterr()
+    cli.main(["inspect", str(tmp_path), "--offline", "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert '"rule": "copied-passage"' not in json.dumps(report.get("findings", report))
+    longest = max(len(p.text.replace(" ...", "").split()) for p in drafted.placed)
+    assert longest <= charter.MAX_QUOTE_WORDS < 40

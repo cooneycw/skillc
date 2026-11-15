@@ -80,6 +80,10 @@ def parse_answers(text: str) -> tuple[dict[str, Answer], str | None]:
         if dated:
             if date is not None:
                 raise ConfirmRefused(f"answers line {number}: approved-on given twice")
+            try:
+                _dt.date.fromisoformat(dated.group("date"))
+            except ValueError:
+                raise ConfirmRefused(f"answers line {number}: approved-on {dated.group('date')!r} is not a real date") from None
             date = dated.group("date")
             continue
         match = ANSWER_RE.match(line)
@@ -137,33 +141,37 @@ def confirm(draft_text: str, answers_text: str | None, today: _dt.date | None = 
     if missing:
         raise ConfirmRefused(f"unanswered clause(s), never defaulted: {', '.join(missing)}")
 
-    always: list[dict[str, object]] = []
-    never: list[dict[str, object]] = []
+    # Every section is REBUILT from the answers (counter-model review on #726:
+    # writing back only intent and invariants ignored the owner's answers for
+    # authority, requires, provides and failure).
+    rebuilt: dict[str, list[dict[str, object]]] = {}
     for section, clause in clauses:
         answer = answers[str(clause.get("id"))]
+        if section == "intent" and answer.action in ("drop", "forbid"):
+            raise ConfirmRefused(f"{answer.clause_id}: the intent cannot be "
+                                 f"{'dropped (a contract requires one)' if answer.action == 'drop' else 'forbidden'}; edit it")
         if answer.action == "drop":
-            if section == "intent":
-                raise ConfirmRefused(f"{answer.clause_id}: the intent cannot be dropped (a contract requires one); edit it")
             continue
         kept = {k: v for k, v in clause.items() if k not in ("draft", "approved")}
         if answer.action == "edit":
             kept["what"] = answer.text
+        target = section
         if answer.action == "forbid":
-            if section == "intent":
-                raise ConfirmRefused(f"{answer.clause_id}: the intent cannot be forbidden; edit it")
             kept["what"] = f"Never: {kept.get('what')}"
             kept["column"] = "forbidden-by-owner"
-            never.append(kept)
-            continue
-        if section in APPROVAL_SECTIONS:
+            kept.pop("readers", None)  # a forbidden duty is provided to nobody
+            target = "invariants.never"
+        elif section in APPROVAL_SECTIONS:
             kept["approved"] = stamp
-        if section == "intent":
+        if target == "intent":
             data["intent"] = kept
-        elif section == "invariants.never":
-            never.append(kept)
-        elif section == "invariants.always":
-            always.append(kept)
-    data["invariants"] = {"always": always, "never": never}
+        else:
+            rebuilt.setdefault(target, []).append(kept)
+    invariants = {kind: rebuilt.get(f"invariants.{kind}", []) for kind in contracts.INVARIANT_KINDS}
+    data["invariants"] = invariants
+    for section in contracts.CLAUSE_SECTIONS:
+        if section in data or section in rebuilt:
+            data[section] = rebuilt.get(section, [])
     return "---\n" + dump(data) + "---\n\n" + _confirmed_body(body, stamp)
 
 

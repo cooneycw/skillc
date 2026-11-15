@@ -63,9 +63,12 @@ COLUMNS = (OBSERVED_AND_STATED, STATED_NOT_OBSERVED, UNKNOWN_COLUMN, OBSERVED_NO
 #: The one coverage value that can make an absence count as "never observed".
 COMPLETE = "complete"
 
-#: A quote longer than this is cut (orchestrator, #726 gate): long copied
-#: passages would trip `skillc inspect`'s copied-passage rule on the report.
-MAX_QUOTE_WORDS = 40
+#: A quote keeps at most this many source words (orchestrator, #726 gate:
+#: under 40). `skillc inspect`'s copied-passage rule fires at
+#: `decay.COPIED_MIN_WORDS` (40) identical words, so a 40-word quote would
+#: still trip it (counter-model review); tests/test_charter.py runs the real
+#: detector over a quote and its source.
+MAX_QUOTE_WORDS = 39
 
 #: How many candidates of each kind become draft clauses; the rest are listed
 #: in the body. The issue asks for 2-4 must-always outcomes; the owner chooses.
@@ -97,6 +100,11 @@ class Candidate:
     text: str  # the quote, at most MAX_QUOTE_WORDS words
     cite: str  # "<file>:<line>"
     emphasis: bool  # the keyword is written in capitals
+    full: str = ""  # the whole sentence, which observations are matched against
+
+    @property
+    def sentence(self) -> str:
+        return self.full or self.text
 
 
 @dataclass(frozen=True)
@@ -118,6 +126,7 @@ class Evidence:
     coverage: Counter[str]  # coverage value -> records
     outcomes: Counter[str]
     observations: tuple[Observation, ...]
+    rejected: int = 0  # records for this skill that #719's usage rules refuse
 
     @property
     def can_show_absence(self) -> bool:
@@ -130,6 +139,8 @@ class Evidence:
             return "no usage log"
         if self.unreadable and self.records == 0:
             return "the usage log could not be read"
+        if self.records == 0 and self.rejected:
+            return f"every record for this skill ({self.rejected}) fails #719's usage rules"
         if self.records == 0:
             return "no usage record for this skill (an empty log is not evidence of non-use)"
         seen = ", ".join(f"{k} x{v}" for k, v in sorted(self.coverage.items()))
@@ -148,7 +159,7 @@ class TokenMatcher:
     """Every word of the stop_reason token appears as a word in the line."""
 
     def matches(self, candidate: Candidate, observation: Observation) -> bool:
-        words = set(WORD_RE.findall(candidate.text.lower()))
+        words = set(WORD_RE.findall(candidate.sentence.lower()))
         token_words = WORD_RE.findall(observation.token.lower())
         return bool(token_words) and all(w in words for w in token_words)
 
@@ -177,6 +188,8 @@ class Draft:
     git_summary: str
     subject: str | None = None
     warnings: list[str] = field(default_factory=list)
+    #: cite -> stop_reason tokens that matched an undrafted candidate
+    further_seen: dict[str, list[str]] = field(default_factory=dict)
 
     def data(self) -> dict[str, object]:
         """The YAML block, as data; `render()` emits it."""
@@ -220,7 +233,10 @@ class Draft:
             lines.append("| - | - | no stated or observed duty | - |")
         if self.further:
             lines += ["", f"## Further candidates, not drafted ({len(self.further)})", ""]
-            lines += [f"- {c.kind} `{c.cite}`: {_cell(c.text)}" for c in self.further]
+            for c in self.further:
+                seen = self.further_seen.get(c.cite)
+                note = f" (observed: stop_reason {', '.join(seen)})" if seen else ""
+                lines.append(f"- {c.kind} `{c.cite}`: {_cell(c.text)}{note}")
         lines += [
             "",
             "## Limits",
@@ -357,7 +373,7 @@ def stated_duties(text: str, file_label: str, first_line: int = 1) -> list[Candi
             kind = "never" if NEVER_RE.search(sentence) else "always" if ALWAYS_RE.search(sentence) else None
             if kind is not None:
                 found.append(Candidate(kind, _quote(sentence), f"{file_label}:{number}",
-                                       bool(UPPER_KEYWORD_RE.search(sentence))))
+                                       bool(UPPER_KEYWORD_RE.search(sentence)), " ".join(sentence.split())))
     return found
 
 
@@ -415,6 +431,7 @@ def read_evidence(logs: Sequence[usage.UsageLog], names: set[str]) -> Evidence:
     outcomes: Counter[str] = Counter()
     tokens: Counter[str] = Counter()
     records = 0
+    rejected = 0
     unreadable: list[str] = []
     for log in logs:
         if log.parse_error is not None:
@@ -422,9 +439,12 @@ def read_evidence(logs: Sequence[usage.UsageLog], names: set[str]) -> Evidence:
             continue
         for entry in log.entries:
             data = entry.data
-            if data.get("kind") != usage.SKILL_USAGE or data.get("version") not in usage.USAGE_VERSIONS:
-                continue
             if data.get("skill") not in names:
+                continue
+            if usage.record_problems(data):
+                # A record #719's own rules refuse is not evidence (counter-model
+                # review: a malformed one could grant complete coverage).
+                rejected += 1
                 continue
             records += 1
             coverage[str(data.get("coverage"))] += 1
@@ -434,7 +454,7 @@ def read_evidence(logs: Sequence[usage.UsageLog], names: set[str]) -> Evidence:
                 if isinstance(reason, str) and usage.STOP_REASON_RE.fullmatch(reason):
                     tokens[reason] += 1
     observations = tuple(Observation(t, n) for t, n in sorted(tokens.items()))
-    return Evidence(len(logs), tuple(unreadable), records, coverage, outcomes, observations)
+    return Evidence(len(logs), tuple(unreadable), records, coverage, outcomes, observations, rejected)
 
 
 def git_summary(skill_file: Path) -> str | None:
@@ -505,7 +525,7 @@ def draft(
         )
 
     chosen, further = _choose(candidates, max_always, max_never)
-    placed = place(name, chosen, evidence, matcher or TokenMatcher())
+    placed = place(name, chosen, evidence, matcher or TokenMatcher(), further)
 
     git = git_summary(skill_file)
     sources = [
@@ -517,10 +537,14 @@ def draft(
                           + ("" if evidence.can_show_absence else f"; absences UNKNOWN ({evidence.why_unknown()})")),
         (REPOSITORY_SOURCE, "missing (#718 build step 4)"),
     ]
+    if evidence.rejected:
+        warnings.append(f"{evidence.rejected} usage record(s) for this skill fail #719's usage rules and were not counted")
     if evidence.unreadable:
         warnings.append(f"unreadable usage log(s), not counted: {', '.join(evidence.unreadable)}")
+    use = matcher or TokenMatcher()
+    further_seen = {c.cite: [o.token for o in evidence.observations if use.matches(c, o)] for c in further}
     return Draft(name, skill_file, job, job_cite, placed, further, evidence, sources, git or "",
-                 subject, warnings)
+                 subject, warnings, {k: v for k, v in further_seen.items() if v})
 
 
 def _choose(candidates: list[Candidate], max_always: int, max_never: int) -> tuple[list[Candidate], list[Candidate]]:
@@ -534,9 +558,16 @@ def _choose(candidates: list[Candidate], max_always: int, max_never: int) -> tup
     return chosen, rest
 
 
-def place(name: str, chosen: Sequence[Candidate], evidence: Evidence, matcher: Matcher) -> list[Placed]:
+def place(
+    name: str, chosen: Sequence[Candidate], evidence: Evidence, matcher: Matcher,
+    further: Sequence[Candidate] = (),
+) -> list[Placed]:
+    """Columns for the chosen candidates. An observation is "observed, never
+    stated" only when NO stated candidate matches it - chosen or not, at full
+    length (counter-model review: matching only the drafted, cut quotes called
+    a stated duty unstated)."""
     placed: list[Placed] = []
-    used: set[str] = set()
+    used: set[str] = {o.token for c in further for o in evidence.observations if matcher.matches(c, o)}
     counters = {"always": 0, "never": 0}
     for c in chosen:
         counters[c.kind] += 1

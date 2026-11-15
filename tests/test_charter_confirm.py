@@ -130,3 +130,61 @@ def test_the_confirmed_charter_says_who_confirmed_it(tmp_path: Path) -> None:
     assert cli.main(["charter", "confirm", str(draft), "--answers", str(answers), "--out", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
     assert "Confirmed by the owner on" in text and "Draft ready for owner confirmation" not in text
+
+
+# ---------------------------------------------------------------- counter-model review, pass 1
+
+RICH = """---
+contract: rich
+version: 1
+intent:
+  id: rich.intent
+  draft: true
+  what: Why rich exists.
+purpose: Rich delivers.
+owner: owner
+provides:
+  - id: rich.out
+    draft: true
+    what: the output
+    readers: [owner]
+authority:
+  - id: rich.no-self-approval
+    draft: true
+    what: never approves itself
+  - id: rich.auth-drop
+    draft: true
+    what: to drop
+requires:
+  - id: rich.input
+    draft: true
+    what: the input
+invariants:
+  always: []
+  never: []
+---
+
+**Draft ready for owner confirmation.**
+"""
+
+
+def test_every_clause_section_takes_the_owners_answers() -> None:
+    """Pass 1 HIGH: only intent and invariants were written back, so an
+    authority clause was never approved and drop/forbid on provides did nothing."""
+    answers = ("rich.intent: accept\nrich.out: forbid\nrich.no-self-approval: edit: Never approves its own plan.\n"
+               "rich.auth-drop: drop\nrich.input: accept\n")
+    clauses = {str(c["id"]): (s, c) for s, c in _every_clause(charter_confirm.confirm(RICH, answers, DAY))}
+    section, auth = clauses["rich.no-self-approval"]
+    assert section == "authority" and auth["approved"] == "2026-11-15" and "draft" not in auth
+    assert auth["what"] == "Never approves its own plan."
+    assert "rich.auth-drop" not in clauses
+    assert clauses["rich.out"][0] == "invariants.never"  # moved, not duplicated
+    assert [s for s, c in _every_clause(charter_confirm.confirm(RICH, answers, DAY)) if c["id"] == "rich.out"] == ["invariants.never"]
+    section, needed = clauses["rich.input"]
+    assert section == "requires" and "approved" not in needed and "draft" not in needed
+
+
+@pytest.mark.parametrize("date", ["2026-02-30", "2026-99-99"])
+def test_an_impossible_approval_date_is_refused(date: str) -> None:
+    with pytest.raises(ConfirmRefused, match="not a real date"):
+        charter_confirm.parse_answers(f"approved-on: {date}\n")

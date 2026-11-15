@@ -36,7 +36,7 @@ invariants:
     - id: "flow-auto.always-4"
       draft: true
       column: "unknown"
-      what: "Keys: `LANE` (`current-branch|fresh|resume|remote-pickup|local-pickup|cross-repo`), `CROSS_REPO`, `GIT_LANE` (always `GIT_LANE=1`: enter with `cd`, git cleanup at Step 7), `SESSION_CWD`, `SESSION_CWD_INFERRED`, `TARGET_REPO`, `COMPOSE_PROJECT_NAME` (the compose pin for the whole run, issue #626), `ISSUE_STATE`, `ISSUE_TITLE`, `BRANCH`, `WT_PATH`, `DEFAULT_BRANCH`, `REMOTE_BRANCH`, `WT_CREATED` (1 = the helper already ..."
+      what: "Keys: `LANE` (`current-branch|fresh|resume|remote-pickup|local-pickup|cross-repo`), `CROSS_REPO`, `GIT_LANE` (always `GIT_LANE=1`: enter with `cd`, git cleanup at Step 7), `SESSION_CWD`, `SESSION_CWD_INFERRED`, `TARGET_REPO`, `COMPOSE_PROJECT_NAME` (the compose pin for the whole run, issue #626), `ISSUE_STATE`, `ISSUE_TITLE`, `BRANCH`, `WT_PATH`, `DEFAULT_BRANCH`, `REMOTE_BRANCH`, `WT_CREATED` (1 = the helper ..."
       evidence:
         - "auto.md:120"
         - "UNKNOWN: no usage log"
@@ -105,7 +105,7 @@ From `auto.md`, no model call.
 | unknown | `flow-auto.always-1` | **CRITICAL: You MUST create or enter a worktree before proceeding. | auto.md:82; UNKNOWN: no usage log |
 | unknown | `flow-auto.always-2` | Cleanup is ALWAYS the git fallback (issue #627); on `LANE=current-branch` there is no worktree, so just delete the branch. | auto.md:1177; UNKNOWN: no usage log |
 | unknown | `flow-auto.always-3` | Resolved like `/project:next`: an existing directory path first, else `~/Projects/<PROJECT>`; must be a git checkout. | auto.md:12; UNKNOWN: no usage log |
-| unknown | `flow-auto.always-4` | Keys: `LANE` (`current-branch\|fresh\|resume\|remote-pickup\|local-pickup\|cross-repo`), `CROSS_REPO`, `GIT_LANE` (always `GIT_LANE=1`: enter with `cd`, git cleanup at Step 7), `SESSION_CWD`, `SESSION_CWD_INFERRED`, `TARGET_REPO`, `COMPOSE_PROJECT_NAME` (the compose pin for the whole run, issue #626), `ISSUE_STATE`, `ISSUE_TITLE`, `BRANCH`, `WT_PATH`, `DEFAULT_BRANCH`, `REMOTE_BRANCH`, `WT_CREATED` (1 = the helper already ... | auto.md:120; UNKNOWN: no usage log |
+| unknown | `flow-auto.always-4` | Keys: `LANE` (`current-branch\|fresh\|resume\|remote-pickup\|local-pickup\|cross-repo`), `CROSS_REPO`, `GIT_LANE` (always `GIT_LANE=1`: enter with `cd`, git cleanup at Step 7), `SESSION_CWD`, `SESSION_CWD_INFERRED`, `TARGET_REPO`, `COMPOSE_PROJECT_NAME` (the compose pin for the whole run, issue #626), `ISSUE_STATE`, `ISSUE_TITLE`, `BRANCH`, `WT_PATH`, `DEFAULT_BRANCH`, `REMOTE_BRANCH`, `WT_CREATED` (1 = the helper ... | auto.md:120; UNKNOWN: no usage log |
 | unknown | `flow-auto.never-1` | NEVER implement changes directly on main/master. | auto.md:82; UNKNOWN: no usage log |
 | unknown | `flow-auto.never-2` | NEVER use `git stash push` or a bare `git stash pop`: the stash stack is shared by every worktree. | auto.md:594; UNKNOWN: no usage log |
 | unknown | `flow-auto.never-3` | A SKIP IS A RECORDED STATE, NEVER AN OMISSION.** **IT COMES BEFORE THE QUALITY GATES, deliberately**: accepted findings are fixed in the worktree, and the gates must see those fixes. | auto.md:682; UNKNOWN: no usage log |
@@ -131,7 +131,7 @@ From `auto.md`, no model call.
 - never `auto.md:396`: If git refuses to START the merge, commit first (`git add -A` + `git commit -m "wip(flow): pre-merge snapshot"`) and merge on the clean tree - never stash: the stash stack is SHARED across every worktree (#635).
 - never `auto.md:406`: **Only after approval is granted, and never before**, and only after the two checks above, write THIS RUN's approved plan.
 - never `auto.md:410`: Then APPEND this run's fields - never rewrite the file or edit an earlier run's section:
-- never `auto.md:436`: **Adopting found or dirty work (issue #1504).** Only if you deliberately preserved pre-existing or dirty work by committing it unmodified as its own commit, run `declare-salvage` with that commit's sha right after `begin-run` (it refuses a sha that is not ...
+- never `auto.md:436`: **Adopting found or dirty work (issue #1504).** Only if you deliberately preserved pre-existing or dirty work by committing it unmodified as its own commit, run `declare-salvage` with that commit's sha right after `begin-run` (it refuses a sha that is ...
 - never `auto.md:468`: Proceed; Step 6 will report drift as unresolved, never clean.
 - never `auto.md:472`: **Worktree path-resolution rule (issue #486).** Resolve every edit path from the active worktree root - `git rev-parse --show-toplevel` - never a hand-built `.claude/worktrees/<name>/...` absolute path.
 - always `auto.md:482`: **Read the `FLOW_WORKTREE_GUARD:` line (issue #1014)**, which is always printed:
@@ -153,9 +153,9 @@ From `auto.md`, no model call.
 - never `auto.md:725`: When no eligible reviewer can run, record `reviewer-unavailable`; never fabricate a stream or copy a model from a banner.
 - never `auto.md:745`: Later accepted fixes: STOP, ask the approver before each further pass; never receipt unreviewed commits or false counts.
 - never `auto.md:749`: `COUNTER_MODEL_REVIEW: unparseable` (non-zero) - **This is not a clean review.** Record `skipped` with reason `reviewer-unavailable`; never a `ran` receipt with zeros.
-- never `auto.md:752`: `COUNTER_MODEL_REVIEW: format-mismatch` (non-zero, issue #1259) - **the review HAPPENED, so this is never a skip.** Ask the reviewer once to restate its findings in the prescribed `### [SEVERITY] title` shape and parse again; if it still does not comply, triage ...
+- never `auto.md:752`: `COUNTER_MODEL_REVIEW: format-mismatch` (non-zero, issue #1259) - **the review HAPPENED, so this is never a skip.** Ask the reviewer once to restate its findings in the prescribed `### [SEVERITY] title` shape and parse again; if it still does not comply, ...
 - never `auto.md:797`: **The PR body block below is a RENDERING of the receipt, never the source.** Append it to the PR body in item 5; a skipped stage appends the one-line skip note and its receipt path instead:
-- never `auto.md:826`: **A run with no `FLOW_FINISH_GATE:` verdict line did not run the gate: **STOP** (issue #1547).** The trigger is the verdict LINE, never the exit code: 127, 126 (an unset `CPP_SKILL_DIR`), 2, only the `FLOW_FINISH_GATE_EXIT=` trailer, or nothing at all, gave ...
+- never `auto.md:826`: **A run with no `FLOW_FINISH_GATE:` verdict line did not run the gate: **STOP** (issue #1547).** The trigger is the verdict LINE, never the exit code: 127, 126 (an unset `CPP_SKILL_DIR`), 2, only the `FLOW_FINISH_GATE_EXIT=` trailer, or nothing at all, ...
 - never `auto.md:830`: It is NOT `skipped`, and the run never commits, pushes or merges on it.
 - never `auto.md:836`: Proceed, but report the counts verbatim and say plainly that this gate proved nothing about the change; never "tests passed".
 - never `auto.md:838`: `warn` also means a test failed and PASSED on re-run (issue #769): report the ids on the `RERUN_PASSED:` line and never call the run a clean pass.
@@ -165,7 +165,7 @@ From `auto.md`, no model call.
 - never `auto.md:922`: `PLAN_COMPLIANCE: unknown` (exit 4) - never report it as agreement.
 - never `auto.md:989`: The Codex re-sync is called UNCONDITIONALLY here too (never re-gated on a path pattern,
 - never `auto.md:1012`: **If the merge changed the branch**, re-run the FULL quality gate - the same Step-6 helper, invoked BARE as a separate call (#613; the #581 discipline - never fold it back into a compound block).
-- always `auto.md:1051`: (`--strict-event` makes the required lane, named by `FLOW_CI_EVENT`, a FILTER: an absent required-lane pipeline stays `not-found` and the wait continues.) On `stalled` (issue #1552) the pipeline is dead, not slow: do not merge and do not keep waiting - report ...
+- always `auto.md:1051`: (`--strict-event` makes the required lane, named by `FLOW_CI_EVENT`, a FILTER: an absent required-lane pipeline stays `not-found` and the wait continues.) On `stalled` (issue #1552) the pipeline is dead, not slow: do not merge and do not keep waiting - ...
 - never `auto.md:1056`: On `success`, invoke the merge helper at once, PINNED to the sha that wait was keyed on (issue #1543): pass `--match-head-commit <pr-head-sha>` to the helper, never to a plain `gh pr merge`.
 - never `auto.md:1064`: Never use plain `gh pr merge --delete-branch` from a linked worktree (issue #461):
 - never `auto.md:1102`: **`MERGE_RC` 12 is the MISSING-HELPER REFUSAL (issue #1543), and the helper never emits it.** Nothing was merged.

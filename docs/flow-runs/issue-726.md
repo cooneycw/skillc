@@ -63,3 +63,15 @@ Scope: ~13 paths plus fixture files, ~1,000-1,200 lines. Risks: crude determinis
   - `tests/test_contracts.py` - subject rules
   - `docs/specs/contracts.md` - the `subject` field and the charters/ layout
   - effect on the outcome: the CPP proof drafts use `charters/flow/{eli5,auto}/CHARTER.md` with a subject naming `.claude/commands/flow/*.md`, drafted from the command file, never the codex mirror
+
+### Lane and reader corrections (counter-model review, pass 1)
+The pass-1 review found three lane answers that claimed more than this change tests. Corrected:
+- Checkout: **not covered**. `charter draft --usage` takes explicit paths and `discover_logs` scans what it is given. Nothing here resolves a main checkout from a linked worktree, so neither layout is tested by this change.
+- Subject collection: synthetic fixtures **will test** (`evals/subjects/charter-draft`). CPP at `3ed2546` is **not covered** in CI: the proof drafts were produced by hand and re-checked by hand in a CPP-layout copy, as recorded in `docs/measurements/round1/README.md`.
+- skillc distribution: source checkout **will test** (the suite). Built wheel **not covered** for the new commands: `make clean-install` exercises selftest and check, not `charter`.
+
+Readers of the changed output:
+- Reader: `charter_confirm.confirm` reads `charter draft` YAML. Compatibility: the emitter round-trip test, and confirm tests built on real drafts.
+- Reader: `contracts.load` and the nine contract rules read drafts and confirmed charters, including `subject`, `draft` and `approved`. Compatibility: `test_a_draft_passes_contract_shape_warns_approval_and_fails_clause_backed` and `test_a_command_draft_carries_its_subject_and_passes_shape`.
+- Reader: `decay.copied_passage` (`skillc inspect`) reads reports that hold quotes. Compatibility: `test_a_quote_never_trips_the_copied_passage_detector`, which runs the real detector.
+- Reader: the owner, who reads drafts and the round-1 README. Compatibility: none mechanical; this is the confirmation dialogue.
