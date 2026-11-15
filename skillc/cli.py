@@ -26,6 +26,8 @@ from pathlib import Path
 
 from . import (
     __version__,
+    charter,
+    charter_confirm,
     checks,
     configuration_compare,
     contracts,
@@ -2672,6 +2674,51 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+#: `charter draft` exit codes (docs/specs/charter-round1.md). 3 matches
+#: `contracts`' "none declared": nothing to work from is never a clean result.
+CHARTER_EXIT_OK, CHARTER_EXIT_REFUSED, CHARTER_EXIT_USAGE, CHARTER_EXIT_NOTHING = 0, 1, 2, 3
+
+
+def cmd_charter_draft(args: argparse.Namespace) -> int:
+    """`skillc charter draft <skill>` (#726): a draft CHARTER.md from evidence.
+    Prints to stdout, or writes `--out`, which must not exist."""
+    skill = Path(args.skill)
+    out = Path(args.out) if args.out else None
+    if out is not None and (out.exists() or out.is_symlink()):
+        print(f"skillc: {out} exists; charter draft never overwrites a charter", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    try:
+        drafted = charter.draft(skill, [Path(u) for u in args.usage or []], aliases=args.alias or [],
+                                subject=args.subject)
+    except FileNotFoundError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    except charter.NothingToDraft as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_NOTHING
+    text = drafted.render()
+    if out is None:
+        sys.stdout.write(text)
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"skillc: draft written to {out} - draft ready for owner confirmation")
+    columns = ", ".join(f"{c} {sum(p.column == c for p in drafted.placed)}" for c in charter.COLUMNS)
+    print(f"skillc: {len(drafted.placed)} draft clause(s): {columns}", file=sys.stderr)
+    return CHARTER_EXIT_OK
+
+
+def cmd_charter_confirm(args: argparse.Namespace) -> int:
+    """`skillc charter confirm <draft> --answers FILE --out FILE` (#726)."""
+    try:
+        charter_confirm.confirm_file(Path(args.draft), Path(args.answers) if args.answers else None, Path(args.out))
+    except (charter_confirm.ConfirmRefused, OSError) as exc:
+        print(f"skillc: charter confirm refused: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_REFUSED
+    print(f"skillc: confirmed charter written to {args.out}")
+    return CHARTER_EXIT_OK
+
+
 def cmd_contracts(args: argparse.Namespace) -> int:
     """`skillc contracts <collection>` (#720): every CHARTER.md read together.
 
@@ -3528,6 +3575,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_contracts.add_argument("path", help="collection root; test paths resolve from here")
     p_contracts.set_defaults(func=cmd_contracts)
+
+    p_charter = sub.add_parser("charter", help="skill-gauntlet round 1: draft a charter, then the owner confirms it (#726)")
+    charter_sub = p_charter.add_subparsers(dest="charter_command", required=True)
+    p_charter_draft = charter_sub.add_parser(
+        "draft", help="draft a CHARTER.md from the skill's text and usage records; nothing is approved"
+    )
+    p_charter_draft.add_argument("skill", help="a skill directory holding SKILL.md, or a command .md file")
+    p_charter_draft.add_argument("--usage", action="append", metavar="PATH",
+                                 help="a usage log, or a directory searched for them (repeatable)")
+    p_charter_draft.add_argument("--alias", action="append", metavar="NAME",
+                                 help="another name usage records carry for this skill, e.g. flow:eli5 (repeatable)")
+    p_charter_draft.add_argument("--subject", metavar="PATH",
+                                 help="the subject: line, the skill file's path from the collection root")
+    p_charter_draft.add_argument("--out", metavar="FILE", help="write here instead of stdout; never overwrites")
+    p_charter_draft.set_defaults(func=cmd_charter_draft)
+    p_charter_confirm = charter_sub.add_parser(
+        "confirm", help="apply the owner's answers to a draft; refuses without them"
+    )
+    p_charter_confirm.add_argument("draft", help="a `charter draft` output")
+    p_charter_confirm.add_argument("--answers", metavar="FILE", help="the owner's answers (docs/specs/charter-round1.md)")
+    p_charter_confirm.add_argument("--out", required=True, metavar="FILE", help="the confirmed charter; never overwrites")
+    p_charter_confirm.set_defaults(func=cmd_charter_confirm)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

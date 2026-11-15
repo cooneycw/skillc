@@ -41,7 +41,12 @@ REQUIRED = ("contract", "version", "intent", "purpose", "owner")
 #: Clause lists: each entry is a mapping with an `id` and a `test`.
 CLAUSE_SECTIONS = ("requires", "provides", "authority", "failure")
 INVARIANT_KINDS = ("always", "never")
-OPTIONAL = ("scope", "consumes", "invariants", *CLAUSE_SECTIONS)
+OPTIONAL = ("subject", "scope", "consumes", "invariants", *CLAUSE_SECTIONS)
+#: A slash command's charter lives here, at the collection root, and must name
+#: its command file as `subject:` (owner decision 2026-11-15, #726,
+#: claude-power-pack#1838). A native skill keeps CHARTER.md beside SKILL.md.
+CHARTERS_DIR = "charters"
+SKILL_FILE = "SKILL.md"
 KNOWN_FIELDS = frozenset((*REQUIRED, *OPTIONAL))
 
 NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
@@ -194,7 +199,7 @@ def _is_date(value: object) -> bool:
     return True
 
 
-def _contract_shape_problems(contract: Contract) -> list[str]:
+def _contract_shape_problems(contract: Contract, root: Path | None = None) -> list[str]:
     if contract.parse_error is not None:
         return [f"the contract block does not parse: {contract.parse_error}"]
     data = contract.data
@@ -267,11 +272,47 @@ def _contract_shape_problems(contract: Contract) -> list[str]:
     for clause_id, count in sorted(ids.items()):
         if count > 1:
             problems.append(f"clause id {clause_id!r} is declared {count} times in this contract")
+    if root is not None:
+        problems.extend(_subject_problems(contract, root))
     return problems
 
 
+def _subject_problems(contract: Contract, root: Path) -> list[str]:
+    """`subject:` names the file a charter is about, from the collection root.
+    Required under `charters/` (a slash command's charter); optional beside a
+    SKILL.md, but then it must name that SKILL.md. A subject that does not
+    exist is refused by name: a charter about nothing certifies nothing."""
+    subject = contract.data.get("subject")
+    try:
+        rel = contract.path.relative_to(root)
+    except ValueError:
+        return []
+    under_charters = len(rel.parts) > 1 and rel.parts[0] == CHARTERS_DIR
+    if subject is None:
+        if under_charters:
+            return [f"a charter under {CHARTERS_DIR}/ requires 'subject:' naming the command file it is about, "
+                    f"e.g. 'subject: .claude/commands/flow/auto.md'"]
+        return []
+    if not (isinstance(subject, str) and subject.strip()):
+        return [f"subject {subject!r} is not a path"]
+    if not _usable(subject) or not _inside(root, subject):
+        return [f"subject {subject!r} is not a path inside the collection"]
+    if not (root / subject).is_file():
+        return [f"subject {subject!r} does not exist (resolved from the collection root)"]
+    beside = contract.path.parent / SKILL_FILE
+    if not under_charters and beside.is_file():
+        try:
+            same = (root / subject).resolve() == beside.resolve()
+        except (OSError, RuntimeError):
+            same = False
+        if not same:
+            return [f"subject {subject!r} is not the SKILL.md beside this charter "
+                    f"({beside.relative_to(root).as_posix()})"]
+    return []
+
+
 def _shape_ok(collection: Collection) -> list[Contract]:
-    return [c for c in collection.contracts if not _contract_shape_problems(c)]
+    return [c for c in collection.contracts if not _contract_shape_problems(c, collection.root)]
 
 
 def _collection_problems(collection: Collection) -> list[Finding]:
@@ -317,7 +358,7 @@ Finding = tuple[Path, str]
 def contract_shape(collection: Collection) -> Iterator[Finding]:
     """Each block parses and declares the required fields in their types."""
     for contract in collection.contracts:
-        for problem in _contract_shape_problems(contract):
+        for problem in _contract_shape_problems(contract, collection.root):
             yield contract.path, problem
     yield from _collection_problems(collection)
 

@@ -37,6 +37,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/contracts.py` - `skillc contracts` (#720): the `CHARTER.md` contract beside each `SKILL.md`,
   nine rules read across a whole collection (unbacked clauses, missing bad cases, two-sided hand-offs,
   readers, duty ownership); reads declarations only and runs no test - see [docs/specs/contracts.md](docs/specs/contracts.md)
+- `skillc/charter.py` - `skillc charter draft` (#726, gauntlet round 1): a draft CHARTER.md from a skill's text and
+  usage records, sorted into observed-and-stated / stated-not-observed / unknown / observed-not-stated; no model call,
+  never approves. `skillc/charter_confirm.py` applies the owner's answers. Spec: [docs/specs/charter-round1.md](docs/specs/charter-round1.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module

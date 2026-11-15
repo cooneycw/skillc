@@ -267,3 +267,52 @@ def test_every_run_says_a_bad_segment_proves_presence_not_failure(
     assert "shows a negative case is present, not that it can fail" in out
     spec = (Path(__file__).resolve().parents[1] / "docs/specs/contracts.md").read_text(encoding="utf-8")
     assert "It proves a negative case is PRESENT,\nnot that it can fail." in spec
+
+
+# ---------------------------------------------------------------- subject (owner decision 2026-11-15, #726)
+
+
+def _details(root: Path) -> list[str]:
+    return [f.detail for f in checks.run_contracts(contracts.load_collection(root)) if f.rule == "contract-shape"]
+
+
+def _command_case(tmp_path: Path, subject: str | None) -> Path:
+    shutil.copytree(CONTROLS / "contract-shape/good/subject-command", tmp_path / "c")
+    charter = tmp_path / "c/charters/flow/auto/CHARTER.md"
+    text = charter.read_text(encoding="utf-8").replace("subject: .claude/commands/flow/auto.md\n", "")
+    if subject is not None:
+        text = text.replace("contract: flow-auto\n", f"contract: flow-auto\nsubject: {subject}\n")
+    charter.write_text(text, encoding="utf-8")
+    return tmp_path / "c"
+
+
+def test_a_command_charter_names_an_existing_subject(tmp_path: Path) -> None:
+    assert _details(_command_case(tmp_path, ".claude/commands/flow/auto.md")) == []
+
+
+@pytest.mark.parametrize(("subject", "reason"), [
+    (None, "requires 'subject:'"),
+    (".claude/commands/flow/autoo.md", "does not exist"),
+    ("../outside.md", "not a path inside the collection"),
+    ("/etc/hostname", "not a path inside the collection"),
+    (".claude/commands/flow", "does not exist"),  # a directory is not a subject file
+])
+def test_a_command_charter_without_a_real_subject_fails_shape(tmp_path: Path, subject: str | None, reason: str) -> None:
+    details = _details(_command_case(tmp_path, subject))
+    assert len(details) == 1 and reason in details[0]
+
+
+def test_a_skill_charter_needs_no_subject_but_a_given_one_must_be_its_skill(tmp_path: Path) -> None:
+    root = tmp_path / "c"
+    shutil.copytree(CONTROLS / "contract-shape/good/valid", root)
+    (root / "alpha/SKILL.md").write_text("---\nname: alpha\ndescription: x\n---\n", encoding="utf-8")
+    (root / "beta").mkdir()
+    (root / "beta/SKILL.md").write_text("---\nname: beta\ndescription: x\n---\n", encoding="utf-8")
+    assert _details(root) == []
+    charter = root / "alpha/CHARTER.md"
+    original = charter.read_text(encoding="utf-8")
+    charter.write_text(original.replace("contract: alpha\n", "contract: alpha\nsubject: alpha/SKILL.md\n"), encoding="utf-8")
+    assert _details(root) == []
+    charter.write_text(original.replace("contract: alpha\n", "contract: alpha\nsubject: beta/SKILL.md\n"), encoding="utf-8")
+    details = _details(root)
+    assert len(details) == 1 and "is not the SKILL.md beside this charter" in details[0]
