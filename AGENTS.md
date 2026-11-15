@@ -34,6 +34,9 @@ specification rejects, and it proves its own rules can fail before reporting the
   (`<main checkout>/.skillc/usage.jsonl`), its four rules, the fail-open Claude Code hook that
   writes it (`skillc usage hook`), `usage end` and `usage report`; see
   [docs/skill-usage-hook.md](docs/skill-usage-hook.md) and the records spec's `skill-usage` section
+- `skillc/contracts.py` - `skillc contracts` (#720): the `CHARTER.md` contract beside each `SKILL.md`,
+  nine rules read across a whole collection (unbacked clauses, missing bad cases, two-sided hand-offs,
+  readers, duty ownership); reads declarations only and runs no test - see [docs/specs/contracts.md](docs/specs/contracts.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module
