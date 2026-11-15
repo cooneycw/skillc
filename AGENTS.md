@@ -37,6 +37,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/contracts.py` - `skillc contracts` (#720): the `CHARTER.md` contract beside each `SKILL.md`,
   nine rules read across a whole collection (unbacked clauses, missing bad cases, two-sided hand-offs,
   readers, duty ownership); reads declarations only and runs no test - see [docs/specs/contracts.md](docs/specs/contracts.md)
+- `skillc/gauntlet_trials.py` - `skillc gauntlet round3|round4` (#736): baseline and challenge trials from a declaration;
+  a declared attempt cap (decision 4), a seeded train/test split, UNKNOWN unless a named damaged copy separates,
+  strict no-worse variants, and a ledger keyed by skill, task, grader, client and model. PR 1 runs offline only. Spec: [docs/specs/gauntlet-rounds-3-4.md](docs/specs/gauntlet-rounds-3-4.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module

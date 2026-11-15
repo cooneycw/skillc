@@ -30,6 +30,7 @@ from . import (
     configuration_compare,
     contracts,
     exposure,
+    gauntlet_trials,
     leak,
     materialize,
     profile,
@@ -2672,6 +2673,35 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+#: `gauntlet round3|round4` exit codes (docs/specs/gauntlet-rounds-3-4.md).
+GAUNTLET_EXIT_OK, GAUNTLET_EXIT_REFUSED, GAUNTLET_EXIT_USAGE, GAUNTLET_EXIT_UNDECIDED = 0, 1, 2, 3
+
+
+def cmd_gauntlet_round(args: argparse.Namespace) -> int:
+    """`skillc gauntlet round3|round4 <declaration> [--plan]` (#736 PR 1).
+    PR 1 ships no real attempt runner: `--plan` prints the declared attempt
+    count and spends nothing; a real run is refused until #736 PR 3."""
+    try:
+        declaration = gauntlet_trials.load(Path(args.declaration).resolve())
+    except gauntlet_trials.DeclarationError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    ledger = gauntlet_trials.Ledger(Path(args.ledger) if args.ledger
+                                    else declaration.path.parent / ".gauntlet-ledger.jsonl")
+    play = gauntlet_trials.round3 if args.gauntlet_command == "round3" else gauntlet_trials.round4
+    try:
+        report = play(declaration, ledger, None, plan_only=args.plan)
+    except gauntlet_trials.DeclarationError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    sys.stdout.write(gauntlet_trials.render(report))
+    if report.verdict in (gauntlet_trials.COMPLETE, gauntlet_trials.PLANNED):
+        return GAUNTLET_EXIT_OK
+    if report.verdict == gauntlet_trials.REFUSED:
+        return GAUNTLET_EXIT_REFUSED
+    return GAUNTLET_EXIT_UNDECIDED  # UNKNOWN or INCOMPLETE: never a pass
+
+
 def cmd_contracts(args: argparse.Namespace) -> int:
     """`skillc contracts <collection>` (#720): every CHARTER.md read together.
 
@@ -3528,6 +3558,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_contracts.add_argument("path", help="collection root; test paths resolve from here")
     p_contracts.set_defaults(func=cmd_contracts)
+
+    # One `gauntlet` group, shared with #754's `gauntlet run` (coordinated
+    # through the wave orchestrator): whichever merges second adds only its
+    # own subparsers.
+    p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4, #736)")
+    gauntlet_sub = p_gauntlet.add_subparsers(dest="gauntlet_command", required=True)
+    for name, about in (("round3", "baseline: clause tests, intact vs a named damaged copy; UNKNOWN unless they separate"),
+                        ("round4", "challenge: leaner variants on held-out tasks; keep unless one is no worse on every clause")):
+        p_round = gauntlet_sub.add_parser(name, help=about)
+        p_round.add_argument("declaration", help="the round declaration (JSON; docs/specs/gauntlet-rounds-3-4.md)")
+        p_round.add_argument("--plan", action="store_true", help="print the declared attempt count; spend nothing")
+        p_round.add_argument("--ledger", metavar="FILE", help="the attempt ledger (default: beside the declaration)")
+        p_round.set_defaults(func=cmd_gauntlet_round)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

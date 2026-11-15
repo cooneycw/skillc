@@ -1,0 +1,281 @@
+"""Skill-gauntlet rounds 3 and 4 (#736, PR 1): offline controls through ScriptedRunner.
+
+No model is called anywhere in this file. Each control names an input that
+makes the machinery report the OTHER verdict (AGENTS.md, negative control).
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+from skillc import cli
+from skillc import gauntlet_trials as g
+from skillc.source_digest import digest_tree
+
+ROOT = Path(__file__).resolve().parent.parent
+CONTROLS = ROOT / "evals/gauntlet-controls"
+GATE = "planner.never-edit-before-approval"
+LANES = "planner.always-report-lanes"
+
+
+def _copy(tmp_path: Path, **overrides: object) -> Path:
+    root = tmp_path / "c"
+    shutil.copytree(CONTROLS, root)
+    path = root / "declaration.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(overrides)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _decl(path: Path) -> g.Declaration:
+    return g.load(path)
+
+
+def _runner(declaration: g.Declaration, script: dict[tuple[str, str], list[str]]) -> g.ScriptedRunner:
+    return g.ScriptedRunner(script, declaration.client)
+
+
+def _fail_all(arm: str, tasks: list[str]) -> dict[tuple[str, str], list[str]]:
+    return {(arm, t): [g.FAIL] for t in tasks}
+
+
+GATE_TASKS = ["a1", "a2", "a3"]
+LANE_TASKS = ["b1", "b2", "b3"]
+
+
+def _round3_complete(path: Path) -> tuple[g.Declaration, g.Ledger]:
+    declaration = _decl(path)
+    ledger = g.Ledger(path.parent / "ledger.jsonl")
+    report = g.round3(declaration, ledger, _runner(declaration, _fail_all("damaged-gate", GATE_TASKS)))
+    assert report.verdict == g.COMPLETE, report
+    return declaration, ledger
+
+
+# ---------------------------------------------------------------- round 3
+
+
+def test_round3_completes_when_the_damaged_arm_separates(tmp_path: Path) -> None:
+    declaration = _decl(_copy(tmp_path))
+    runner = _runner(declaration, _fail_all("damaged-gate", GATE_TASKS))
+    report = g.round3(declaration, g.Ledger(tmp_path / "l.jsonl"), runner)
+    assert report.verdict == g.COMPLETE
+    assert report.separation["damaged-gate"]["verdict"] == "DISCRIMINATING"
+    assert report.per_clause[GATE]["damaged-gate"] == {"pass": 0, "evaluable": 6, "error": 0}
+    # 2 arms x (2 + 2 train tasks) x 3 replicates
+    assert report.declared == report.new == report.run == runner.calls == 24
+
+
+def test_round3_is_unknown_when_the_tasks_cannot_tell_damaged_from_intact(tmp_path: Path) -> None:
+    """The charter's guard test: a damaged skill that scores like the intact
+    one proves the tasks cannot measure the skill."""
+    declaration = _decl(_copy(tmp_path))
+    report = g.round3(declaration, g.Ledger(tmp_path / "l.jsonl"), _runner(declaration, {}))
+    assert report.verdict == g.UNKNOWN and "did not separate" in report.reason
+    assert report.separation["damaged-gate"]["verdict"] == "NOT_SHOWN"
+
+
+def test_a_damaged_arm_must_name_a_passage_that_occurs_once(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["damaged"][0]["remove"] = "approval gate"  # occurs twice in SKILL.md
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="occurs 2 times"):
+        g.round3(_decl(path), g.Ledger(tmp_path / "l.jsonl"), _runner(_decl(path), {}))
+
+
+def test_a_declaration_without_a_damaged_arm_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(g.DeclarationError, match="damaged arm is required"):
+        _decl(_copy(tmp_path, damaged=[]))
+
+
+def test_a_skill_that_changed_since_declaration_is_refused(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    (path.parent / "skill/SKILL.md").write_text("changed\n", encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="the skill changed"):
+        _decl(path)
+
+
+@pytest.mark.parametrize("bad", [{"min_tasks_per_clause": 1}, {"replicates": 0}, {"tolerance": -1}, {"attempt_cap": 0}])
+def test_an_unusable_declaration_is_refused(tmp_path: Path, bad: dict[str, object]) -> None:
+    with pytest.raises(g.DeclarationError):
+        _decl(_copy(tmp_path, **bad))
+
+
+def test_below_the_minimum_tasks_per_clause_is_unknown(tmp_path: Path) -> None:
+    path = _copy(tmp_path, min_tasks_per_clause=4)
+    report = g.round3(_decl(path), g.Ledger(tmp_path / "l.jsonl"), _runner(_decl(path), {}))
+    assert report.verdict == g.UNKNOWN and "min_tasks_per_clause 4" in report.reason and report.run == 0
+
+
+def test_the_split_is_deterministic_and_disjoint(tmp_path: Path) -> None:
+    declaration = _decl(_copy(tmp_path))
+    first = [g.split(declaration, c) for c in declaration.clauses]
+    again = _decl(_copy(tmp_path / "again"))
+    names = [tuple(tuple(t.name for t in part) for part in g.split(again, c)) for c in again.clauses]
+    assert names == [tuple(tuple(t.name for t in part) for part in pair) for pair in first]
+    for train, held in first:
+        assert held and train and not set(train) & set(held)
+
+
+# ---------------------------------------------------------------- the attempt cap (decision 4)
+
+
+def test_no_cap_is_refused_before_any_attempt(tmp_path: Path) -> None:
+    path = _copy(tmp_path, attempt_cap=None)
+    runner = _runner(_decl(path), {})
+    report = g.round3(_decl(path), g.Ledger(tmp_path / "l.jsonl"), runner)
+    assert report.verdict == g.REFUSED and "no attempt_cap" in report.reason and runner.calls == 0
+
+
+def test_over_the_cap_is_refused_before_any_attempt(tmp_path: Path) -> None:
+    path = _copy(tmp_path, attempt_cap=10)
+    runner = _runner(_decl(path), {})
+    report = g.round3(_decl(path), g.Ledger(tmp_path / "l.jsonl"), runner)
+    assert report.verdict == g.REFUSED and "exceed attempt_cap 10" in report.reason and runner.calls == 0
+
+
+def test_a_partial_run_stops_at_the_cap_and_reads_incomplete(tmp_path: Path) -> None:
+    path = _copy(tmp_path, attempt_cap=10, partial=True)
+    runner = _runner(_decl(path), _fail_all("damaged-gate", GATE_TASKS))
+    report = g.round3(_decl(path), g.Ledger(tmp_path / "l.jsonl"), runner)
+    assert report.verdict == g.INCOMPLETE and runner.calls == report.run == 10
+    assert "stopped at attempt_cap 10" in report.reason
+
+
+def test_a_rerun_on_the_same_digest_spends_nothing(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    declaration, ledger = _round3_complete(path)
+    again = _runner(declaration, {})
+    report = g.round3(declaration, g.Ledger(ledger.path), again)
+    assert again.calls == 0 and report.new == 0 and report.reused == 24 and report.verdict == g.COMPLETE
+
+
+def test_a_changed_grader_reuses_nothing(tmp_path: Path) -> None:
+    """Orchestrator gate: the ledger key includes the grader's identity."""
+    path = _copy(tmp_path)
+    _declaration, ledger = _round3_complete(path)
+    for task in path.parent.glob("tasks/*/grader.json"):
+        task.write_text(task.read_text(encoding="utf-8").replace("constraint", "functional"), encoding="utf-8")
+    declaration = _decl(path)
+    runner = _runner(declaration, _fail_all("damaged-gate", GATE_TASKS))
+    report = g.round3(declaration, g.Ledger(ledger.path), runner)
+    assert report.reused == 0 and report.new == 24 == runner.calls
+
+
+def test_a_changed_client_version_reuses_nothing(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    _declaration, ledger = _round3_complete(path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["client"]["version"] = "scripted-2"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    report = g.round3(_decl(path), g.Ledger(ledger.path), _runner(_decl(path), _fail_all("damaged-gate", GATE_TASKS)))
+    assert report.reused == 0
+
+
+def test_no_runner_refuses_rather_than_pretending(tmp_path: Path) -> None:
+    report = g.round3(_decl(_copy(tmp_path)), g.Ledger(tmp_path / "l.jsonl"), None)
+    assert report.verdict == g.REFUSED and "PR 3" in report.reason
+
+
+# ---------------------------------------------------------------- round 4
+
+
+def test_round4_finds_the_redundant_passage_removable(tmp_path: Path) -> None:
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    script = _fail_all("lean-lanes", LANE_TASKS)
+    report = g.round4(declaration, ledger, _runner(declaration, script))
+    assert report.verdict == g.COMPLETE and report.recommendation == g.TRIM
+    assert report.variants["lean-repeat"]["passes"] is True
+    assert report.variants["lean-lanes"]["passes"] is False
+
+
+def test_round4_keeps_a_lean_skill(tmp_path: Path) -> None:
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    script = {**_fail_all("lean-lanes", LANE_TASKS), **_fail_all("lean-repeat", GATE_TASKS)}
+    report = g.round4(declaration, ledger, _runner(declaration, script))
+    assert report.recommendation == g.KEEP and not any(v["passes"] for v in report.variants.values())
+
+
+def test_round4_judges_on_the_held_out_tasks_only(tmp_path: Path) -> None:
+    """A variant that fails only TRAIN tasks still passes round 4."""
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    train_gate = [t.name for t in g.split(declaration, GATE)[0]]
+    report = g.round4(declaration, ledger, _runner(declaration, _fail_all("lean-repeat", train_gate)))
+    assert report.variants["lean-repeat"]["passes"] is True
+
+
+def test_one_fewer_pass_is_worse_under_the_strict_rule_and_a_declared_tolerance_prints(tmp_path: Path) -> None:
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    held_gate = g.split(declaration, GATE)[1][0].name
+    script = {("lean-repeat", held_gate): [g.FAIL, g.PASS, g.PASS], **_fail_all("lean-lanes", LANE_TASKS)}
+    strict = g.round4(declaration, ledger, _runner(declaration, script))
+    assert strict.variants["lean-repeat"]["passes"] is False and strict.recommendation == g.KEEP
+    path = _copy(tmp_path / "tol", tolerance=1)
+    declaration, ledger = _round3_complete(path)
+    tolerant = g.round4(declaration, ledger, _runner(declaration, script))
+    assert tolerant.variants["lean-repeat"]["passes"] is True
+    assert "no-worse tolerance: 1 (declared by the owner)" in g.render(tolerant)
+
+
+def test_an_errored_attempt_is_never_no_worse(tmp_path: Path) -> None:
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    held_gate = g.split(declaration, GATE)[1][0].name
+    script = {("lean-repeat", held_gate): [g.ERROR], **_fail_all("lean-lanes", LANE_TASKS)}
+    report = g.round4(declaration, ledger, _runner(declaration, script))
+    assert report.variants["lean-repeat"]["passes"] is False
+
+
+def test_round4_refuses_until_round3_is_complete(tmp_path: Path) -> None:
+    declaration = _decl(_copy(tmp_path))
+    runner = _runner(declaration, {})
+    report = g.round4(declaration, g.Ledger(tmp_path / "l.jsonl"), runner)
+    assert report.verdict == g.REFUSED and "run round 3 first" in report.reason and runner.calls == 0
+
+
+def test_round4_is_unknown_when_round3_is(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    declaration = _decl(path)
+    ledger = g.Ledger(tmp_path / "l.jsonl")
+    assert g.round3(declaration, ledger, _runner(declaration, {})).verdict == g.UNKNOWN
+    assert g.round4(declaration, ledger, _runner(declaration, {})).verdict == g.UNKNOWN
+
+
+def test_below_the_minimum_held_out_is_unknown(tmp_path: Path) -> None:
+    declaration, ledger = _round3_complete(_copy(tmp_path, min_heldout=3))
+    report = g.round4(declaration, ledger, _runner(declaration, {}))
+    assert report.verdict == g.UNKNOWN and "min_heldout 3" in report.reason
+
+
+def test_round4_never_repays_round3(tmp_path: Path) -> None:
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    runner = _runner(declaration, _fail_all("lean-lanes", LANE_TASKS))
+    report = g.round4(declaration, ledger, runner)
+    # intact on held-out (2 tasks x 3) is new; round 3's train attempts are untouched
+    assert runner.calls == report.new == 3 * 2 * 3
+
+
+# ---------------------------------------------------------------- the command
+
+
+def test_plan_spends_nothing_and_prints_the_count(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = _copy(tmp_path)
+    assert cli.main(["gauntlet", "round3", str(path), "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert "declared 24" in out and "new 24" in out and "run 0" in out
+    assert not (path.parent / ".gauntlet-ledger.jsonl").exists()
+
+
+def test_a_real_run_is_refused_in_pr1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = _copy(tmp_path)
+    assert cli.main(["gauntlet", "round3", str(path)]) == cli.GAUNTLET_EXIT_REFUSED
+    assert "PR 3" in capsys.readouterr().out
+
+
+def test_the_fixture_digest_is_current() -> None:
+    data = json.loads((CONTROLS / "declaration.json").read_text(encoding="utf-8"))
+    assert data["skill_digest"] == digest_tree((CONTROLS / "skill").resolve())
