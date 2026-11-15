@@ -109,7 +109,8 @@ def _draft_clauses(data: dict[str, object]) -> list[tuple[str, dict[str, object]
                 if isinstance(clause, dict):
                     found.append((f"invariants.{kind}", clause))
     for section in contracts.CLAUSE_SECTIONS:
-        for clause in data.get(section) or []:  # type: ignore[union-attr]
+        entries = data.get(section)
+        for clause in entries if isinstance(entries, list) else []:
             if isinstance(clause, dict):
                 found.append((section, clause))
     return found
@@ -125,7 +126,7 @@ def confirm(draft_text: str, answers_text: str | None, today: _dt.date | None = 
     except FrontmatterError as exc:
         raise ConfirmRefused(f"the draft does not parse: {exc}") from None
     answers, date = parse_answers(answers_text)
-    stamp = date or (today or _dt.datetime.now(_dt.timezone.utc).date()).isoformat()
+    stamp = date or (today or _dt.datetime.now(_dt.UTC).date()).isoformat()
 
     clauses = _draft_clauses(data)
     ids = [str(c.get("id")) for _, c in clauses]

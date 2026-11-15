@@ -290,8 +290,8 @@ def _subject_problems(contract: Contract, root: Path) -> list[str]:
     under_charters = len(rel.parts) > 1 and rel.parts[0] == CHARTERS_DIR
     if subject is None:
         if under_charters:
-            return [f"a charter under {CHARTERS_DIR}/ requires 'subject:' naming the command file it is about, "
-                    f"e.g. 'subject: .claude/commands/flow/auto.md'"]
+            return [(f"a charter under {CHARTERS_DIR}/ requires 'subject:' naming the command file it is about, "
+                     f"e.g. 'subject: .claude/commands/flow/auto.md'")]
         return []
     if not (isinstance(subject, str) and subject.strip()):
         return [f"subject {subject!r} is not a path"]
@@ -306,8 +306,8 @@ def _subject_problems(contract: Contract, root: Path) -> list[str]:
         except (OSError, RuntimeError):
             same = False
         if not same:
-            return [f"subject {subject!r} is not the SKILL.md beside this charter "
-                    f"({beside.relative_to(root).as_posix()})"]
+            return [(f"subject {subject!r} is not the SKILL.md beside this charter "
+                     f"({beside.relative_to(root).as_posix()})")]
     return []
 
 

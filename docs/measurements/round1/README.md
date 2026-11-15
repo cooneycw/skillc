@@ -43,7 +43,7 @@ about a file the collection lacks certifies nothing.
 
 ## What the owner decides
 
-1. **Each clause.** The drafts quote MUST/ALWAYS/NEVER sentences, each cut to 40
+1. **Each clause.** The drafts quote the commands' imperative-keyword sentences, each cut to 40
    words with a `file:line` cite. The extraction is crude: it includes a few
    descriptive sentences that merely contain "always" or "never", and it misses
    duties stated in plain prose. The owner confirms in a grilling-style dialogue

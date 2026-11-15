@@ -87,16 +87,16 @@ invariants:
 
 # Draft charter: flow-auto
 
-**Draft ready for owner confirmation.** Nothing here is approved: every clause is `draft: true` with no `approved` date, and only the owner's answers (`skillc charter confirm`) make it a charter.
+**Draft ready for owner confirmation.** Nothing here is approved.
 
-Drafted from `auto.md` with no model call (#726: product model calls are sized, not run).
+From `auto.md`, no model call.
 
 ## Sources
 
 - **skill text:** `auto.md`: a description and 78 stated duty candidate(s)
 - **git history:** 128 commit(s), newest c566b3a2 2026-11-13, oldest 3891c530 2026-02-16
-- **usage records:** 0 record(s) for flow-auto, flow:auto in 0 log(s) - absences read UNKNOWN: no usage log
-- **repository evidence (GitHub ingestion, #718 build step 4):** missing: not built yet, so nothing here comes from issues or PRs
+- **usage records:** 0 record(s) for flow-auto, flow:auto in 0 log(s); absences UNKNOWN (no usage log)
+- **repository evidence:** missing (#718 build step 4)
 
 ## The three columns
 
@@ -184,11 +184,9 @@ Drafted from `auto.md` with no model call (#726: product model calls are sized, 
 - never `auto.md:1489`: Demoted, never deleted.
 - never `auto.md:1564`: Never filter a rollout, choose a manual model window, invent a skip or bypass enrollment.
 
-## What this draft does not show
+## Limits
 
-- A duty stated in plain prose, without MUST/ALWAYS/NEVER, is not a candidate. The stated column undercounts.
-- A clause here names no test, so `skillc contracts` reports it unbacked (`clause-backed`). That is expected for a draft: round 3 writes the tests.
-- `unknown` means nothing could have shown the duty either way. It is never a finding against the skill.
+Per the round-1 spec (#726), the stated column undercounts, and `clause-backed` fails until round 3.
 
 ## Warnings
 

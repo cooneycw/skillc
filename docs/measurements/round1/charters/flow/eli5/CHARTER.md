@@ -87,16 +87,16 @@ invariants:
 
 # Draft charter: flow-eli5
 
-**Draft ready for owner confirmation.** Nothing here is approved: every clause is `draft: true` with no `approved` date, and only the owner's answers (`skillc charter confirm`) make it a charter.
+**Draft ready for owner confirmation.** Nothing here is approved.
 
-Drafted from `eli5.md` with no model call (#726: product model calls are sized, not run).
+From `eli5.md`, no model call.
 
 ## Sources
 
 - **skill text:** `eli5.md`: a description and 15 stated duty candidate(s)
 - **git history:** 13 commit(s), newest 7eaf6bf3 2026-11-14, oldest 6c8f9571 2026-06-28
-- **usage records:** 0 record(s) for flow-eli5, flow:eli5 in 0 log(s) - absences read UNKNOWN: no usage log
-- **repository evidence (GitHub ingestion, #718 build step 4):** missing: not built yet, so nothing here comes from issues or PRs
+- **usage records:** 0 record(s) for flow-eli5, flow:eli5 in 0 log(s); absences UNKNOWN (no usage log)
+- **repository evidence:** missing (#718 build step 4)
 
 ## The three columns
 
@@ -121,11 +121,9 @@ Drafted from `eli5.md` with no model call (#726: product model calls are sized, 
 - never `eli5.md:304`: It never writes implementation code; the only mutating action it suggests is `gh issue close` on a `No longer needed` verdict, and that is a recommendation for the reviewer to run.
 - always `eli5.md:307`: The vendored core between the markers must stay byte-identical to the canonical https://github.com/cooneycw/eli5-gate copy; `scripts/eli5-core-drift.sh` checks this (advisory, fail-open).
 
-## What this draft does not show
+## Limits
 
-- A duty stated in plain prose, without MUST/ALWAYS/NEVER, is not a candidate. The stated column undercounts.
-- A clause here names no test, so `skillc contracts` reports it unbacked (`clause-backed`). That is expected for a draft: round 3 writes the tests.
-- `unknown` means nothing could have shown the duty either way. It is never a finding against the skill.
+Per the round-1 spec (#726), the stated column undercounts, and `clause-backed` fails until round 3.
 
 ## Warnings
 

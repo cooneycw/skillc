@@ -73,7 +73,7 @@ DEFAULT_MAX_ALWAYS = 4
 DEFAULT_MAX_NEVER = 6
 
 #: The source #718 build step 4 will add; until then it is reported missing.
-REPOSITORY_SOURCE = "repository evidence (GitHub ingestion, #718 build step 4)"
+REPOSITORY_SOURCE = "repository evidence"
 
 NEVER_RE = re.compile(r"\b(?:must\s+never|must\s+not|never)\b", re.IGNORECASE)
 ALWAYS_RE = re.compile(r"\b(?:must|always)\b", re.IGNORECASE)
@@ -204,11 +204,9 @@ class Draft:
         lines = [
             f"# Draft charter: {self.name}",
             "",
-            "**Draft ready for owner confirmation.** Nothing here is approved: every clause is "
-            "`draft: true` with no `approved` date, and only the owner's answers "
-            "(`skillc charter confirm`) make it a charter.",
+            "**Draft ready for owner confirmation.** Nothing here is approved.",
             "",
-            f"Drafted from `{self.skill_file.name}` with no model call (#726: product model calls are sized, not run).",
+            f"From `{self.skill_file.name}`, no model call.",
             "",
             "## Sources",
             "",
@@ -225,14 +223,9 @@ class Draft:
             lines += [f"- {c.kind} `{c.cite}`: {_cell(c.text)}" for c in self.further]
         lines += [
             "",
-            "## What this draft does not show",
+            "## Limits",
             "",
-            "- A duty stated in plain prose, without MUST/ALWAYS/NEVER, is not a candidate. The stated "
-            "column undercounts.",
-            "- A clause here names no test, so `skillc contracts` reports it unbacked (`clause-backed`). "
-            "That is expected for a draft: round 3 writes the tests.",
-            "- `unknown` means nothing could have shown the duty either way. It is never a finding against "
-            "the skill.",
+            "Per the round-1 spec (#726), the stated column undercounts, and `clause-backed` fails until round 3.",
         ]
         if self.warnings:
             lines += ["", "## Warnings", ""] + [f"- {w}" for w in self.warnings]
@@ -340,17 +333,17 @@ def _blocks(text: str, first_line: int) -> list[list[tuple[int, str]]]:
 
 def _sentences(block: list[tuple[int, str]]) -> list[tuple[int, str]]:
     """(line the sentence starts on, sentence)."""
-    joined, starts = "", []
-    for number, line in block:
+    joined = ""
+    starts: list[tuple[int, int]] = []  # (offset in joined, line number)
+    for number, text in block:
         starts.append((len(joined), number))
-        joined += line + " "
-    out = []
+        joined += text + " "
+    out: list[tuple[int, str]] = []
     position = 0
     for sentence in SENTENCE_END_RE.split(joined.strip()):
-        at = joined.find(sentence, position)
+        at = max(joined.find(sentence, position), 0)
         position = at + len(sentence)
-        line = max(n for o, n in starts if o <= max(at, 0))
-        out.append((line, sentence.strip()))
+        out.append((max(n for o, n in starts if o <= at), sentence.strip()))
     return out
 
 
@@ -516,13 +509,13 @@ def draft(
 
     git = git_summary(skill_file)
     sources = [
-        ("skill text", f"`{skill_file.name}`: {'a description and ' if job else 'no description; '}"
-                       f"{len(candidates)} stated duty candidate(s)"),
+        ("skill text", (f"`{skill_file.name}`: {'a description and ' if job else 'no description; '}"
+                        f"{len(candidates)} stated duty candidate(s)")),
         ("git history", git or "missing: git could not read the file's history"),
         ("usage records", f"{evidence.records} record(s) for {', '.join(sorted(names))} in {evidence.logs} log(s)"
                           + (f"; coverage {dict(sorted(evidence.coverage.items()))}" if evidence.records else "")
-                          + ("" if evidence.can_show_absence else f" - absences read UNKNOWN: {evidence.why_unknown()}")),
-        (REPOSITORY_SOURCE, "missing: not built yet, so nothing here comes from issues or PRs"),
+                          + ("" if evidence.can_show_absence else f"; absences UNKNOWN ({evidence.why_unknown()})")),
+        (REPOSITORY_SOURCE, "missing (#718 build step 4)"),
     ]
     if evidence.unreadable:
         warnings.append(f"unreadable usage log(s), not counted: {', '.join(evidence.unreadable)}")
