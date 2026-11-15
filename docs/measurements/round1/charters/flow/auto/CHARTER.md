@@ -93,7 +93,7 @@ From `auto.md`, no model call.
 
 ## Sources
 
-- **skill text:** `auto.md`: a description and 78 stated duty candidate(s)
+- **skill text:** `auto.md`: a description and 81 stated duty candidate(s)
 - **git history:** 128 commit(s), newest c566b3a2 2026-11-13, oldest 3891c530 2026-02-16
 - **usage records:** 0 record(s) for flow-auto, flow:auto in 0 log(s); absences UNKNOWN (no usage log)
 - **repository evidence:** missing (#718 build step 4)
@@ -113,7 +113,7 @@ From `auto.md`, no model call.
 | unknown | `flow-auto.never-5` | Report the helper's handoff message and leave the worktree, branch, and PR INTACT - do NOT run cleanup, do NOT retry, and NEVER re-invoke with `--admin` yourself. | auto.md:1111; UNKNOWN: no usage log |
 | unknown | `flow-auto.never-6` | Never log the **permission-prompt** class by hand (issue #482). | auto.md:73; UNKNOWN: no usage log |
 
-## Further candidates, not drafted (68)
+## Further candidates, not drafted (71)
 
 - never `auto.md:85`: Enter with `cd`; never call `EnterWorktree`.
 - never `auto.md:90`: **Invocation discipline (issue #581):** call flow helpers BARE, with literal argument values - never wrapped in `if [ -x ... ]`, never chained with `&&` or `;`, never followed by `echo $?`.
@@ -160,7 +160,9 @@ From `auto.md`, no model call.
 - never `auto.md:836`: Proceed, but report the counts verbatim and say plainly that this gate proved nothing about the change; never "tests passed".
 - never `auto.md:838`: `warn` also means a test failed and PASSED on re-run (issue #769): report the ids on the `RERUN_PASSED:` line and never call the run a clean pass.
 - never `auto.md:843`: Proceed, but **repeat the runner's warning verbatim rather than paraphrasing it**; never "the gates passed".
+- never `auto.md:863`: Invoke bare with `--strict`, and handle the `FLOW_WORKTREE_GUARD:` verdict exactly as in Step 4 (issue #1014): exit 3 stops - do not commit, and first read `git -C <main> diff -- <path>` to confirm the edit is YOURS before ...
 - never `auto.md:879`: A `Co-Authored-By: <name> <noreply@anthropic.com>` trailer naming the current session's own assistant model - never a literal copied from this document (issue #1037)
+- never `auto.md:911`: It REPORTS; it never blocks:
 - never `auto.md:920`: Write the reason in the PR; never edit the plan to make it agree.
 - never `auto.md:922`: `PLAN_COMPLIANCE: unknown` (exit 4) - never report it as agreement.
 - never `auto.md:989`: The Codex re-sync is called UNCONDITIONALLY here too (never re-gated on a path pattern,
@@ -176,6 +178,7 @@ From `auto.md`, no model call.
 - never `auto.md:1178`: **CRITICAL: `cd` to the main repo BEFORE removing the worktree - never remove a worktree while your cwd is inside it.
 - never `auto.md:1194`: Report it and stop; never retry with an override reflexively, and never with `--steal` - that is the user's call.
 - always `auto.md:1219`: Derive the paths in THIS call (`WORKTREE_PATH` must be set in it too) and record the refusal in a per-worktree marker FILE:
+- never `auto.md:1278`: Restate here the `ACCEPTANCE_COMPLETE` judgement you reached in Step 6 for THIS issue; never inherit a value and never parse it out of the report.
 - never `auto.md:1351`: The helper never cancels.
 - never `auto.md:1358`: **Read `FLOW_CI_WAIT` first (issue #1262):** with `FLOW_CI_WAIT: expired (<N>s)`, say that no matching pipeline was found AT EXPIRY of that window - not "CI may not be wired", and not that one never registered.
 - never `auto.md:1362`: Report the named evidence gap; an unexamined lane is not green, and a fallback probe's result never establishes recorded-provider completeness.

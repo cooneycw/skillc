@@ -2701,7 +2701,11 @@ def cmd_charter_draft(args: argparse.Namespace) -> int:
         sys.stdout.write(text)
     else:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
+        try:
+            charter_confirm.write_new(out, text)
+        except charter_confirm.ConfirmRefused:
+            print(f"skillc: {out} appeared while drafting; charter draft never overwrites a charter", file=sys.stderr)
+            return CHARTER_EXIT_USAGE
         print(f"skillc: draft written to {out} - draft ready for owner confirmation")
     columns = ", ".join(f"{c} {sum(p.column == c for p in drafted.placed)}" for c in charter.COLUMNS)
     print(f"skillc: {len(drafted.placed)} draft clause(s): {columns}", file=sys.stderr)

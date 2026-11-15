@@ -188,3 +188,49 @@ def test_every_clause_section_takes_the_owners_answers() -> None:
 def test_an_impossible_approval_date_is_refused(date: str) -> None:
     with pytest.raises(ConfirmRefused, match="not a real date"):
         charter_confirm.parse_answers(f"approved-on: {date}\n")
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2
+
+
+def test_a_draft_with_no_addressable_intent_is_refused() -> None:
+    """An empty answers file must never confirm a charter with nothing to answer."""
+    bare = "---\ncontract: bare\nversion: 1\nintent: A job.\npurpose: p\nowner: owner\n---\n"
+    with pytest.raises(ConfirmRefused, match="no intent clause"):
+        charter_confirm.confirm(bare, "", DAY)
+
+
+def test_a_draft_with_duplicate_clause_ids_is_refused() -> None:
+    dup = RICH.replace("id: rich.auth-drop", "id: rich.no-self-approval")
+    answers = "rich.intent: accept\nrich.out: accept\nrich.no-self-approval: accept\nrich.input: accept\n"
+    with pytest.raises(ConfirmRefused, match="fails contract-shape"):
+        charter_confirm.confirm(dup, answers, DAY)
+
+
+def test_an_edit_that_cannot_be_written_exactly_is_refused() -> None:
+    answers = _accept_all(_draft()).replace("demo.always-1: accept", "demo.always-1: edit: tab\there")
+    with pytest.raises(ConfirmRefused, match="cannot be written exactly"):
+        charter_confirm.confirm(_draft(), answers, DAY)
+
+
+def test_a_confirmed_charter_no_longer_says_nothing_is_approved() -> None:
+    text = charter_confirm.confirm(_draft(), _accept_all(_draft()), DAY)
+    assert "Nothing here is approved" not in text
+
+
+def test_the_output_is_created_exclusively(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A charter that appears between the existence check and the write is never truncated."""
+    out = tmp_path / "CHARTER.md"
+    real_confirm = charter_confirm.confirm
+
+    def racing(*args: object, **kwargs: object) -> str:
+        out.write_text("the owner's charter\n", encoding="utf-8")  # appears mid-confirm
+        return real_confirm(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(charter_confirm, "confirm", racing)
+    draft, answers = tmp_path / "draft.md", tmp_path / "answers.txt"
+    draft.write_text(_draft(), encoding="utf-8")
+    answers.write_text(_accept_all(_draft()), encoding="utf-8")
+    with pytest.raises(ConfirmRefused, match="appeared"):
+        charter_confirm.confirm_file(draft, answers, out, DAY)
+    assert out.read_text(encoding="utf-8") == "the owner's charter\n"

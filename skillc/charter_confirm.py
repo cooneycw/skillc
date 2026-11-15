@@ -129,6 +129,14 @@ def confirm(draft_text: str, answers_text: str | None, today: _dt.date | None = 
         data, body = parse_contract_block(draft_text)
     except FrontmatterError as exc:
         raise ConfirmRefused(f"the draft does not parse: {exc}") from None
+    intent = data.get("intent")
+    if not isinstance(intent, dict) or not isinstance(intent.get("id"), str):
+        raise ConfirmRefused("the draft has no intent clause with an id; a charter cannot be confirmed without one")
+    problems = contracts._contract_shape_problems(contracts.Contract(path=Path("<draft>"), data=data))
+    if problems:
+        # Malformed sections or duplicate ids would let an answer cover two
+        # clauses, or none (counter-model review on #726).
+        raise ConfirmRefused(f"the draft fails contract-shape: {problems[0]}")
     answers, date = parse_answers(answers_text)
     stamp = date or (today or _dt.datetime.now(_dt.UTC).date()).isoformat()
 
@@ -172,13 +180,18 @@ def confirm(draft_text: str, answers_text: str | None, today: _dt.date | None = 
     for section in contracts.CLAUSE_SECTIONS:
         if section in data or section in rebuilt:
             data[section] = rebuilt.get(section, [])
-    return "---\n" + dump(data) + "---\n\n" + _confirmed_body(body, stamp)
+    try:
+        block = dump(data)
+    except (TypeError, ValueError) as exc:
+        raise ConfirmRefused(f"the confirmed charter cannot be written exactly: {exc}") from None
+    return "---\n" + block + "---\n\n" + _confirmed_body(body, stamp)
 
 
 def _confirmed_body(body: str, stamp: str) -> str:
     note = (f"**Confirmed by the owner on {stamp}** with `skillc charter confirm`. Clauses carry no tests yet, "
             "so `skillc contracts` reports them unbacked until round 3 writes them.\n\n")
-    return note + body.replace("**Draft ready for owner confirmation.**", "**Was a draft.**", 1)
+    return note + body.replace("**Draft ready for owner confirmation.** Nothing here is approved.",
+                               "**Was a draft.** The owner's answers are applied above.", 1)
 
 
 def confirm_file(draft: Path, answers: Path | None, out: Path, today: _dt.date | None = None) -> str:
@@ -187,5 +200,15 @@ def confirm_file(draft: Path, answers: Path | None, out: Path, today: _dt.date |
         raise ConfirmRefused(f"{out} exists; confirm never overwrites a charter")
     answers_text = answers.read_text(encoding="utf-8") if answers is not None else None
     text = confirm(draft.read_text(encoding="utf-8"), answers_text, today)
-    out.write_text(text, encoding="utf-8")
+    write_new(out, text)
     return text
+
+
+def write_new(out: Path, text: str) -> None:
+    """Create `out`, refusing if anything appeared there meanwhile: the
+    existence check alone left a window (counter-model review on #726)."""
+    try:
+        with out.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+    except FileExistsError:
+        raise ConfirmRefused(f"{out} appeared while confirming; confirm never overwrites a charter") from None

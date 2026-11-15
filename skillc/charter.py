@@ -75,6 +75,10 @@ MAX_QUOTE_WORDS = 39
 DEFAULT_MAX_ALWAYS = 4
 DEFAULT_MAX_NEVER = 6
 
+#: A generated clause id stays within contracts.CLAUSE_ID_RE's 128 characters,
+#: with room for a collision suffix.
+MAX_ID_STEM = 120
+
 #: The source #718 build step 4 will add; until then it is reported missing.
 REPOSITORY_SOURCE = "repository evidence"
 
@@ -264,7 +268,13 @@ def _scalar(value: object) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
-    text = " ".join(str(value).split())  # one line; the parser reads no escapes but \" and \\
+    text = str(value)
+    if any(ord(ch) < 0x20 or ch == "\x7f" for ch in text):
+        # The contract parser reads no escape but \" and \\, so a newline,
+        # tab or control character cannot be written back exactly. Refused,
+        # never collapsed: collapsing silently changed an accepted test path
+        # (counter-model review on #726).
+        raise ValueError(f"cannot emit {text!r}: a control character has no representation in the contract subset")
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -311,6 +321,27 @@ def _quote(text: str) -> str:
 SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z*`\"(\[])")
 
 
+COMMENT_OPEN, COMMENT_CLOSE = "<!--", "-->"
+
+
+def _strip_comments(line: str, in_comment: bool) -> tuple[str, bool]:
+    """Remove HTML comment spans wherever they sit on the line, inline or
+    running across lines. Returns (the line without them, still inside one)."""
+    out, rest = "", line
+    while rest:
+        if in_comment:
+            end = rest.find(COMMENT_CLOSE)
+            if end < 0:
+                return out, True
+            rest, in_comment = rest[end + len(COMMENT_CLOSE):], False
+        else:
+            start = rest.find(COMMENT_OPEN)
+            if start < 0:
+                return out + rest, False
+            out, rest, in_comment = out + rest[:start] + " ", rest[start + len(COMMENT_OPEN):], True
+    return out, in_comment
+
+
 def _blocks(text: str, first_line: int) -> list[list[tuple[int, str]]]:
     """Prose blocks outside fenced code: wrapped lines joined back into the
     paragraph or list item they belong to, each line keeping its number.
@@ -321,15 +352,14 @@ def _blocks(text: str, first_line: int) -> list[list[tuple[int, str]]]:
     in_comment = False
     for offset, raw in enumerate(text.splitlines()):
         number = first_line + offset
+        if not fenced:
+            raw, in_comment = _strip_comments(raw, in_comment)
         stripped = raw.strip()
-        if in_comment or (not fenced and stripped.startswith("<!--")):
-            # An HTML comment is never a stated duty, however many lines it runs.
-            in_comment = "-->" not in stripped
+        if FENCE_RE.match(raw):
+            # Flush the prose before the fence (counter-model review: a duty
+            # directly above a fence was dropped).
             if current:
                 blocks.append(current)
-            current = []
-            continue
-        if FENCE_RE.match(raw):
             fenced = not fenced
             current = []
             continue
@@ -439,8 +469,9 @@ def read_evidence(logs: Sequence[usage.UsageLog], names: set[str]) -> Evidence:
             continue
         for entry in log.entries:
             data = entry.data
-            if data.get("skill") not in names:
-                continue
+            skill = data.get("skill")
+            if not isinstance(skill, str) or skill not in names:
+                continue  # a non-string skill names no skill (and must not crash the draft)
             if usage.record_problems(data):
                 # A record #719's own rules refuse is not evidence (counter-model
                 # review: a malformed one could grant complete coverage).
@@ -587,10 +618,11 @@ def place(
     for o in evidence.observations:
         if o.token in used:
             continue
-        clause_id, n = f"{name}.observed-{_slug(o.token)}", 1
+        stem = f"{name}.observed-{_slug(o.token)}"[:MAX_ID_STEM]  # CLAUSE_ID_RE allows 128
+        clause_id, n = stem, 1
         while clause_id in taken:  # two tokens can slug alike (a.b, a-b)
             n += 1
-            clause_id = f"{name}.observed-{_slug(o.token)}-{n}"
+            clause_id = f"{stem}-{n}"
         taken.add(clause_id)
         placed.append(Placed(
             clause_id, "always", OBSERVED_NOT_STATED,

@@ -244,3 +244,46 @@ def test_a_quote_never_trips_the_copied_passage_detector(tmp_path: Path, capsys:
     assert '"rule": "copied-passage"' not in json.dumps(report.get("findings", report))
     longest = max(len(p.text.replace(" ...", "").split()) for p in drafted.placed)
     assert longest <= charter.MAX_QUOTE_WORDS < 40
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2
+
+
+def test_the_emitter_keeps_inner_whitespace_and_refuses_control_characters() -> None:
+    data = {"test": "checks/two  spaces/{bad,good}"}
+    assert parse_contract_block("---\n" + charter.dump(data) + "---\n")[0] == data
+    with pytest.raises(ValueError, match="control character"):
+        charter.dump({"what": "line one\nline two"})
+
+
+def test_a_duty_directly_above_a_fence_is_kept() -> None:
+    (candidate,) = charter.stated_duties("You MUST stop before editing.\n```\ncode\n```\n", "x.md")
+    assert candidate.text == "You MUST stop before editing." and candidate.cite == "x.md:1"
+
+
+def test_an_inline_html_comment_states_no_duty() -> None:
+    assert charter.stated_duties("Ordinary text <!-- NEVER invent a duty --> ends here.\n", "x.md") == []
+    (kept,) = charter.stated_duties("<!-- note --> You MUST keep this.\n", "x.md")
+    assert kept.text == "You MUST keep this."
+
+
+@pytest.mark.parametrize("skill", ["[]", "{}", "3"])
+def test_a_non_string_skill_is_skipped_not_a_crash(tmp_path: Path, skill: str) -> None:
+    log = tmp_path / "usage.jsonl"
+    log.write_text(f'{{"kind": "skill-usage", "version": 1, "skill": {skill}, "coverage": "complete"}}\n', encoding="utf-8")
+    assert _columns(charter.draft(SKILL, [log]))[LANE_DUTY] == charter.UNKNOWN_COLUMN
+
+
+def test_generated_ids_stay_within_the_clause_id_limit() -> None:
+    name = "n" * 63
+    evidence = charter.Evidence(1, (), 2, charter.Counter({"complete": 2}), charter.Counter(),
+                                (charter.Observation("a" * 64, 1), charter.Observation("a" * 64 + ".", 1)))
+    placed = charter.place(name, [], evidence, charter.TokenMatcher())
+    assert len({p.clause_id for p in placed}) == 2
+    assert all(contracts.CLAUSE_ID_RE.fullmatch(p.clause_id) for p in placed)
+
+
+@pytest.mark.parametrize("kwargs", [{"overlap_controls": -20}, {"proof_drafts": -1}, {"replicates": 1.5}])
+def test_sizing_refuses_negative_and_fractional_counts(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        cost_estimate.size_round1(1, **kwargs)  # type: ignore[arg-type]

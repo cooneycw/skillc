@@ -331,9 +331,11 @@ def size_round1(collection_skills: int, *, overlap_controls: int = 2, proof_draf
     assumes ~8-15k input tokens a call (the skill's text, plus the duty index
     for overlap) and ~1k output. It never authorizes: `authorize()` is still
     the only gate, and nothing calls it for round 1."""
-    for value, what in ((collection_skills, "collection_skills"), (replicates, "replicates")):
-        if value < 1:
-            raise ValueError(f"{what} must be a positive integer, not {value!r} - a run of nothing was not sized")
+    for value, what, least in ((collection_skills, "collection_skills", 1), (replicates, "replicates", 1),
+                               (overlap_controls, "overlap_controls", 0), (proof_drafts, "proof_drafts", 0)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < least:
+            raise ValueError(f"{what} must be an integer of at least {least}, not {value!r} - "
+                             f"a negative or fractional count was not sized")
     return Round1Sizing((
         ModelRun("overlap controls", overlap_controls, replicates, 2_000, 4_000, 500),
         ModelRun("collection overlap", collection_skills, replicates, 8_000, 15_000, 1_000),
