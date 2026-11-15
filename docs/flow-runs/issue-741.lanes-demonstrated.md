@@ -4,7 +4,7 @@
 
 | Lane | Result | Evidence |
 |---|---|---|
-| Run placement | passed | host make verify targeted set on 097b3f5: ruff, bare mypy, leak-check, selftest 39/39, 730 tests in `tests/test_decay.py`, `tests/test_inspect.py` and neighbours. woodpecker ci not run yet (the PR opens after #744 merges); real-docker runner vm not applicable |
+| Run placement | not run | host make verify targeted set passed on 097b3f5: ruff, bare mypy, leak-check, selftest 39/39, 730 tests in `tests/test_decay.py`, `tests/test_inspect.py` and neighbours. woodpecker ci NOT RUN yet (the PR opens after #744 merges); real-docker runner vm not applicable. To be re-recorded as passed only with the PR pipeline number |
 | Subject collection | passed | `docs/measurements/inspect/2026-11-14-cpp-and-mattpocock.md` "Re-run after #741": cpp at pinned shas d5ef0a66 and 93ae8540 and mattpocock-skills 5863806, plus synthetic `tests/test_decay.py::test_741_*`; tokeniser parity on 17,694 corpus spans |
-| skillc distribution | passed | source checkout: the targeted set above. built wheel in a clean venv not run yet (PR CI clean-install) |
+| skillc distribution | not run | source checkout passed (the targeted set above); built wheel in a clean venv NOT RUN yet (PR CI clean-install). To be re-recorded with the pipeline number |
 | Python version | passed | 3.12 tested: the targeted set above. >=3.11 declared not run for this change |

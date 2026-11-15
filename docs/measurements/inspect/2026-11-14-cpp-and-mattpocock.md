@@ -207,22 +207,23 @@ were then added to the command prefixes, and a test now holds both.
 
 The only movement is in the two counters of words this rule does NOT examine:
 `path_like_not_examined` 159 -> 158 and `placeholder_paths_not_examined`
-1092 -> 1137 (CPP, both SHAs). Each changed word was traced to the token it came
-from (`docs/measurements` keeps no script; the method is reproducible from
-`decay.shell_tokens`):
-- **+24 placeholder words from quoted strings that contain `$(...)` or carry an
-  unquoted `)`**, 19 of them `2>/dev/null` inside `"$(... 2>/dev/null)"`. These
-  are #741 items 2 and 3 working: such strings are now read word by word,
-  whereas #744 skipped the whole token as a substitution.
-- **±0, a change of spelling only**: `s|^https?://||` (formerly counted as
-  `s|^https?://`) and `s|refs/remotes/origin/||`. A quoted `|` is text, so it is
-  no longer stripped as if it were a separator (#741 item 1).
-- **path-like -1 (`AppleWebKit/537.36`), placeholder -1/+1** from
-  `--chrome-flags="--user-agent='Mozilla/5.0 ...'"`. An option with a quoted value
-  is an option, not a string (the orchestrator's `--opt="x y"` guard).
-- **+1** from `'-> Local-model lanes not installed (...)'`, a quoted message that
-  begins with `-` and is now read as an option. That is the one new blind spot,
-  listed by name in `docs/specs/inspect.md`.
+1092 -> 1137 (CPP, both SHAs). Both were reconciled code span by code span. Each
+version was instrumented to record which span every count came from (the
+instrument reproduces both totals, 1092 and 1137, exactly), the two were diffed
+span by span, and each differing span was classified by its token shapes. The
+categories sum to the totals:
+
+| Placeholder delta | Token shape | Cause |
+|---|---|---|
+| +30 | a quoted string containing `$(...)` (`if ! LANES_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`) | #741 item 2: the string is read word by word; #744 skipped the whole token as a substitution |
+| +13 | a quoted string carrying an unquoted `$(` or `)` (`... sed 's\|branch refs/h...'` closing a `$(`) | the same reading, plus the closer fix: the attached `)` still closes the substitution |
+| +1 | both of the above (`CAND="$(dirname "$(pwd)")/.claude/commands"`) | as above |
+| +1 | a quoted string starting with `-` (`echo "-> Local-model lanes not installed ..."`) | read as an option with a value: the one new, named blind spot |
+| **+45** | | |
+
+| Path-like delta | Span | Cause |
+|---|---|---|
+| -1 | `bdg --chrome-flags="--user-agent='Mozilla/5.0 (...) AppleWebKit/537.36'"` | an option with a quoted value is an option, not a string (the `--opt="x y"` guard), so `AppleWebKit/537.36` is no longer split out |
 
 No examined reference moved, so prefixed references are 336 and flags 240 as
 before.

@@ -555,19 +555,18 @@ def test_731_r2_an_unbalanced_quote_falls_back_to_whitespace_words(tmp_path: Pat
 
 
 def test_731_r2_a_truncated_fallback_search_is_an_estimate_even_when_it_finds_nothing(tmp_path: Path) -> None:
-    """Reviewer's exact case: 100 `same` + 50 distinct + a different separator +
-    100 `same`, in both documents. The anchor takes the first 150; the fallback's
-    first candidates are already consumed, so the last 100 are not measured - and
-    the finding must SAY so."""
-    from skillc import inspect
-
+    """Reviewer's exact case (#731 pass 2): 100 `same` + 50 distinct + a different
+    separator + 100 `same`, in both documents. The invariant: either all 250
+    shared words are measured, or the finding SAYS it is an estimate. Since #741
+    (run heads join the candidate pool) the last 100 are found and the pair is
+    measured whole, so the exact branch holds."""
     distinct = " ".join(f"d{i}" for i in range(50))
     same = " ".join(["same"] * 100)
     _skill(tmp_path, "a", f"{same} {distinct} sepA {same}\n")
     _skill(tmp_path, "b", f"{same} {distinct} sepB {same}\n")
     [hit] = decay.copied_passage(_load(tmp_path)).hits
-    assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
-    assert "bounded estimate" in inspect.run(decay.load(tmp_path, offline=True)).data["summary"]
+    assert hit.data["shared_words"] == 250 or (hit.data["estimate"] is True and "bounded estimate" in hit.detail)
+    assert hit.data["shared_words"] == 250 and hit.data["estimate"] is False
 
 
 def test_731_r2_the_fallback_still_ends_a_command_after_a_substitution(tmp_path: Path) -> None:
@@ -726,4 +725,56 @@ def test_741_an_unquoted_single_token_substitution_restores_the_outer_command(tm
     self-contained and never touches the stack.)"""
     _helper(tmp_path)
     _skill(tmp_path, "a", "```bash\nscripts/helper.sh --verbose $(pwd) --absent\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+# ------------------------------------------------- #741 counter-model pass 1
+
+@pytest.mark.parametrize("swap", [False, True], ids=["A-first", "B-first"])
+def test_741_r1_short_repetitive_blocks_cannot_hide_a_longer_match(tmp_path: Path, swap: bool) -> None:
+    """Reviewer's exact input: A = 70 x same; B = 8 x (40 x same + separator) then
+    100 x same. Either 70 words is found, or the pair says it is an estimate."""
+    first = " ".join(["same"] * 70)
+    second = " ".join(" ".join(["same"] * 40) + f" sep{i}" for i in range(8)) + " " + " ".join(["same"] * 100)
+    if swap:
+        first, second = second, first
+    _skill(tmp_path, "a", first + "\n")
+    _skill(tmp_path, "b", second + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["longest_words"] == 70 or hit.data["estimate"] is True
+
+
+def test_741_r1_a_pending_split_string_does_not_leak_across_a_separator(tmp_path: Path) -> None:
+    """Reviewer's exact input: an empty `env -S ""` value is consumed, and `;`
+    starts a new command, so the helper's flag is checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nenv -S ""; scripts/helper.sh --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_741_r1_an_escaped_space_makes_a_string(tmp_path: Path) -> None:
+    """Reviewer's exact input: `run\\ scripts/gone.sh` is one word holding a space,
+    so its paths are still checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "```bash\necho run\\ scripts/gone.sh\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/gone.sh"]
+
+
+def test_741_r1_whitespace_is_exactly_shlexs() -> None:
+    """shlex splits only on space, tab, CR and LF: a non-breaking space, a
+    vertical tab and a form feed are part of a word."""
+    import shlex
+
+    for text in ["a b --x", "a\vb c", "a\fb c", "a\tb\r\nc"]:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        assert [t.text for t in decay.shell_tokens(text)] == list(lexer), repr(text)
+
+
+def test_741_r1_a_valueless_split_string_ends_at_the_separator(tmp_path: Path) -> None:
+    """`env -S;` - the split is still pending when `;` arrives: the separator must
+    end it, so the helper after it is a command and `--absent` is checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "```bash\nenv -S; scripts/helper.sh --absent\n```\n")
     assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]

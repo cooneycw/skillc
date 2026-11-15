@@ -64,6 +64,8 @@ COPIED_CANDIDATES = 8
 TRUNCATION_PROBE = 64
 #: Bidirectional extensions allowed per pair from repetitive windows; past it, the pair is an estimate.
 FALLBACK_EXTENSION_CAP = 512
+#: Contiguous-run heads tried per repetitive window; more than this and the pair is an estimate.
+HEAD_CANDIDATES = 64
 
 #: `emphasis-density`: these words, uppercase and whole, count as emphasis.
 EMPHASIS_WORDS: tuple[str, ...] = ("MUST", "NEVER", "CRITICAL", "ALWAYS", "IMPORTANT")
@@ -470,6 +472,9 @@ class Token:
 
 
 SHELL_PUNCT = ";&|"
+#: shlex's own whitespace - NOT str.isspace(), which also splits on a
+#: non-breaking space, a vertical tab or a form feed (#741 review).
+SHLEX_WHITESPACE = " \t\r\n"
 
 
 def shell_tokens(text: str) -> list[Token]:
@@ -493,7 +498,7 @@ def shell_tokens(text: str) -> list[Token]:
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c.isspace():
+        if c in SHLEX_WHITESPACE:
             flush()
             i += 1
         elif c in SHELL_PUNCT:
@@ -530,7 +535,7 @@ def shell_tokens(text: str) -> list[Token]:
             if i + 1 >= n:
                 raise ValueError("trailing escape")
             buf.append(text[i + 1])
-            in_word = True
+            in_word = quoted = True  # an escape quotes what follows (`run\ x` is one word)
             i += 2
         else:
             if c == "$" and i + 1 < n and text[i + 1] == "(":
@@ -668,7 +673,7 @@ def dangling_reference(coll: Collection) -> Result:
             tokens, quote_aware = _command_tokens(span.text)
             # The whole segment state, saved across `$(...)` (#741): an inner
             # `;` must not clear the outer `sudo` or its pending option value.
-            State = tuple[Path | None, str, bool, bool, str, bool]
+            State = tuple[Path | None, str, bool, bool, str, bool, bool]
             outer2: list[State] = []
             pending_split = False  # `env -S VALUE`: VALUE is command text
             for token in tokens:
@@ -676,6 +681,7 @@ def dangling_reference(coll: Collection) -> Result:
                 if reset_after:
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
+                    pending_split = False
                     reset_after = False
                 is_separator = token.operator if quote_aware else raw in SHELL_SEPARATORS
                 if is_separator:
@@ -683,6 +689,7 @@ def dangling_reference(coll: Collection) -> Result:
                     # #741); the next word starts a new one.
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
+                    pending_split = False
                     continue
                 word = _clean_word(raw)
                 is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
@@ -710,17 +717,27 @@ def dangling_reference(coll: Collection) -> Result:
                     # order - pushes, then pops - so `$(pwd)` restores at once.
                     if pending_operand:
                         pending_operand = False  # the substitution IS the option's value
+                    if pending_split:
+                        pending_split = False  # `env -S $(...)`: the substitution IS the value
+                        arg_path_seen = True
                     for _ in range(opens):
                         outer2.append((script, script_word, expect_command,
-                                       pending_operand, prefix, arg_path_seen))
+                                       pending_operand, prefix, arg_path_seen, pending_split))
                         script, script_word, expect_command = None, "", True
                         pending_operand, prefix, arg_path_seen = False, "", False
+                        pending_split = False
                     for _ in range(min(closes, len(outer2))):
                         (script, script_word, expect_command,
-                         pending_operand, prefix, arg_path_seen) = outer2.pop()
+                         pending_operand, prefix, arg_path_seen, pending_split) = outer2.pop()
                     reset_after = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
                     continue
                 if is_string:
+                    continue
+                if pending_split:
+                    # `env -S VALUE`: VALUE is command text, even when it is empty
+                    # (`env -S ""`), so it is consumed here, before anything else.
+                    check_path(word, span.index)
+                    arg_path_seen, pending_split, pending_operand = True, False, False
                     continue
                 if not word:
                     continue
@@ -730,6 +747,7 @@ def dangling_reference(coll: Collection) -> Result:
                 if (inner_break and not trailing_break) or (not quote_aware and word in SHELL_SEPARATORS):
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
+                    pending_split = False
                     if not word.strip("|;&()$`"):
                         continue
                 if not quote_aware:
@@ -745,11 +763,6 @@ def dangling_reference(coll: Collection) -> Result:
                             f"passes {flag} to {script_word}, whose source never mentions it",
                             {"reference": f"{script_word} {flag}", "kind": "flag"},
                         ))
-                    continue
-                if pending_split:
-                    # A one-word `env -S` value is command text too.
-                    check_path(word, span.index)
-                    arg_path_seen, pending_split, pending_operand = True, False, False
                     continue
                 if script is None and arg_path_seen and FLAG_RE.match(word.split("=", 1)[0]):
                     # A flag after a path that was NOT the command (checked
@@ -1015,6 +1028,10 @@ def _pair_runs(
     def free(i: int, j: int) -> bool:
         return not used_a[i] and not used_b[j]
 
+    def heads(positions_sorted: Sequence[int]) -> list[int]:
+        """The first position of each contiguous run of occurrences."""
+        return [p for k, p in enumerate(positions_sorted) if k == 0 or positions_sorted[k - 1] != p - 1]
+
     def take(sa: int, sb: int, length: int, estimate: bool) -> None:
         used_a[sa:sa + length] = b"\x01" * length
         used_b[sb:sb + length] = b"\x01" * length
@@ -1041,7 +1058,17 @@ def _pair_runs(
         repetitive = len(candidates) > COPIED_CANDIDATES
         if repetitive and capped:
             continue  # the cap is already spent; the pair is an estimate either way
-        for bp in candidates[:COPIED_CANDIDATES] if repetitive else candidates:
+        if repetitive:
+            # The first COPIED_CANDIDATES alignments PLUS the head of every
+            # contiguous run of this window in the other document (#741 review):
+            # eight short 40-word blocks must not crowd out one 100-word block.
+            runs_heads = heads(candidates)
+            if len(runs_heads) > HEAD_CANDIDATES:
+                capped = True  # too many distinct blocks to try them all
+            pool = list(dict.fromkeys([*candidates[:COPIED_CANDIDATES], *runs_heads[:HEAD_CANDIDATES]]))
+        else:
+            pool = list(candidates)
+        for bp in pool:
             diagonal = pos - bp
             if any(lo <= pos < hi for lo, hi in extended[diagonal]):
                 continue
