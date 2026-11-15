@@ -316,7 +316,7 @@ def test_a_trim_without_per_clause_counts_is_unknown(coll: Path, tmp_path: Path)
     _engine(coll, "trimmable")
     bare = _planted(tmp_path, "round4-trim.json", lambda d: d.__setitem__("per_clause", {}))
     code, lines = _verdict(coll, "trimmable", tmp_path, **{**TRIM, "round4": bare})
-    assert "per-clause" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+    assert "no clause" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
 
 
 @pytest.mark.parametrize("file", ["../lean/SKILL.md", "/etc/hostname", "linked.md"])
@@ -463,3 +463,60 @@ def test_a_contract_name_in_any_valid_spelling_is_read(coll: Path, tmp_path: Pat
     _engine(coll, "lean")
     code, lines = _verdict(coll, "lean", tmp_path)
     assert _verdict_line(lines).startswith("ROUND 5 verdict: KEEP") and code == gauntlet_verdict.EXIT_PROPOSED
+
+
+# ---------------------- #769 items 2-4, folded into #770 by orchestrator ruling
+
+B_PARAGRAPH = "You MUST keep `tests/test_restate_check.py` passing\nbefore you stop."
+TAIL = "before you stop."
+
+
+def _with_b_paragraph(coll: Path) -> None:
+    skill_md = coll / "skills" / "trimmable" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\n" + B_PARAGRAPH + "\n")
+
+
+def test_a_trim_of_a_b_paragraphs_continuation_line_is_unknown(coll: Path, tmp_path: Path) -> None:
+    """inspect reports B on the emphasised line; the rule is the paragraph."""
+    _with_b_paragraph(coll)
+    _engine(coll, "trimmable")
+    decl = tmp_path / "declaration-tail.json"
+    decl.write_text(json.dumps({"variants": [{"arm": "lean-1", "file": "SKILL.md", "remove": TAIL, "clause": "x"}]}))
+    r4 = _planted(tmp_path, "round4-trim.json", lambda d: d["variants"]["lean-1"].update(
+        removes=f"SKILL.md: {TAIL}", remove_sha256=None))
+    code, lines = _verdict(coll, "trimmable", tmp_path, round4=r4, declaration=decl)
+    assert "includes round 2 B prose" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+def test_a_trim_outside_the_b_paragraph_still_reads_trim(coll: Path, tmp_path: Path) -> None:
+    """The negative control: protection is the paragraph, not the whole file."""
+    _with_b_paragraph(coll)
+    _engine(coll, "trimmable")
+    code, lines = _verdict(coll, "trimmable", tmp_path, **TRIM)
+    assert _verdict_line(lines).startswith("ROUND 5 verdict: TRIM") and code == gauntlet_verdict.EXIT_PROPOSED
+
+
+@pytest.mark.parametrize("where", ["round3", "declaration"])
+def test_a_trim_missing_a_clause_round_3_or_the_declaration_covers_is_unknown(coll: Path, tmp_path: Path,
+                                                                             where: str) -> None:
+    _engine(coll, "trimmable")
+    files: dict[str, Path] = dict(TRIM)
+    if where == "round3":
+        files["round3"] = _planted(tmp_path, "round3-complete.json", lambda d: d["per_clause"].__setitem__(
+            "mandatory-safety", {"intact": {"error": 0, "evaluable": 4, "pass": 4}}))
+    else:
+        files["declaration"] = _planted(tmp_path, "declaration-trim.json",
+                                        lambda d: d.__setitem__("clauses", {"report": [], "mandatory-safety": []}))
+    code, lines = _verdict(coll, "trimmable", tmp_path, **files)
+    assert "mandatory-safety" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+@pytest.mark.parametrize("edit,why", [
+    (lambda d: d.update(recommendation=None, variants={}, per_clause={}), "recommendation is None"),
+    (lambda d: d.update(variants={}), "evaluated no variant"),
+    (lambda d: d.update(per_clause={}), "evaluated no variant or no clause")])
+def test_an_undecided_round_4_is_unknown_never_keep(coll: Path, tmp_path: Path, edit: Any, why: str) -> None:
+    _engine(coll, "lean")
+    code, lines = _verdict(coll, "lean", tmp_path, round4=_planted(tmp_path, "round4-keep.json", edit))
+    assert _verdict_line(lines).startswith("ROUND 5 verdict: UNKNOWN - round 4 did not decide")
+    assert why in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN

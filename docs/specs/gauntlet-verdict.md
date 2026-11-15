@@ -37,7 +37,9 @@ has no JSON on main either, so its shape is planted the same way.
    collection as they are now (their recorded input digests). A skill changed
    since `gauntlet run` is UNKNOWN: its PASS is evidence about another revision.
 2. **Rounds 3 and 4** must be present, the right round, and `COMPLETE`.
-   Otherwise UNKNOWN, naming the round.
+   Round 4 must also have DECIDED: a recommendation of `keep` or `trim` over a
+   non-empty `variants` and `per_clause`. Otherwise UNKNOWN, naming the round:
+   an undecided round 4 never reads as keep.
 3. **No `--overlap`, or an overlap that does not cover this skill:** retire is
    NOT EXAMINED, so the verdict is UNKNOWN, and NEXT names round 1 overlap. This
    is never keep by default (must-never 3, gate ruling). The report must carry
@@ -62,12 +64,14 @@ has no JSON on main either, so its shape is planted the same way.
    - Its file must be a regular file inside the skill, reached through no
      symlink; `..`, an absolute path or a symlink is UNKNOWN. A command skill
      owns its one file: a neighbouring command or file is UNKNOWN.
-   - It must not include a round 2 **B** line: that prose stays until its check
-     exists, so such a trim is UNKNOWN.
+   - It must not include any line of a round 2 **B** rule's paragraph
+     (`inspect.paragraph_span`, the span inspect sorted it by): that prose stays
+     until its check exists, so such a trim is UNKNOWN.
    - Its passage must occur **exactly once** in the file. Zero or several
      occurrences are UNKNOWN.
    - Every clause in `per_clause` must carry intact and variant counts, with at
-     least one evaluable variant attempt. Missing counts are UNKNOWN: a trim is
+     least one evaluable variant attempt, and round 4's clauses must cover every
+     clause round 3 reported and every clause the declaration names. Missing counts are UNKNOWN: a trim is
      never claimed without per-clause evidence.
    - The drafted diff only removes text (must-always 3), and the before and after
      pass counts are shown per clause.

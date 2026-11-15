@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import contracts, gauntlet, source_digest
+from .inspect import paragraph_span
 
 KEEP, TRIM, RETIRE, UNKNOWN = "KEEP", "TRIM", "RETIRE", "UNKNOWN"
 EXIT_PROPOSED, EXIT_REFUSED, EXIT_USAGE, EXIT_UNKNOWN = 0, 1, 2, 3
@@ -54,6 +55,8 @@ VARIANT_FIELDS = ("removes", "source", "passes")
 #: characters would be drafted as the one round 4 tested (counter-model review).
 PASSAGE_DIGEST = "remove_sha256"
 ROUND_COMPLETE = "COMPLETE"
+#: What a decided round 4 recommends (#736); anything else is undecided.
+ROUND4_DECISIONS = ("keep", "trim")
 #: Rounds 0-2, as the engine records them, and the verdict each must hold.
 RECORD_PASSES = {"0": "OBSERVED", "1": "PASS", "2": "PASS"}
 #: The overlap kinds that make another charter the owner of this skill's duty.
@@ -190,12 +193,23 @@ def _passage_target(skill: gauntlet.Skill, file: str) -> Path | None:
     return target if inside else None
 
 
-def _clause_counts(round4: dict[str, object], arm: str) -> list[str] | str:
+def _protected(lines: list[str], line: object) -> set[int]:
+    """The 1-based line numbers of the paragraph a B rule line belongs to."""
+    if not isinstance(line, int) or not 0 < line <= len(lines):
+        return set()
+    lo, hi = paragraph_span(lines, line - 1)
+    return set(range(lo + 1, hi + 2))
+
+
+def _clause_counts(round4: dict[str, object], arm: str, required: set[str]) -> list[str] | str:
     """Before/after pass counts for every clause, or why they are missing: a
     trim is never drafted without per-clause evidence (counter-model review)."""
     per_clause = round4["per_clause"]
     if not isinstance(per_clause, dict) or not per_clause:
         return "the report carries no per-clause counts"
+    missing = sorted(required - set(per_clause))
+    if missing:
+        return f"clause(s) {', '.join(missing)} that round 3 or the declaration covers have no round 4 counts"
     lines = []
     for clause, arms in sorted(per_clause.items()):
         intact, lean = (arms.get("intact"), arms.get(arm)) if isinstance(arms, dict) else (None, None)
@@ -210,7 +224,7 @@ def _clause_counts(round4: dict[str, object], arm: str) -> list[str] | str:
 
 
 def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[str, object] | None,
-          evidence: list[str], b_items: list[dict[str, object]]) -> Verdict | None:
+          evidence: list[str], b_items: list[dict[str, object]], required: set[str]) -> Verdict | None:
     """The passing variant that removes the most, as a patch that only removes."""
     variants = round4["variants"]
     if not isinstance(variants, dict):
@@ -247,17 +261,19 @@ def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[st
     if count != 1:
         return _unknown("round 4", f"variant {arm}'s passage occurs {count} times in {file}, not exactly once")
     first = before[:before.index(remove)].count("\n") + 1
-    span = range(first, first + remove.count("\n") + 1)
-    kept = [b for b in b_items if b.get("path") == target.relative_to(skill.collection).as_posix()
-            and b.get("line") in span]
+    removed = set(range(first, first + remove.count("\n") + 1))
+    lines = before.splitlines()
+    # inspect sorts a B rule by its whole PARAGRAPH (inspect.paragraph_span),
+    # so the whole paragraph is protected, not only the emphasised line.
+    rel = target.relative_to(skill.collection).as_posix()
+    kept = [b for b in b_items if b.get("path") == rel and removed & _protected(lines, b.get("line"))]
     if kept:
         return _unknown("round 4", f"variant {arm}'s passage includes round 2 B prose (line {kept[0].get('line')}), "
                                    "which stays until its check exists")
-    counts = _clause_counts(round4, arm)
+    counts = _clause_counts(round4, arm, required)
     if isinstance(counts, str):
         return _unknown("round 4", f"variant {arm}: {counts}, so its passing is not shown per clause")
     after = before.replace(remove, "", 1)
-    rel = target.relative_to(skill.collection).as_posix()
     patch = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), f"a/{rel}", f"b/{rel}"))
     # `after` is `before` with the passage cut once, so the patch can only remove (must-always 3).
     if not patch or len(after) >= len(before):
@@ -307,6 +323,16 @@ def decide(skill: gauntlet.Skill, record: dict[str, dict[str, object]], round3: 
         why = _round_report(data, number)
         if why is not None:
             return _unknown(f"round {number}", why)
+    assert round3 is not None and round4 is not None
+    # Round 4 must have DECIDED something over an evaluated population, or
+    # "nothing passed" would read as keep (must-never 3; counter-model pass 3).
+    if round4["recommendation"] not in ROUND4_DECISIONS:
+        return _unknown("round 4", f"its recommendation is {round4['recommendation']!r}, not one of "
+                                   f"{', '.join(ROUND4_DECISIONS)}")
+    if not (isinstance(round4["variants"], dict) and round4["variants"]
+            and isinstance(round4["per_clause"], dict) and round4["per_clause"]):
+        return _unknown("round 4", "it evaluated no variant or no clause")
+    required = set(_dict(round3, "per_clause")) | set(_dict(declaration, "clauses"))
     if overlap is None:
         return _unknown("round 1 overlap", "no overlap report, so retire is NOT EXAMINED")
     missing = [f for f in OVERLAP_FIELDS if f not in overlap]
@@ -346,8 +372,7 @@ def decide(skill: gauntlet.Skill, record: dict[str, dict[str, object]], round3: 
                  f"{f.get('path')}:{f.get('line')}; its bad input is NOT CONSTRUCTED (round 2 names the check, "
                  f"not a case it must fail on); prose kept until the check exists: {f.get('detail')}"
                  for f in b_items]
-    assert round4 is not None
-    return (_retire(contract, overlap, evidence) or _trim(skill, round4, declaration, evidence, b_items)
+    return (_retire(contract, overlap, evidence) or _trim(skill, round4, declaration, evidence, b_items, required)
             or Verdict(KEEP, "no variant passed round 4 and no duty is owned elsewhere",
                        "NEXT: nothing to change; the owner may record the keep with `skillc gauntlet rule ... accept`",
                        evidence))
