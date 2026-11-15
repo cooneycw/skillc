@@ -38,14 +38,14 @@ section; nothing earlier is edited, and every check reads only its own run.
 
 | Lane | Answer |
 |---|---|
-| Checkout | will test - temp checkouts, including one reached through a symlinked path component |
+| Checkout | will test - main checkout (temp checkouts, including one reached through a symlinked path component); linked worktree: not tested (the launcher resolves its own path, the same in both) |
 | Run placement | will test - Woodpecker CI (python:3.12-slim, kyleci agent) and host targeted set; real-Docker runner VM: not applicable |
 | Execution backend | not applicable |
 | Agent client | not applicable - the launcher is invoked directly |
 | Client invocation | not applicable |
 | Static-check target | not applicable |
 | Subject collection | not applicable |
-| Subject installation | will test - editable install runs; a non-editable copy inside the checkout's .venv is refused |
-| skillc distribution | will test - source checkout; built wheel: simulated by layout, not built |
+| Subject installation | not applicable - no subject is installed; the skill surface install (make install-skill) is unchanged. skillc's OWN install kind is the skillc distribution row |
+| skillc distribution | will test - source checkout (editable install runs); built wheel: simulated by layout, not built (a non-editable copy inside the checkout's .venv is refused) |
 | Python version | will test - 3.12 tested; >=3.11 declared: 3.11 not tested |
 | Reader: the owner and /skill-gauntlet reading the SKILL_GAUNTLET line | tested against real output - the launcher's own stderr and exit asserted |
