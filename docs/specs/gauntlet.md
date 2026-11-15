@@ -37,7 +37,7 @@ ran; this is not a keep/trim/retire verdict".
 
 | Round | Command | Continues on | Stops on |
 |---|---|---|---|
-| 0 usage | `usage report <log>`, per discovered log | `OBSERVED`; `UNKNOWN` when there is no log or one is unreadable (round 1 already reads missing usage as UNKNOWN columns) | never |
+| 0 usage | `usage report <log>`, per discovered log | `OBSERVED` only when the logs record THIS skill (its names: directory, frontmatter `name`, command name, `--alias`, as `charter draft` matches them); `UNKNOWN` when there is no log, one is unreadable, its report has no per-skill block this engine reads, or no log records the skill (#760) | never |
 | 1 charter | no `CHARTER.md`: `charter draft`; with one: `contracts <collection>`, this skill's `CONTRACT` line | `PASS`: contract GOOD and owner-approved | `STOP` draft ready for owner confirmation; `STOP` an intent or authority clause not approved; `FAIL` contract BAD; `UNKNOWN` nothing to draft from, or `contracts` says its hand-off rules did NOT run (a neighbour failed contract-shape, so this contract's hand-offs are unchecked); `NOT BUILT` |
 | 1 overlap | `charter overlap <collection>` | always: `EXAMINED`, `NOT EXAMINED` (no comparator), `NOT BUILT`; none is a pass | never |
 | 2 inspect | `inspect <collection> --json`, filtered to this skill | `PASS`: no error and no UNKNOWN on this skill | `FAIL` an error finding on this skill; `UNKNOWN` an unreadable issue state, an unexamined rule, nothing inspected, or an `--exclude` that drops this skill |
@@ -144,11 +144,23 @@ skill's `CHARTER.md`: beside `SKILL.md` for a native skill, or at
 
 **Resume.** A round whose recorded input digests equal the current ones is not
 re-run; its line reads `(cached)`. Round 0's inputs are the usage logs (an
-unreadable one is recorded as `unreadable` and reads UNKNOWN). Round 1's are the
-skill text, its charter, the collection's files (`contracts` checks that every
-declared test path exists), the aliases, the logs, and whether `charter`
-exists. Round 2's are the skill text, the collection's files, the issue-state
-file and the passed-through options. So editing `SKILL.md` re-runs rounds 1 and
+unreadable one is recorded as `unreadable` and reads UNKNOWN) and the aliases.
+Round 1's are the skill text, its charter, the collection's files (`contracts`
+checks that every declared test path exists), every declared test path by
+content wherever it lives (under `.skillc/` or `.venv/` too; a missing one reads
+`absent`), the aliases, the logs, and whether `charter` exists. Round 2's are
+the skill text, the collection's files, a digest of the raw `origin` URL (inspect
+infers its repository from it), the files inspect could add from the skipped
+directories (include-glob matches under `.venv`, `node_modules`, `.skillc`,
+`__pycache__`; names listed, only matches hashed), the issue-state file and the
+passed-through options (#760).
+
+- **The origin is keyed raw, not parsed** (orchestrator ruling): a cosmetic URL
+  change, such as `.git` added, re-runs round 2. Round 2 is free, so
+  over-invalidating is the safe direction, and no copy of inspect's parser is
+  kept here.
+- **The skipped-directory walk has a cap** (`SKIPPED_WALK_CAP`, 20,000 entries).
+  Past it round 2 reads UNKNOWN and says why, rather than scanning on. So editing `SKILL.md` re-runs rounds 1 and
 2 and leaves round 0 cached. A cached "draft ready" whose draft has been deleted
 is drafted again.
 

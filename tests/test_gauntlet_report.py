@@ -383,3 +383,17 @@ def test_a_refused_record_respects_the_output_mode(tmp_path: Path, mode: str, ma
                         out=lines.append)
     assert code == gauntlet.EXIT_USAGE
     assert any(line.startswith("ROUND ") for line in lines) is machine, (mode, lines)
+
+
+def test_a_log_without_this_skill_says_so_and_names_the_alias_switch(tmp_path: Path) -> None:
+    """#760: round 0's own stop has its own plain wording, never another's."""
+    log = tmp_path / "beta-only" / "usage.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("".join(line + "\n" for line in (FIXTURES / "usage" / "usage.jsonl").read_text().splitlines()
+                           if '"skill": "beta"' in line))
+    coll = _collection(tmp_path)
+    lines: list[str] = []
+    gauntlet.run(coll, "skills/alpha", gauntlet.Options(issue_states=coll / "issue-states.json",
+                                                        repo="example/gauntlet", usage=[log]), out=lines.append)
+    round0 = "\n".join(_plain(lines)).split("Round 1")[0]
+    assert "none records this skill (looked for alpha)" in round0 and "`--alias <name>`" in round0

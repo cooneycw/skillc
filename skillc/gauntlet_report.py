@@ -115,6 +115,10 @@ def _bad_rules(ctx: Ctx) -> str:
     return "; ".join(RULE_WORDS.get(r, "another contract check failed") for r in sorted(rules))
 
 
+def _names(items: object) -> str:
+    return ", ".join(str(n) for n in items) if isinstance(items, list) else "this skill's names"
+
+
 def _len(items: object) -> int:
     return len(items) if isinstance(items, list) else 0
 
@@ -164,8 +168,24 @@ TABLE: dict[tuple[str, str], Entry] = {
         lambda c: f"{c.facts('unreadable')} of {_count(c.facts('logs'), 'usage log')} could not be read",
         lambda c: "how the skill is used is only partly known",
         lambda c: "check each `--usage` file with `skillc usage report <log>`"),
+    ("0", "skill-not-in-log"): (
+        lambda c: f"{_count(c.facts('logs'), 'usage log')} read, but none records this skill (looked for "
+                  f"{_names(c.facts('names'))})",
+        lambda c: "how the skill is used is unknown; that never blocks the later rounds",
+        lambda c: "if the skill runs under another name, pass `--alias <name>`; otherwise pass `--usage <log>` "
+                  "from where it runs"),
+    ("0", "report-unreadable"): (
+        lambda c: f"{c.facts('unreadable')} of {_count(c.facts('logs'), 'usage report')} could not be read by this "
+                  "engine",
+        lambda c: "how the skill is used is unknown",
+        lambda c: "check each log with `skillc usage report <log>`; this skillc may be older than the log"),
+    ("2", "skipped-cap"): (
+        lambda c: "the hidden directories (.venv, node_modules, .skillc) are too large to fingerprint",
+        lambda c: "round 2 cannot tell whether its saved result is still current, so it is not a pass",
+        lambda c: "remove or move the large `.venv` or `node_modules` out of the collection, then re-run"),
     ("0", ""): (
-        lambda c: f"{_count(c.facts('logs'), 'usage log')} read",
+        lambda c: f"{_count(c.facts('logs'), 'usage log')} read; "
+                  f"{_count(c.facts('invocations'), 'recorded run')} of this skill",
         lambda c: "usage is recorded; the counts stay in the logs",
         lambda c: "nothing for this round"),
     ("1", "no-charter-draft"): (

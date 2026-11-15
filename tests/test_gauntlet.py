@@ -663,3 +663,89 @@ def test_state_files_are_never_written_through_a_link(coll: Path, tmp_path: Path
     (drafts / "skills__beta" / "display.json").symlink_to(victim)
     code, _ = _run(coll, "skills/beta", draft_dir=drafts)
     assert victim.read_text() == "keep me\n" and code == gauntlet.EXIT_USAGE
+
+
+# ------------------------- #760: each round's key covers what it reads; round 0's population
+
+def _alpha_declares(coll: Path, test: str) -> None:
+    charter = coll / "skills" / "alpha" / "CHARTER.md"
+    charter.write_text(charter.read_text().replace(
+        "owner: owner\n", f"owner: owner\ninvariants:\n  always:\n    - id: alpha.always-x\n      test: {test}\n"
+                          "  never: []\n", 1))
+
+
+def test_deleting_a_declared_test_under_skillc_reruns_round_1(coll: Path) -> None:
+    (coll / ".skillc").mkdir()
+    (coll / ".skillc" / "check.py").write_text("print('check')\n")
+    _alpha_declares(coll, ".skillc/check.py")
+    _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["1"].endswith("(cached)"), "the control: unchanged inputs are cached"
+    (coll / ".skillc" / "check.py").unlink()
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)"), "a deleted declared test must re-run round 1"
+
+
+def test_changing_origin_reruns_round_2(coll: Path) -> None:
+    _git(coll, "remote", "add", "origin", "https://github.com/example/gauntlet.git")
+    _run(coll, "skills/alpha", repo=None)
+    _, again = _run(coll, "skills/alpha", repo=None)
+    assert _rounds(again)["2"].endswith("(cached)"), "the control: an unchanged origin is cached"
+    _git(coll, "remote", "set-url", "origin", "https://github.com/example/other.git")
+    _, after = _run(coll, "skills/alpha", repo=None)
+    assert not _rounds(after)["2"].endswith("(cached)"), "a changed origin must re-run round 2"
+
+
+def test_a_new_skill_under_venv_reruns_round_2(coll: Path) -> None:
+    _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["2"].endswith("(cached)")
+    (coll / ".venv" / "x").mkdir(parents=True)
+    (coll / ".venv" / "x" / "SKILL.md").write_text("---\nname: x\ndescription: Use when x.\n---\nDo x.\n")
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["2"].endswith("(cached)"), "inspect could include it, so round 2 re-runs"
+
+
+def test_the_skipped_directory_walk_has_a_cap(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gauntlet, "SKIPPED_WALK_CAP", 3)
+    for i in range(5):
+        (coll / ".venv" / f"d{i}").mkdir(parents=True)
+    code, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["2"].startswith("UNKNOWN") and "more than 3 entries" in _rounds(lines)["2"]
+    assert code == gauntlet.EXIT_STOPPED
+
+
+def _beta_only_log(tmp: Path) -> Path:
+    log = tmp / "beta-only" / "usage.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("".join(line + "\n" for line in (FIXTURES / "usage" / "usage.jsonl").read_text().splitlines()
+                           if '"skill": "beta"' in line))
+    return log
+
+
+def test_a_log_without_this_skill_reads_unknown_and_an_alias_finds_it(coll: Path, tmp_path: Path) -> None:
+    log = _beta_only_log(tmp_path)
+    _, lines = _run(coll, "skills/alpha", usage=[log])
+    assert _rounds(lines)["0"].startswith("UNKNOWN") and "alpha" in _rounds(lines)["0"]
+    _, aliased = _run(coll, "skills/alpha", usage=[log], aliases=["beta"])
+    assert _rounds(aliased)["0"].startswith("OBSERVED"), "an alias names the skill's other usage name"
+
+
+def test_alphas_own_records_read_observed(coll: Path) -> None:
+    """The control: the fixture log holds alpha's own invocation."""
+    _, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["0"].startswith("OBSERVED")
+
+
+def test_a_usage_report_whose_shape_changed_reads_unknown(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = gauntlet._skillc
+
+    def renamed(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        done = real(args, cwd)
+        if args[:2] == ["usage", "report"]:
+            return subprocess.CompletedProcess(done.args, 0, done.stdout.replace("by skill and digest:", "per skill:"),
+                                               done.stderr)
+        return done
+    monkeypatch.setattr(gauntlet, "_skillc", renamed)
+    _, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["0"].startswith("UNKNOWN"), "an unreadable report shape is never OBSERVED"
