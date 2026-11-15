@@ -123,9 +123,10 @@ verify: selftest test lint typecheck negative-control typecheck-control leak-che
 cpp-pin-watch: sync
 	uv run --no-sync python3 -m ci.cpp_pin_watch $(if $(filter 1,$(POST)),--post,)
 
-# /skill-gauntlet for every Claude Code session (#763): a link from
-# ~/.claude/skills/skill-gauntlet to this checkout's skill. A git pull updates it;
-# uninstall removes only that link. SKILLC_SKILLS_DIR overrides the directory.
+# /skill-gauntlet for every Claude Code session (#763, #774): a real COPY of this
+# checkout's skill at ~/.claude/skills/skill-gauntlet (never a link: Kyle's deploy
+# refuses symlinks). Re-run to refresh it after a git pull; uninstall removes only
+# skillc's marked copy. SKILLC_SKILLS_DIR overrides the directory.
 .PHONY: install-skill uninstall-skill
 install-skill:
 	python3 scripts/install_skill.py install

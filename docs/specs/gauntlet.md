@@ -137,12 +137,16 @@ It never opens a log. It hands the paths to `usage report` and
 `charter draft --usage`, and the record keeps only each log's sha256, numbered
 in digest order. The log stays local (#718 decision 2).
 
-## From any session (#763)
+## From any session (#763, #774)
 
-`make install-skill` links `~/.claude/skills/skill-gauntlet` to the main
-checkout's `.claude/skills/skill-gauntlet` (`scripts/install_skill.py`). The skill
-calls its own launcher, `scripts/gauntlet.sh`, which finds skillc through its
-own real path. It then checks that the checkout's environment (`.venv`, or
+`make install-skill` writes a REAL COPY of the main checkout's
+`.claude/skills/skill-gauntlet` to `~/.claude/skills/skill-gauntlet`
+(`scripts/install_skill.py`), never a link: Kyle's deploy stages that directory
+and refuses symlinks (#774). The copy carries a locator, `.skillc-checkout`
+(the main checkout, `~/`-relative under $HOME), and a marker, `.skillc-install`
+(kind, schema, digest). The skill calls its own launcher, `scripts/gauntlet.sh`,
+which finds skillc through the locator when there is one, and otherwise
+through its own real path (the repository's copy). It then checks that the checkout's environment (`.venv`, or
 `UV_PROJECT_ENVIRONMENT` resolved against the checkout, as uv resolves it)
 imports THIS checkout's gauntlet engine, and runs it directly:
 `<env>/bin/python -P -m skillc.cli gauntlet run`. It drops a caller's
@@ -152,9 +156,12 @@ derived at run time.
 
 Two failure cases, ruled on #763:
 
-- **The checkout moved or was deleted.** The link dangles, so Claude Code lists
-  no `/skill-gauntlet` and nothing can run. No verdict is possible.
-  (`test_a_dangling_link_lists_no_skill_and_gives_no_verdict`.)
+- **The checkout moved or was deleted.** The locator names a missing
+  checkout, so the launcher prints the cannot-find line, exit 2, with no ROUND
+  line. (`test_a_wrong_or_missing_locator_gives_cannot_find_and_no_verdict`.)
+- **The copy is stale** (a `git pull` since the install): one
+  `SKILL_GAUNTLET: warning: ...` line on stderr; the verdict and exit code are
+  the engine's, unchanged. Refresh with `make install-skill`.
 - **The checkout is present but skillc cannot run** (no gauntlet engine, no
   synced environment, or an environment that does not import this checkout's
   engine). The launcher prints `SKILL_GAUNTLET: cannot find
