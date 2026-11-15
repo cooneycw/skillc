@@ -403,17 +403,25 @@ def run(
             if pins:
                 item.extra["pinned_by"] = pins
 
+    skipped_splits = sum(
+        int(result.population.get("split_strings_not_examined", 0) or 0)  # type: ignore[call-overload]
+        for rule, result in results if rule.id == "dangling-reference"
+    )
     if errors:
         verdict, code = STOPPED, 1
         summary = (f"STOPPED - {len(errors)} hard error(s): a dangling reference is a bug, not a trim. "
                    f"Nothing here is trim-ready until they are fixed")
-    elif unknown or unexamined:
+    elif unknown or unexamined or skipped_splits:
         verdict, code = INCOMPLETE, 1
         gaps = []
         if unknown:
             gaps.append(f"{len(unknown)} marker(s) UNKNOWN")
         if unexamined:
             gaps.append(f"not examined: {', '.join(unexamined)}")
+        if skipped_splits:
+            # Past the splice cap (#745): those env -S values were not read as
+            # commands, so a CLEAN here would claim more than was examined.
+            gaps.append(f"{skipped_splits} env -S value(s) not examined (splice cap)")
         summary = f"INCOMPLETE - {'; '.join(gaps)} - NOT clean"
     elif items or any(r.bucket in (A, B) for r in rule_lines):
         actionable = sum(r.bucket in (A, B) for r in rule_lines)

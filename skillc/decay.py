@@ -27,6 +27,7 @@ from __future__ import annotations
 import functools
 import json
 import re
+import shlex
 import shutil
 import subprocess
 from collections import defaultdict, deque
@@ -472,6 +473,7 @@ class Token:
     opens: int = 0  # UNQUOTED `$(` in this word
     closes: int = 0  # UNQUOTED `)` in this word
     began_quoted: bool = False  # the word OPENS with a quote: a whole quoted string
+    literal: bool = False  # an argv word from `env -S`: never an operator or substitution
 
 
 SHELL_PUNCT = ";&|"
@@ -552,6 +554,22 @@ def shell_tokens(text: str) -> list[Token]:
             i += 1
     flush()
     return tokens
+
+
+def env_split_words(value: str) -> list[Token]:
+    """An `env -S` value split the way env splits it (#745 review, checked
+    against /usr/bin/env): whitespace-separated words with quotes and escapes, a
+    `#` at the start of a word begins a comment, and NO shell operators or
+    substitutions - `;` is an argument here, never a separator. Each word is a
+    `literal` token, so the command logic never reads shell metadata into it."""
+    lexer = shlex.shlex(value, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
+    try:
+        words = list(lexer)
+    except ValueError:
+        words = value.split()
+    return [Token(w, literal=True) for w in words]
 
 
 def _command_tokens(text: str) -> tuple[list[Token], bool]:
@@ -693,11 +711,7 @@ def dangling_reference(coll: Collection) -> Result:
                 if splices > SPLICE_CAP:
                     split_unexamined += 1
                     return False
-                try:
-                    inner = shell_tokens(value)
-                except ValueError:
-                    inner = [Token(w, opens=w.count("$("), closes=w.count(")")) for w in value.split()]
-                queue.extendleft(reversed(inner))
+                queue.extendleft(reversed(env_split_words(value)))
                 return True
 
             while queue:
@@ -708,7 +722,8 @@ def dangling_reference(coll: Collection) -> Result:
                     pending_operand, prefix, arg_path_seen = False, "", False
                     pending_split = False
                     reset_after = False
-                is_separator = token.operator if quote_aware else raw in SHELL_SEPARATORS
+                is_separator = (not token.literal
+                                and (token.operator if quote_aware else raw in SHELL_SEPARATORS))
                 if is_separator:
                     # An UNQUOTED operator ends the command (`";"` is an argument,
                     # #741); the next word starts a new one.
@@ -724,6 +739,20 @@ def dangling_reference(coll: Collection) -> Result:
                 is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
                              and (token.began_quoted or not word.startswith("-")))
                 quoted_option = is_string and bool(FLAG_RE.match(word.split("=", 1)[0]))
+                handled_option = False
+                if quoted_option and expect_command and prefix == "env" \
+                        and word.split("=", 1)[0] in SPLIT_STRING_OPTIONS:
+                    # `env "--split-string=VALUE"` is `env --split-string="VALUE"`.
+                    is_string = quoted_option = False
+                    if "=" in raw:
+                        if splice(raw.split("=", 1)[1]):
+                            script, script_word, expect_command = None, "", True
+                            pending_operand, prefix, arg_path_seen = False, "", False
+                            continue
+                        arg_path_seen = True
+                    else:
+                        pending_split = True
+                    continue
                 if quoted_option:
                     # A FULLY quoted option (`"--absent=x y"`) is the same argv
                     # word as `--absent="x y"` (#745): an option with an attached
@@ -744,7 +773,7 @@ def dangling_reference(coll: Collection) -> Result:
                     elif arg_path_seen:
                         flags_unowned += 1
                     pending_operand = False
-                    continue
+                    handled_option = True  # still run the substitution delimiters below
                 if is_string and pending_split:
                     pending_split = False
                     if splice(raw):
@@ -790,7 +819,7 @@ def dangling_reference(coll: Collection) -> Result:
                          pending_operand, prefix, arg_path_seen, pending_split) = outer2.pop()
                     reset_after = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
                     continue
-                if is_string:
+                if is_string or handled_option:
                     continue
                 if pending_split:
                     # `env -S VALUE`: VALUE is command text, even when it is empty
@@ -810,9 +839,10 @@ def dangling_reference(coll: Collection) -> Result:
                         pending_operand = False
                     continue
                 # Whitespace fallback only: a separator inside or trailing a word.
-                trailing_break = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
-                inner_break = not quote_aware and any(sep in raw for sep in SHELL_BREAKS)
-                if (inner_break and not trailing_break) or (not quote_aware and word in SHELL_SEPARATORS):
+                shellish = not quote_aware and not token.literal
+                trailing_break = shellish and raw.rstrip("\"'").endswith((";", "|", "&"))
+                inner_break = shellish and any(sep in raw for sep in SHELL_BREAKS)
+                if (inner_break and not trailing_break) or (shellish and word in SHELL_SEPARATORS):
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
                     pending_split = False

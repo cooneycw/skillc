@@ -883,3 +883,46 @@ def test_745_nested_split_strings_are_bounded_and_reported(tmp_path: Path) -> No
     _skill(tmp_path, "b", f"```bash\n{flood}\n```\n")
     result = decay.dangling_reference(_load(tmp_path))
     assert int(result.population["split_strings_not_examined"]) > 0  # type: ignore[call-overload]
+
+
+# ------------------------------------------------- #745 counter-model pass 1
+
+def test_745_r1_a_quoted_option_inside_a_substitution_still_closes_it(tmp_path: Path) -> None:
+    """Reviewer's exact input: the quoted option sits inside `$(...)`, whose `)`
+    is in the same word; the outer helper's `--missing` is still checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh $(echo "--absent=a b") --missing\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --missing"]
+
+
+def test_745_r1_a_fully_quoted_split_string_option_still_splices(tmp_path: Path) -> None:
+    """Reviewer's exact input: `env "--split-string=..."` is the same argv as
+    `env --split-string="..."`."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nenv "--split-string=bash scripts/helper.sh --absent"\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_745_r1_env_split_string_uses_envs_rules_not_the_shells(tmp_path: Path) -> None:
+    """Reviewer's exact inputs, checked against real env: inside -S a `;` is an
+    ARGUMENT (the helper receives it, then --absent), and `#` at a word start
+    begins a comment (env drops `--commented`)."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh ; --absent"\n'
+                          'env -S "bash scripts/helper.sh # --commented"\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_745_r1_splice_cap_makes_the_run_incomplete(tmp_path: Path) -> None:
+    """Reviewer's exact input: 33 values on one line, one past the cap. The skip
+    is not only in JSON: the verdict is INCOMPLETE and the Markdown says why."""
+    from skillc import inspect
+
+    _helper(tmp_path)
+    line = " ; ".join(['env -S "bash scripts/helper.sh --verbose"'] * 32 + ['env -S "bash scripts/helper.sh --absent"'])
+    _skill(tmp_path, "a", f"```bash\n{line}\n```\n")
+    _skill(tmp_path, "b", "other\n")
+    report = inspect.run(decay.load(tmp_path, offline=True))
+    assert report.data["rules"]["dangling-reference"]["population"]["split_strings_not_examined"] == 1
+    assert report.verdict == inspect.INCOMPLETE
+    assert "env -S value(s) not examined" in inspect.render_markdown(report)
