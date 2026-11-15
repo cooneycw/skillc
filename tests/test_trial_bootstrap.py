@@ -89,12 +89,12 @@ with open(log, "a") as fh:
 if argv[0] == "rm":
     if mode == "sleep-rmhang":
         time.sleep(3600)  # blocks until the probe's bound kills it (role F, #758)
-    sys.exit(1 if mode in ("sleep-rmfail", "late-rmfail") else 0)
+    sys.exit(1 if mode == "sleep-rmfail" else 0)
 if mode == "badbytes":
     sys.stdout.buffer.write(b"codex-cli \\xff\\xfe\\n")
     sys.exit(0)
-if mode in ("late", "late-rmfail"):
-    time.sleep(1)  # answers AFTER the 0.3 s bound; load only delays it further (#758)
+if mode == "late":
+    time.sleep(1)
     sys.exit(0)
 if mode in ("signal", "late-signal"):
     import os, signal
@@ -192,22 +192,56 @@ def test_548_probe_removes_and_never_confirms_after_a_signalled_cli(tmp_path, ti
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 
 
-@pytest.mark.parametrize(("mode", "reason", "settle"), [
-    # rm -f EXITS 1 at once, after a CLI that answers late but does settle:
-    # both waits inside `settle` must be BEATEN, or a slow host reads "timed
-    # out" where the property is "exited 1" (#758, pipeline 1475). A CLI that
-    # never settles would make this test wait the whole generous bound.
-    ("late-rmfail", "exited 1", TEST_SETUP_BOUND),
-    # rm -f HANGS until killed: the settle window is the property, so it fires.
-    ("sleep-rmhang", "failed", 0.5),  # timing: must-fire - rm -f blocks until this bound kills it
+@pytest.mark.parametrize(("mode", "reason", "rm_bound"), [
+    # rm -f EXITS 1 at once: its own call must be BEATEN, so it gets the shared
+    # bound, or a slow host reads "timed out" where the property is "exited 1"
+    # (#758, pipeline 1475).
+    ("sleep-rmfail", "exited 1", TEST_SETUP_BOUND),
+    # rm -f HANGS until killed: its bound is the property, so it fires at settle.
+    ("sleep-rmhang", "failed", None),
 ])
-def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, mode, reason, settle):
+def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, monkeypatch, mode, reason, rm_bound):
+    """The probe gives its CLI `timeout`, then `settle` both to settle and to
+    `docker rm -f`. The "sleep" CLI BLOCKS until killed, so the timeout and the
+    settle wait are must-fire: load can only delay the CLI further past them.
+    Only the rm-fail call is work to beat, so only it is widened (#758 review:
+    a CLI that answered "late" could still beat a descheduled parent)."""
+    if rm_bound is not None:
+        real_remove = tb._remove_probe_container
+        monkeypatch.setattr(tb, "_remove_probe_container",
+                            lambda docker_bin, name, _timeout: real_remove(docker_bin, name, rm_bound))
     docker_bin, _log = _probe_docker(tmp_path, mode)
     probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
                                        timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
-                                       settle=settle)
+                                       settle=0.5)  # timing: must-fire - the blocked create never settles
     assert probe.version is None and "cleanup 'docker rm -f skillc-client-probe-" in probe.reason
     assert reason in probe.reason
+
+
+def test_548_a_descheduled_parent_still_reports_the_failed_cleanup(tmp_path, monkeypatch):
+    """Reviewer's red case (#758): delay the parent 1.2 s before its first
+    `communicate()`, as a loaded host can. The blocking CLI still has not
+    answered, so the timeout still fires and the rm-fail is still reported."""
+    import subprocess as sp
+    import time
+    real_communicate = sp.Popen.communicate
+    delayed: list[bool] = []
+
+    def late_parent(self, *args, **kwargs):
+        if not delayed:
+            delayed.append(True)
+            time.sleep(1.2)  # timing: must-fire - simulates the descheduled parent
+        return real_communicate(self, *args, **kwargs)
+
+    monkeypatch.setattr(sp.Popen, "communicate", late_parent)
+    real_remove = tb._remove_probe_container
+    monkeypatch.setattr(tb, "_remove_probe_container",
+                        lambda docker_bin, name, _timeout: real_remove(docker_bin, name, TEST_SETUP_BOUND))
+    docker_bin, _log = _probe_docker(tmp_path, "sleep-rmfail")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
+                                       settle=0.5)  # timing: must-fire - the blocked create never settles
+    assert delayed and probe.version is None and "exited 1" in probe.reason
 
 
 def test_548_probe_refuses_an_unknown_client_without_running_anything(tmp_path):

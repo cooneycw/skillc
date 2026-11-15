@@ -127,15 +127,27 @@ class _Scan(ast.NodeVisitor):
         """`@pytest.mark.parametrize("mode, settle", [("x", 0.5)])`: a value in
         a time-ish column is a bound, even though it is not a keyword - or a
         bound could dodge the ratchet by moving into a parametrize table."""
-        if len(node.args) < 2 or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+        if len(node.args) < 2:
             return
-        names = [n.strip() for n in node.args[0].value.split(",")]
+        spec = node.args[0]
+        if isinstance(spec, ast.Constant) and isinstance(spec.value, str):
+            names = [n.strip() for n in spec.value.split(",")]
+        elif isinstance(spec, (ast.Tuple, ast.List)) and all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in spec.elts):
+            names = [str(e.value).strip() for e in spec.elts]  # type: ignore[attr-defined]
+        else:
+            return
         timeish = [i for i, n in enumerate(names) if TIMEISH.search(n)]
         rows = node.args[1]
         if not timeish or not isinstance(rows, (ast.List, ast.Tuple)):
             return
         for row in rows.elts:
-            cells = row.elts if isinstance(row, (ast.Tuple, ast.List)) and len(names) > 1 else [row]
+            if isinstance(row, ast.Call) and _src(row.func).split(".")[-1] == "param":
+                cells = list(row.args)  # pytest.param(0.3, "x", id=...) - the values are its positional args
+            elif isinstance(row, (ast.Tuple, ast.List)) and len(names) > 1:
+                cells = list(row.elts)
+            else:
+                cells = [row]
             for i in timeish:
                 if i < len(cells):
                     value = _num(cells[i])
@@ -173,6 +185,12 @@ class _Scan(ast.NodeVisitor):
             for target in node.targets:
                 if isinstance(target, ast.Name) and TIMEISH.search(target.id):
                     self._add("const", node.value, value, f"{target.id} = {_src(node.value)}")
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        value = _num(node.value) if node.value is not None else None
+        if value is not None and isinstance(node.target, ast.Name) and TIMEISH.search(node.target.id):
+            self._add("const", node.value, value, f"{node.target.id}: {_src(node.annotation)} = {_src(node.value)}")  # type: ignore[arg-type]
         self.generic_visit(node)
 
     def visit_arguments(self, node: ast.arguments) -> None:
@@ -214,8 +232,12 @@ def scan_tree(root: Path, subdir: str) -> list[Hit]:
     base = root / subdir
     if not base.is_dir():
         raise ScanError(f"{subdir}/ does not exist under {root}")
+    files = sorted(base.rglob("*.py"))
+    if not files:
+        # An empty population reads like a clean one: refuse it (#758 review).
+        raise ScanError(f"{subdir}/ under {root} holds no Python files to scan")
     hits: list[Hit] = []
-    for path in sorted(base.rglob("*.py")):
+    for path in files:
         hits.extend(scan_file(path, path.relative_to(root).as_posix()))
     return hits
 

@@ -185,3 +185,38 @@ def test_the_committed_tree_passes_its_own_ratchet() -> None:
     """The real gate, run here too, so a local test run catches baseline drift."""
     ok, lines = ti.check(ROOT, ROOT / ti.DEFAULT_BASELINE)
     assert ok, "\n".join(lines)
+
+
+# --------------------------------------------- counter-model pass 1 (#758): forms that dodged the ratchet
+
+@pytest.mark.parametrize("source", [
+    # Column names as a tuple, not one string.
+    _j("import pytest\n", "@pytest.mark.parametrize(('mode', 'settle'), [('x', ", DOT, "3)])\n",
+       "def test_x(mode, settle):\n", "    pass\n"),
+    # A pytest.param() row.
+    _j("import pytest\n", "@pytest.mark.parametrize('settle', [pytest.param(", DOT, "3, id='fast')])\n",
+       "def test_x(settle):\n", "    pass\n"),
+    # A typed module constant.
+    _j("POLL_INTERVAL: float = ", DOT, "3\n", "def test_x():\n", "    pass\n"),
+], ids=["tuple-columns", "pytest-param", "annotated-constant"])
+def test_review_forms_are_new_to_an_empty_baseline(tmp_path: Path, source: str) -> None:
+    """Reviewer's exact inputs: each passed an empty baseline before the fix."""
+    root = _tree(tmp_path, {"tests/test_x.py": source})
+    ok, lines = ti.check(root, root / "ci" / "timing-baseline.txt")
+    assert not ok and any(line.startswith("TIMING_NEW: tests/test_x.py:") for line in lines), lines
+
+
+def test_a_bad_annotation_on_a_pytest_param_row_is_still_an_error(tmp_path: Path) -> None:
+    source = _j("import pytest\n", "@pytest.mark.parametrize('settle', [pytest.param(", DOT, "3)])",
+                "  # tim", "ing: must-fire\n", "def test_x(settle):\n", "    pass\n")
+    root = _tree(tmp_path, {"tests/test_x.py": source})
+    ok, lines = ti.check(root, root / "ci" / "timing-baseline.txt")
+    assert not ok and any(line.startswith("TIMING_ANNOTATION_ERROR:") for line in lines), lines
+
+
+def test_an_empty_population_is_an_error_never_a_clean_scan(tmp_path: Path) -> None:
+    """Reviewer's exact input: an empty tests/ with an empty baseline read ok.
+    (A tests/ whose files hold no bound is still ok: the clean twin above.)"""
+    root = _tree(tmp_path, {})
+    (root / "tests").mkdir()
+    assert ti.main(["check", "--root", str(root)]) == 2

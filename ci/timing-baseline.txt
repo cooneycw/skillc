@@ -147,6 +147,7 @@ tests/test_skillc_supervisor.py::test_a_real_supervisor_relays_term_and_survives
 tests/test_skillc_supervisor.py::test_a_real_supervisor_relays_term_and_survives_letting_the_subject_finish::sleep::0.2
 tests/test_skillc_supervisor.py::test_a_supervisor_that_exits_after_relaying_kills_the_subject_before_its_handler_completes::kw::0.5
 tests/test_skillc_supervisor.py::test_a_supervisor_that_exits_after_relaying_kills_the_subject_before_its_handler_completes::sleep::0.2
+tests/test_stall_capture.py::test_red_an_unbounded_loop_is_refused::param::0.5
 tests/test_trial.py::_run::kw::0.5
 tests/test_trial.py::test_a_failing_journal_write_still_stops_the_subject::kw::0.5
 tests/test_trial.py::test_an_interrupted_controller_still_stops_the_subject.interrupt::elapsed::0.5

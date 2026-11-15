@@ -121,9 +121,8 @@ pytest-population-control: test
 	bash ci/pytest-population-control.sh
 	bash ci/pytest-lanes-control.sh
 
-verify: selftest test lint typecheck negative-control typecheck-control leak-check \
-	changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install \
-	timing-check
+verify: selftest test lint typecheck negative-control typecheck-control leak-check timing-check \
+	changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install
 
 # Explicit advisory network reading; posting requires the operator's POST=1.
 .PHONY: cpp-pin-watch
