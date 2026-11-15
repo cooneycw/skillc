@@ -188,6 +188,10 @@ It was **decided after seeing those results** (owner option 3). The repository n
 - **If revision 5 misses new wordings again, that is reported, and the grader is NOT patched
   further without the owner.**
 
+The revision-5 campaign ran once (`20261021T050644Z-25a382`). Grader revision 6 (#537)
+moved the grader, so `campaign-declaration-rev5.json` is now refused as spent and stays
+unchanged as the record; a revision-6 campaign needs its own declaration and approval.
+
 ## Harness: installed file modes (#505)
 
 Before #505, every file a live trial installed into the agent's home arrived at mode 0600,
