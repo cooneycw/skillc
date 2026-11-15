@@ -105,6 +105,7 @@ skillc materialize <subject>   # install a declared skill surface and prove what
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
 skillc inspect <collection>    # #725: skill-gauntlet round 2 - decay rules, findings sorted A/B/C/D; never edits
+skillc gauntlet run <collection> <skill> # #754: the skill-gauntlet engine - rounds 0-2 in order, one verdict per round, one NEXT: line; rounds 3-5 read NOT BUILT, so it never exits 0 yet (docs/specs/gauntlet.md)
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)

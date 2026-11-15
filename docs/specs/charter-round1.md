@@ -127,4 +127,7 @@ to `invariants.never`, worded "Never: ...".
   build step 4, and every draft lists it as a missing source.
 - It does not compare duties across skills. That is part B.
 - It writes nothing into the skill's own repository. The proof drafts for CPP
-  live under `docs/measurements/round1/`.
+  live under `docs/measurements/round1/`. The one exception is the gauntlet
+  engine (#754): it writes only `GAUNTLET.json` beside a confirmed charter, and
+  only when that file's contents change. It never stages or commits it
+  ([docs/specs/gauntlet.md](gauntlet.md)).
