@@ -46,6 +46,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/gauntlet.py` - `skillc gauntlet run` (#754): the skill-gauntlet engine. Runs the round commands
   (usage, charter, contracts, inspect) as subprocesses and reads only their verdicts; imports no round module;
   writes `GAUNTLET.json` beside the charter only on change and never commits it - see [docs/specs/gauntlet.md](docs/specs/gauntlet.md)
+- `skillc/gauntlet_verdict.py` - `skillc gauntlet verdict` / `rule` (#737): round 5. A pure function from the record,
+  round 3/4 JSON, the declaration, inspect and overlap reports to ONE keep/trim/retire proposal or UNKNOWN; drafts a
+  patch and PR text, never edits the skill; the owner's dated ruling goes into the record - see [docs/specs/gauntlet-verdict.md](docs/specs/gauntlet-verdict.md)
 - `skillc/overlap.py` - `skillc charter overlap` (#726 part B): shared/shadowed/orphan duties behind a `DutyComparator`
   seam (FakeComparator, recorded verdicts); replicates must agree or the pair is UNKNOWN; no comparator = exit 3, not examined
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
