@@ -33,6 +33,7 @@ from . import (
     materialize,
     profile,
     records,
+    usage,
 )
 
 # `demo` is NOT imported here at module load (EF-11, #80's own no-Docker-
@@ -63,7 +64,10 @@ def _controls_root(explicit: str | None) -> Path:
 
 def _unknown_rule_message(
     only: str | None,
-    family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
+    family: (
+        tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...]
+        | tuple[checks.RecordRule | checks.BundleRule | checks.UsageRule, ...]
+    ),
 ) -> str | None:
     """The refusal message for an unknown `--rule`, or None when it is known.
 
@@ -81,7 +85,10 @@ def _unknown_rule_message(
 
 def _unknown_rule(
     only: str | None,
-    family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
+    family: (
+        tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...]
+        | tuple[checks.RecordRule | checks.BundleRule | checks.UsageRule, ...]
+    ),
 ) -> bool:
     """`check-records` has no `--json` mode; keep its plain stderr-and-refuse shape."""
     message = _unknown_rule_message(only, family)
@@ -278,7 +285,11 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         return 2
 
     found = records.discover(root)
-    if not found:
+    # #719: skill-usage logs are their own subject - one record per LINE of a
+    # `*usage.jsonl` file - and count toward the population like any record.
+    logs = usage.discover_logs(root)
+    usage_records = sum(len(log.entries) for log in logs)
+    if not found and not usage_records and not any(log.parse_error for log in logs):
         # An empty population must not render as a clean one (AGENTS.md).
         print(f"skillc: no record found under {root} - nothing was checked")
         return 2
@@ -300,7 +311,24 @@ def cmd_check_records(args: argparse.Namespace) -> int:
     # case above already does for its own family.
     selected_record_rule = checks.record_rule_by_id(args.rule) if args.rule else None
     applicable = None
-    if selected_record_rule is not None:
+    if args.rule and any(r.id == args.rule for r in checks.USAGE_RULES):
+        # The envelope rule reads every log (an unreadable one is its finding);
+        # the semantic rules read only the lines the envelope accepts, so a log
+        # FILE is not their population - its readable records are (counter-
+        # model review: an unreadable log under --rule skill-usage-fields
+        # "checked one log" and exited 0 having examined nothing).
+        # The envelope's population is every log with something to read or an
+        # unreadable one; a readable EMPTY log is nothing, even beside an
+        # unrelated record that let the population guard above pass (pass 2).
+        applicable = (
+            sum(1 for log in logs if log.parse_error or log.entries) if args.rule == "skill-usage-envelope"
+            else sum(usage.readable_count(log) for log in logs)
+        )
+        if applicable == 0:
+            print(f"skillc: no {args.rule}-applicable usage record under {root} - "
+                  f"{args.rule} checked nothing")
+            return 2
+    elif selected_record_rule is not None:
         applicable = checks.applicable_population(selected_record_rule, found)
         if applicable == 0:
             print(f"skillc: no {selected_record_rule.id}-applicable record "
@@ -313,6 +341,8 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         findings.extend(checks.run_record(record, only=args.rule))
     for bundle in bundles:
         findings.extend(checks.run_bundle(bundle, only=args.rule))
+    for log in logs:
+        findings.extend(checks.run_usage_log(log, only=args.rule))
 
     base = root if root.is_dir() else root.parent
     for finding in findings:
@@ -325,7 +355,17 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         f"\nskillc: {len(found)} record(s) in {len(bundles)} bundle(s) checked, "
         f"{errors} error(s)"
     )
-    if applicable is not None:
+    if logs:
+        open_ended = sum(len(usage.unended(log)) for log in logs)
+        print(
+            f"skillc: {usage_records} skill-usage record(s) in {len(logs)} usage log(s) checked; "
+            f"{open_ended} start(s) without an end, read as outcome UNKNOWN (reported, not refused)"
+        )
+    if applicable is not None and args.rule == "skill-usage-envelope":
+        print(f"skillc: {applicable} usage log(s) were {args.rule}-applicable")
+    elif applicable is not None and any(r.id == args.rule for r in checks.USAGE_RULES):
+        print(f"skillc: {applicable} usage record(s) were {args.rule}-applicable")
+    elif applicable is not None:
         print(f"skillc: {applicable} of {len(found)} record(s) were {args.rule}-applicable")
     if loose:
         print(
@@ -350,7 +390,9 @@ class _Subject:
 
 
 def _population(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: (
+        checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.UsageRule | checks.CollectionRule
+    ),
     where: Path,
     target: str = DEFAULT_TARGET,
 ) -> list[_Subject]:
@@ -379,6 +421,41 @@ def _population(
             own = sum(1 for f in case_findings if f.rule == rule.id)
             subjects.append(_Subject(case, load_error, own))
         return subjects
+    if isinstance(rule, checks.UsageRule):
+        # An EMPTY usage log is an unexercised subject, never a passing one: a
+        # good control emptied to zero bytes would otherwise certify a rule that
+        # refuses every real record (counter-model review). It reads as
+        # unparsed, so a good side refuses UNPARSED and a bad side BLIND.
+        #
+        # One level deeper (#723): the SEMANTIC usage rules (fields, privacy,
+        # pairing - every usage rule but the parser-rule envelope) read only
+        # envelope-accepted lines, so a log with none of those gave them nothing
+        # to read, however many lines it has. It is unexercised for them too,
+        # and both sides then refuse UNPARSED. The envelope rule keeps its own
+        # population: an unreadable envelope is exactly what it examines.
+        def unexercised(log: usage.UsageLog) -> str | None:
+            if log.parse_error is not None:
+                return log.parse_error
+            if not log.entries:
+                return "empty usage log: no record to examine"
+            if not rule.parser and usage.readable_count(log) == 0:
+                return "no envelope-readable record: the rule had nothing to read"
+            return None
+
+        return [
+            _Subject(log.path, unexercised(log),
+                     sum(f.rule == rule.id for f in checks.run_usage_log(log, only=rule.id)))
+            for log in usage.discover_logs(where)
+        ]
+    if isinstance(rule, checks.CollectionRule):
+        # Same shape as BundleRule (issue #725): every CASE DIRECTORY is one
+        # collection, loaded offline, whether or not it loads; a case that
+        # does not load is UNPARSED rather than dropping out of the population.
+        subjects = []
+        for case in sorted(p for p in where.iterdir() if p.is_dir()):
+            case_findings, load_error = checks.collection_findings(case, only=rule.id)
+            subjects.append(_Subject(case, load_error, sum(f.rule == rule.id for f in case_findings)))
+        return subjects
     if isinstance(rule, checks.RecordRule):
         return [
             _Subject(r.path, r.parse_error,
@@ -393,7 +470,9 @@ def _population(
 
 
 def _refusal(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: (
+        checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.UsageRule | checks.CollectionRule
+    ),
     bad: list[_Subject], good: list[_Subject],
 ) -> tuple[str, str] | None:
     """Why this rule's control does not prove it, or None when it does.
@@ -711,6 +790,77 @@ def cmd_exposure(args: argparse.Namespace) -> int:
         return 1
     print(f"\nskillc: measured - evidence in {out}")
     return 0
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    """Round 2 of the skill-gauntlet (issue #725): run the decay rules over a
+    collection and sort what they find into A/B/C/D or UNSORTED. Reports;
+    never edits. Exit 2 when nothing was inspected or an input is refused,
+    1 when STOPPED (a hard error) or INCOMPLETE (an UNKNOWN or an unexamined
+    rule), 0 otherwise (1 under --strict when anything was found)."""
+    from . import decay, inspect
+
+    root = Path(args.path).resolve()
+    try:
+        states = decay.read_issue_states(Path(args.issue_states)) if args.issue_states else None
+        maps = [decay.parse_map(m) for m in (args.map or [])]
+        repo = args.repo or decay.repo_from_git(root)
+        if repo is not None and not decay.REPO_RE.fullmatch(repo):
+            raise decay.CollectionError(f"--repo {repo!r} is not owner/name")
+        coll = decay.load(
+            root,
+            include=args.include or decay.DEFAULT_INCLUDE,
+            exclude=args.exclude or (),
+            maps=maps,
+            own_prefixes=args.own_prefix or decay.DEFAULT_OWN_PREFIXES,
+            repo=repo,
+            issue_states=states,
+            offline=args.offline,
+            enforcement_roots=args.enforcement_root,
+        )
+        exposure_data = inspect.load_exposure(Path(args.exposure)) if args.exposure else None
+    except (decay.CollectionError, inspect.Refused) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    out: Path | None = None
+    if args.out:
+        # inspect never edits a skill (its charter): the report may not land
+        # inside the collection, through a symlink, or over an earlier report.
+        out = Path(args.out).absolute()
+        targets = [out / "report.json", out / "report.md"]
+        if out.resolve().is_relative_to(coll.root) or any(
+            t.resolve().is_relative_to(coll.root) for t in targets
+        ):
+            print(f"skillc: --out {out} is inside the inspected collection; refusing to write there",
+                  file=sys.stderr)
+            return 2
+        if any(t.exists() or t.is_symlink() for t in targets):
+            print(f"skillc: {out} already holds a report; refusing to overwrite it", file=sys.stderr)
+            return 2
+
+    report = inspect.run(coll, exposure=exposure_data, strict=args.strict)
+    markdown = inspect.render_markdown(report)
+    if out is not None:
+        out.mkdir(parents=True, exist_ok=True)
+        for target, text in ((out / "report.json", json.dumps(report.data, indent=1) + "\n"),
+                             (out / "report.md", markdown)):
+            try:
+                # Exclusive create: refuses a path that appeared (or became a
+                # symlink) after the check above.
+                with target.open("x", encoding="utf-8") as handle:
+                    handle.write(text)
+            except FileExistsError:
+                print(f"skillc: {target} appeared while inspecting; refusing to overwrite it",
+                      file=sys.stderr)
+                return 2
+    if args.json:
+        print(json.dumps(report.data, indent=1))
+    else:
+        print(markdown, end="")
+    if report.verdict == inspect.NOTHING_INSPECTED:
+        print(f"skillc: nothing inspected under {root} - not a clean result", file=sys.stderr)
+    return report.exit_code
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
@@ -2504,6 +2654,19 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_usage_hook(args: argparse.Namespace) -> int:
+    return usage.run_hook(sys.stdin, sys.stderr)
+
+
+def cmd_usage_end(args: argparse.Namespace) -> int:
+    session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    return usage.declare_end(args.skill, args.outcome, args.stop_reason, session, Path.cwd(), sys.stdout)
+
+
+def cmd_usage_report(args: argparse.Namespace) -> int:
+    return usage.cmd_report(Path(args.path))
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -3260,6 +3423,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="the one identity field allowed to differ between --a and --b; every other one must match",
     )
     p_config_compare.set_defaults(func=cmd_configuration_compare)
+
+    p_usage = sub.add_parser("usage", help="write, close and read skill-usage records (#719)")
+    usage_sub = p_usage.add_subparsers(dest="usage_command", required=True)
+    p_usage_hook = usage_sub.add_parser(
+        "hook", help="Claude Code hook: read the event payload on stdin, append to .skillc/usage.jsonl; always exits 0"
+    )
+    p_usage_hook.set_defaults(func=cmd_usage_hook)
+    p_usage_end = usage_sub.add_parser("end", help="declare how a skill ended (optional; closes its open start)")
+    p_usage_end.add_argument("--skill", required=True, help="the skill name its start recorded")
+    p_usage_end.add_argument("--outcome", required=True, choices=[o for o in usage.OUTCOMES if o != usage.UNKNOWN])
+    p_usage_end.add_argument("--stop-reason", help="a short token, e.g. approval-gate")
+    p_usage_end.add_argument("--session", help="session id (default: $CLAUDE_CODE_SESSION_ID)")
+    p_usage_end.set_defaults(func=cmd_usage_end)
+    p_usage_report = usage_sub.add_parser("report", help="counts by skill and digest, outcome mix, UNKNOWN rate")
+    p_usage_report.add_argument("path", help="a usage log, e.g. .skillc/usage.jsonl")
+    p_usage_report.set_defaults(func=cmd_usage_report)
+
+    p_inspect = sub.add_parser(
+        "inspect",
+        help="skill-gauntlet round 2: decay rules over a collection, sorted into A/B/C/D",
+    )
+    p_inspect.add_argument("path", help="the collection root")
+    p_inspect.add_argument("--include", action="append", metavar="GLOB",
+                           help="subject glob, repeatable (default: **/SKILL.md)")
+    p_inspect.add_argument("--exclude", action="append", metavar="GLOB", help="drop matching subjects")
+    p_inspect.add_argument("--map", action="append", metavar="FROM=TO",
+                           help="an installed-path prefix and where it lives in the collection, "
+                                "e.g. '~/.agent/bin/=bin/' (see docs/specs/inspect.md)")
+    p_inspect.add_argument("--own-prefix", action="append", metavar="PREFIX",
+                           help="a path prefix the text uses for its own files "
+                                "(default: scripts/, references/, assets/)")
+    p_inspect.add_argument("--repo", metavar="OWNER/NAME",
+                           help="repository a bare #N belongs to (default: the origin remote)")
+    p_inspect.add_argument("--issue-states", metavar="FILE",
+                           help="offline issue states, {\"owner/name#N\": \"OPEN\"|\"CLOSED\"}")
+    p_inspect.add_argument("--offline", action="store_true",
+                           help="never ask gh; every marker without a state is UNKNOWN")
+    p_inspect.add_argument("--enforcement-root", action="append", metavar="PREFIX",
+                           help="where checks live (default: tests/, controls/, ci/, .github/workflows/)")
+    p_inspect.add_argument("--exposure", metavar="REPORT", help="a `skillc exposure` report.json to fold in")
+    p_inspect.add_argument("--out", metavar="DIR", help="also write report.json and report.md here")
+    p_inspect.add_argument("--json", action="store_true", help="print the JSON report instead of Markdown")
+    p_inspect.add_argument("--strict", action="store_true", help="exit 1 when anything was found")
+    p_inspect.set_defaults(func=cmd_inspect)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
