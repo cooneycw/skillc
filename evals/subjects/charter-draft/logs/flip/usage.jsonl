@@ -1,0 +1,1 @@
+{"at": "2026-11-15T10:01:00Z", "client": "claude-code", "collection": "UNKNOWN", "commit": "UNKNOWN", "coverage": "complete", "event": "start", "invocation": "explicit", "kind": "skill-usage", "model": "UNKNOWN", "origin": "observed", "outcome": "UNKNOWN", "repo": "UNKNOWN", "session": "s1", "skill": "demo", "skill_digest": "UNKNOWN", "stop_reason": null, "version": 1}

@@ -293,3 +293,70 @@ def authorize(
             f"approved budget ${approved_budget_usd:.4f} is less than the ${gated_usd:.4f} "
             f"estimate for {cost.total_attempts} attempt(s)"
         )
+
+
+# ---------------------------------------------------------------- round 1 (#726)
+
+#: Every round-1 sizing carries this label. Product model calls stay sized,
+#: not run, until the owner sets the gauntlet budget (#747, #718 decision 4).
+ROUND1_LABEL = "sized, not run"
+
+
+@dataclass(frozen=True)
+class ModelRun:
+    """One kind of model work round 1 would do, counted rather than priced."""
+
+    what: str
+    units: int  # skills, cases or pairs, each one call
+    replicates: int
+    input_tokens_low: int
+    input_tokens_high: int
+    output_tokens: int
+
+    @property
+    def calls(self) -> int:
+        return self.units * self.replicates
+
+
+@dataclass(frozen=True)
+class Round1Sizing:
+    runs: tuple[ModelRun, ...]
+    label: str = ROUND1_LABEL
+
+    @property
+    def calls(self) -> int:
+        return sum(r.calls for r in self.runs)
+
+    @property
+    def input_tokens(self) -> tuple[int, int]:
+        return (sum(r.calls * r.input_tokens_low for r in self.runs),
+                sum(r.calls * r.input_tokens_high for r in self.runs))
+
+    def lines(self) -> list[str]:
+        out = [f"round-1 model runs ({self.label}):"]
+        for r in self.runs:
+            out.append(f"  {r.what}: {r.units} x {r.replicates} replicates = {r.calls} calls, "
+                       f"{r.input_tokens_low:,}-{r.input_tokens_high:,} input tokens each")
+        low, high = self.input_tokens
+        out.append(f"  total: {self.calls} calls, {low:,}-{high:,} input tokens")
+        return out
+
+
+def size_round1(collection_skills: int, *, overlap_controls: int = 2, proof_drafts: int = 2,
+                replicates: int = 3) -> Round1Sizing:
+    """Count the model calls round 1 would make (#726 gate): the overlap
+    controls, one overlap call per skill against an index of every other
+    charter's duties, and model-assisted drafting of the proof skills. It
+    assumes ~8-15k input tokens a call (the skill's text, plus the duty index
+    for overlap) and ~1k output. It never authorizes: `authorize()` is still
+    the only gate, and nothing calls it for round 1."""
+    for value, what, least in ((collection_skills, "collection_skills", 1), (replicates, "replicates", 1),
+                               (overlap_controls, "overlap_controls", 0), (proof_drafts, "proof_drafts", 0)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < least:
+            raise ValueError(f"{what} must be an integer of at least {least}, not {value!r} - "
+                             f"a negative or fractional count was not sized")
+    return Round1Sizing((
+        ModelRun("overlap controls", overlap_controls, replicates, 2_000, 4_000, 500),
+        ModelRun("collection overlap", collection_skills, replicates, 8_000, 15_000, 1_000),
+        ModelRun("proof drafting", proof_drafts, replicates, 8_000, 15_000, 1_500),
+    ))

@@ -26,6 +26,8 @@ from pathlib import Path
 
 from . import (
     __version__,
+    charter,
+    charter_confirm,
     checks,
     configuration_compare,
     contracts,
@@ -2706,6 +2708,68 @@ def cmd_gauntlet_round(args: argparse.Namespace) -> int:
     return GAUNTLET_EXIT_UNDECIDED  # UNKNOWN or INCOMPLETE: never a pass
 
 
+#: `charter draft` exit codes (docs/specs/charter-round1.md). 3 matches
+#: `contracts`' "none declared": nothing to work from is never a clean result.
+CHARTER_EXIT_OK, CHARTER_EXIT_REFUSED, CHARTER_EXIT_USAGE, CHARTER_EXIT_NOTHING = 0, 1, 2, 3
+
+
+def cmd_charter_draft(args: argparse.Namespace) -> int:
+    """`skillc charter draft <skill>` (#726): a draft CHARTER.md from evidence.
+    Prints to stdout, or writes `--out`, which must not exist."""
+    skill = Path(args.skill)
+    out = Path(args.out) if args.out else None
+    if out is not None and (out.exists() or out.is_symlink()):
+        print(f"skillc: {out} exists; charter draft never overwrites a charter", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    try:
+        drafted = charter.draft(skill, [Path(u) for u in args.usage or []], aliases=args.alias or [],
+                                subject=args.subject)
+    except FileNotFoundError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    except charter.NothingToDraft as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_NOTHING
+    text = drafted.render()
+    if out is None:
+        sys.stdout.write(text)
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            charter_confirm.write_new(out, text)
+        except charter_confirm.ConfirmRefused:
+            print(f"skillc: {out} appeared while drafting; charter draft never overwrites a charter", file=sys.stderr)
+            return CHARTER_EXIT_USAGE
+        print(f"skillc: draft written to {out} - draft ready for owner confirmation")
+    columns = ", ".join(f"{c} {sum(p.column == c for p in drafted.placed)}" for c in charter.COLUMNS)
+    print(f"skillc: {len(drafted.placed)} draft clause(s): {columns}", file=sys.stderr)
+    return CHARTER_EXIT_OK
+
+
+def cmd_charter_confirm(args: argparse.Namespace) -> int:
+    """`skillc charter confirm <draft> --answers FILE --out FILE` (#726)."""
+    try:
+        charter_confirm.confirm_file(Path(args.draft), Path(args.answers) if args.answers else None, Path(args.out))
+    except (charter_confirm.ConfirmRefused, OSError) as exc:
+        print(f"skillc: charter confirm refused: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_REFUSED
+    print(f"skillc: confirmed charter written to {args.out}")
+    return CHARTER_EXIT_OK
+def cmd_gauntlet_run(args: argparse.Namespace) -> int:
+    """`skillc gauntlet run <collection> <skill>` (#754): the skill-gauntlet engine
+    for the free rounds 0-2. It runs the round commands and reads their verdicts;
+    rounds 3-5 read NOT BUILT and the run stops, so it never exits 0 in part 1
+    (docs/specs/gauntlet.md)."""
+    from . import gauntlet
+
+    options = gauntlet.Options(
+        usage=[Path(p) for p in args.usage or []], aliases=list(args.alias or []), offline=args.offline,
+        issue_states=Path(args.issue_states) if args.issue_states else None, repo=args.repo,
+        draft_dir=Path(args.draft_dir) if args.draft_dir else None, include=list(args.include or []),
+        exclude=list(args.exclude or []), maps=list(args.map or []))
+    return gauntlet.run(Path(args.path), args.skill, options)
+
+
 def cmd_contracts(args: argparse.Namespace) -> int:
     """`skillc contracts <collection>` (#720): every CHARTER.md read together.
 
@@ -3563,11 +3627,54 @@ def build_parser() -> argparse.ArgumentParser:
     p_contracts.add_argument("path", help="collection root; test paths resolve from here")
     p_contracts.set_defaults(func=cmd_contracts)
 
-    # One `gauntlet` group, shared with #754's `gauntlet run` (coordinated
-    # through the wave orchestrator): whichever merges second adds only its
-    # own subparsers.
-    p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4, #736)")
+    p_charter = sub.add_parser("charter", help="skill-gauntlet round 1: draft a charter, then the owner confirms it (#726)")
+    charter_sub = p_charter.add_subparsers(dest="charter_command", required=True)
+    p_charter_draft = charter_sub.add_parser(
+        "draft", help="draft a CHARTER.md from the skill's text and usage records; nothing is approved"
+    )
+    p_charter_draft.add_argument("skill", help="a skill directory holding SKILL.md, or a command .md file")
+    p_charter_draft.add_argument("--usage", action="append", metavar="PATH",
+                                 help="a usage log, or a directory searched for them (repeatable)")
+    p_charter_draft.add_argument("--alias", action="append", metavar="NAME",
+                                 help="another name usage records carry for this skill, e.g. flow:eli5 (repeatable)")
+    p_charter_draft.add_argument("--subject", metavar="PATH",
+                                 help="the subject: line, the skill file's path from the collection root")
+    p_charter_draft.add_argument("--out", metavar="FILE", help="write here instead of stdout; never overwrites")
+    p_charter_draft.set_defaults(func=cmd_charter_draft)
+    p_charter_confirm = charter_sub.add_parser(
+        "confirm", help="apply the owner's answers to a draft; refuses without them"
+    )
+    p_charter_confirm.add_argument("draft", help="a `charter draft` output")
+    p_charter_confirm.add_argument("--answers", metavar="FILE", help="the owner's answers (docs/specs/charter-round1.md)")
+    p_charter_confirm.add_argument("--out", required=True, metavar="FILE", help="the confirmed charter; never overwrites")
+    p_charter_confirm.set_defaults(func=cmd_charter_confirm)
+    p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4 and the engine)")
     gauntlet_sub = p_gauntlet.add_subparsers(dest="gauntlet_command", required=True)
+    p_gauntlet_run = gauntlet_sub.add_parser(
+        "run", help="the engine (#754): rounds 0-2 in order, one verdict per round, one NEXT: line; "
+                    "rounds 3-5 read NOT BUILT, so it never exits 0 yet"
+    )
+    p_gauntlet_run.add_argument("path", help="the collection root")
+    p_gauntlet_run.add_argument("skill", help="a skill directory holding SKILL.md, or a command .md file, "
+                                              "relative to the collection")
+    p_gauntlet_run.add_argument("--usage", action="append", metavar="PATH",
+                                help="a usage log, or a directory searched for usage.jsonl (repeatable); "
+                                     "the collection's own .skillc/usage.jsonl is always read")
+    p_gauntlet_run.add_argument("--alias", action="append", metavar="NAME",
+                                help="another name usage records carry for this skill (repeatable)")
+    p_gauntlet_run.add_argument("--offline", action="store_true", help="round 2 never asks gh for issue states")
+    p_gauntlet_run.add_argument("--issue-states", metavar="FILE", help="round 2's offline issue states")
+    p_gauntlet_run.add_argument("--repo", metavar="OWNER/NAME", help="repository a bare #N belongs to (round 2)")
+    p_gauntlet_run.add_argument("--include", action="append", metavar="GLOB",
+                                help="round 2's inspect subject glob, passed through (repeatable)")
+    p_gauntlet_run.add_argument("--exclude", action="append", metavar="GLOB",
+                                help="round 2's inspect exclusion, passed through (repeatable)")
+    p_gauntlet_run.add_argument("--map", action="append", metavar="FROM=TO",
+                                help="round 2's inspect installed-path map, passed through (repeatable)")
+    p_gauntlet_run.add_argument("--draft-dir", metavar="DIR",
+                                help="where the draft and record go before a CHARTER.md exists "
+                                     "(default: <main checkout>/.skillc/gauntlet/)")
+    p_gauntlet_run.set_defaults(func=cmd_gauntlet_run)
     for name, about in (("round3", "baseline: clause tests, intact vs a named damaged copy; UNKNOWN unless they separate"),
                         ("round4", "challenge: leaner variants on held-out tasks; keep unless one is no worse on every clause")):
         p_round = gauntlet_sub.add_parser(name, help=about)

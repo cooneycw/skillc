@@ -145,10 +145,16 @@ resolved script, in the same span or line, is looked up in the script's
 `flow-preflight.sh` that execs `flow-preflight.py "$@"` takes the flags its
 target defines.
 
-**How command text is split into words** (#731, a design change). Inline code
-spans and fenced-block lines - command-shaped text only, never running prose,
-where two apostrophes ("don't ... isn't") would pair up and swallow a reference
-- are tokenised with stdlib `shlex` (posix, `punctuation_chars=";&|"`). A
+**How command text is split into words** (#731, a design change; #741). Inline
+code spans and fenced-block lines - command-shaped text only, never running
+prose, where two apostrophes ("don't ... isn't") would pair up and swallow a
+reference - are split with EXACTLY the word boundaries of stdlib `shlex`
+(posix, `punctuation_chars=";&|"`): `p="a b"` and `--opt="x y"` stay one word.
+`decay.shell_tokens` reproduces those boundaries (checked identical to `shlex`
+on all 17,694 CPP and mattpocock code spans, and refusing the same 434) and adds
+what shlex discards: whether an operator, a `$(` or a `)` was UNQUOTED. Only an
+unquoted `;`/`|`/`&&` separates commands, and only unquoted `$(`/`)` open and
+close a substitution, so a quoted `"$(pwd)"` is self-contained. A
 quoted argument stays one word, so `"$(printf x);"` is a value and its `;` no
 separator, while an unquoted `;`, `|` or `&&` is a token of its own. A quoted
 argument that holds several words is a STRING: each of its paths must still
@@ -188,27 +194,44 @@ execute repository-controlled code on the host.
 - a script that is not in command position: `a.sh b.sh --x` checks `--x`
   against `a.sh` (shell semantics; approved on #731), a script named inside an
   `echo "..."` string, and a script named mid-sentence in a prose code span
-  (`(re-run scripts/x.sh --write later)`) - their flags are not examined.
+  (`(re-run scripts/x.sh --write later)`) - their flags are not examined;
+- **flags inside or after an `env -S` / `--split-string` value are counted as
+  not examined, never checked** (`flags_after_a_non_command_path`; a stated
+  limit, ruled on #745). env splits its value into argv by rules of its own:
+  comments, escapes, and options such as `-u NAME` before the command. These
+  rules are not emulated, so no word in the value is taken as a command or a
+  flag owner, and a path after the value owns no later flag either. Every flag
+  in the value is counted (split on whitespace and on env's `\_` separator
+  escape), and its paths are still existence-checked: `env -S "bash
+  scripts/gone.sh"` is a finding.
 
-**Known false negatives until #741 lands.** A CLEAN `dangling-reference`
-verdict does NOT cover these five shapes. Each one is missed today, and each
-names its tracking item:
-- **a quoted separator** - `scripts/helper.sh ";" --absent`: shlex returns `;`
-  for a quoted and an unquoted separator alike, so the command is reset and
-  `--absent` is never examined;
-- **a path beside a substitution in one quoted argument** -
-  `echo "$(pwd) scripts/gone.sh"`: the whole token is skipped as a
-  substitution, so the missing `scripts/gone.sh` is not reported;
-- **wrapper state across a substitution with a separator inside** -
-  `sudo -u $(id -un; echo root) -g root scripts/helper.sh --absent`: the inner
-  `;` clears the outer `sudo` prefix, `root` is then taken as the command and
-  `--absent` is skipped;
-- **`env -S` / `--split-string`** - `env -S "bash scripts/helper.sh" --absent`:
-  the operand is command text but is consumed as an option value, so neither
-  the flag nor an unowned flag is counted;
-- **(copied-passage) a rare anchor starving a repetitive match** - A = 70 x
-  `same` + a 20-word tail, B = 100 x `same` + a separator + 31 x `same` + the
-  same tail: 51 words are reported, unlabelled, where 70 are shared.
+**Fixed in #741** (each has a regression in `tests/test_decay.py` and no longer
+escapes): a quoted separator (`scripts/helper.sh ";" --absent`), a path beside a
+substitution in one quoted argument (`echo "$(pwd) scripts/gone.sh"`), wrapper
+state across a substitution with a separator inside, `env -S` (its value is
+command text; its paths are checked and the flags after it counted as unowned),
+and a rare copy anchor starving a longer repetitive match.
+
+A word that OPENS with a quote is a whole quoted string even when its text
+begins with `-` (`echo "-> see scripts/x.sh"` is checked). Only a quote that
+opens mid-word is an attached option value (`--opt="x y"`): one option, with no
+paths read out of it. A value that cleans to nothing (`sudo -p ";"`) is still
+the option's value.
+
+**Fixed in #745** (each has a regression in `tests/test_decay.py`):
+- **a fully quoted option** (`scripts/helper.sh "--absent=x y"`) is the same argv
+  word as `--absent="x y"`. It is checked against its owner, and no paths are
+  read out of its value. With no owner but after a non-command path, it is
+  counted as unowned. A quoted word whose first part is not a flag name stays a
+  string and is path-checked, and a lone `--` or `-` is not a flag.
+
+**Known false negative until #752 lands.** A CLEAN `dangling-reference` verdict
+does NOT cover a quoted value of a prefix option that takes an operand, such as
+`sudo -p "--label=see scripts/gone.sh"`: it is read as an option, so its paths
+are not checked. This is a REGRESSION against `6040840`, which caught it. Also
+under #752, and not a false negative: an `env -S $(...)` value leaves command
+position open, so a later flag is CHECKED against the next script rather than
+counted.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,
@@ -253,7 +276,10 @@ and forward, then accepts the runs longest first - so a repetitive prefix is
 recovered whole from the first distinctive word after it, and an early short
 match never starves a later longer one, in either document order. Only what no anchor
 reached - purely repetitive text - falls back to the first 8 starting points,
-forward only. A pair is an **estimate** exactly when a candidate search was
+forward only. Since #741 a repetitive window's first 8 alignments join the
+anchored ones BEFORE any word is consumed, so a rare anchor cannot starve a
+longer repetitive match; those extensions are capped at 512 per pair. A pair is
+an **estimate** exactly when that cap was hit, or a candidate search was
 cut while a free alignment beyond the cut existed - whether or not the cut
 search then accepted a run - and that finding and the report summary say
 **bounded estimate**; `population.estimated_pairs` counts them. No word on either side is counted

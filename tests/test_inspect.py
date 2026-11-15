@@ -322,10 +322,34 @@ def test_731_the_control_root_is_still_an_enforcer(tmp_path: Path) -> None:
 
 
 def test_731_the_report_summary_says_when_a_copy_count_is_an_estimate(tmp_path: Path) -> None:
-    same = " ".join(["same"] * 200)
+    same = " ".join(["same"] * 1000)  # hits the extension cap (#741: 200 is now exact)
     _skill(tmp_path, "a", same + "\n")
     _skill(tmp_path, "b", same + "\n")
     report = inspect.run(decay.load(tmp_path, offline=True))
     assert "bounded estimate" in report.data["summary"]
     assert report.data["rules"]["copied-passage"]["population"]["estimated_pairs"] == 1
     assert "bounded estimate" in inspect.render_markdown(report)
+
+
+def test_741_the_env_split_string_counter_reaches_the_assembled_report(tmp_path: Path) -> None:
+    """The reader of the new population field: `inspect.run`'s report.json and
+    report.md carry `flags_after_a_non_command_path`, with the real count."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
+    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh" --absent\n```\n')
+    _skill(tmp_path, "b", "other\n")
+    report = inspect.run(decay.load(tmp_path, offline=True))
+    assert report.data["rules"]["dangling-reference"]["population"]["flags_after_a_non_command_path"] == 1
+    out = json.loads(json.dumps(report.data))
+    assert out["rules"]["dangling-reference"]["population"]["flags_after_a_non_command_path"] == 1
+
+
+def test_745_a_quoted_option_after_a_non_command_path_is_counted(tmp_path: Path) -> None:
+    """`mystery scripts/helper.sh "--odd=a b"`: a FULLY quoted option with no
+    owner, after a non-command path, is counted as unowned, as `--odd` would be."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
+    _skill(tmp_path, "a", '```bash\nmystery scripts/helper.sh "--odd=a b"\n```\n')
+    _skill(tmp_path, "b", "other\n")
+    report = inspect.run(decay.load(tmp_path, offline=True))
+    assert report.data["rules"]["dangling-reference"]["population"]["flags_after_a_non_command_path"] == 1

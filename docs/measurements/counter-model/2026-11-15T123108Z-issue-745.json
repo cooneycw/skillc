@@ -1,0 +1,70 @@
+{
+  "branch": "issue-745-skillc-inspect-two-741-pass-3-false-negatives-a-fu",
+  "counts": {
+    "accepted": 8,
+    "deferred": 6,
+    "rejected": 0
+  },
+  "extra_passes_reason": "pass 2 found 3 MEDIUM in the env -S splice; skillc-orch ratified option (b), counting instead of splicing, plus pass 3 at the ceiling (outbox rev 32, 2026-11-15)",
+  "head": "1e5175fb5e82a6f31a20bb7fc3a4eb8462c15501",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "569111c7-8eef-4a21-801d-0312b6df902e",
+    "sources": [
+      {
+        "bytes": 12629172,
+        "path": "-home-user-Projects/569111c7-8eef-4a21-801d-0312b6df902e.jsonl",
+        "sha256": "83ab0498f7a3c79731500654d5080df1ad1d05eff808702d3a7e33b33481ffeb"
+      }
+    ],
+    "transcript": "-home-user-Projects/569111c7-8eef-4a21-801d-0312b6df902e.jsonl"
+  },
+  "issue": "745",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-11-15T12:31:08Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 5
+  },
+  "reviewed_artifact": {
+    "base_sha": "604084088cc9e11464c5cc263260f658836e400c",
+    "merge_base": "604084088cc9e11464c5cc263260f658836e400c",
+    "method": "runtime-head",
+    "patch_sha256": "c253ba9dfad5899679ea06eaf34dc699d2524f673b55fd10afb49ce0a76ce6f6",
+    "report_record": 129,
+    "target_head": "1e5175fb5e82a6f31a20bb7fc3a4eb8462c15501"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.O24opK",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/15/rollout-2026-11-15T07-24-00-01a1df2a-1775-7bd2-968d-ba2cede2f2a1.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 166394,
+        "path": "codex-review-stream.O24opK",
+        "sha256": "a762a37439bb05365b657b1dec77e452292c74efeb27585d46a820e85ccbf045"
+      },
+      {
+        "bytes": 795070,
+        "path": "2026/11/15/rollout-2026-11-15T07-24-00-01a1df2a-1775-7bd2-968d-ba2cede2f2a1.jsonl",
+        "sha256": "ec8fc81e79190f2226770c5161cf6367e183f4d78d462b3bf89850421f568599"
+      }
+    ],
+    "thread_id": "01a1df2a-1775-7bd2-968d-ba2cede2f2a1"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}
