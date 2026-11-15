@@ -43,6 +43,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/charter_evidence.py` - `skillc charter evidence` (#778): every existing piece of a skill's charter as cited
   suggestions, each source with a status. `skillc/repo_reader.py` is its read-only GitHub seam (GraphQL queries only,
   asserted before any process runs). Spec: [docs/specs/charter-create.md](docs/specs/charter-create.md)
+- `skillc/charter_create.py` - `skillc charter create` (#778): the owner's answers become a CHARTER.md plus a
+  trap-task stub per clause (`evals/trap-tasks/`, no grader until #736 fills it), checked by the real contracts rules
+  and rolled back on any failure. The dialogue is `.claude/skills/charter-create/` (SKILL.md and `scripts/charter.sh`)
 - `skillc/gauntlet.py` - `skillc gauntlet run` (#754): the skill-gauntlet engine. Runs the round commands
   (usage, charter, contracts, inspect) as subprocesses and reads only their verdicts; imports no round module;
   writes `GAUNTLET.json` beside the charter only on change and never commits it - see [docs/specs/gauntlet.md](docs/specs/gauntlet.md)
