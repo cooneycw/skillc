@@ -92,7 +92,16 @@ skill's `CHARTER.md`: beside `SKILL.md` for a native skill, or at
   path is refused (exit 2), and the write replaces the path itself (temp file,
   then rename), so it cannot land in the file a link points at. A symlinked
   component of the draft location (`.skillc`, `gauntlet`, the skill's directory)
-  is refused too.
+  is refused too, as is a `--draft-dir` that is a symlink or holds one, and any
+  symlinked component between the collection root and the skill or its charter
+  (#759). Each state file is written through a temp file created exclusively,
+  then renamed over the path, as #733 writes its reports.
+
+  The default draft location, the main checkout's `.skillc/`, can sit outside
+  the collection directory (a nested collection, or a linked worktree). That is
+  the approved design (orchestrator ruling on #759): it is where the usage log
+  lives, it is ignored by git, and nothing lands beside the skill before a
+  charter exists.
 
 **Resume.** A round whose recorded input digests equal the current ones is not
 re-run; its line reads `(cached)`. Round 0's inputs are the usage logs (an

@@ -185,8 +185,16 @@ def resolve_skill(collection: Path, skill: str) -> Skill:
     root = collection.resolve()
     if not root.is_dir():
         raise UsageError(f"no such collection directory: {collection}")
-    target = Path(skill)
-    target = (target if target.is_absolute() else root / target).resolve()
+    given = Path(skill)
+    given = given if given.is_absolute() else root / given
+    # #759: no symlinked component between the collection root and the skill, so
+    # nothing the engine writes beside it can land outside the collection.
+    try:
+        _no_symlink_below(given, root)
+    except UsageError:
+        raise UsageError(f"{skill} reaches the skill through a symlink; the gauntlet keeps its record beside "
+                         "the skill and never writes through a link") from None
+    target = given.resolve()
     try:
         rel = target.relative_to(root).as_posix()
     except ValueError:
@@ -220,8 +228,7 @@ def main_checkout(path: Path) -> Path | None:
 
 def _draft_dir(skill: Skill, options: Options) -> Path:
     if options.draft_dir is not None:
-        top = options.draft_dir.resolve()
-        _no_symlink_below(top / skill.slug, top)
+        top = _given_draft_dir(options.draft_dir)
         return top / skill.slug
     main = main_checkout(skill.collection)
     if main is None:
@@ -232,13 +239,33 @@ def _draft_dir(skill: Skill, options: Options) -> Path:
 
 
 def _no_symlink_below(path: Path, top: Path) -> None:
-    """Refuse an engine-owned state path with a symlinked component at or below
-    `top`, so the engine never writes outside where it says it writes."""
+    """Refuse a path with a symlinked component at or below `top`, so the engine
+    never reads or writes outside where it says it does."""
     for part in [path, *path.parents]:
-        if part.is_symlink():
-            raise UsageError(f"{part} is a symlink - refusing to keep gauntlet state through it")
         if part == top:
             return
+        if part.is_symlink():
+            raise UsageError(f"{part} is a symlink - refusing to keep gauntlet state through it")
+
+
+def _inside(path: Path, top: Path) -> None:
+    """The resolved path must stay inside the resolved `top` (#759)."""
+    if not path.resolve().is_relative_to(top.resolve()):
+        raise UsageError(f"{path} resolves outside {top} - refusing to write the gauntlet record there")
+
+
+def _given_draft_dir(given: Path) -> Path:
+    """An operator-named --draft-dir, taken as given and never resolved: a
+    symlinked one, or a symlink below it, is refused (#759, orchestrator ruling
+    b), as #733 refuses a symlinked --out."""
+    top = given if given.is_absolute() else Path.cwd() / given
+    if top.is_symlink():
+        raise UsageError(f"--draft-dir {given} is a symlink - refusing to keep gauntlet state through it")
+    for child in top.rglob("*") if top.is_dir() else []:
+        if child.is_symlink():
+            raise UsageError(f"--draft-dir {given} holds a symlink ({child.relative_to(top)}) - refusing to keep "
+                             "gauntlet state through it")
+    return top
 
 
 def _ensure_ignored(draft_dir: Path) -> None:
@@ -318,7 +345,10 @@ def round1(skill: Skill, logs: list[Path], options: Options, draft: Path, tool: 
     if not tool:
         return Result("1", "charter", "NOT BUILT", "no CHARTER.md, and this skillc has no `charter draft` (#726)",
                       proceed=False, inputs=inputs)
-    draft.unlink(missing_ok=True)  # the engine's own previous draft; `charter draft` never overwrites
+    if draft.exists() and not draft.is_symlink() and not draft.is_file():
+        raise UnsafeRecord(f"{draft.name} is not a regular file - refusing to draft over it")
+    draft.unlink(missing_ok=True)  # the engine's own previous draft (a link is removed, never followed);
+    # `charter draft --out` then creates it afresh and never overwrites
     args = ["charter", "draft", str(skill.text.parent if not skill.command else skill.text), "--out", str(draft)]
     if skill.command:
         args += ["--subject", skill.text_rel]
@@ -506,19 +536,30 @@ class UnsafeRecord(Exception):
     """The record's path is a symlink, or not a regular file: never written through."""
 
 
+def _write_state(path: Path, data: bytes) -> None:
+    """Every engine-written file (the record, the display cache): refused when
+    the path is a symlink or not a regular file; written to a temp file created
+    EXCLUSIVELY (O_EXCL | O_NOFOLLOW, as #733 creates its reports), then renamed
+    over the path, so it can never land in the file a link points at."""
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise UnsafeRecord(f"{path.name} is a symlink or not a regular file - refusing to write through it")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.tmp")
+    if temp.is_symlink() or temp.exists():
+        temp.unlink()
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
+    os.replace(temp, path)
+
+
 def write_record(path: Path, data: bytes) -> bool:
-    """Write only when the bytes would change; True when written. A symlinked or
-    non-regular record path is refused, and the write replaces the path itself
-    (temp file + rename), so it can never land in the file a link points at."""
+    """Write only when the bytes would change; True when written."""
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise UnsafeRecord(f"{path.name} is a symlink or not a regular file - refusing to write through it")
     if path.is_file() and path.read_bytes() == data:
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f".{path.name}.tmp")
-    temp.unlink(missing_ok=True)
-    temp.write_bytes(data)
-    os.replace(temp, path)
+    _write_state(path, data)
     return True
 
 
@@ -529,9 +570,7 @@ def _display_path(skill: Skill, options: Options) -> Path | None:
     (`.skillc/` ignores itself), because the published record holds digests and
     verdicts only. No main checkout and no --draft-dir: no display cache."""
     if options.draft_dir is not None:
-        top = options.draft_dir.resolve()
-        _no_symlink_below(top / skill.slug, top)
-        return top / skill.slug / "display.json"
+        return _given_draft_dir(options.draft_dir) / skill.slug / "display.json"
     main = main_checkout(skill.collection)
     if main is None:
         return None
@@ -550,10 +589,8 @@ def _load_display(path: Path | None) -> dict[str, dict[str, object]]:
 
 
 def _save_display(path: Path, data: dict[str, dict[str, object]]) -> None:
-    if path.is_symlink():
-        return
     _ensure_ignored(path.parent)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    _write_state(path, (json.dumps(data, indent=2, sort_keys=True) + "\n").encode())
 
 
 # --------------------------------------------------------------------- the run
@@ -591,6 +628,10 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
     try:
         skill = resolve_skill(collection, skill_arg)
         logs = discover_usage(skill, options)
+        # #759: every component from the collection root to the charter, and
+        # where it resolves, before anything is read beside it or written there.
+        _no_symlink_below(skill.charter.parent, skill.collection)
+        _inside(skill.charter.parent, skill.collection)
         draft_dir = _draft_dir(skill, options) if not skill.charter.is_file() else None
         display_path = _display_path(skill, options)
     except UsageError as exc:
@@ -641,7 +682,11 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
     results: list[Result] = []
     stopped: Result | None = None
     for key, inputs, fresh in plan:
-        result = step(key, inputs(), fresh)
+        try:
+            result = step(key, inputs(), fresh)
+        except UnsafeRecord as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return EXIT_USAGE
         results.append(result)
         out(f"ROUND {key} {result.name}: {result.verdict} - {result.detail}{' (cached)' if result.cached else ''}")
         for line in result.lines:
@@ -652,12 +697,12 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
     assert stopped is not None, "round 3 never proceeds in part 1"
     try:
         written = write_record(record, render_record(skill, results))
+        if display_path is not None:
+            _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines}
+                                         for r in results if not r.cached or r.round in display})
     except UnsafeRecord as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return EXIT_USAGE
-    if display_path is not None:
-        _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines}
-                                     for r in results if not r.cached or r.round in display})
     out(f"RECORD: {record.relative_to(skill.collection) if record.is_relative_to(skill.collection) else record}"
         f" ({'written' if written else 'unchanged'}; the engine never commits it)")
     out(_next_line(skill, stopped, draft))

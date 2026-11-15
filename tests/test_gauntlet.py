@@ -553,3 +553,86 @@ def test_the_tree_digest_sees_a_retargeted_link_and_a_removed_empty_directory(tm
     retargeted = gauntlet._tree_digest(root)
     (root / "checks" / "empty").rmdir()
     assert len({before, retargeted, gauntlet._tree_digest(root)}) == 3
+
+
+# ------------------------- #759 (pass-3 HIGH, folded in by orchestrator ruling), red first
+
+def _command_collection(root: Path, charter_dir: Path) -> None:
+    (root / ".claude" / "commands" / "flow").mkdir(parents=True)
+    (root / ".claude" / "commands" / "flow" / "wave.md").write_text("Drive the wave. Report, then stop.\n")
+    charter_dir.mkdir(parents=True, exist_ok=True)
+    (charter_dir / "CHARTER.md").write_text(
+        "---\ncontract: flow-wave\nversion: 1\nsubject: .claude/commands/flow/wave.md\nintent:\n  id: wave.intent\n"
+        "  what: Drive the wave.\n  approved: 2026-11-15\npurpose: fixture\nowner: owner\n---\n")
+
+
+def test_a_symlinked_command_charter_dir_never_gets_a_record_outside(tmp_path: Path) -> None:
+    """#759's exact input: charters/flow/wave -> a directory outside the collection."""
+    root, outside = tmp_path / "coll", tmp_path / "outside"
+    _command_collection(root, outside)
+    (root / "charters" / "flow").mkdir(parents=True)
+    (root / "charters" / "flow" / "wave").symlink_to(outside, target_is_directory=True)
+    code = gauntlet.run(root, ".claude/commands/flow/wave.md", gauntlet.Options(offline=True), out=lambda _: None)
+    assert not (outside / gauntlet.RECORD_NAME).exists()
+    assert code == gauntlet.EXIT_USAGE
+
+
+def test_a_symlinked_native_skill_dir_is_refused(coll: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside-skill"
+    shutil.copytree(coll / "skills" / "alpha", outside)
+    (coll / "skills" / "linked").symlink_to(outside, target_is_directory=True)
+    code, _ = _run(coll, "skills/linked")
+    assert code == gauntlet.EXIT_USAGE and not (outside / gauntlet.RECORD_NAME).exists()
+
+
+def test_a_symlinked_charters_root_is_refused(tmp_path: Path) -> None:
+    root, outside = tmp_path / "coll", tmp_path / "outside"
+    _command_collection(root, outside / "flow" / "wave")
+    (root / "charters").symlink_to(outside, target_is_directory=True)
+    code = gauntlet.run(root, ".claude/commands/flow/wave.md", gauntlet.Options(offline=True), out=lambda _: None)
+    assert code == gauntlet.EXIT_USAGE and not (outside / "flow" / "wave" / gauntlet.RECORD_NAME).exists()
+
+
+def test_a_plain_command_charter_dir_still_gets_its_record(tmp_path: Path) -> None:
+    """The negative control: without a link, the record lands beside the charter."""
+    root = tmp_path / "coll"
+    _command_collection(root, root / "charters" / "flow" / "wave")
+    gauntlet.run(root, ".claude/commands/flow/wave.md", gauntlet.Options(offline=True), out=lambda _: None)
+    assert (root / "charters" / "flow" / "wave" / gauntlet.RECORD_NAME).is_file()
+
+
+def test_a_symlinked_draft_dir_is_refused_and_nothing_lands_where_it_points(
+        coll: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#759, the scoped check's remaining path (orchestrator ruling b): an
+    explicit --draft-dir that is itself a symlink, or holds one below it."""
+    monkeypatch.setattr(gauntlet, "available", _absent(("charter", "draft")))
+    outside = tmp_path / "outside-drafts"
+    outside.mkdir()
+    (tmp_path / "drafts-link").symlink_to(outside, target_is_directory=True)
+    code, _ = _run(coll, "skills/beta", draft_dir=tmp_path / "drafts-link")
+    assert code == gauntlet.EXIT_USAGE and list(outside.iterdir()) == []
+    real = tmp_path / "drafts-real"
+    real.mkdir()
+    (real / "skills__beta").symlink_to(outside, target_is_directory=True)
+    code, _ = _run(coll, "skills/beta", draft_dir=real)
+    assert code == gauntlet.EXIT_USAGE and list(outside.iterdir()) == []
+
+
+def test_a_plain_draft_dir_gets_the_record(coll: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The negative control for the refusal above."""
+    monkeypatch.setattr(gauntlet, "available", _absent(("charter", "draft")))
+    drafts = tmp_path / "drafts"
+    code, _ = _run(coll, "skills/beta", draft_dir=drafts)
+    assert code == gauntlet.EXIT_STOPPED and (drafts / "skills__beta" / gauntlet.RECORD_NAME).is_file()
+
+
+def test_state_files_are_never_written_through_a_link(coll: Path, tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gauntlet, "available", _absent(("charter", "draft")))
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me\n")
+    drafts = tmp_path / "drafts"
+    (drafts / "skills__beta").mkdir(parents=True)
+    (drafts / "skills__beta" / "display.json").symlink_to(victim)
+    code, _ = _run(coll, "skills/beta", draft_dir=drafts)
+    assert victim.read_text() == "keep me\n" and code == gauntlet.EXIT_USAGE
