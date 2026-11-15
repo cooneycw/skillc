@@ -574,3 +574,67 @@ def test_a_stale_copy_is_warned_and_still_runs_with_the_same_exit(tmp_path: Path
 def test_the_repository_skill_carries_no_locator_or_marker() -> None:
     skill = ROOT / ".claude" / "skills" / NAME
     assert not (skill / ".skillc-checkout").exists() and not (skill / ".skillc-install").exists()
+
+
+# ----------------------------------------------- #774: counter-model pass 1
+
+def test_an_overlapping_install_waits_for_the_lock_and_is_refused_when_it_cannot(
+    checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One install at a time: a second one never cleans the first one's build."""
+    import fcntl
+
+    skills = tmp_path / "skills"
+    lock_dir = tmp_path / "cache" / "skillc"
+    lock_dir.mkdir(parents=True)
+    with open(lock_dir / "install.lock", "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        monkeypatch.setenv("SKILLC_INSTALL_LOCK_WAIT", "0.2")
+        done = _installer(checkout, skills, "install")
+        assert done.returncode == 1 and "another install-skill is running" in done.stderr
+        assert not (skills / NAME).exists()
+    assert _installer(checkout, skills, "install").returncode == 0, "released, it proceeds"
+
+
+@pytest.mark.parametrize("where", ["source", "existing-copy"])
+def test_an_unreadable_directory_refuses_and_touches_nothing(checkout: Path, tmp_path: Path, where: str) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root reads a mode-000 directory")
+    skills = tmp_path / "skills"
+    if where == "source":
+        blocked = checkout / ".claude" / "skills" / NAME / "scripts"
+    else:
+        skills.mkdir()
+        shutil.copytree(checkout / ".claude" / "skills" / NAME, skills / NAME)
+        blocked = skills / NAME / "scripts"
+    blocked.chmod(0)
+    try:
+        before = sorted(p.name for p in skills.iterdir()) if skills.exists() else []
+        done = _installer(checkout, skills, "install")
+        assert done.returncode == 1 and "refusing" in done.stderr, done.stdout + done.stderr
+        assert (sorted(p.name for p in skills.iterdir()) if skills.exists() else []) == before
+    finally:
+        blocked.chmod(0o755)
+    if where == "existing-copy":
+        assert (skills / NAME / "scripts" / "gauntlet.sh").is_file(), "the copy is untouched"
+
+
+@pytest.mark.parametrize("cache", ["in-skills", "in-dot-claude", "linked-into-skills"])
+def test_a_cache_inside_what_kyle_reads_is_refused_before_anything_is_created(
+    checkout: Path, tmp_path: Path, cache: str,
+) -> None:
+    home = tmp_path / "home"
+    skills = home / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    if cache == "in-skills":
+        xdg = skills
+    elif cache == "in-dot-claude":
+        xdg = home / ".claude" / "cache"
+    else:
+        xdg = tmp_path / "xdg-link"
+        xdg.symlink_to(skills, target_is_directory=True)
+    env = {**os.environ, "SKILLC_SKILLS_DIR": str(skills), "HOME": str(home), "XDG_CACHE_HOME": str(xdg)}
+    done = subprocess.run(["python3", str(checkout / "scripts" / "install_skill.py"), "install"], capture_output=True,
+                          text=True, check=False, cwd=checkout, env=env)
+    assert done.returncode == 2 and "which Kyle's deploy reads" in done.stderr, done.stderr
+    assert list(skills.iterdir()) == [] and not (home / ".claude" / "cache").exists()

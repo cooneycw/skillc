@@ -49,6 +49,8 @@ Stdlib only: it must run with plain `python3`, before any `uv sync`.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import os
 import shutil
@@ -56,6 +58,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 NAME = "skill-gauntlet"
@@ -63,6 +67,7 @@ SKILLS_ENV = "SKILLC_SKILLS_DIR"
 LOCATOR, MARKER = ".skillc-checkout", ".skillc-install"
 MARKER_KIND, MARKER_SCHEMA = "skillc-skill-install", "1"
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
+LOCK_WAIT_ENV, LOCK_WAIT = "SKILLC_INSTALL_LOCK_WAIT", 30.0
 
 
 class Refused(Exception):
@@ -114,7 +119,14 @@ def payload(root: Path) -> dict[str, bytes]:
     marker. Any symlink or special file is refused: the copy holds regular
     files only (Kyle's staging rule), so nothing else may be copied from."""
     files: dict[str, bytes] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
+
+    def unreadable(exc: OSError) -> None:
+        # os.walk skips a directory it cannot list by default, which would
+        # install, or adopt, an incomplete copy (counter-model review).
+        raise Refused(EXIT_REFUSED, f"{exc.filename} cannot be listed ({type(exc).__name__}); refusing rather "
+                                    "than copying, or comparing, an incomplete skill")
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=unreadable):
         for name in sorted(dirnames + filenames):
             path = Path(dirpath, name)
             mode = path.lstat().st_mode
@@ -123,7 +135,10 @@ def payload(root: Path) -> dict[str, bytes]:
                 raise Refused(EXIT_USAGE, f"{rel} in {root} is not a regular file or directory; "
                                           "the installed copy holds regular files only")
             if stat.S_ISREG(mode) and rel not in (LOCATOR, MARKER):
-                files[rel] = path.read_bytes()
+                try:
+                    files[rel] = path.read_bytes()
+                except OSError as exc:
+                    raise Refused(EXIT_REFUSED, f"{rel} in {root} cannot be read ({type(exc).__name__})") from None
     return files
 
 
@@ -149,6 +164,42 @@ def _marker(path: Path) -> dict[str, str] | None:
         return None
     fields = dict(line.split(" ", 1) for line in lines if " " in line)
     return fields if fields.get("kind") == MARKER_KIND else None
+
+
+def _placed(cache: Path, skills: Path) -> None:
+    """The cache must lie OUTSIDE the skills directory and outside ~/.claude
+    (Kyle stages both), checked through any link, BEFORE anything is created
+    there (counter-model review: XDG_CACHE_HOME=~/.claude/skills recreated the
+    deploy failure)."""
+    real = Path(os.path.realpath(cache))
+    for guarded in (skills, Path.home() / ".claude"):
+        top = Path(os.path.realpath(guarded))
+        if real == top or top in real.parents:
+            raise Refused(EXIT_USAGE, f"the install cache {cache} is inside {guarded}, which Kyle's deploy reads; "
+                                      "set XDG_CACHE_HOME outside it")
+
+
+@contextlib.contextmanager
+def _locked(cache: Path) -> Iterator[None]:
+    """One install or uninstall at a time: the cache is shared, and its
+    leftovers are cleaned (counter-model review: an overlapping install could
+    delete another's build mid-flight)."""
+    cache.mkdir(parents=True, exist_ok=True)
+    wait = float(os.environ.get(LOCK_WAIT_ENV, LOCK_WAIT))
+    with open(cache.parent / "install.lock", "a") as handle:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise Refused(EXIT_REFUSED, "another install-skill is running; try again when it finishes") from None
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _same_device(cache: Path, skills: Path) -> None:
@@ -215,13 +266,18 @@ def _retire(entry: Path, cache: Path) -> Path | None:
 
 
 def install() -> int:
+    skills, cache = skills_dir(), cache_dir()
+    _placed(cache, skills)
+    with _locked(cache):
+        return _install(skills, cache)
+
+
+def _install(skills: Path, cache: Path) -> int:
     checkout, source = _source()
     files = payload(source)
-    skills = skills_dir()
     entry = skills / NAME
     state = _ours(entry, source, files)
-    if cache_dir().is_dir():
-        _clear_leftovers(cache_dir())  # an earlier install stopped between moves
+    _clear_leftovers(cache)  # an earlier install stopped between moves
     if state == "marked":
         current = _marker(entry) or {}
         try:
@@ -231,10 +287,7 @@ def install() -> int:
         if current.get("digest") == digest(files) and located == locator_text(checkout) and payload(entry) == files:
             return _say(EXIT_OK, f"already installed: {entry} is a current copy of {source}")
     skills.mkdir(parents=True, exist_ok=True)
-    cache = cache_dir()
-    cache.mkdir(parents=True, exist_ok=True)
     _same_device(cache, skills)
-    _clear_leftovers(cache)
     build = _build(cache, source, files, checkout)
     _step("built")
     retired = _retire(entry, cache) if state != "absent" else None
@@ -251,8 +304,14 @@ def install() -> int:
 
 
 def uninstall() -> int:
+    skills, cache = skills_dir(), cache_dir()
+    _placed(cache, skills)
+    with _locked(cache):
+        return _uninstall(skills, cache)
+
+
+def _uninstall(skills: Path, cache: Path) -> int:
     _checkout, source = _source()
-    skills = skills_dir()
     entry = skills / NAME
     if not entry.is_symlink() and not entry.exists():
         return _say(EXIT_OK, f"not installed: {entry} does not exist")
@@ -263,8 +322,6 @@ def uninstall() -> int:
         return _say(EXIT_OK, f"uninstalled: removed the old link {entry}")
     if not entry.is_dir() or _marker(entry) is None:
         return _say(EXIT_REFUSED, f"refusing: {entry} has no skillc marker; it is not ours to remove")
-    cache = cache_dir()
-    cache.mkdir(parents=True, exist_ok=True)
     _same_device(cache, skills)
     retired = _retire(entry, cache)
     if retired is not None:
