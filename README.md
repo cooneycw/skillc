@@ -302,6 +302,25 @@ uv sync --extra dev
 uv run skillc selftest
 ```
 
+### `/skill-gauntlet` in every Claude Code session (#763)
+
+Claude Code loads a repository's own skills only in sessions opened in that
+repository. To use `/skill-gauntlet` from any session (CPP, Kyle, anywhere):
+
+```bash
+make install-skill     # links ~/.claude/skills/skill-gauntlet to this checkout's skill
+make uninstall-skill   # removes that link, and only that link
+```
+
+- **Updating:** it is a link, so a `git pull` here updates the skill everywhere.
+- **Safety:** it refuses to replace a real `~/.claude/skills/skill-gauntlet`, or
+  a link pointing somewhere else, and names it. It links the main checkout even
+  when run from a linked worktree. `SKILLC_SKILLS_DIR` overrides the directory.
+- **If the checkout moves:** the link dangles, so the skill simply disappears
+  from the list. Run `make install-skill` again from the new place.
+- **If skillc is present but cannot run** (no `uv sync`, no `uv`): the skill
+  prints `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no verdict.
+
 ## Contributing
 
 `main` is branch-protected: the `ci/woodpecker/pr/ci` check is required and
