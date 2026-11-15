@@ -383,3 +383,196 @@ def test_a_url_encoded_link_resolves_to_its_decoded_file(tmp_path: Path) -> None
     (tmp_path / "skills" / "a" / "references" / "my guide.md").write_text("x", encoding="utf-8")
     hits = decay.dangling_reference(_load(tmp_path)).hits
     assert [h.data["reference"] for h in hits] == ["references/no%20such.md"]
+
+
+# ------------------------------------------------- #731 (counter-model pass 3, deferred)
+
+def test_731_a_single_token_substitution_restores_the_outer_command(tmp_path: Path) -> None:
+    """#731 item 2, the issue's exact input."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("#!/bin/sh\n# helper.sh [--verbose]\n", encoding="utf-8")
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --verbose "$(pwd)" --absent\n```\n')
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/helper.sh --absent"]
+
+
+def test_731_a_file_argument_does_not_own_later_flags(tmp_path: Path) -> None:
+    """#731 item 3, the issue's exact input against controls/dangling-reference/good/present."""
+    import shutil
+
+    case = tmp_path / "present"
+    shutil.copytree(CONTROLS / "dangling-reference" / "good" / "present", case)
+    skill_md = case / "skills" / "demo" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text(encoding="utf-8")
+                        + "\nRun `scripts/helper.sh references/guide.md --verbose`.\n", encoding="utf-8")
+    assert decay.dangling_reference(_load(case)).hits == []
+
+
+def _prefix_case(root: Path, swap: bool) -> list[decay.Hit]:
+    tail = " ".join(f"t{i}" for i in range(50))
+    first, second = " ".join(["same"] * 60) + " " + tail, " ".join(["same"] * 100) + " " + tail
+    if swap:
+        first, second = second, first
+    _skill(root, "a", first + "\n")
+    _skill(root, "b", second + "\n")
+    return decay.copied_passage(_load(root)).hits
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["60-first", "100-first"])
+def test_731_a_repetitive_prefix_is_measured_whole_in_both_orders(tmp_path: Path, swap: bool) -> None:
+    """#731 item 4, the issue's exact case: 110 words, in either document order,
+    and not labelled an estimate - an anchor measured it exactly."""
+    [hit] = _prefix_case(tmp_path, swap)
+    assert (hit.data["longest_words"], hit.data["runs"], hit.data["shared_words"]) == (110, 1, 110)
+    assert hit.data["estimate"] is False and "bounded estimate" not in hit.detail
+
+
+def test_731_purely_repetitive_text_is_labelled_a_bounded_estimate(tmp_path: Path) -> None:
+    """The orchestrator's condition: where the first-8 fallback measured a
+    position, the finding says it is an estimate."""
+    same = " ".join(["same"] * 200)
+    _skill(tmp_path, "a", same + "\n")
+    _skill(tmp_path, "b", same + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
+
+
+def test_731_a_shell_keyword_keeps_the_command_position(tmp_path: Path) -> None:
+    """`if ! scripts/x.sh --bad` and `elif scripts/x.sh --bad`: the script IS the
+    command, so its flags are still checked (found on CPP's update.md/wave.md)."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "x.sh").write_text("--check\n", encoding="utf-8")
+    _skill(tmp_path, "a", "```bash\nif ! scripts/x.sh --check --bad; then :; fi\nelif scripts/x.sh --worse\n```\n")
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/x.sh --bad", "scripts/x.sh --worse"]
+
+
+# ------------------------------------------------- #731 counter-model pass 1
+
+def test_731_r1_a_separator_after_a_substitution_ends_the_command(tmp_path: Path) -> None:
+    """Reviewer's exact input: `echo --absent` is echo's flag, not the helper's."""
+    import shutil
+
+    case = tmp_path / "present"
+    shutil.copytree(CONTROLS / "dangling-reference" / "good" / "present", case)
+    skill_md = case / "skills" / "demo" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text(encoding="utf-8")
+                        + '\n```bash\nscripts/helper.sh --verbose "$(pwd)"; echo --absent\n```\n', encoding="utf-8")
+    assert decay.dangling_reference(_load(case)).hits == []
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["A-first", "B-first"])
+def test_731_r1_a_longer_match_is_not_starved_by_an_earlier_shorter_one(tmp_path: Path, swap: bool) -> None:
+    """Reviewer's exact P/T case: the longest run is 60 words in BOTH orders."""
+    p = " ".join(f"p{i}" for i in range(40))
+    t = " ".join(f"t{i}" for i in range(20))
+    first = " ".join(f"{p} sep{i}" for i in range(9)) + f" {p} {t}"
+    second = f"{p} {t}"
+    if swap:
+        first, second = second, first
+    _skill(tmp_path, "a", first + "\n")
+    _skill(tmp_path, "b", second + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["longest_words"] == 60
+
+
+@pytest.mark.parametrize("wrapper", ["sudo -u root", "env -u VAR"])
+def test_731_r1_a_wrapper_option_operand_is_not_the_command(tmp_path: Path, wrapper: str) -> None:
+    """Reviewer's exact inputs: the helper is still the command, so --absent fires."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
+    _skill(tmp_path, "a", f"```bash\n{wrapper} scripts/helper.sh --absent\n```\n")
+    hits = decay.dangling_reference(_load(tmp_path)).hits
+    assert [h.data["reference"] for h in hits] == ["scripts/helper.sh --absent"]
+
+
+def test_731_r1_flags_after_a_non_command_path_are_counted_not_silent(tmp_path: Path) -> None:
+    """A path outside command position keeps its flags unexamined - but SAYS so."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
+    _skill(tmp_path, "a", "```bash\nmystery-wrapper --odd scripts/helper.sh --absent\n```\n")
+    result = decay.dangling_reference(_load(tmp_path))
+    assert result.hits == []
+    assert result.population["flags_after_a_non_command_path"] == 1
+
+
+# ------------------------------------------------- #731 counter-model pass 2 (ratified: shlex)
+
+def _helper(root: Path) -> None:
+    (root / "scripts").mkdir(exist_ok=True)
+    (root / "scripts" / "helper.sh").write_text("#!/bin/sh\n# helper.sh [--verbose]\n", encoding="utf-8")
+
+
+def _flag_refs(root: Path) -> list[str]:
+    return [str(h.data["reference"]) for h in decay.dangling_reference(_load(root)).hits]
+
+
+def test_731_r2_a_substitution_as_an_option_value_is_that_value(tmp_path: Path) -> None:
+    """Reviewer's exact input: `"$(id -un)"` IS sudo's -u value; the helper is the command."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nsudo -u "$(id -un)" scripts/helper.sh --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+@pytest.mark.parametrize("wrapper", ["sudo --user root", "sudo --user=root", "env --unset VAR", "env --unset=VAR"])
+def test_731_r2_long_wrapper_options_take_their_value(tmp_path: Path, wrapper: str) -> None:
+    """Reviewer's exact inputs, separate and `=` forms."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", f"```bash\n{wrapper} scripts/helper.sh --absent\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_a_quoted_separator_is_not_a_separator(tmp_path: Path) -> None:
+    """Reviewer's exact input: the `;` is inside a quoted argument."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh "$(printf x);" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_prose_apostrophes_never_hide_a_command(tmp_path: Path) -> None:
+    """The orchestrator's guard: shlex reads command-shaped text only, so two
+    apostrophes in the surrounding prose cannot swallow the code span."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "Don't run `scripts/helper.sh --absent` if it isn't needed.\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_an_unbalanced_quote_falls_back_to_whitespace_words(tmp_path: Path) -> None:
+    """shlex refuses an unterminated quote; the span is then read as plain
+    whitespace-separated words, so the command and its flag are still checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh "unterminated --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_731_r2_a_truncated_fallback_search_is_an_estimate_even_when_it_finds_nothing(tmp_path: Path) -> None:
+    """Reviewer's exact case: 100 `same` + 50 distinct + a different separator +
+    100 `same`, in both documents. The anchor takes the first 150; the fallback's
+    first candidates are already consumed, so the last 100 are not measured - and
+    the finding must SAY so."""
+    from skillc import inspect
+
+    distinct = " ".join(f"d{i}" for i in range(50))
+    same = " ".join(["same"] * 100)
+    _skill(tmp_path, "a", f"{same} {distinct} sepA {same}\n")
+    _skill(tmp_path, "b", f"{same} {distinct} sepB {same}\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
+    assert "bounded estimate" in inspect.run(decay.load(tmp_path, offline=True)).data["summary"]
+
+
+def test_731_r2_the_fallback_still_ends_a_command_after_a_substitution(tmp_path: Path) -> None:
+    """The whitespace fallback (an unterminated quote later on the line) keeps
+    the separator rule: `"$(pwd)";` ends the helper, so `echo --absent` is echo's."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --verbose "$(pwd)"; echo --absent \'dangling\n```\n')
+    assert _flag_refs(tmp_path) == []
+
+
+def test_731_r2_a_path_inside_a_quoted_string_is_still_checked_for_existence(tmp_path: Path) -> None:
+    """shlex keeps `"..."` as one word; its inner paths must still exist (a
+    deleted helper named in an echo string is still a dangling reference), but
+    none of them is a command, so no flag is checked against them."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\necho "run scripts/gone.sh, then scripts/helper.sh --absent"\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/gone.sh,"[:-1]]
