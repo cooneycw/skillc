@@ -232,6 +232,24 @@ and the +1 is gone.)
 No examined reference moved, so prefixed references are 336 and flags 240 as
 before.
 
+## Re-run after #745 (same SHAs, against #748's numbers)
+
+Every count is identical on all three collections: errors, findings, buckets,
+rule lines, copies, and every population counter (placeholder 1136, path-like
+158, prefixed 336, flags 240, flags after a non-command path 1 in CPP and 0 in
+mattpocock). No population field was added or removed. (An intermediate build
+spliced `env -S` values in as commands and added a
+`split_strings_not_examined` counter. The orchestrator ratified counting
+instead after review pass 2, so the counter is gone; it was 0 everywhere.)
+
+Both #745 shapes have zero occurrences in the inspected surface. The only
+`env -S` uses in CPP are three `#!/usr/bin/env -S uv run --script` shebang
+examples, in `docs/skills/python-packaging.md` and
+`docs/reference/CLAUDE_CODE_BEST_PRACTICES_FULL.md`, outside
+`.claude/commands/**` and `.claude/skills/*/SKILL.md`. There is no fully quoted
+option either. The grep used for that claim was first shown to find both shapes
+in a planted canary.
+
 ## Reproducing
 
 The SHAs above are public. `--issue-states` makes a run deterministic: issue
