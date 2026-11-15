@@ -7,8 +7,8 @@ against its charter (#718). This part builds two commands:
 - `skillc charter confirm <draft> --answers FILE --out FILE` turns that
   proposal into a charter, **only** from the owner's own answers.
 
-The overlap view (shared, shadowed and orphan duties across a collection) is
-part B. Its comparison is by meaning, so it is a model call.
+Part B adds `skillc charter overlap <collection>`: shared, shadowed and orphan
+duties across a collection (see "The overlap view" below).
 
 ## No model call, by ruling
 
@@ -125,9 +125,72 @@ to `invariants.never`, worded "Never: ...".
 - It does not hold the dialogue. The owner's session does; this applies the result.
 - It does not read repository evidence (GitHub issues and PRs). That is #718
   build step 4, and every draft lists it as a missing source.
-- It does not compare duties across skills. That is part B.
 - It writes nothing into the skill's own repository. The proof drafts for CPP
   live under `docs/measurements/round1/`. The one exception is the gauntlet
   engine (#754): it writes only `GAUNTLET.json` beside a confirmed charter, and
   only when that file's contents change. It never stages or commits it
   ([docs/specs/gauntlet.md](gauntlet.md)).
+
+## The overlap view (part B)
+
+`skillc charter overlap <collection>` compares every duty clause
+(`provides`, `invariants.always`) in every charter against those of every
+**other** charter, **by meaning**. It proposes:
+
+| Kind | Means | The owner's choice |
+|---|---|---|
+| `shared` | two charters both claim the duty | pick one owner; the other points at it |
+| `shadowed` | a skill is only *observed* doing it (column `observed-not-stated`) while another charter claims it | the strongest candidate for removing text |
+| `co-observed` | two skills are both only observed doing one duty, and neither charter states it | give it an owner, or forbid it |
+| `orphan` | an observed-only duty that no other charter's duty matches | add a charter line, or forbid it |
+
+**Proposals, never findings.** Some duplication protects a boundary or helps a
+skill be found. The command never fails on an overlap and never edits anything.
+
+**The comparison is a model call, and none is made here.** The `DutyComparator`
+seam has two implementations:
+- `FakeComparator`, for tests;
+- `RecordedComparator` (`--verdicts FILE`), which reads lines of
+  `<clause-id> <clause-id>: same|different|UNKNOWN`, one replicate per line, and
+  names its source in the report.
+
+A later local-model step (permitted only after part B merges, labelled
+"local-model evidence") writes such a file; it never writes a CHARTER.md.
+
+**Replicates** (`--replicates`, default 3):
+- A pair is `same` or `different` only when every replicate agrees.
+- Any disagreement, any `UNKNOWN`, any invalid answer, or a comparator that
+  raises makes the pair `UNKNOWN`. A recording with fewer lines than the
+  replicates is `UNKNOWN` too.
+- An orphan needs every one of its pairs judged `different`, and the whole
+  collection read. Its status stays `UNKNOWN` when:
+  - one of its pairs is `UNKNOWN`;
+  - there is no other duty to compare it against;
+  - its pair was skipped for sharing a clause id;
+  - any charter in the collection is unparseable or unnamed, or any directory
+    could not be read. The report lists what was unread.
+
+Pairs that share a clause id are skipped: an exact duplicate id is #720's
+`duty-single-owner`. A clause id that two charters both declare can't be told
+apart by a comparator keyed on ids, so every pair involving it is `UNKNOWN`.
+
+A duty is **observed-only** while it is still a draft clause in the
+`observed-not-stated` column. Once the owner confirms it, `charter confirm`
+removes `draft`, and the charter claims the duty. The column stays only as
+provenance. A duty clause with no `what` text can't be compared, so it counts as
+unread, and while one exists no duty is called an orphan.
+
+| `charter overlap` exit | Meaning |
+|---|---|
+| 0 | examined: a report with counts, evidence and a diagram (overlaps are proposals) |
+| 2 | usage: no such directory, `--replicates` below 1, an unreadable verdicts file, or `--out` exists |
+| 3 | **not examined**: no comparator, or no CHARTER.md. No count is printed, since a zero would claim a comparison nobody made |
+
+**The controls** (`evals/subjects/overlap-controls`, #726 acceptance 1):
+- `shared-paraphrase`: one duty stated in different wording, which must be `shared`.
+- `distinct-vocabulary`: deliberately shared vocabulary but different duties,
+  which must report nothing.
+
+A word-overlap comparator gets both wrong (`tests/test_overlap.py`), so passing
+both takes meaning. Their **live** verdict, with the model, the replicate count
+and the agreement rate, is sized, not run (6 calls; `cost_estimate.size_round1`).

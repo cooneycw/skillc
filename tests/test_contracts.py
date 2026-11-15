@@ -316,3 +316,16 @@ def test_a_skill_charter_needs_no_subject_but_a_given_one_must_be_its_skill(tmp_
     charter.write_text(original.replace("contract: alpha\n", "contract: alpha\nsubject: beta/SKILL.md\n"), encoding="utf-8")
     details = _details(root)
     assert len(details) == 1 and "is not the SKILL.md beside this charter" in details[0]
+
+
+# ---------------------------------------------------------------- #749: the intent id is a clause id too
+
+
+def test_an_intent_id_reused_by_another_clause_is_a_shape_error(tmp_path: Path) -> None:
+    shutil.copytree(CONTROLS / "contract-shape/good/valid", tmp_path / "c")
+    charter = tmp_path / "c/alpha/CHARTER.md"
+    assert _details(tmp_path / "c") == []
+    charter.write_text(charter.read_text(encoding="utf-8").replace("id: alpha.no-self-approval", "id: alpha.intent"),
+                       encoding="utf-8")
+    details = _details(tmp_path / "c")
+    assert len(details) == 1 and "'alpha.intent' is declared 2 times" in details[0]

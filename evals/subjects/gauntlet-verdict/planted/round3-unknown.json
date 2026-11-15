@@ -1,0 +1,19 @@
+{
+  "cap": 8,
+  "clients": [
+    "fixture"
+  ],
+  "declared": 4,
+  "new": 0,
+  "notes": [],
+  "per_clause": {},
+  "reason": "fixture",
+  "recommendation": null,
+  "reused": 4,
+  "round": 3,
+  "run": 0,
+  "separation": {},
+  "tolerance": 0,
+  "variants": {},
+  "verdict": "UNKNOWN"
+}
