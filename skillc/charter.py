@@ -367,7 +367,7 @@ def _blocks(text: str, first_line: int) -> list[list[tuple[int, str]]]:
             current = []
             continue
         if fence and fenced is not None and fence["run"][0] == fenced[0] \
-                and len(fence["run"]) >= len(fenced) and not fence["info"].strip():
+                and len(fence["run"]) >= len(fenced) and not fence["info"].strip(" \t"):
             # Closes only on the SAME character, at least as long, with no info
             # string (CommonMark; #749: a nested shorter fence leaked duties).
             fenced = None

@@ -328,3 +328,9 @@ def test_a_closing_line_with_an_info_string_does_not_close() -> None:
 
 def test_a_longer_closing_fence_closes() -> None:
     assert _duties("```\nYou MUST NOT see this.\n`````\nYou MUST keep this.\n") == ["You MUST keep this."]
+
+
+def test_only_spaces_and_tabs_may_follow_a_closing_fence() -> None:
+    """CommonMark: a non-breaking space after the run makes it NOT a closing fence."""
+    text = "```\n```\u00a0\nYou MUST delete all files.\n```\nYou MUST keep this.\n"
+    assert _duties(text) == ["You MUST keep this."]
