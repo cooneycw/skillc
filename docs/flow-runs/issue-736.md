@@ -54,3 +54,7 @@ Scope: ~9 paths plus control data, ~1,200-1,500 lines. Risks: noisy strict rule 
 Readers:
 - Reader: round 5 (#737) reads the round 3 and 4 verdicts. Compatibility: the verdict vocabulary is fixed in the spec.
 - Reader: the owner reads the attempt counts against /usage (decision 4). Compatibility: the report prints attempts, reused and new, and the client and model.
+
+### Reader corrections (counter-model review, pass 1)
+- Reader: `Ledger.__init__` reads the persisted JSONL. Compatibility: rows are validated on load (fields, result vocabulary); a malformed line refuses the whole ledger. `test_an_untrustworthy_ledger_row_refuses_the_ledger`.
+- Reader: `cmd_gauntlet_round` maps report verdicts to exit codes (0 COMPLETE or PLANNED, 1 REFUSED, 2 a declaration or ledger it cannot read, 3 UNKNOWN or INCOMPLETE). Compatibility: the CLI tests for --plan, the PR-1 refusal and an untrusted ledger.

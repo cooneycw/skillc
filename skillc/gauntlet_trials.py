@@ -95,7 +95,7 @@ class Declaration:
     min_heldout: int
     tolerance: int
     rule: TwoArmRule
-    clauses: dict[str, tuple[Path, ...]]
+    clauses: dict[str, tuple[Task, ...]]
     damaged: tuple[Passage, ...]
     variants: tuple[Passage, ...]
 
@@ -174,15 +174,14 @@ def load(path: Path) -> Declaration:
         raise DeclarationError(f"discrimination_rule: {exc}") from None
     raw_clauses = _need(data, "clauses", dict, "declaration")
     assert isinstance(raw_clauses, dict)
-    clauses: dict[str, tuple[Path, ...]] = {}
+    clauses: dict[str, tuple[Task, ...]] = {}
     for clause_id, tasks in raw_clauses.items():
         if not isinstance(tasks, list) or not all(isinstance(t, str) for t in tasks):
             raise DeclarationError(f"clause {clause_id!r}: tasks must be a list of task directories")
-        resolved = tuple(sorted({(base / t).resolve() for t in tasks}))
-        for task in resolved:
-            if not (task / "grader.json").is_file():
-                raise DeclarationError(f"clause {clause_id!r}: {task} has no grader.json")
-        clauses[str(clause_id)] = resolved
+        distinct: dict[str, Task] = {}
+        for task in (read_task((base / t).resolve()) for t in sorted(set(tasks))):
+            distinct.setdefault(task.identity, task)  # byte-identical copies are ONE task
+        clauses[str(clause_id)] = tuple(sorted(distinct.values(), key=lambda t: t.path))
     if not clauses:
         raise DeclarationError("no clause is declared")
     damaged = _passages(data.get("damaged", []), "damaged", clause_ids=set(clauses))
@@ -233,36 +232,81 @@ def _digest_files(root: Path, files: Iterable[Path]) -> str:
     return h.hexdigest()
 
 
-def task_identity(task: Path) -> tuple[str, str]:
-    """(task digest, grader digest). The task is what the agent sees:
-    goal.md and fixture/. The grader is everything else at the task's top
-    level: grader.json and its scripts and inputs. Editing a grader changes
-    only the second digest, and a changed digest is a new ledger key."""
-    seen = [task / "goal.md", *sorted(p for p in (task / "fixture").rglob("*") if p.is_file())]
-    task_files = [p for p in seen if p.is_file()]
-    grader_files = [p for p in task.iterdir() if p.is_file() and p.name != "goal.md"]
-    return _digest_files(task, task_files), _digest_files(task, grader_files)
+@dataclass(frozen=True)
+class Task:
+    """One trap task, identified by CONTENT, not by path (counter-model review
+    on #736: two byte-identical directories are one task, never two)."""
+
+    path: Path
+    task_digest: str  # what the agent sees: goal.md and fixture/
+    grader_digest: str  # verify.GraderDef.digest(): definition, probe, inputs, judge
+
+    @property
+    def identity(self) -> str:
+        return _sha(f"{self.task_digest}:{self.grader_digest}".encode())
+
+
+def read_task(path: Path) -> Task:
+    """A task's identities. The grader's is verify's own pin, so editing a
+    README beside it changes nothing, while editing the grader does."""
+    from .verify import GraderDef, Refused
+
+    seen = [path / "goal.md", *sorted(p for p in (path / "fixture").rglob("*") if p.is_file())]
+    try:
+        grader = GraderDef.load(path).digest()
+    except (Refused, OSError, ValueError) as exc:
+        raise DeclarationError(f"task {path}: grader not read: {exc}") from None
+    return Task(path, _digest_files(path, [p for p in seen if p.is_file()]), grader)
 
 
 # ---------------------------------------------------------------- the split
 
 
-def split(declaration: Declaration, clause: str) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
-    """(train, held-out) for one clause: a seeded, deterministic shuffle;
-    held-out is a third, at least one task; train is the rest."""
-    tasks = list(declaration.clauses[clause])
-    random.Random(f"{declaration.seed}:{clause}").shuffle(tasks)
-    held = max(1, len(tasks) // 3)
-    return tuple(sorted(tasks[held:])), tuple(sorted(tasks[:held]))
+def assignments(declaration: Declaration) -> dict[str, str]:
+    """ONE split over every distinct task (counter-model review: a task shared
+    by two clauses must never train one and be held out for the other).
+    Clauses are walked in a fixed order. Each clause's not-yet-assigned tasks
+    are shuffled with the seed, and enough are held out to give that clause
+    a third of its tasks (at least one) held out. A clause left without a
+    train or a held-out task reads UNKNOWN by the minimums."""
+    placed: dict[str, str] = {}
+    for clause in sorted(declaration.clauses):
+        tasks = declaration.clauses[clause]
+        want = max(1, len(tasks) // 3)
+        have = sum(placed.get(t.identity) == "held" for t in tasks)
+        fresh = [t for t in tasks if t.identity not in placed]
+        random.Random(f"{declaration.seed}:{clause}").shuffle(fresh)
+        for task in fresh:
+            if have < want:
+                placed[task.identity] = "held"
+                have += 1
+            else:
+                placed[task.identity] = "train"
+    return placed
+
+
+def split(declaration: Declaration, clause: str) -> tuple[tuple[Task, ...], tuple[Task, ...]]:
+    """(train, held-out) for one clause, from the single global split."""
+    placed = assignments(declaration)
+    tasks = declaration.clauses[clause]
+    return (tuple(t for t in tasks if placed[t.identity] == "train"),
+            tuple(t for t in tasks if placed[t.identity] == "held"))
 
 
 # ---------------------------------------------------------------- the ledger
 
 
+class LedgerError(ValueError):
+    """A ledger this module cannot trust; nothing is reused from it."""
+
+
+LEDGER_FIELDS = ("key", "arm", "task", "replicate", "result", "skill", "client", "version", "model")
+
+
 @dataclass(frozen=True)
 class Attempt:
     arm: str
-    task: Path
+    task: Task
     replicate: int
     key: str
 
@@ -277,16 +321,27 @@ class Outcome:
 
 class Ledger:
     """One JSON line per attempt, keyed. Append-only; a key seen twice keeps
-    its first outcome."""
+    its first outcome. Every row is validated on load: a malformed line, a
+    missing field or an unknown result refuses the whole ledger
+    (counter-model review: an invalid row read as zero evidence)."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self.rows: dict[str, dict[str, object]] = {}
-        if path.is_file():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    row = json.loads(line)
-                    self.rows.setdefault(str(row["key"]), row)
+        if not path.is_file():
+            return
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError as exc:
+                raise LedgerError(f"{path}:{number}: not JSON: {exc}") from None
+            if not isinstance(row, dict) or set(LEDGER_FIELDS) - set(row):
+                raise LedgerError(f"{path}:{number}: a row needs {', '.join(LEDGER_FIELDS)}")
+            if row["result"] not in OUTCOMES:
+                raise LedgerError(f"{path}:{number}: result {row['result']!r} is not one of {', '.join(OUTCOMES)}")
+            self.rows.setdefault(str(row["key"]), row)
 
     def get(self, key: str) -> dict[str, object] | None:
         return self.rows.get(key)
@@ -300,13 +355,17 @@ class Ledger:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
-def attempt_key(declaration: Declaration, arm_digest_value: str, task: Path, arm: str, replicate: int) -> str:
-    task_digest, grader_digest = task_identity(task)
+def attempt_key(declaration: Declaration, arm_digest_value: str, task: Task, arm: str, replicate: int) -> str:
     c = declaration.client
     return _sha(json.dumps({
-        "skill": arm_digest_value, "task": task_digest, "grader": grader_digest,
+        "skill": arm_digest_value, "task": task.task_digest, "grader": task.grader_digest,
         "client": c.name, "version": c.version, "model": c.model, "arm": arm, "replicate": replicate,
     }, sort_keys=True).encode())
+
+
+def _row_matches(declaration: Declaration, row: Mapping[str, object]) -> bool:
+    c = declaration.client
+    return (row.get("client"), row.get("version"), row.get("model")) == (c.name, c.version, c.model)
 
 
 # ---------------------------------------------------------------- running
@@ -349,28 +408,35 @@ class RoundReport:
     variants: dict[str, dict[str, object]] = field(default_factory=dict)
     recommendation: str | None = None
     clients: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
-def _plan(declaration: Declaration, arms: Sequence[tuple[str, Passage | None]], tasks_of: Mapping[str, Sequence[Path]],
-          ) -> tuple[list[tuple[Attempt, str, Mapping[str, str]]], dict[str, str]]:
-    """Every distinct (arm, task, replicate) the round needs."""
-    planned: dict[str, tuple[Attempt, str, Mapping[str, str]]] = {}
-    digests: dict[str, str] = {}
+Planned = tuple[Attempt, str, Mapping[str, str]]
+
+
+def _plan(declaration: Declaration, arms: Sequence[tuple[str, Passage | None]],
+          tasks_of: Mapping[str, Sequence[Task]]) -> list[Planned]:
+    """Every distinct (arm, task identity, replicate) the round needs."""
+    planned: dict[str, Planned] = {}
     for arm, passage in arms:
         changes = arm_text(declaration, passage)
         digest = arm_digest(declaration, passage)
-        digests[arm] = digest
         for tasks in tasks_of.values():
             for task in tasks:
                 for r in range(declaration.replicates):
                     key = attempt_key(declaration, digest, task, arm, r)
                     planned.setdefault(key, (Attempt(arm, task, r, key), digest, changes))
-    return list(planned.values()), digests
+    return list(planned.values())
 
 
-def _execute(declaration: Declaration, planned: list[tuple[Attempt, str, Mapping[str, str]]], ledger: Ledger,
+def _record_clients(planned: Sequence[Planned], ledger: Ledger, report: RoundReport) -> None:
+    rows = (ledger.get(p[0].key) for p in planned)
+    report.clients = sorted({f"{r['client']} {r['version']} {r['model']}" for r in rows if r})
+
+
+def _execute(declaration: Declaration, planned: list[Planned], ledger: Ledger,
              runner: AttemptRunner | None, report: RoundReport, plan_only: bool = False) -> bool:
-    """Run what the ledger lacks, within the cap. False when the cap stopped it."""
+    """Run what the ledger lacks, within the cap. False when the round stops."""
     needed = [p for p in planned if ledger.get(p[0].key) is None]
     report.declared, report.reused, report.new = len(planned), len(planned) - len(needed), len(needed)
     cap = declaration.attempt_cap
@@ -390,53 +456,77 @@ def _execute(declaration: Declaration, planned: list[tuple[Attempt, str, Mapping
     if needed and runner is None:
         report.verdict, report.reason = REFUSED, "no attempt runner: PR 1 runs offline controls only (real runs are #736 PR 3)"
         return False
-    clients: set[str] = set()
     for attempt, digest, changes in needed:
         if cap is not None and report.run >= cap:
             report.verdict, report.reason = INCOMPLETE, f"stopped at attempt_cap {cap}; {len(needed) - report.run} attempt(s) not run"
+            _record_clients(planned, ledger, report)
             return False
         assert runner is not None
-        outcome = runner.run(declaration, attempt.arm, changes, attempt.task, attempt.replicate)
-        result = outcome.result if outcome.result in OUTCOMES else ERROR
-        ledger.add(attempt.key, {"key": attempt.key, "arm": attempt.arm, "task": attempt.task.name,
-                                 "replicate": attempt.replicate, "result": result, "skill": digest,
-                                 "client": outcome.client, "version": outcome.version, "model": outcome.model})
+        outcome = runner.run(declaration, attempt.arm, changes, attempt.task.path, attempt.replicate)
+        row = {"key": attempt.key, "arm": attempt.arm, "task": attempt.task.path.name, "replicate": attempt.replicate,
+               "result": outcome.result if outcome.result in OUTCOMES else ERROR, "skill": digest,
+               "client": outcome.client, "version": outcome.version, "model": outcome.model}
         report.run += 1
-        clients.add(f"{outcome.client} {outcome.version} {outcome.model}")
-    report.clients = sorted(clients | {f"{r['client']} {r['version']} {r['model']}" for r in
-                                       (ledger.get(p[0].key) for p in planned) if r})
+        if not _row_matches(declaration, row):
+            # Counter-model review: a different client's grade must never be
+            # filed under the declared one, where a re-run would reuse it.
+            report.verdict, report.reason = REFUSED, (
+                f"the runner reported {outcome.client} {outcome.version} {outcome.model}, not the declared "
+                f"{declaration.client.name} {declaration.client.version} {declaration.client.model}; not recorded")
+            _record_clients(planned, ledger, report)
+            return False
+        ledger.add(attempt.key, row)
+    _record_clients(planned, ledger, report)
     return True
 
 
-def _counts(planned: Sequence[tuple[Attempt, str, Mapping[str, str]]], ledger: Ledger, arm: str,
-            tasks: Iterable[Path]) -> dict[str, int]:
-    wanted = set(tasks)
-    rows = [ledger.get(a.key) for a, _d, _c in planned if a.arm == arm and a.task in wanted]
+def _counts(planned: Sequence[Planned], ledger: Ledger, arm: str, tasks: Iterable[Task]) -> dict[str, int]:
+    wanted = {t.identity for t in tasks}
+    rows = [ledger.get(a.key) for a, _d, _c in planned if a.arm == arm and a.task.identity in wanted]
     results = [str(r["result"]) for r in rows if r]
-    return {"pass": results.count(PASS), "evaluable": sum(r in (PASS, FAIL) for r in results), "error": results.count(ERROR)}
+    return {"pass": results.count(PASS), "evaluable": sum(r in (PASS, FAIL) for r in results),
+            "error": results.count(ERROR), "missing": len(rows) - len(results)}
 
 
-def _minimum_problem(declaration: Declaration) -> str | None:
+def _minimum_problem(declaration: Declaration, held_needed: bool) -> str | None:
     short = [c for c, t in declaration.clauses.items() if len(t) < declaration.min_tasks_per_clause]
     if short:
-        return f"clause(s) below min_tasks_per_clause {declaration.min_tasks_per_clause}: {', '.join(sorted(short))}"
+        return (f"clause(s) with fewer distinct tasks than min_tasks_per_clause {declaration.min_tasks_per_clause}: "
+                f"{', '.join(sorted(short))}")
+    empty = [c for c in declaration.clauses if not split(declaration, c)[0] or (held_needed and not split(declaration, c)[1])]
+    if empty:
+        return f"clause(s) left without a train or held-out task by the shared split: {', '.join(sorted(empty))}"
+    return None
+
+
+def _evidence_problem(report: RoundReport, expected: Mapping[str, int]) -> str | None:
+    """Every clause and arm must hold its whole population before a verdict
+    (counter-model review: 0/0 read as no worse)."""
+    for clause, arms in report.per_clause.items():
+        for arm, c in arms.items():
+            if c["missing"] or c["pass"] + (c["evaluable"] - c["pass"]) + c["error"] != expected[clause]:
+                return f"clause {clause} arm {arm} has {c['evaluable'] + c['error']} of {expected[clause]} attempts recorded"
     return None
 
 
 def round3(declaration: Declaration, ledger: Ledger, runner: AttemptRunner | None,
            plan_only: bool = False) -> RoundReport:
     report = RoundReport(3, COMPLETE, "", 0, 0, 0, 0, declaration.attempt_cap, declaration.tolerance)
-    problem = _minimum_problem(declaration)
+    problem = _minimum_problem(declaration, held_needed=False)
     if problem:
-        report.verdict, report.reason = UNKNOWN, problem + "; a split needs at least that many tasks"
+        report.verdict, report.reason = UNKNOWN, problem
         return report
     train = {c: split(declaration, c)[0] for c in declaration.clauses}
     arms: list[tuple[str, Passage | None]] = [(INTACT, None), *((p.arm, p) for p in declaration.damaged)]
-    planned, _ = _plan(declaration, arms, train)
+    planned = _plan(declaration, arms, train)
     if not _execute(declaration, planned, ledger, runner, report, plan_only):
         return report
     for clause, tasks in train.items():
         report.per_clause[clause] = {arm: _counts(planned, ledger, arm, tasks) for arm, _ in arms}
+    missing = _evidence_problem(report, {c: len(t) * declaration.replicates for c, t in train.items()})
+    if missing:
+        report.verdict, report.reason = UNKNOWN, missing
+        return report
     for passage in declaration.damaged:
         intact = report.per_clause[passage.clause][INTACT]
         damaged = report.per_clause[passage.clause][passage.arm]
@@ -460,31 +550,42 @@ def round4(declaration: Declaration, ledger: Ledger, runner: AttemptRunner | Non
     if not declaration.variants:
         report.verdict, report.reason = REFUSED, "no variant is declared"
         return report
-    baseline = round3(declaration, ledger, None)  # must be fully cached: round 4 never re-pays round 3
-    if baseline.verdict == UNKNOWN:
-        report.verdict, report.reason = UNKNOWN, f"round 3 is UNKNOWN ({baseline.reason}); round 4 cannot judge against it"
-        return report
-    if baseline.verdict != COMPLETE:
-        report.verdict, report.reason = REFUSED, f"round 3 is not complete ({baseline.reason}); run round 3 first"
+    problem = _minimum_problem(declaration, held_needed=True)
+    if problem:
+        report.verdict, report.reason = UNKNOWN, problem
         return report
     held = {c: split(declaration, c)[1] for c in declaration.clauses}
-    total_held = len({t for ts in held.values() for t in ts})
+    total_held = len({t.identity for ts in held.values() for t in ts})
     if total_held < declaration.min_heldout:
-        report.verdict, report.reason = UNKNOWN, (f"{total_held} held-out task(s), below min_heldout "
+        report.verdict, report.reason = UNKNOWN, (f"{total_held} distinct held-out task(s), below min_heldout "
                                                   f"{declaration.min_heldout}; round 4 cannot judge on so little")
         return report
+    baseline = round3(declaration, ledger, None)  # must be fully cached: round 4 never re-pays round 3
+    if plan_only:
+        # Counter-model review: a plan never needs round 3 to have run; it
+        # says whether round 3 is done and counts round 4's own attempts.
+        report.notes.append(f"round 3 prerequisite: {baseline.verdict} ({baseline.reason})")
+    elif baseline.verdict == UNKNOWN:
+        report.verdict, report.reason = UNKNOWN, f"round 3 is UNKNOWN ({baseline.reason}); round 4 cannot judge against it"
+        return report
+    elif baseline.verdict != COMPLETE:
+        report.verdict, report.reason = REFUSED, f"round 3 is not complete ({baseline.reason}); run round 3 first"
+        return report
     arms: list[tuple[str, Passage | None]] = [(INTACT, None), *((p.arm, p) for p in declaration.variants)]
-    planned, _ = _plan(declaration, arms, held)
+    planned = _plan(declaration, arms, held)
     if not _execute(declaration, planned, ledger, runner, report, plan_only):
+        return report
+    for clause, tasks in held.items():
+        report.per_clause[clause] = {arm: _counts(planned, ledger, arm, tasks) for arm, _ in arms}
+    missing = _evidence_problem(report, {c: len(t) * declaration.replicates for c, t in held.items()})
+    if missing:
+        report.verdict, report.reason = UNKNOWN, missing
         return report
     passing: list[str] = []
     for variant in declaration.variants:
         worse: list[str] = []
-        for clause, tasks in held.items():
-            base = _counts(planned, ledger, INTACT, tasks)
-            mine = _counts(planned, ledger, variant.arm, tasks)
-            report.per_clause.setdefault(clause, {})[INTACT] = base
-            report.per_clause[clause][variant.arm] = mine
+        for clause in held:
+            base, mine = report.per_clause[clause][INTACT], report.per_clause[clause][variant.arm]
             if mine["error"] or base["error"]:
                 worse.append(f"{clause} (an attempt errored, so not shown no-worse)")
             elif mine["pass"] < base["pass"] - declaration.tolerance:
@@ -508,14 +609,16 @@ def render(report: RoundReport) -> str:
              (f"  attempts: declared {report.declared}, reused {report.reused}, new {report.new}, run {report.run}; "
               f"cap {report.cap if report.cap is not None else 'NONE'}"),
              f"  no-worse tolerance: {report.tolerance}" + (" (declared by the owner)" if report.tolerance else " (strict)")]
+    lines += [f"  {n}" for n in report.notes]
     lines += [f"  client: {c}" for c in report.clients]
     for clause, arms in sorted(report.per_clause.items()):
         cells = "; ".join(f"{arm} {c['pass']}/{c['evaluable']}" + (f" ({c['error']} error)" if c["error"] else "")
                           for arm, c in arms.items())
         lines.append(f"  clause {clause}: {cells}")
     for arm, s in sorted(report.separation.items()):
-        lines.append(f"  separation {arm} on {s['clause']}: {s['verdict']}" + (f" (p={s['p']:.4f})" if isinstance(s['p'], float) and math.isfinite(s['p']) else "")
-                     + (f" - {s['reason']}" if s["reason"] else ""))
+        p_value = s["p"]
+        shown = f" (p={p_value:.4f})" if isinstance(p_value, float) and math.isfinite(p_value) else ""
+        lines.append(f"  separation {arm} on {s['clause']}: {s['verdict']}{shown}" + (f" - {s['reason']}" if s["reason"] else ""))
     for arm, v in sorted(report.variants.items()):
         worse_on = v["worse_on"]
         listed = "; ".join(str(w) for w in worse_on) if isinstance(worse_on, list) else str(worse_on)

@@ -31,11 +31,23 @@ runner over `calibration_run`'s path, under its own gate.
 A passage must occur **exactly once** in its file. Otherwise the arm would not
 be the one its name says.
 
-## The split
+## Tasks and the split
 
-For each clause, a seeded shuffle of its tasks; a third (at least one) is held
-out, and the rest is train. Round 3 uses train only, and round 4 held-out only.
-The same seed always gives the same split.
+**A task is identified by content, not by path.**
+- Its task digest covers `goal.md` and `fixture/`.
+- Its grader digest is `verify.GraderDef.digest()`: the definition, plus the
+  probe, inputs and judge it names. Editing a README beside the grader changes
+  nothing.
+- Byte-identical task directories are one task, so copies never meet a minimum.
+
+**One global split** covers every distinct task, so a task shared by two
+clauses can never train one and be held out for the other.
+- Clauses are walked in a fixed order.
+- Each clause's not-yet-placed tasks are shuffled with the seed, and enough are
+  held out to give that clause a third of its tasks (at least one) held out.
+- The same seed always gives the same split.
+- A clause left without a train task, or (for round 4) a held-out task, reads
+  `UNKNOWN`.
 
 ## Round 3: baseline
 
@@ -52,6 +64,8 @@ The same seed always gives the same split.
 
 - Round 3 must be `COMPLETE`, and its attempts are reused from the ledger. A
   round-3 `UNKNOWN` makes round 4 `UNKNOWN`. Round 3 not run yet is `REFUSED`.
+  `--plan` never needs round 3: it counts round 4's attempts and states the
+  round-3 prerequisite.
 - **Arms:** the intact baseline and every variant, on the held-out tasks.
 - **A variant passes iff, for every clause, its pass count >= the baseline's
   minus `tolerance`.** An errored attempt is never "no worse".
@@ -69,11 +83,17 @@ The same seed always gives the same split.
   `partial`, also mean `REFUSED`. Either way, this happens **before any attempt**.
 - With `partial: true`, the run goes up to the cap, then stops: **`INCOMPLETE`**,
   never a pass.
-- **The ledger key** is the arm's skill digest, the task's content digest
-  (`goal.md` and `fixture/`), the **grader's** digest (every other top-level
-  file of the task), the client, its version, the model, the arm and the
-  replicate. A re-run on the same key spends nothing. A changed grader or
-  client is a new key, and reuses nothing.
+- **The ledger key** is the arm's skill digest, the task digest, the
+  **grader's** digest (`GraderDef.digest()`), the client, its version, the
+  model, the arm and the replicate. A re-run on the same key spends nothing. A
+  changed grader or client is a new key, and reuses nothing.
+- **The runner must report the declared client, version and model.** A
+  mismatch refuses the round, and that grade is never recorded, so a re-run
+  never reuses another client's result.
+- **Ledger rows are validated on load.** Each needs every field and a result of
+  pass, fail or error. One bad row refuses the whole ledger (exit 2).
+- **Every clause and arm must hold its whole population** (tasks x replicates)
+  before a verdict. Missing evidence is `UNKNOWN`, never `0/0` read as no worse.
 - The report prints declared, reused, new and run attempts, the cap, and the
   client and model of every attempt. The owner relates those counts to
   `/usage` (decision 4).

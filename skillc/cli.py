@@ -2686,8 +2686,12 @@ def cmd_gauntlet_round(args: argparse.Namespace) -> int:
     except gauntlet_trials.DeclarationError as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return GAUNTLET_EXIT_USAGE
-    ledger = gauntlet_trials.Ledger(Path(args.ledger) if args.ledger
-                                    else declaration.path.parent / ".gauntlet-ledger.jsonl")
+    try:
+        ledger = gauntlet_trials.Ledger(Path(args.ledger) if args.ledger
+                                        else declaration.path.parent / ".gauntlet-ledger.jsonl")
+    except (gauntlet_trials.LedgerError, OSError) as exc:
+        print(f"skillc: ledger not trusted: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
     play = gauntlet_trials.round3 if args.gauntlet_command == "round3" else gauntlet_trials.round4
     try:
         report = play(declaration, ledger, None, plan_only=args.plan)

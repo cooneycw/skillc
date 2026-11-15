@@ -1,1 +1,4 @@
-{"criteria": [{"id": "b1-held", "dimension": "constraint"}]}
+{"id": "gauntlet-control-b1", "revision": "1", "criteria": ["held"],
+ "dimensions": {"held": "constraint"},
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 10},
+ "judge": {"file": "judge.py", "timeout": 10}}
