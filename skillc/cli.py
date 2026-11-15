@@ -34,6 +34,7 @@ from . import (
     exposure,
     leak,
     materialize,
+    overlap,
     profile,
     records,
     usage,
@@ -2723,6 +2724,45 @@ def cmd_charter_confirm(args: argparse.Namespace) -> int:
     return CHARTER_EXIT_OK
 
 
+def cmd_charter_overlap(args: argparse.Namespace) -> int:
+    """`skillc charter overlap <collection>` (#726, PR B). With no comparator
+    it exits 3, "not examined"; overlaps are proposals and never fail it."""
+    root = Path(args.path)
+    if not root.is_dir():
+        print(f"skillc: no such collection directory: {root}", file=sys.stderr)
+        return overlap.EXIT_USAGE
+    if args.replicates < 1:
+        print(f"skillc: --replicates must be at least 1, not {args.replicates}", file=sys.stderr)
+        return overlap.EXIT_USAGE
+    collection = contracts.load_collection(root.resolve())
+    if not collection.contracts:
+        print(f"skillc: no CHARTER.md under {root} - nothing to compare", file=sys.stderr)
+        return overlap.EXIT_NOT_EXAMINED
+    comparator = None
+    if args.verdicts:
+        try:
+            comparator = overlap.load_verdicts(Path(args.verdicts))
+        except (OSError, UnicodeDecodeError, overlap.VerdictsError) as exc:
+            print(f"skillc: verdicts not read: {exc}", file=sys.stderr)
+            return overlap.EXIT_USAGE
+    report = overlap.compare(collection, comparator, replicates=args.replicates)
+    text = overlap.render(report)
+    if args.out:
+        try:
+            charter_confirm.write_new(Path(args.out), text)
+        except charter_confirm.ConfirmRefused:
+            print(f"skillc: {args.out} exists; overlap never overwrites a report", file=sys.stderr)
+            return overlap.EXIT_USAGE
+    else:
+        sys.stdout.write(text)
+    if report.examined:
+        counts = ", ".join(f"{k} {v}" for k, v in report.counts().items())
+        print(f"skillc: overlap examined ({report.source}): {counts}", file=sys.stderr)
+    else:
+        print("skillc: overlap NOT examined - no pair was judged; no count is reported", file=sys.stderr)
+    return overlap.EXIT_REPORTED if report.examined else overlap.EXIT_NOT_EXAMINED
+
+
 def cmd_contracts(args: argparse.Namespace) -> int:
     """`skillc contracts <collection>` (#720): every CHARTER.md read together.
 
@@ -3601,6 +3641,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_charter_confirm.add_argument("--answers", metavar="FILE", help="the owner's answers (docs/specs/charter-round1.md)")
     p_charter_confirm.add_argument("--out", required=True, metavar="FILE", help="the confirmed charter; never overwrites")
     p_charter_confirm.set_defaults(func=cmd_charter_confirm)
+    p_charter_overlap = charter_sub.add_parser(
+        "overlap", help="shared, shadowed and orphan duties across a collection's charters; proposals only"
+    )
+    p_charter_overlap.add_argument("path", help="the collection root")
+    p_charter_overlap.add_argument("--verdicts", metavar="FILE",
+                                   help="recorded verdicts, '<clause-id> <clause-id>: same|different|UNKNOWN' "
+                                        "one replicate per line; without it nothing is compared (exit 3)")
+    p_charter_overlap.add_argument("--replicates", type=int, default=3, help="judgements per pair (default 3)")
+    p_charter_overlap.add_argument("--out", metavar="FILE", help="write the report here; never overwrites")
+    p_charter_overlap.set_defaults(func=cmd_charter_overlap)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
