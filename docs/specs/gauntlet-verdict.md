@@ -32,7 +32,10 @@ has no JSON on main either, so its shape is planted the same way.
 ## The rules, in order
 
 1. **Rounds 0-2 must have passed** in the record: `0` OBSERVED, `1` PASS, `2`
-   PASS. Anything else is **UNKNOWN**, and NEXT names that round.
+   PASS. Anything else is **UNKNOWN**, and NEXT names that round. The
+   recorded rounds 1 and 2 must also have read the skill, its charter and the
+   collection as they are now (their recorded input digests). A skill changed
+   since `gauntlet run` is UNKNOWN: its PASS is evidence about another revision.
 2. **Rounds 3 and 4** must be present, the right round, and `COMPLETE`.
    Otherwise UNKNOWN, naming the round.
 3. **No `--overlap`, or an overlap that does not cover this skill:** retire is
@@ -41,7 +44,9 @@ has no JSON on main either, so its shape is planted the same way.
    every `OVERLAP_FIELDS` field, read `examined: true` with `incomplete: []`, and
    list at least one duty of this skill's contract; anything else is UNKNOWN.
 4. **No `--inspect`, or one that did not inspect this skill:** the file must be
-   an `inspect-report` with at least one entry on this skill's text. Otherwise
+   an `inspect-report` with at least one entry on this skill's text, and the
+   engine's own round-2 reading of it (`gauntlet.read_round2`, one place) must
+   be PASS: an error or UNKNOWN on this skill, or an unexamined rule, is
    UNKNOWN, naming round 2.
 5. **retire:** every duty of this skill's contract appears in a `shared` or
    `shadowed` overlap with another charter. The verdict names the owner of each
@@ -55,7 +60,10 @@ has no JSON on main either, so its shape is planted the same way.
      Absent or different: UNKNOWN. Without it, a declaration sharing only the
      first 80 characters would be drafted as the passage round 4 tested.
    - Its file must be a regular file inside the skill, reached through no
-     symlink; `..`, an absolute path or a symlink is UNKNOWN.
+     symlink; `..`, an absolute path or a symlink is UNKNOWN. A command skill
+     owns its one file: a neighbouring command or file is UNKNOWN.
+   - It must not include a round 2 **B** line: that prose stays until its check
+     exists, so such a trim is UNKNOWN.
    - Its passage must occur **exactly once** in the file. Zero or several
      occurrences are UNKNOWN.
    - Every clause in `per_clause` must carry intact and variant counts, with at
@@ -66,8 +74,9 @@ has no JSON on main either, so its shape is planted the same way.
 7. **keep:** otherwise.
 
 Round 2's **D** items are listed as removal candidates. **B** items become
-**proposed checks**, each naming its bad input, and their prose stays until the
-check exists. The evidence is labelled observational, never causal.
+**proposed checks** naming the missing check (`missing_check`), and their prose
+stays until the check exists. Round 2 names the check, not a case it must fail
+on, so each says its bad input is NOT CONSTRUCTED rather than inventing one. The evidence is labelled observational, never causal.
 
 **Not examined:** the second retire path, "no clause has any observed use",
 needs per-clause usage, and no round stores that yet. It is neither built nor

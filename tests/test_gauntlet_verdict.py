@@ -170,15 +170,14 @@ def test_a_report_and_declaration_that_disagree_on_the_passage_is_unknown(coll: 
 
 
 def test_class_b_findings_become_proposed_checks_and_keep_their_prose(coll: Path, tmp_path: Path) -> None:
+    """A REAL inspect B item: the rule names a check that does not exist."""
+    skill_md = coll / "skills" / "lean" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\nYou MUST keep `tests/test_report_check.py` passing before you stop.\n")
     _engine(coll, "lean")
-    report = json.loads(_inspect(coll, tmp_path).read_text())  # the REAL report, plus one B rule line
-    planted = tmp_path / "inspect-b.json"
-    report["rule_lines"].append({"bucket": "B", "path": "skills/lean/SKILL.md", "line": 5, "rule": "rule-line",
-                                 "detail": "names tests/test_missing.py"})
-    planted.write_text(json.dumps(report))
-    _, lines = _verdict(coll, "lean", tmp_path, inspect=planted)
-    assert any(line.startswith("  round 2 B -> proposed check") and "prose kept" in line for line in lines)
-
+    _, lines = _verdict(coll, "lean", tmp_path)
+    proposed = [line for line in lines if line.startswith("  round 2 B -> proposed check")]
+    assert len(proposed) == 1 and "tests/test_report_check.py for skills/lean/SKILL.md:7" in proposed[0]
+    assert "bad input is NOT CONSTRUCTED" in proposed[0] and "prose kept" in proposed[0]
 
 # ------------------------------------------------------- never writes the skill
 
@@ -399,3 +398,68 @@ def test_from_a_linked_worktree_drafts_are_shared_but_a_ruling_binds_its_own_che
     assert gauntlet_verdict.rule(linked, "skills/lean", gauntlet.Options(), "accept", digest, "2026-11-15", None,
                                  out=lambda _: None) == gauntlet_verdict.EXIT_PROPOSED
     assert json.loads((linked / "skills" / "lean" / gauntlet.RECORD_NAME).read_text())["rounds"]["5"]["ruling"] == "accept"
+
+
+# ------------------------------------------- counter-model review, pass 2 (#737)
+
+def test_a_skill_changed_after_the_engine_ran_is_unknown(coll: Path, tmp_path: Path) -> None:
+    _engine(coll, "lean")
+    skill_md = coll / "skills" / "lean" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\nA rule the recorded rounds never saw.\n")
+    code, lines = _verdict(coll, "lean", tmp_path)
+    assert "round 1 did not decide: it was recorded for another revision" in _verdict_line(lines)
+    assert code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+@pytest.mark.parametrize("key,entry,reads", [
+    ("errors", {"rule": "dangling-reference", "path": "skills/lean/SKILL.md", "line": 5, "detail": "x"}, "FAIL"),
+    ("unknown", {"rule": "dangling-reference", "path": "skills/lean/SKILL.md", "line": 5, "detail": "x"}, "UNKNOWN")])
+def test_an_inspect_error_or_unknown_on_this_skill_is_unknown(coll: Path, tmp_path: Path, key: str,
+                                                              entry: dict[str, Any], reads: str) -> None:
+    _engine(coll, "lean")
+    report = json.loads(_inspect(coll, tmp_path).read_text())
+    report[key].append(entry)
+    planted = tmp_path / "inspect-bad.json"
+    planted.write_text(json.dumps(report))
+    code, lines = _verdict(coll, "lean", tmp_path, inspect=planted)
+    assert f"round 2 did not decide: the inspect report reads {reads}" in _verdict_line(lines)
+    assert code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+def test_an_unexamined_inspect_rule_is_unknown(coll: Path, tmp_path: Path) -> None:
+    _engine(coll, "lean")
+    report = json.loads(_inspect(coll, tmp_path).read_text())
+    next(iter(report["rules"].values()))["examined"] = False
+    planted = tmp_path / "inspect-unexamined.json"
+    planted.write_text(json.dumps(report))
+    code, lines = _verdict(coll, "lean", tmp_path, inspect=planted)
+    assert "not examined" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+def test_a_trim_that_removes_b_prose_is_unknown(coll: Path, tmp_path: Path) -> None:
+    skill_md = coll / "skills" / "trimmable" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text().replace(PASSAGE, PASSAGE + " Keep `tests/test_restate_check.py` green."))
+    _engine(coll, "trimmable")
+    code, lines = _verdict(coll, "trimmable", tmp_path, **TRIM)
+    assert "includes round 2 B prose" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+    assert not (_draft(coll, "trimmable") / gauntlet_verdict.PATCH_FILE).exists()
+
+
+def test_a_command_skill_trims_only_its_own_file(tmp_path: Path) -> None:
+    commands = tmp_path / ".claude" / "commands"
+    commands.mkdir(parents=True)
+    for name in ("mine.md", "neighbour.md"):
+        (commands / name).write_text("You MUST report what you found, then stop.\n")
+    skill = gauntlet.Skill(tmp_path, ".claude/commands/mine.md", commands / "mine.md",
+                           tmp_path / "charters" / "mine" / "CHARTER.md", True)
+    assert gauntlet_verdict._passage_target(skill, ".claude/commands/neighbour.md") is None
+    assert gauntlet_verdict._passage_target(skill, ".claude/commands/mine.md") == commands / "mine.md"
+
+
+@pytest.mark.parametrize("line", ["contract: 'lean'", "contract: lean # the charter name"])
+def test_a_contract_name_in_any_valid_spelling_is_read(coll: Path, tmp_path: Path, line: str) -> None:
+    charter = coll / "skills" / "lean" / "CHARTER.md"
+    charter.write_text(charter.read_text().replace("contract: lean", line, 1))
+    _engine(coll, "lean")
+    code, lines = _verdict(coll, "lean", tmp_path)
+    assert _verdict_line(lines).startswith("ROUND 5 verdict: KEEP") and code == gauntlet_verdict.EXIT_PROPOSED

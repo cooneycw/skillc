@@ -465,6 +465,12 @@ def round2(skill: Skill, options: Options) -> Result:
     except json.JSONDecodeError:
         return Result("2", "inspect", "UNKNOWN", f"`skillc inspect` printed no report (exit {done.returncode})",
                       proceed=False, inputs=inputs)
+    return read_round2(skill, report, inputs)
+
+
+def read_round2(skill: Skill, report: dict, inputs: dict[str, str]) -> Result:
+    """Round 2's reading of one `inspect --json` report, in ONE place: the
+    engine and round 5 (#737, `gauntlet verdict --inspect`) both use it."""
     if report.get("verdict") == "NOTHING-INSPECTED":
         return Result("2", "inspect", "UNKNOWN", "nothing inspected - not a clean result", proceed=False,
                       inputs=inputs)

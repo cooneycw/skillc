@@ -33,11 +33,10 @@ import datetime as _dt
 import difflib
 import hashlib
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import gauntlet, source_digest
+from . import contracts, gauntlet, source_digest
 
 KEEP, TRIM, RETIRE, UNKNOWN = "KEEP", "TRIM", "RETIRE", "UNKNOWN"
 EXIT_PROPOSED, EXIT_REFUSED, EXIT_USAGE, EXIT_UNKNOWN = 0, 1, 2, 3
@@ -62,7 +61,6 @@ OWNED_ELSEWHERE = ("shared", "shadowed")
 #: The overlap report fields read (#726 part B), pinned here as round 3/4's are.
 OVERLAP_FIELDS = ("examined", "duties", "overlaps", "incomplete")
 INSPECT_KIND = "inspect-report"
-_CONTRACT = re.compile(r"^contract:\s*\"?([A-Za-z0-9_.-]+)\"?\s*$", re.MULTILINE)
 _REMOVES_HEAD = 80  # #736 records `f"{file}: {remove[:80]}"`
 
 
@@ -118,12 +116,8 @@ def _record_path(skill: gauntlet.Skill, options: gauntlet.Options) -> Path:
 
 
 def _contract_name(charter: Path) -> str | None:
-    try:
-        head = charter.read_text().split("---", 2)
-    except OSError:
-        return None
-    match = _CONTRACT.search(head[1] if len(head) > 2 else "")
-    return match.group(1) if match else None
+    """Through the repository's own contract parser, never a second one."""
+    return contracts.load(charter).name or None
 
 
 def _sha(data: bytes) -> str:
@@ -146,6 +140,21 @@ def skill_fingerprint(skill: gauntlet.Skill) -> str:
 def record_fingerprint(record: dict[str, dict[str, object]]) -> str:
     """Rounds 0-2 as recorded: the verdict is bound to the record it read."""
     return _sha(json.dumps({k: record.get(k) for k in RECORD_PASSES}, sort_keys=True).encode())
+
+
+def _stale_round(skill: gauntlet.Skill, record: dict[str, dict[str, object]]) -> str | None:
+    """The first recorded round whose inputs are not the skill as it is now:
+    its PASS is evidence about another revision (counter-model review)."""
+    now = {"skill": gauntlet._file_digest(skill.text), "charter": gauntlet._file_digest(skill.charter),
+           "collection": gauntlet._tree_digest(skill.collection)}
+    for key in ("1", "2"):
+        recorded = _dict(record.get(key), "inputs")
+        for name, digest in now.items():
+            if name in recorded and recorded[name] != digest:
+                return f"round {key}"
+        if key == "2" and "skill" not in recorded:
+            return "round 2"
+    return None
 
 
 def _round_report(data: dict[str, object] | None, number: int) -> str | None:
@@ -171,6 +180,8 @@ def _passage_target(skill: gauntlet.Skill, file: str) -> Path | None:
     if not file or rel.is_absolute() or ".." in rel.parts:
         return None
     target = base / rel
+    if skill.command and target != skill.text:
+        return None  # a command skill owns its one file, never a neighbour in the collection
     try:
         gauntlet._no_symlink_below(target, skill.collection)
         inside = target.resolve().is_relative_to(base.resolve()) and target.is_file() and not target.is_symlink()
@@ -199,7 +210,7 @@ def _clause_counts(round4: dict[str, object], arm: str) -> list[str] | str:
 
 
 def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[str, object] | None,
-          evidence: list[str]) -> Verdict | None:
+          evidence: list[str], b_items: list[dict[str, object]]) -> Verdict | None:
     """The passing variant that removes the most, as a patch that only removes."""
     variants = round4["variants"]
     if not isinstance(variants, dict):
@@ -235,6 +246,13 @@ def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[st
     count = before.count(remove) if remove else 0
     if count != 1:
         return _unknown("round 4", f"variant {arm}'s passage occurs {count} times in {file}, not exactly once")
+    first = before[:before.index(remove)].count("\n") + 1
+    span = range(first, first + remove.count("\n") + 1)
+    kept = [b for b in b_items if b.get("path") == target.relative_to(skill.collection).as_posix()
+            and b.get("line") in span]
+    if kept:
+        return _unknown("round 4", f"variant {arm}'s passage includes round 2 B prose (line {kept[0].get('line')}), "
+                                   "which stays until its check exists")
     counts = _clause_counts(round4, arm)
     if isinstance(counts, str):
         return _unknown("round 4", f"variant {arm}: {counts}, so its passing is not shown per clause")
@@ -281,6 +299,10 @@ def decide(skill: gauntlet.Skill, record: dict[str, dict[str, object]], round3: 
         got = entry.get("verdict") if isinstance(entry, dict) else None
         if got != wanted:
             return _unknown(f"round {key}", f"the record reads {got or 'nothing'}, not {wanted}")
+    stale = _stale_round(skill, record)
+    if stale is not None:
+        return _unknown(stale, "it was recorded for another revision of the skill, its charter or the collection; "
+                               "re-run `skillc gauntlet run`")
     for number, data in ((3, round3), (4, round4)):
         why = _round_report(data, number)
         if why is not None:
@@ -311,13 +333,21 @@ def decide(skill: gauntlet.Skill, record: dict[str, dict[str, object]], round3: 
     if not own:
         return _unknown("round 2", f"the inspect report shows nothing of {skill.text_rel}, so it did not inspect "
                                    "this skill")
+    # The engine's own round-2 reading, so an error, an UNKNOWN on this skill
+    # or an unexamined rule stops round 5 exactly as it stops round 2.
+    read = gauntlet.read_round2(skill, inspect, {})
+    if read.verdict != "PASS":
+        return _unknown("round 2", f"the inspect report reads {read.verdict}: {read.detail}")
     evidence = ["  evidence is observational: it shows what the rounds measured, never why"]
     evidence += [f"  round 2 D (removal candidate): {f.get('path')}:{f.get('line')} {f.get('detail')}"
                  for f in own if f.get("bucket") == "D"]
-    evidence += [f"  round 2 B -> proposed check (bad input: the rule named at {f.get('path')}:{f.get('line')} "
-                 f"broken), prose kept until the check exists: {f.get('detail')}" for f in own if f.get("bucket") == "B"]
+    b_items = [f for f in own if f.get("bucket") == "B"]
+    evidence += [f"  round 2 B -> proposed check {f.get('missing_check') or '(unnamed)'} for "
+                 f"{f.get('path')}:{f.get('line')}; its bad input is NOT CONSTRUCTED (round 2 names the check, "
+                 f"not a case it must fail on); prose kept until the check exists: {f.get('detail')}"
+                 for f in b_items]
     assert round4 is not None
-    return (_retire(contract, overlap, evidence) or _trim(skill, round4, declaration, evidence)
+    return (_retire(contract, overlap, evidence) or _trim(skill, round4, declaration, evidence, b_items)
             or Verdict(KEEP, "no variant passed round 4 and no duty is owned elsewhere",
                        "NEXT: nothing to change; the owner may record the keep with `skillc gauntlet rule ... accept`",
                        evidence))
