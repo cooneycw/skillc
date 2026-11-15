@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import records, usage
+from . import decay, records, usage
 from .spec import (
     BODY_LINE_BUDGET,
     CLAUDE_CODE,
@@ -597,6 +597,84 @@ def run_usage_log(log: usage.UsageLog, only: str | None = None) -> list[Finding]
     return findings
 
 
+@dataclass(frozen=True)
+class CollectionRule:
+    """A rule whose subject is a whole COLLECTION of instruction documents
+    (issue #725): the decay rules, each needing something no single SKILL.md
+    can show - the tree a reference resolves in, the other skills a passage is
+    copied from, the issue a temporary rule waits on.
+
+    A separate TYPE for the reason `BundleRule` is one: the subject it loads
+    (`decay.Collection`) is neither a `Skill` nor a record. It sits in the SAME
+    `ALL_RULES` `selftest` iterates; every control case directory under
+    `controls/<id>/{bad,good}/` is one collection, declared by its own
+    `collection.json` and loaded OFFLINE, so no committed case asks the network.
+
+    These rules run under `skillc inspect`, not `skillc check`: `check` stays
+    one-SKILL.md-at-a-time and network-free. A `decay.Result`'s `unknown`
+    entries are never counted as the rule firing - selftest credits `hits` only.
+    """
+
+    id: str
+    severity: str
+    summary: str
+    check: Callable[[decay.Collection], decay.Result]
+    parser: bool = False
+
+
+COLLECTION_RULES: tuple[CollectionRule, ...] = (
+    CollectionRule("dangling-reference", ERROR,
+                   "every path, link and script flag the text names into the collection exists",
+                   decay.dangling_reference),
+    CollectionRule("expired-marker", WARN,
+                   "no `until #N` / `expires-with: #N` rule waits on a closed issue",
+                   decay.expired_marker),
+    CollectionRule("copied-passage", WARN,
+                   "no passage is copied word for word between two documents",
+                   decay.copied_passage),
+    CollectionRule("emphasis-density", WARN,
+                   "MUST/NEVER/CRITICAL/ALWAYS/IMPORTANT stay rare enough to stand out",
+                   decay.emphasis_density),
+)
+
+
+def run_collection(
+    collection: decay.Collection, only: str | None = None,
+) -> list[tuple[CollectionRule, decay.Result]]:
+    """Every collection rule (or one) over one collection, with each rule's
+    whole result - `inspect` needs its unknowns and population, not only hits."""
+    require_known(only, COLLECTION_RULES)
+    return [(rule, rule.check(collection)) for rule in COLLECTION_RULES if not only or rule.id == only]
+
+
+def collection_findings(case: Path, only: str | None = None) -> tuple[list[Finding], str | None]:
+    """A control case as `selftest` reads it: `(findings, load_error)`. A case
+    that does not load, or loads no subject, says nothing about the rule - it
+    is reported as the load error, never as zero findings."""
+    try:
+        collection = decay.load_case(case)
+    except decay.CollectionError as exc:
+        return [], str(exc)
+    if not collection.subjects:
+        return [], "collection has no subject"
+    results = run_collection(collection, only)
+    if only is not None:
+        for _rule, result in results:
+            vacuous = decay.not_exercised(only, result)
+            if vacuous is not None:
+                return [], vacuous
+            if result.unknown:
+                # A control whose facts were never established is silent (or
+                # red) because nothing was KNOWN - it certifies nothing.
+                return [], f"{only}: {len(result.unknown)} UNKNOWN - the control's facts were not established"
+    findings = [
+        Finding(rule.id, rule.severity, collection.root / hit.rel, f"{hit.line}: {hit.detail}")
+        for rule, result in results
+        for hit in result.hits
+    ]
+    return findings, None
+
+
 def evidence_rules() -> tuple[RecordRule | BundleRule | UsageRule, ...]:
     """Every rule `check-records` can run, any family - resolved at CALL time,
     so a registry patched in a test is the registry the selector is checked against."""
@@ -621,8 +699,8 @@ def applicable_population(rule: RecordRule, found: list[records.Record]) -> int:
 
 #: ONE registry. `selftest` iterates this; the coverage check, the totals and the
 #: exit code never learn which family a rule came from.
-ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule | UsageRule, ...] = (
-    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES + USAGE_RULES
+ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule | UsageRule | CollectionRule, ...] = (
+    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES + USAGE_RULES + COLLECTION_RULES
 )
 
 
@@ -631,6 +709,7 @@ def require_known(
     family: (
         tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[ManifestRule, ...]
         | tuple[RecordRule | BundleRule, ...] | tuple[RecordRule | BundleRule | UsageRule, ...]
+        | tuple[CollectionRule, ...]
     ),
 ) -> None:
     """An unknown selector is a caller error, never a request to check nothing.
