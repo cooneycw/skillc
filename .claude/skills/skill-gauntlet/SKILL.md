@@ -10,9 +10,15 @@ wherever the owner has to decide. It never answers for the owner.
 
 ## Run it
 
+Run the launcher in this skill's own directory (its base directory):
+
 ```bash
-skillc gauntlet run <collection> <skill> [--usage <log-or-dir>]...
+<this skill's directory>/scripts/gauntlet.sh <collection> <skill> [--usage <log-or-dir>]...
 ```
+
+It finds skillc from any session and runs `skillc gauntlet run`. If it prints
+`SKILL_GAUNTLET: cannot find a usable skillc (...)`, report that line and stop:
+there is no verdict.
 
 - `<skill>` is a skill directory holding `SKILL.md`, or a command `.md` file,
   relative to the collection.
