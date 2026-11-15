@@ -159,3 +159,121 @@ read, reported as `not examined`.
   gauntlet's draft location as `not examined`. The other sources still run.
 - **Meaning.** Nothing is compared by meaning, and no model is called. Two
   suggestions that say the same thing in different words are both offered.
+
+## `skillc charter create`
+
+```
+skillc charter create <collection> <skill> --evidence FILE --answers FILE [--replace-draft]
+```
+
+Turns the owner's answers into a CHARTER.md, with a trap-task stub per clause.
+It exits 0 when the charter is written and clean, 1 when it refuses, and 2 on a
+usage error. **It never answers for the owner. It never runs git and never
+commits:** in a collection that lives in another repository (CPP), it writes the
+charter and its stubs there, and committing them is the owner's act. It never
+changes the skill. The skill's tree digest, every file but `CHARTER.md` and
+`GAUNTLET.json`, is checked before and after.
+
+### The answers file (schema 1)
+
+The `/charter-create` dialogue writes it from the owner's words:
+
+```json
+{
+  "schema": 1,
+  "approved_on": "2026-11-15",
+  "answers": {"e1": "edit", "e2": "accept", "e3": "drop"},
+  "intent": {"what": "...", "from": ["e1"], "approve": true},
+  "purpose": "...",
+  "clauses": [
+    {"section": "always", "id": "cite-every-claim", "what": "...", "from": ["e2"], "test": "tests/test_demo.py"},
+    {"section": "never", "id": "never-approve", "what": "...", "shortcut": "the tempting wrong move",
+     "good": "the rule-following move"},
+    {"section": "authority", "id": "owner-merges", "what": "...", "shortcut": "...", "approve": true}
+  ]
+}
+```
+
+- `answers` holds one answer per suggestion in the evidence file: `accept`,
+  `edit` or `drop`.
+- `from` names the suggestions a field came from.
+- `section` is one of `always`, `never`, `provides`, `requires`, `authority`
+  or `failure`.
+- `id` is a lowercase slug. The clause id is `<contract>.<id>`; the default
+  `<section>-<n>` is used when none is given.
+- `contract` is optional and defaults to the skill's name.
+- `purpose` may be text, or `{"what": ..., "from": [...]}`.
+
+### Refusals: nothing is written
+
+| Refused when | Why |
+|---|---|
+| a suggestion has no answer, or an answer names no suggestion | every piece of evidence gets the owner's decision |
+| an accepted or edited suggestion is in no `from`, or a dropped one is | an accepted line must land somewhere, and a dropped one nowhere |
+| a `never` or `authority` clause has no `shortcut` | every safety line needs a trap: the shortcut becomes its bad case |
+| `approve` outside intent and authority; an approval without `approved_on`; `approved_on` with nothing approved; an impossible or future date | only the owner approves, and only intent and authority (the `charter confirm` allowlist) |
+| a clause with no text, an unknown section, or a repeated id | the charter would not parse, or would be ambiguous |
+| a `test` that is not an existing path in the collection | an offered test must exist |
+| the evidence file is for another skill, or not schema 1, or its `suggestions` is missing or not a list of entries with unique string ids | the answers must match the evidence they answer; a malformed population is never read as empty (an explicit `[]` is allowed) |
+| the CHARTER.md exists | never overwritten, unless every clause in it is a `draft` and `--replace-draft` is given |
+| a stub directory exists | never overwritten |
+| any output's path from the collection root holds a symlink, or resolves outside the collection | never written through a link (a symlinked `charters/` or `evals/` would redirect it) |
+
+### The trap-task stubs
+
+Every `never` and `authority` clause gets a stub, and so does any other clause
+that names no existing test. The stubs live at:
+
+```
+<collection>/evals/trap-tasks/<contract>/<clause-id-slug>/
+  bad/   STUB.md  goal.md  fixture/README.md   # the shortcut is the WRONG move
+  good/  STUB.md  goal.md  fixture/README.md   # the skill's rule is followed
+```
+
+The clause's `test` is `evals/trap-tasks/<contract>/<slug>/{bad,good}`. Where
+the owner offered an existing test for a safety clause, the stub path is added
+after it. `clause-backed` and `negative-backed` therefore pass from creation.
+
+**A stub is not a graded task.** It has no `grader.json`, so
+`verify.GraderDef.load` refuses it, and a round-3 declaration that names it
+refuses too. A stub backs a clause by existence only, and `STUB.md` says so.
+
+**#736 PR 2 fills a stub** into the task shape `gauntlet_trials.read_task`
+reads:
+1. write the agent's real task in `goal.md` and its inputs in `fixture/`;
+2. add `grader.json`, `probe.py`, `judge.py` and `inputs.json`;
+3. delete `STUB.md`.
+
+### The final check
+
+After writing, `create` runs the real contracts rules over the collection and
+reads every finding on this charter:
+- **any error rolls back everything create wrote**, including a replaced
+  draft, which is restored byte for byte. Directory cleanup runs even if that
+  restoration fails;
+- `approval-present` may warn **only** on an intent or authority clause whose
+  approval the owner withheld. A warning on a clause the owner approved also
+  rolls back.
+- a NEW error on another contract rolls back too: replacing a draft can break
+  a neighbour's hand-off, which `handoff-bilateral` reports against the
+  neighbour. Findings that were there before create ran are not counted.
+- **not examined is never clean:** create refuses when the rules did not read
+  the composed charter, or when the collection's cross-contract rules cannot
+  run (another CHARTER.md fails contract-shape, a name or provider repeats, a
+  directory is unreadable). Fix the collection first.
+
+A skill at the collection root (`<skill>` is `.`) holds its own stubs; the
+skill's digest leaves out the stub directories create writes.
+
+The warnings it keeps are printed as such.
+
+## The `/charter-create` skill
+
+`.claude/skills/charter-create/` holds the dialogue (SKILL.md, pinned at 600
+words) and its launcher, `scripts/charter.sh`. The launcher runs only
+`charter evidence` or `charter create`, and only from the skillc checkout it
+belongs to.
+- **Install:** not installed under `~/.claude/skills` (wave rule, 2026-11-15);
+  the copy-mode installer (#774) may add it later.
+- **First real subject:** `/skill-gauntlet`'s own charter, composed with the
+  owner, starting from discussion #718's Charter v1.

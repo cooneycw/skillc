@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "skill": "skills/demo",
+  "skill_file": "skills/demo/SKILL.md",
+  "sources": [
+    {
+      "source": "repository evidence",
+      "status": "not examined: no repository reader",
+      "detail": "",
+      "ref": ""
+    },
+    {
+      "source": "existing charter",
+      "status": "none found",
+      "detail": "no skills/demo/CHARTER.md and no CHARTER.draft.md",
+      "ref": ""
+    },
+    {
+      "source": "skill text",
+      "status": "examined",
+      "detail": "3 item(s)",
+      "ref": "skills/demo/SKILL.md"
+    },
+    {
+      "source": "usage records",
+      "status": "not examined: no --usage given; absences are UNKNOWN",
+      "detail": "",
+      "ref": ""
+    },
+    {
+      "source": "existing tests",
+      "status": "none found",
+      "detail": "0 test file(s) read, 0 name demo",
+      "ref": ""
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "e1",
+      "section": "intent",
+      "text": "Summarise a pull request for its reviewer in five lines.",
+      "cite": "skills/demo/SKILL.md: frontmatter description",
+      "kind": "stated",
+      "source": "skill text",
+      "test": ""
+    },
+    {
+      "id": "e2",
+      "section": "always",
+      "text": "You MUST cite the file and line behind every claim.",
+      "cite": "skills/demo/SKILL.md:10",
+      "kind": "stated",
+      "source": "skill text",
+      "test": ""
+    },
+    {
+      "id": "e3",
+      "section": "never",
+      "text": "You must NEVER approve or merge the pull request yourself.",
+      "cite": "skills/demo/SKILL.md:11",
+      "kind": "stated",
+      "source": "skill text",
+      "test": ""
+    }
+  ]
+}
