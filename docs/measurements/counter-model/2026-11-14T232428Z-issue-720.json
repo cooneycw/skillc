@@ -1,0 +1,70 @@
+{
+  "branch": "issue-720-skill-contracts-charter-md-format-and-skillc-contr",
+  "counts": {
+    "accepted": 10,
+    "deferred": 2,
+    "rejected": 0
+  },
+  "extra_passes_reason": "pass 2 found 4 MEDIUM defects in the pass-1 fixes; the wave orchestrator skillc-orch (skillc-work policy rev 1, orchestrator-only, owner-delegated) ratified fixing all four and one final pass 3, deferring pass-3 findings (filed #739)",
+  "head": "8f1b89ccea84eb75fa8832fd66bbfc05e27f45bd",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "4442f745-f19b-4ef8-bdb6-71fc92ee505a",
+    "sources": [
+      {
+        "bytes": 7104613,
+        "path": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl",
+        "sha256": "2496fa44ffb84953c3d3d9d4b62be9093e0ac40f72f26d532d59d7a4cf2c4c8d"
+      }
+    ],
+    "transcript": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl"
+  },
+  "issue": "720",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-11-14T23:24:28Z",
+  "red_cases": {
+    "already_covered": 13,
+    "proposed": 15
+  },
+  "reviewed_artifact": {
+    "base_sha": "398c477caf22cb2f0d5c8a8e31d411cfb5fca4c3",
+    "merge_base": "398c477caf22cb2f0d5c8a8e31d411cfb5fca4c3",
+    "method": "runtime-head",
+    "patch_sha256": "d3c4eafeab3813e64b1f0a686e4316bdc38785f0c32157a85a94545f5c9e563d",
+    "report_record": 76,
+    "target_head": "8f1b89ccea84eb75fa8832fd66bbfc05e27f45bd"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.JOgVvt",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/14/rollout-2026-11-14T18-21-29-01a1dc5d-aee8-7a32-9d8a-8d1a24d27873.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 110971,
+        "path": "codex-review-stream.JOgVvt",
+        "sha256": "ad9218c1ed75a899d0ff238b43148bc3e57e2cc9e0c73d247cd37c46af5c9dc8"
+      },
+      {
+        "bytes": 938296,
+        "path": "2026/11/14/rollout-2026-11-14T18-21-29-01a1dc5d-aee8-7a32-9d8a-8d1a24d27873.jsonl",
+        "sha256": "3ec1e59372442f7bdfdd06373fc1dec854c8d43e29d768532ab2b035214661a0"
+      }
+    ],
+    "thread_id": "01a1dc5d-aee8-7a32-9d8a-8d1a24d27873"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}
