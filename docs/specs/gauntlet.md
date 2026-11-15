@@ -36,14 +36,16 @@ ran; this is not a keep/trim/retire verdict".
 | Round | Command | Continues on | Stops on |
 |---|---|---|---|
 | 0 usage | `usage report <log>`, per discovered log | `OBSERVED`; `UNKNOWN` when there is no log or one is unreadable (round 1 already reads missing usage as UNKNOWN columns) | never |
-| 1 charter | no `CHARTER.md`: `charter draft`; with one: `contracts <collection>`, this skill's `CONTRACT` line | `PASS`: contract GOOD and owner-approved | `STOP` draft ready for owner confirmation; `STOP` an intent or authority clause not approved; `FAIL` contract BAD; `UNKNOWN` nothing to draft from; `NOT BUILT` |
+| 1 charter | no `CHARTER.md`: `charter draft`; with one: `contracts <collection>`, this skill's `CONTRACT` line | `PASS`: contract GOOD and owner-approved | `STOP` draft ready for owner confirmation; `STOP` an intent or authority clause not approved; `FAIL` contract BAD; `UNKNOWN` nothing to draft from, or `contracts` says its hand-off rules did NOT run (a neighbour failed contract-shape, so this contract's hand-offs are unchecked); `NOT BUILT` |
 | 1 overlap | `charter overlap <collection>` | always: `EXAMINED`, `NOT EXAMINED` (no comparator), `NOT BUILT`; none is a pass | never |
-| 2 inspect | `inspect <collection> --json`, filtered to this skill | `PASS`: no error and no UNKNOWN on this skill | `FAIL` an error finding on this skill; `UNKNOWN` an unreadable issue state, an unexamined rule, nothing inspected |
+| 2 inspect | `inspect <collection> --json`, filtered to this skill | `PASS`: no error and no UNKNOWN on this skill | `FAIL` an error finding on this skill; `UNKNOWN` an unreadable issue state, an unexamined rule, nothing inspected, or an `--exclude` that drops this skill |
 | 3 trials | not built | never | always: `NOT BUILT` (or `NOT RUN` once the command exists: part 1 never runs paid trials) |
 
 Round 2 runs `inspect` on the whole collection, never on this skill alone:
 `copied-passage` needs at least two subjects, so a one-skill run would always
-read as not examined. Its findings for this skill are then listed by group. A D
+read as not examined. The skill's own path is added as an `--include`, so a
+passed-through surface that misses it cannot yield a zero that only means "not
+looked at"; an `--exclude` that drops it reads UNKNOWN. Its findings for this skill are then listed by group. A D
 item is a stale rule the owner may move or delete; the run trims nothing.
 
 Round 1 never confirms or writes a charter (#718: "never changes a charter
@@ -78,16 +80,29 @@ skill's `CHARTER.md`: beside `SKILL.md` for a native skill, or at
   byte-identical.
 - **It is safe to publish.** It holds digests and verdicts only: each round's
   name, verdict, one-line detail, whether the run continued, and the sha256 of
-  each input. It holds no usage row or count, no session id, no host path and no
-  host name.
+  each input (the passed-through options too, so an absolute `--map` path is
+  hashed, never copied). It holds no usage row or count, no session id, no host
+  path and no host name.
+- **It is never written through a link.** A symlinked or non-regular record
+  path is refused (exit 2), and the write replaces the path itself (temp file,
+  then rename), so it cannot land in the file a link points at.
 
 **Resume.** A round whose recorded input digests equal the current ones is not
-re-run; its line reads `(cached)`. Round 0's inputs are the usage logs. Round 1's
-are the skill text, its charter, every `CHARTER.md` in the collection, the logs,
-and whether `charter` exists. Round 2's are the skill text, the collection's
-files, the issue-state file and the passed-through options. So editing
-`SKILL.md` re-runs rounds 1 and 2 and leaves round 0 cached. A cached
-"draft ready" whose draft has been deleted is drafted again.
+re-run; its line reads `(cached)`. Round 0's inputs are the usage logs (an
+unreadable one is recorded as `unreadable` and reads UNKNOWN). Round 1's are the
+skill text, its charter, the collection's files (`contracts` checks that every
+declared test path exists), the aliases, the logs, and whether `charter`
+exists. Round 2's are the skill text, the collection's files, the issue-state
+file and the passed-through options. So editing `SKILL.md` re-runs rounds 1 and
+2 and leaves round 0 cached. A cached "draft ready" whose draft has been deleted
+is drafted again.
+
+Two things are never served from cache. Round 2 reading **live** issue states
+(no `--issue-states`, no `--offline`) re-runs every time, because an issue that
+closes changes no file. And the finding lines a cached round shows come from a
+LOCAL display cache beside the draft (`.skillc/gauntlet/<skill>/display.json`,
+ignored), never from the published record; on a host without it, a cached
+round 2 says its lines are not here.
 
 ## Usage logs
 

@@ -40,6 +40,7 @@ part 1.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -47,7 +48,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 EXIT_FAILED = 1
 EXIT_USAGE = 2
@@ -63,7 +64,10 @@ NOT_A_VERDICT = "no trials ran; this is not a keep/trim/retire verdict"
 _NOT_INPUTS = {RECORD_NAME}
 _SKIP_DIRS = {".git", ".skillc", "__pycache__", ".venv", "node_modules"}
 _CONTRACT_LINE = re.compile(r"^CONTRACT (?P<name>\S+) \((?P<path>[^)]+)\): (?P<state>GOOD|BAD)\b", re.MULTILINE)
-_FINDING_LINE = re.compile(r"^(?P<severity>error|warn)\s+(?P<rule>\S+)\s+(?P<path>[^:\s]+):", re.MULTILINE)
+#: `Finding.render`: severity, rule, then the path up to the first ": " - a path may hold spaces.
+_FINDING_LINE = re.compile(r"^(?P<severity>error|warn)\s+(?P<rule>\S+)\s+(?P<path>.+?): ", re.MULTILINE)
+#: `contracts` says so when its collection-wide rules could not run (docs/specs/contracts.md).
+_CROSS_NOT_RUN = "did NOT run"
 COMMAND_TIMEOUT = 1800
 
 
@@ -122,7 +126,12 @@ def _sha(data: bytes) -> str:
 
 
 def _file_digest(path: Path) -> str:
-    return _sha(path.read_bytes()) if path.is_file() else "absent"
+    if not path.is_file():
+        return "absent"
+    try:
+        return _sha(path.read_bytes())
+    except OSError:
+        return "unreadable"  # the round then reports UNKNOWN; it never crashes the run
 
 
 def _tree_digest(root: Path, *, only: str | None = None) -> str:
@@ -246,7 +255,7 @@ def round0(skill: Skill, logs: list[Path]) -> Result:
     if not logs:
         return Result("0", "usage", "UNKNOWN", "no usage log found - not a pass; round 1 reads usage as UNKNOWN",
                       proceed=True, inputs=inputs)
-    unreadable = 0
+    unreadable = sum(digest == "unreadable" for digest in inputs.values())
     for log in logs:
         if _skillc(["usage", "report", str(log)], skill.collection).returncode != 0:
             unreadable += 1
@@ -257,14 +266,17 @@ def round0(skill: Skill, logs: list[Path]) -> Result:
                   "stay in the logs", proceed=True, inputs=inputs)
 
 
-def _round1_inputs(skill: Skill, logs: list[Path], tool: bool) -> dict[str, str]:
+def _round1_inputs(skill: Skill, logs: list[Path], tool: bool, options: Options) -> dict[str, str]:
+    """The skill, its charter, and the whole collection: `contracts` checks that
+    every declared test path exists, so any file can change its verdict."""
     return {"skill": _file_digest(skill.text), "charter": _file_digest(skill.charter),
-            "charters": _tree_digest(skill.collection, only="CHARTER.md"),
+            "collection": _tree_digest(skill.collection),
+            "aliases": _sha(json.dumps(sorted(options.aliases)).encode()),
             "tool:charter": "available" if tool else "absent", **_usage_inputs(logs)}
 
 
 def round1(skill: Skill, logs: list[Path], options: Options, draft: Path, tool: bool) -> Result:
-    inputs = _round1_inputs(skill, logs, tool)
+    inputs = _round1_inputs(skill, logs, tool, options)
     if skill.charter.is_file():
         return _round1_contracts(skill, inputs)
     if not tool:
@@ -299,6 +311,10 @@ def _round1_contracts(skill: Skill, inputs: dict[str, str]) -> Result:
     errors = sorted({m.group("rule") for m in findings if m.group("severity") == "error"})
     if ours[0].group("state") == "BAD":
         return Result("1", "charter", "FAIL", f"contract BAD: {', '.join(errors) or 'error findings'}",
+                      proceed=False, inputs=inputs)
+    if _CROSS_NOT_RUN in done.stdout:
+        return Result("1", "charter", "UNKNOWN", "`skillc contracts` says its hand-off rules did NOT run (a "
+                      "contract in the collection failed contract-shape), so this contract's hand-offs are unchecked",
                       proceed=False, inputs=inputs)
     if any(m.group("rule") == "approval-present" for m in findings):
         return Result("1", "charter", "STOP", "the charter has an intent or authority clause the owner has not "
@@ -340,18 +356,33 @@ def _round2_args(skill: Skill, options: Options) -> list[str]:
     for flag, values in (("--include", options.include), ("--exclude", options.exclude), ("--map", options.maps)):
         for value in values:
             args += [flag, value]
+    if options.include:  # the default surface already holds a native skill; a command needs naming
+        args += ["--include", skill.text_rel]
+    elif skill.command:
+        args += ["--include", "**/SKILL.md", "--include", skill.text_rel]
     return args
+
+
+def _excluded(skill: Skill, options: Options) -> str | None:
+    """An --exclude that would drop this skill: then round 2 cannot show it was inspected."""
+    path = PurePosixPath(skill.text_rel)
+    return next((g for g in options.exclude if path.match(g) or fnmatch.fnmatch(skill.text_rel, g)), None)
 
 
 def _round2_inputs(skill: Skill, options: Options) -> dict[str, str]:
     return {"skill": _file_digest(skill.text), "collection": _tree_digest(skill.collection),
             "issue-states": _file_digest(options.issue_states) if options.issue_states else "none",
-            "options": json.dumps({"offline": options.offline, "repo": options.repo or "", "include": options.include,
-                                   "exclude": options.exclude, "maps": options.maps}, sort_keys=True)}
+            "options": _sha(json.dumps({"offline": options.offline, "repo": options.repo or "",
+                                        "include": options.include, "exclude": options.exclude,
+                                        "maps": options.maps}, sort_keys=True).encode())}
 
 
 def round2(skill: Skill, options: Options) -> Result:
     inputs = _round2_inputs(skill, options)
+    dropped = _excluded(skill, options)
+    if dropped is not None:
+        return Result("2", "inspect", "UNKNOWN", f"--exclude {dropped} drops this skill, so it was not inspected",
+                      proceed=False, inputs=inputs)
     done = _skillc(_round2_args(skill, options), skill.collection)
     try:
         report = json.loads(done.stdout)
@@ -406,6 +437,8 @@ def render_record(skill: Skill, results: list[Result]) -> bytes:
 
 
 def load_record(path: Path) -> dict[str, dict[str, object]]:
+    if path.is_symlink():
+        return {}
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
@@ -416,13 +449,53 @@ def load_record(path: Path) -> dict[str, dict[str, object]]:
     return rounds if isinstance(rounds, dict) else {}
 
 
+class UnsafeRecord(Exception):
+    """The record's path is a symlink, or not a regular file: never written through."""
+
+
 def write_record(path: Path, data: bytes) -> bool:
-    """Write only when the bytes would change; True when written."""
+    """Write only when the bytes would change; True when written. A symlinked or
+    non-regular record path is refused, and the write replaces the path itself
+    (temp file + rename), so it can never land in the file a link points at."""
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise UnsafeRecord(f"{path.name} is a symlink or not a regular file - refusing to write through it")
     if path.is_file() and path.read_bytes() == data:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    temp = path.with_name(f".{path.name}.tmp")
+    temp.unlink(missing_ok=True)
+    temp.write_bytes(data)
+    os.replace(temp, path)
     return True
+
+
+# ------------------------------------------------- local display (never published)
+
+def _display_path(skill: Skill, options: Options) -> Path | None:
+    """The finding lines a cached run re-shows. They stay LOCAL, beside the draft
+    (`.skillc/` ignores itself), because the published record holds digests and
+    verdicts only. No main checkout and no --draft-dir: no display cache."""
+    if options.draft_dir is not None:
+        return options.draft_dir.resolve() / skill.slug / "display.json"
+    main = main_checkout(skill.collection)
+    return None if main is None else main / ".skillc" / "gauntlet" / skill.slug / "display.json"
+
+
+def _load_display(path: Path | None) -> dict[str, dict[str, object]]:
+    if path is None or path.is_symlink():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_display(path: Path, data: dict[str, dict[str, object]]) -> None:
+    if path.is_symlink():
+        return
+    _ensure_ignored(path.parent)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 # --------------------------------------------------------------------- the run
@@ -469,12 +542,23 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
     previous = load_record(record)
     if draft_dir is not None:
         _ensure_ignored(draft_dir)
+    display_path = _display_path(skill, options)
+    display = _load_display(display_path)
+    # Live issue states have no digest, so a round 2 that reads them is never served from cache.
+    live_states = not options.offline and options.issue_states is None
 
     def step(key: str, inputs: dict[str, str], fresh) -> Result:
-        hit = _cached(previous, key, inputs)
+        hit = None if key == "2" and live_states else _cached(previous, key, inputs)
         # a cached "draft ready" whose draft has since been removed is re-drafted
         if hit is not None and not (key == "1" and hit.verdict == "STOP" and not draft.is_file()
                                     and not skill.charter.is_file()):
+            shown = display.get(key, {})
+            lines = shown.get("lines")
+            if shown.get("inputs") == dict(sorted(inputs.items())) and isinstance(lines, list):
+                hit.lines = [str(line) for line in lines]
+            elif hit.verdict in ("PASS", "FAIL", "UNKNOWN") and key == "2":
+                hit.lines = [("  (cached: the finding lines are not on this host; change an input or delete the "
+                              "record to list them)")]
             return hit
         return fresh()
 
@@ -483,7 +567,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
               ("round3", ["gauntlet", "round3"]))}
     plan = [
         ("0", lambda: _usage_inputs(logs), lambda: round0(skill, logs)),
-        ("1", lambda: _round1_inputs(skill, logs, tools["charter"]),
+        ("1", lambda: _round1_inputs(skill, logs, tools["charter"], options),
          lambda: round1(skill, logs, options, draft, tools["charter"])),
         ("1-overlap", lambda: _overlap_inputs(skill, tools["overlap"]),
          lambda: round1_overlap(skill, tools["overlap"])),
@@ -505,7 +589,14 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
             stopped = result
             break
     assert stopped is not None, "round 3 never proceeds in part 1"
-    written = write_record(record, render_record(skill, results))
+    try:
+        written = write_record(record, render_record(skill, results))
+    except UnsafeRecord as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    if display_path is not None:
+        _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines}
+                                     for r in results if not r.cached or r.round in display})
     out(f"RECORD: {record.relative_to(skill.collection) if record.is_relative_to(skill.collection) else record}"
         f" ({'written' if written else 'unchanged'}; the engine never commits it)")
     out(_next_line(skill, stopped, draft))

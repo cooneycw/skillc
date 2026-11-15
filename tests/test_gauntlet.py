@@ -393,3 +393,101 @@ def test_on_cpp_flow_wave_at_d5ef0a66_round_2_surfaces_the_closed_rules_as_d(tmp
         assert any(issue in line for line in d_items), (issue, d_items)
     assert not any("#640" in line for line in d_items)
     assert rounds["3"].startswith("NOT BUILT") and code == gauntlet.EXIT_STOPPED
+
+
+# ------------------------------------- counter-model review pass 1 (Codex), each a red
+
+def test_a_symlinked_record_is_refused_and_the_skill_is_untouched(coll: Path) -> None:
+    skill = coll / "skills" / "alpha" / "SKILL.md"
+    before = skill.read_bytes()
+    (coll / "skills" / "alpha" / gauntlet.RECORD_NAME).symlink_to("SKILL.md")
+    code, _ = _run(coll, "skills/alpha")
+    assert code == gauntlet.EXIT_USAGE and skill.read_bytes() == before
+
+
+def test_an_absolute_option_path_never_reaches_the_record(coll: Path, tmp_path: Path) -> None:
+    private = tmp_path / "private-map-target"
+    _run(coll, "skills/alpha", maps=[f"{private}/=scripts/"], include=["**/SKILL.md"])
+    text = (coll / "skills" / "alpha" / gauntlet.RECORD_NAME).read_text()
+    assert str(private) not in text and _leaks(text, [tmp_path]) == []
+
+
+def test_an_unapproved_charter_under_a_spaced_directory_still_stops(coll: Path) -> None:
+    spaced = coll / "skills" / "my alpha"
+    shutil.copytree(coll / "skills" / "alpha", spaced)
+    (spaced / "SKILL.md").write_text((spaced / "SKILL.md").read_text().replace("name: alpha", "name: my-alpha"))
+    charter = spaced / "CHARTER.md"
+    charter.write_text(charter.read_text().replace("contract: alpha", "contract: my-alpha")
+                       .replace("  approved: 2026-11-15\n", ""))
+    _, lines = _run(coll, "skills/my alpha")
+    assert _rounds(lines)["1"].startswith("STOP - the charter has an intent or authority clause"), lines
+
+
+def test_round_2_inspects_the_selected_skill_even_outside_the_given_surface(coll: Path) -> None:
+    _, lines = _run(coll, "skills/alpha", include=["skills/beta/SKILL.md"])
+    assert any(line.startswith("  D skills/alpha/SKILL.md:7") for line in lines)
+
+
+def test_an_exclude_that_drops_the_skill_is_unknown_not_a_clean_round_2(coll: Path) -> None:
+    code, lines = _run(coll, "skills/alpha", exclude=["skills/alpha/*"])
+    assert _rounds(lines)["2"].startswith("UNKNOWN - --exclude") and code == gauntlet.EXIT_STOPPED
+
+
+def test_a_neighbours_broken_contract_makes_round_1_unknown_not_pass(coll: Path) -> None:
+    gamma = coll / "skills" / "gamma"
+    gamma.mkdir()
+    (gamma / "SKILL.md").write_text("---\nname: gamma\ndescription: Use for the gamma fixture.\n---\nReport.\n")
+    (gamma / "CHARTER.md").write_text("---\ncontract: gamma\nversion: 1\nnot_a_field: 1\n---\n")
+    code, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["1"].startswith("UNKNOWN - `skillc contracts` says its hand-off rules did NOT run")
+    assert code == gauntlet.EXIT_STOPPED
+
+
+@pytest.mark.parametrize("change", ["alias", "file"])
+def test_round_1_reruns_when_an_alias_or_any_collection_file_changes(coll: Path, change: str) -> None:
+    _run(coll, "skills/alpha")
+    if change == "alias":
+        _, lines = _run(coll, "skills/alpha", aliases=["alpha-old"])
+    else:
+        (coll / "checks").mkdir()
+        (coll / "checks" / "added.txt").write_text("a declared test path appeared\n")
+        _, lines = _run(coll, "skills/alpha")
+    assert not _rounds(lines)["1"].endswith("(cached)")
+
+
+def test_round_2_reading_live_issue_states_is_never_served_from_cache(coll: Path) -> None:
+    _run(coll, "skills/alpha", issue_states=None)
+    _, lines = _run(coll, "skills/alpha", issue_states=None)
+    assert not _rounds(lines)["2"].endswith("(cached)")
+    _, frozen = _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["2"].endswith("(cached)"), "a frozen issue-state snapshot is cached"
+
+
+def test_a_cached_round_2_shows_the_same_findings_as_a_fresh_one(coll: Path) -> None:
+    _, fresh = _run(coll, "skills/alpha")
+    _, cached = _run(coll, "skills/alpha")
+    assert _rounds(cached)["2"].endswith("(cached)")
+    assert [line for line in cached if line.startswith("  ")] == [line for line in fresh if line.startswith("  ")]
+
+
+def test_an_unreadable_usage_log_is_unknown_and_the_run_continues(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = FIXTURES / "usage" / "usage.jsonl"
+    real = Path.read_bytes
+
+    def denied(self: Path) -> bytes:
+        if self == log:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    code, lines = _run(coll, "skills/alpha")
+    rounds = _rounds(lines)
+    assert rounds["0"].startswith("UNKNOWN") and "1" in rounds and code != 0
+    data = json.loads((coll / "skills" / "alpha" / gauntlet.RECORD_NAME).read_text())
+    assert data["rounds"]["0"]["inputs"] == {"usage-1": "unreadable"}
+
+
+def test_the_skill_passes_skillc_check_for_the_claude_code_target() -> None:
+    done = subprocess.run(["python", "-m", "skillc.cli", "check", "--target", "claude-code", str(SKILL_MD.parent)],
+                          capture_output=True, text=True, check=False, cwd=ROOT)
+    assert done.returncode == 0 and "0 error(s), 0 warning(s)" in done.stdout, done.stdout
