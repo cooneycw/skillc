@@ -1,0 +1,6 @@
+GAUNTLET skills/alpha (collection coll)
+ROUND 0 usage: OBSERVED - 1 usage log(s) read by `skillc usage report`; counts stay in the logs
+ROUND 1 charter: STOP - the charter has an intent or authority clause the owner has not approved (approval-present)
+RECORD: skills/alpha/GAUNTLET.json (written; the engine never commits it)
+NEXT: owner approves the intent and authority clauses of skills/alpha/CHARTER.md, then re-runs
+GAUNTLET: stopped at round 1 (STOP) - no trials ran; this is not a keep/trim/retire verdict
