@@ -75,6 +75,16 @@ def _absent(*commands: tuple[str, ...]):
     return fake
 
 
+def _absent(*commands: tuple[str, ...]):
+    """#736 PR 1 adds `gauntlet round3` to this skillc, so a test asserting the
+    NOT BUILT path pins the command's absence instead of relying on the build."""
+    real = gauntlet.available
+
+    def fake(words: list[str], cwd: Path) -> bool:
+        return False if tuple(words) in commands else real(words, cwd)
+    return fake
+
+
 def _present(*commands: tuple[str, ...]):
     real = gauntlet.available
 
@@ -85,7 +95,9 @@ def _present(*commands: tuple[str, ...]):
 
 # ------------------------------------------------------------ the run's shape
 
-def test_a_charted_skill_runs_rounds_0_to_2_and_stops_at_round_3_not_built(coll: Path) -> None:
+def test_a_charted_skill_runs_rounds_0_to_2_and_stops_at_round_3_not_built(
+        coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gauntlet, "available", _absent(("gauntlet", "round3")))
     code, lines = _run(coll, "skills/alpha")
     rounds = _rounds(lines)
     assert list(rounds) == ["0", "1", "1-overlap", "2", "3"]
@@ -116,6 +128,7 @@ def test_exit_0_is_unreachable_in_part_1_even_with_every_command_present(coll: P
 def test_round_3_never_passes_even_when_its_command_exists(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The unbuilt-round control: with round 3 absent it reads NOT BUILT; with it
     present it reads NOT RUN. Neither proceeds, so neither is ever a pass."""
+    monkeypatch.setattr(gauntlet, "available", _absent(("gauntlet", "round3")))
     _, absent = _run(coll, "skills/alpha")
     assert _rounds(absent)["3"].startswith("NOT BUILT")
     monkeypatch.setattr(gauntlet, "available", _present(("gauntlet", "round3")))
@@ -392,7 +405,8 @@ def test_on_cpp_flow_wave_at_d5ef0a66_round_2_surfaces_the_closed_rules_as_d(tmp
     for issue in ("#635", "#699", "#788"):
         assert any(issue in line for line in d_items), (issue, d_items)
     assert not any("#640" in line for line in d_items)
-    assert rounds["3"].startswith("NOT BUILT") and code == gauntlet.EXIT_STOPPED
+    # Round 3 reads NOT BUILT, or NOT RUN once #736 PR 1's `gauntlet round3` is in this skillc; never a pass.
+    assert rounds["3"].startswith(("NOT BUILT", "NOT RUN")) and code == gauntlet.EXIT_STOPPED
 
 
 # ------------------------------------- counter-model review pass 1 (Codex), each a red
