@@ -40,9 +40,20 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/charter.py` - `skillc charter draft` (#726, gauntlet round 1): a draft CHARTER.md from a skill's text and
   usage records, sorted into observed-and-stated / stated-not-observed / unknown / observed-not-stated; no model call,
   never approves. `skillc/charter_confirm.py` applies the owner's answers. Spec: [docs/specs/charter-round1.md](docs/specs/charter-round1.md)
+- `skillc/charter_evidence.py` - `skillc charter evidence` (#778): every existing piece of a skill's charter as cited
+  suggestions, each source with a status. `skillc/repo_reader.py` is its read-only GitHub seam (GraphQL queries only,
+  asserted before any process runs). Spec: [docs/specs/charter-create.md](docs/specs/charter-create.md)
+- `skillc/charter_create.py` - `skillc charter create` (#778): the owner's answers become a CHARTER.md plus a
+  trap-task stub per clause (`evals/trap-tasks/`, no grader until #736 fills it), checked by the real contracts rules
+  and rolled back on any failure. The dialogue is `.claude/skills/charter-create/` (SKILL.md and `scripts/charter.sh`)
 - `skillc/gauntlet.py` - `skillc gauntlet run` (#754): the skill-gauntlet engine. Runs the round commands
   (usage, charter, contracts, inspect) as subprocesses and reads only their verdicts; imports no round module;
   writes `GAUNTLET.json` beside the charter only on change and never commits it - see [docs/specs/gauntlet.md](docs/specs/gauntlet.md)
+- `skillc/gauntlet_verdict.py` - `skillc gauntlet verdict` / `rule` (#737): round 5. A pure function from the record,
+  round 3/4 JSON, the declaration, inspect and overlap reports to ONE keep/trim/retire proposal or UNKNOWN; drafts a
+  patch and PR text, never edits the skill; the owner's dated ruling goes into the record - see [docs/specs/gauntlet-verdict.md](docs/specs/gauntlet-verdict.md)
+- `skillc/overlap.py` - `skillc charter overlap` (#726 part B): shared/shadowed/orphan duties behind a `DutyComparator`
+  seam (FakeComparator, recorded verdicts); replicates must agree or the pair is UNKNOWN; no comparator = exit 3, not examined
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module
