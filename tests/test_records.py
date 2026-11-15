@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from skillc import checks, cli, records, usage
+from skillc import checks, cli, contracts, records, usage
 from skillc.spec import DEFAULT_TARGET, discover
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
@@ -127,6 +127,11 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
         recs = records.discover(bad_dir)
         own = [f for r in recs for f in checks.run_record(r, only=rule.id)]
         every = [f for r in recs for f in checks.run_record(r)]
+    elif isinstance(rule, checks.ContractRule):
+        # #720: every CASE DIRECTORY is one collection of CHARTER.md contracts.
+        collections = [contracts.load_collection(case) for case in sorted(p for p in bad_dir.iterdir() if p.is_dir())]
+        own = [f for c in collections for f in checks.run_contracts(c, only=rule.id)]
+        every = [f for c in collections for f in checks.run_contracts(c)]
     elif isinstance(rule, checks.UsageRule):
         # #719: the subject is one usage log; minimal means no OTHER usage rule fires.
         logs = usage.discover_logs(bad_dir)
@@ -167,6 +172,19 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
 
 
 # --------------------------------------------------------------- the machinery
+
+def test_a_contract_rule_good_control_whose_rule_was_skipped_is_not_certified(tmp_path: Path) -> None:
+    """#720 counter-model review, pass 2: a good control with a shape-invalid
+    contract makes the hand-off rules skip, and selftest counted that skip as
+    green. A skipped evaluation is an unexercised subject, never a passing one."""
+    copy = tmp_path / "controls"
+    shutil.copytree(CONTROLS, copy)
+    provider = copy / "handoff-bilateral/good/provided/alpha/CHARTER.md"
+    provider.write_text(provider.read_text(encoding="utf-8").replace("version: 1", "version: 0"), encoding="utf-8")
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(copy)))
+    assert rc != 0
+
+
 
 def test_an_uncontrolled_record_rule_is_UNPROVEN(monkeypatch: pytest.MonkeyPatch) -> None:
     """The new arm is covered by the coverage guarantee, not merely beside it.
