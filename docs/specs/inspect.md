@@ -194,7 +194,16 @@ execute repository-controlled code on the host.
 - a script that is not in command position: `a.sh b.sh --x` checks `--x`
   against `a.sh` (shell semantics; approved on #731), a script named inside an
   `echo "..."` string, and a script named mid-sentence in a prose code span
-  (`(re-run scripts/x.sh --write later)`) - their flags are not examined.
+  (`(re-run scripts/x.sh --write later)`) - their flags are not examined;
+- **flags inside or after an `env -S` / `--split-string` value are counted as
+  not examined, never checked** (`flags_after_a_non_command_path`; a stated
+  limit, ruled on #745). env splits its value into argv by rules of its own:
+  comments, escapes, and options such as `-u NAME` before the command. These
+  rules are not emulated, so no word in the value is taken as a command or a
+  flag owner, and a path after the value owns no later flag either. Every flag
+  in the value is counted (split on whitespace and on env's `\_` separator
+  escape), and its paths are still existence-checked: `env -S "bash
+  scripts/gone.sh"` is a finding.
 
 **Fixed in #741** (each has a regression in `tests/test_decay.py` and no longer
 escapes): a quoted separator (`scripts/helper.sh ";" --absent`), a path beside a
@@ -209,15 +218,20 @@ opens mid-word is an attached option value (`--opt="x y"`): one option, with no
 paths read out of it. A value that cleans to nothing (`sudo -p ";"`) is still
 the option's value.
 
-**Known false negatives until #745 lands.** A CLEAN `dangling-reference`
-verdict does NOT cover these two shapes:
-- **a fully quoted option** - `scripts/helper.sh "--absent=x y"`: a word that
-  opens with a quote and holds whitespace is read as a string, so its flag is
-  never checked. This is a REGRESSION against #731's code (`1cf7bc1`), which
-  caught it; the unquoted-name form `--absent="x y"` is still checked;
-- **flags inside an `env -S` value** - `env -S "bash scripts/helper.sh --absent"`
-  (and `--split-string="..."`): the value's paths are checked, but its flags are
-  neither checked against their owner nor counted as unowned.
+**Fixed in #745** (each has a regression in `tests/test_decay.py`):
+- **a fully quoted option** (`scripts/helper.sh "--absent=x y"`) is the same argv
+  word as `--absent="x y"`. It is checked against its owner, and no paths are
+  read out of its value. With no owner but after a non-command path, it is
+  counted as unowned. A quoted word whose first part is not a flag name stays a
+  string and is path-checked, and a lone `--` or `-` is not a flag.
+
+**Known false negative until #752 lands.** A CLEAN `dangling-reference` verdict
+does NOT cover a quoted value of a prefix option that takes an operand, such as
+`sudo -p "--label=see scripts/gone.sh"`: it is read as an option, so its paths
+are not checked. This is a REGRESSION against `6040840`, which caught it. Also
+under #752, and not a false negative: an `env -S $(...)` value leaves command
+position open, so a later flag is CHECKED against the next script rather than
+counted.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,
