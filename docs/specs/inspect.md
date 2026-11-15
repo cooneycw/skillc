@@ -225,6 +225,14 @@ the option's value.
   counted as unowned. A quoted word whose first part is not a flag name stays a
   string and is path-checked, and a lone `--` or `-` is not a flag.
 
+**Known false negative until #752 lands.** A CLEAN `dangling-reference` verdict
+does NOT cover a quoted value of a prefix option that takes an operand, such as
+`sudo -p "--label=see scripts/gone.sh"`: it is read as an option, so its paths
+are not checked. This is a REGRESSION against `6040840`, which caught it. Also
+under #752, and not a false negative: an `env -S $(...)` value leaves command
+position open, so a later flag is CHECKED against the next script rather than
+counted.
+
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,
 because it cannot tell the two apart. The real-collection measurement shows the
