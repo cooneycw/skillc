@@ -340,7 +340,13 @@ def _charter_facts(charter: Path, root: Path) -> dict[str, object]:
         clauses = [c for c in listed if isinstance(c, dict)] if isinstance(listed, list) else []
         tested = 0
         for clause in clauses:
-            paths, _why = expand(str(clause.get("test") or "")) if clause.get("test") else ([], None)
+            # `test` is a path or a LIST of paths (#720), each with one level of {a,b}
+            declared = clause.get("test")
+            tests = declared if isinstance(declared, list) else [declared] if declared else []
+            paths: list[str] = []
+            for test in tests:
+                expanded, why = expand(str(test))
+                paths += expanded if why is None else []
             tested += bool(paths) and all((root / p).exists() for p in paths)  # test paths resolve from the collection
         out[kind] = {"count": len(clauses), "tested": tested}
     return out
@@ -784,7 +790,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
         from .gauntlet_report import render  # the plain report's wording lives in one module
 
         for line in render(skill, results, stopped, draft=draft, charter_create=available(
-                ["charter", "create"], skill.collection)).splitlines():
+                ["charter", "create"], skill.collection), machine_follows=options.output == "both").splitlines():
             final_out(line)
         if options.output == "both":
             final_out("")

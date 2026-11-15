@@ -166,7 +166,23 @@ def test_the_stopping_rounds_do_next_names_a_command_or_file(tmp_path: Path, cas
     _code, lines, _coll = _run(tmp_path, case)
     plain = _plain(lines)
     do_next = [line for line in plain if line.startswith("  Do next:")][-1]
-    assert re.search(r"`[^`]+`|\S+/\S+|\S+\.md\b", do_next), do_next
+    assert _actionable(do_next), do_next
+
+
+#: What counts as naming something to DO: a command in backticks (skillc, a
+#: slash command, make, a flag) or a file path. Prose in backticks does not.
+ACTIONABLE = re.compile(r"`(?:skillc |/[\w-]+|make |--[\w-]+)[^`]*`|(?<![\w`])[\w.-]+/[\w./-]+\.\w+|\b[\w-]+\.md\b")
+
+
+def _actionable(line: str) -> bool:
+    return bool(ACTIONABLE.search(line))
+
+
+def test_the_actionability_check_refuses_prose_in_backticks() -> None:
+    assert not _actionable("  Do next: `this is prose`")
+    assert not _actionable("  Do next: nothing for this round")
+    assert _actionable("  Do next: run `skillc contracts <COLL>`")
+    assert _actionable("  Do next: fix line 2 of skills/alpha/SKILL.md")
 
 
 def test_the_no_rule_id_scan_finds_one() -> None:
@@ -234,3 +250,48 @@ def test_the_output_switches_print_only_their_part(tmp_path: Path, flag: str, pl
     assert ("Where it stands:" in done.stdout) is plain
     assert ("ROUND 0 usage:" in done.stdout) is machine
     assert done.returncode == gauntlet.EXIT_STOPPED
+
+
+def test_a_cached_failure_without_display_data_never_reads_as_a_pass(tmp_path: Path) -> None:
+    """The host-local display cache is gone (deleted, or the record moved
+    hosts): the recorded FAIL shows its recorded detail, never the success
+    wording."""
+    skill, change, extra = CASES["draft-unbacked"]
+    coll = _collection(tmp_path)
+    change(coll)
+    settings: dict[str, object] = {"issue_states": coll / "issue-states.json", "repo": "example/gauntlet",
+                                   "usage": [FIXTURES / "usage"], **extra}
+    gauntlet.run(coll, skill, gauntlet.Options(**settings), out=lambda _: None)  # type: ignore[arg-type]
+    for display in (coll / ".skillc").rglob("*.json"):
+        if display.name != gauntlet.RECORD_NAME:
+            display.unlink()
+    lines: list[str] = []
+    gauntlet.run(coll, skill, gauntlet.Options(**settings), out=lines.append)  # type: ignore[arg-type]
+    plain = "\n".join(_plain(lines))
+    assert any("(cached)" in line for line in lines), "the round came from the record"
+    assert "Round 1: fail" in plain and "Found:   contract BAD: clause-backed" in plain
+    assert "the charter is valid" not in plain and "nothing for this round" not in plain.split("Round 1: fail")[1]
+
+
+def test_a_list_of_test_paths_counts_as_tested(tmp_path: Path) -> None:
+    """`test:` may be a list (#720): both paths exist, so the promise is tested."""
+    coll = _collection(tmp_path)
+    (coll / "README.md").write_text("x\n")
+    (coll / "PLAN.md").write_text("x\n")
+    charter = _charter(coll)
+    _edit(charter, "owner: owner\n", "owner: owner\ninvariants:\n  always: []\n  never:\n"
+                                      "    - id: alpha.never-x\n      test: [README.md, PLAN.md]\n")
+    facts = gauntlet._charter_facts(charter, coll)
+    assert facts["never"] == {"count": 1, "tested": 1}, facts
+
+
+def test_plain_only_points_at_nothing_it_hides(tmp_path: Path) -> None:
+    from skillc import gauntlet_report
+
+    coll = _collection(tmp_path)
+    skill = gauntlet.resolve_skill(coll, "skills/alpha")
+    odd = gauntlet.Result("2", "inspect", "UNKNOWN", "a reason nobody wrote advice for", proceed=False,
+                          reason="brand-new-reason")
+    text = gauntlet_report.render(skill, [odd], odd, draft=coll / "x", charter_create=False, machine_follows=False)
+    assert "line below" not in text and "machine lines follow" not in text
+    assert "`skillc gauntlet run` without `--plain-only`" in text

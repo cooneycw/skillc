@@ -223,30 +223,44 @@ STANDS = {
 }
 
 
+#: The verdicts a round PASSES with; only these may read the success wording.
+PASSING = ("PASS", "OBSERVED", "EXAMINED")
+
+
 def entry(result: Result) -> Entry | None:
     key = (result.round, result.reason)
-    if key in TABLE:
+    if result.reason and key in TABLE:
         return TABLE[key]
-    if result.proceed and (result.round, "") in TABLE and not result.reason:
+    # The success wording only for a round that passed: a cached round whose
+    # host-local display data is gone has no reason, and its FAIL must never read
+    # as a pass (counter-model review).
+    if not result.reason and result.verdict in PASSING and (result.round, "") in TABLE:
         return TABLE[(result.round, "")]
     return None
 
 
-def _unmapped(result: Result) -> Entry:
+def _unmapped(result: Result, machine_follows: bool) -> Entry:
     """No advice is written for this stop: show the round's OWN detail, never
-    another reason's advice (orchestrator, rev 37 and 51)."""
+    another reason's advice (orchestrator, rev 37 and 51). A cached round with no
+    host-local display data lands here too, with its recorded detail."""
+    if machine_follows:
+        advice = f"act on the ROUND {result.round} line below; it names what to fix"
+    else:
+        advice = ("act on the Found line above; `skillc gauntlet run` without `--plain-only` prints the full "
+                  f"ROUND {result.round} line and NEXT")
     return (lambda c: result.detail,
             lambda c: f"this round reads {result.verdict}, which is not a pass",
-            lambda c: f"act on the ROUND {result.round} line below; it names what to fix")
+            lambda c: advice)
 
 
-def render(skill: Skill, results: list[Result], stopped: Result, *, draft: Path, charter_create: bool) -> str:
+def render(skill: Skill, results: list[Result], stopped: Result, *, draft: Path, charter_create: bool,
+           machine_follows: bool = True) -> str:
     stands = STANDS.get((stopped.round, stopped.reason),
                         f"it stopped at round {stopped.round} ({stopped.verdict}): {stopped.detail}")
     lines = [f"skill-gauntlet: {skill.rel}", f"Where it stands: {stands}", ""]
     for result in results:
         ctx = Ctx(skill, result, draft, charter_create)
-        found, means, do_next = entry(result) or _unmapped(result)
+        found, means, do_next = entry(result) or _unmapped(result, machine_follows)
         title = {"1-overlap": "Round 1 (overlap)"}.get(result.round, f"Round {result.round}")
         lines += [f"{title}: {result.verdict.lower()}",
                   f"  Checked: {CHECKED.get(result.round, result.name)}",
@@ -254,5 +268,6 @@ def render(skill: Skill, results: list[Result], stopped: Result, *, draft: Path,
                   f"  Means:   {means(ctx)}",
                   f"  Do next: {do_next(ctx)}",
                   ""]
-    lines.append("No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.")
+    lines.append("No trials ran; this is not a keep/trim/retire verdict."
+                 + (" The machine lines follow." if machine_follows else ""))
     return "\n".join(lines) + "\n"
