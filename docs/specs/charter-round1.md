@@ -168,7 +168,14 @@ A later local-model step (permitted only after part B merges, labelled
     could not be read. The report lists what was unread.
 
 Pairs that share a clause id are skipped: an exact duplicate id is #720's
-`duty-single-owner`.
+`duty-single-owner`. A clause id that two charters both declare can't be told
+apart by a comparator keyed on ids, so every pair involving it is `UNKNOWN`.
+
+A duty is **observed-only** while it is still a draft clause in the
+`observed-not-stated` column. Once the owner confirms it, `charter confirm`
+removes `draft`, and the charter claims the duty. The column stays only as
+provenance. A duty clause with no `what` text can't be compared, so it counts as
+unread, and while one exists no duty is called an orphan.
 
 | `charter overlap` exit | Meaning |
 |---|---|

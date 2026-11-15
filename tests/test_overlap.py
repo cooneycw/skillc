@@ -101,8 +101,8 @@ def _observed(tmp_path: Path, extra_beta: str = "") -> Path:
     shutil.copytree(PARAPHRASE, tmp_path / "c")
     beta = tmp_path / "c/beta/CHARTER.md"
     text = beta.read_text(encoding="utf-8")
-    text = text.replace('    - id: beta.always-1\n', '    - id: beta.always-1\n      column: observed-not-stated\n', 1)
-    text = text.replace('    - id: beta.always-2\n', '    - id: beta.always-2\n      column: observed-not-stated\n', 1)
+    text = text.replace('    - id: beta.always-1\n', '    - id: beta.always-1\n      column: observed-not-stated\n      draft: true\n', 1)
+    text = text.replace('    - id: beta.always-2\n', '    - id: beta.always-2\n      column: observed-not-stated\n      draft: true\n', 1)
     beta.write_text(text + extra_beta, encoding="utf-8")
     return tmp_path / "c"
 
@@ -130,7 +130,7 @@ def test_an_observed_duty_with_nothing_to_compare_is_not_an_orphan(tmp_path: Pat
     shutil.copytree(PARAPHRASE / "beta", tmp_path / "c/beta")
     beta = tmp_path / "c/beta/CHARTER.md"
     beta.write_text(beta.read_text(encoding="utf-8").replace(
-        "    - id: beta.always-2\n", "    - id: beta.always-2\n      column: observed-not-stated\n", 1), encoding="utf-8")
+        "    - id: beta.always-2\n", "    - id: beta.always-2\n      column: observed-not-stated\n      draft: true\n", 1), encoding="utf-8")
     report = overlap.compare(_collection(tmp_path / "c"), FakeComparator({}))
     assert ("orphan", "beta.always-2") not in overlap.ids(report.overlaps)
     assert [d.clause_id for d in report.unknown_orphans] == ["beta.always-2"]
@@ -245,7 +245,55 @@ def test_two_observed_only_duties_are_co_observed_not_shared(tmp_path: Path) -> 
     root = _observed(tmp_path)
     alpha = root / "alpha/CHARTER.md"
     alpha.write_text(alpha.read_text(encoding="utf-8").replace(
-        "    - id: alpha.always-1\n", "    - id: alpha.always-1\n      column: observed-not-stated\n", 1), encoding="utf-8")
+        "    - id: alpha.always-1\n", "    - id: alpha.always-1\n      column: observed-not-stated\n      draft: true\n", 1), encoding="utf-8")
     report = overlap.compare(_collection(root), FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]}))
     assert ("co-observed", "alpha.always-1", "beta.always-1") in overlap.ids(report.overlaps)
     assert not any(kind == "shared" for kind, *_ in overlap.ids(report.overlaps))
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2
+
+
+def test_an_owner_confirmed_observed_duty_is_claimed_not_shadowed(tmp_path: Path) -> None:
+    """Integration with PR A's real charter confirm: accepting an observed-only
+    draft clause makes the charter claim it."""
+    from skillc import charter_confirm
+
+    root = _observed(tmp_path)
+    beta = root / "beta/CHARTER.md"
+    text = beta.read_text(encoding="utf-8")
+    text = text.replace("  id: beta.intent\n", "  id: beta.intent\n  draft: true\n", 1)
+    beta.write_text(text, encoding="utf-8")
+    fake = FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]})
+    assert ("shadowed", "alpha.always-1", "beta.always-1") in overlap.ids(overlap.compare(_collection(root), fake).overlaps)
+    answers = "beta.intent: accept\nbeta.always-1: accept\nbeta.always-2: accept\n"
+    confirmed = charter_confirm.confirm(text, answers)
+    beta.write_text(confirmed, encoding="utf-8")
+    fake = FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]})
+    assert overlap.ids(overlap.compare(_collection(root), fake).overlaps) == [("shared", "alpha.always-1", "beta.always-1")]
+
+
+def test_a_duty_without_text_keeps_every_orphan_unknown(tmp_path: Path) -> None:
+    root = _observed(tmp_path)
+    (root / "silent").mkdir()
+    (root / "silent/CHARTER.md").write_text(
+        "---\ncontract: silent\nversion: 1\nintent:\n  id: silent.intent\n  what: x\npurpose: p\nowner: owner\n"
+        "invariants:\n  always:\n    - id: silent.duty\n      test: checks/x\n---\n", encoding="utf-8")
+    report = overlap.compare(_collection(root), FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]}))
+    assert ("orphan", "beta.always-2") not in overlap.ids(report.overlaps)
+    assert any("silent.duty" in item for item in report.incomplete)
+
+
+def test_a_clause_id_two_charters_declare_is_unknown_whatever_the_file_order(tmp_path: Path) -> None:
+    """Recorded verdicts keyed on ids must not be consumed in file order."""
+    shutil.copytree(PARAPHRASE, tmp_path / "c")
+    for name in ("alpha", "beta"):
+        charter = tmp_path / f"c/{name}/CHARTER.md"
+        charter.write_text(charter.read_text(encoding="utf-8").replace(f"id: {name}.always-2", "id: common.duty"),
+                           encoding="utf-8")
+    shutil.copytree(VOCABULARY / "gamma", tmp_path / "c/gamma")
+    recorded = overlap.RecordedComparator("common.duty gamma.always-2: same\ncommon.duty gamma.always-2: different\n", "rec")
+    report = overlap.compare(_collection(tmp_path / "c"), recorded, replicates=1)
+    involved = [p for p in report.pairs if "common.duty" in (p.a.clause_id, p.b.clause_id)]
+    assert involved and all(p.verdict == UNKNOWN for p in involved)
+    assert not any("common.duty" in o for o in overlap.ids(report.overlaps) for o in o)

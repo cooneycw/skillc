@@ -190,7 +190,7 @@ class Report:
         return found
 
 
-def duties(collection: contracts.Collection) -> list[Duty]:
+def duties(collection: contracts.Collection, unjudgeable: list[str] | None = None) -> list[Duty]:
     """Every duty clause with text, from every contract whose block parsed."""
     found: list[Duty] = []
     for contract in collection.contracts:
@@ -206,9 +206,16 @@ def duties(collection: contracts.Collection) -> list[Duty]:
                     continue
                 text = clause.get("what")
                 if not (isinstance(text, str) and text.strip()):
+                    if unjudgeable is not None:
+                        unjudgeable.append(f"duty {clause['id']} ({contract.name}) has no 'what' text to compare")
                     continue
+                # Observed-only while it is still a DRAFT clause. Once the owner
+                # confirms it (charter confirm removes `draft`), the charter
+                # claims it; the column stays only as provenance (counter-model
+                # review on #726).
+                observed = clause.get("column") == OBSERVED_ONLY and clause.get("draft") is True
                 found.append(Duty(contract.name, str(clause["id"]), section, " ".join(text.split()),
-                                  clause.get("column") == OBSERVED_ONLY, contract.path))
+                                  observed, contract.path))
     return found
 
 
@@ -218,13 +225,23 @@ def compare(
     """The overlap report. With `comparator=None` nothing is compared."""
     if isinstance(replicates, bool) or not isinstance(replicates, int) or replicates < 1:
         raise ValueError(f"replicates must be a positive integer, not {replicates!r}")
-    all_duties = duties(collection)
+    unjudgeable: list[str] = []
+    all_duties = duties(collection, unjudgeable)
     report = Report(collection.root, all_duties, [], [], [], [], [], comparator.source if comparator else None,
                     replicates)
     report.incomplete = [f"unread charter {c.path.relative_to(collection.root)}: "
                          f"{c.parse_error or 'no contract name'}"
                          for c in collection.contracts if c.parse_error is not None or not c.name]
     report.incomplete += [f"unreadable directory {where}" for where in collection.unreadable]
+    report.incomplete += unjudgeable
+    # A clause id declared by more than one charter cannot be told apart by a
+    # comparator keyed on ids (recorded verdicts would be consumed in file
+    # order), so every pair involving one is UNKNOWN, never judged
+    # (counter-model review on #726).
+    owners: dict[str, set[str]] = {}
+    for d in all_duties:
+        owners.setdefault(d.clause_id, set()).add(d.contract)
+    ambiguous = {i for i, who in owners.items() if len(who) > 1}
     candidates: list[tuple[Duty, Duty]] = []
     for a, b in combinations(all_duties, 2):
         if a.contract == b.contract:
@@ -233,11 +250,17 @@ def compare(
             report.skipped_same_id.append((a, b))  # duty-single-owner's case, never re-reported
             continue
         candidates.append((a, b))
+    if ambiguous:
+        report.notes.append(f"clause id(s) declared by more than one charter, so every pair involving them is UNKNOWN: "
+                            f"{', '.join(sorted(ambiguous))}")
     if comparator is None:
         report.notes.append("overlap not examined: no comparator configured (model calls are sized, not run; #747)")
         return report
     for a, b in candidates:
-        pair = PairVerdict(a, b, tuple(_answer(comparator, a, b) for _ in range(replicates)))
+        if a.clause_id in ambiguous or b.clause_id in ambiguous:
+            pair = PairVerdict(a, b, (UNKNOWN,) * replicates)
+        else:
+            pair = PairVerdict(a, b, tuple(_answer(comparator, a, b) for _ in range(replicates)))
         report.pairs.append(pair)
         if pair.verdict == UNKNOWN:
             report.unknown_pairs.append(pair)
