@@ -17,13 +17,13 @@ It is offline and pure. It reads files, and makes no model call and no subproces
 | Input | From | Read |
 |---|---|---|
 | GAUNTLET.json | `gauntlet run` (#764), beside the charter | rounds `0`, `1`, `2` and their `verdict` |
-| `--round3`, `--round4` | `gauntlet round3/round4 --json` (#736): exactly `dataclasses.asdict(RoundReport)` | `round`, `verdict`, `recommendation`, `variants{arm: {removes, source, passes}}`, `per_clause` |
+| `--round3`, `--round4` | `gauntlet round3/round4 --json` (#736): exactly `dataclasses.asdict(RoundReport)` | `round`, `verdict`, `recommendation`, `per_clause`, `variants{arm: {removes, source, passes, remove_sha256}}` |
 | `--declaration` | #736's declaration | `variants[]{arm, file, remove}` |
-| `--inspect` | `inspect --json` (#725) | `findings[]` on this skill: `bucket` D and B |
-| `--overlap` | round 1 overlap (#726 part B) | `examined`, `duties[]{contract, id}`, `overlaps[]{kind, duties}` |
+| `--inspect` | `inspect --json` (#725) | `kind`; `findings[]`, `rule_lines[]` and `errors[]` on this skill: `bucket` D and B |
+| `--overlap` | round 1 overlap (#726 part B) | `examined`, `incomplete`, `duties[]{contract, id}`, `overlaps[]{kind, duties}` |
 
-The round 3/4 field names are pinned in ONE place, `ROUND_FIELDS` and
-`VARIANT_FIELDS` in `skillc/gauntlet_verdict.py`. A rename upstream breaks this
+The field names are pinned in ONE place, `ROUND_FIELDS`, `VARIANT_FIELDS`,
+`PASSAGE_DIGEST` and `OVERLAP_FIELDS` in `skillc/gauntlet_verdict.py`. A rename upstream breaks this
 reader on purpose: `test_the_real_round_report_carries_every_field_read` reads
 the real `RoundReport` class. That test is skipped, loudly, until #736 PR 1 is
 on main. Until then the controls plant reports in that shape. Part B's overlap
@@ -35,21 +35,35 @@ has no JSON on main either, so its shape is planted the same way.
    PASS. Anything else is **UNKNOWN**, and NEXT names that round.
 2. **Rounds 3 and 4** must be present, the right round, and `COMPLETE`.
    Otherwise UNKNOWN, naming the round.
-3. **No `--overlap`, or an overlap that was not examined:** retire is NOT
-   EXAMINED, so the verdict is UNKNOWN, and NEXT names round 1 overlap. This is
-   never keep by default (must-never 3, gate ruling).
-4. **retire:** every duty of this skill's contract appears in a `shared` or
+3. **No `--overlap`, or an overlap that does not cover this skill:** retire is
+   NOT EXAMINED, so the verdict is UNKNOWN, and NEXT names round 1 overlap. This
+   is never keep by default (must-never 3, gate ruling). The report must carry
+   every `OVERLAP_FIELDS` field, read `examined: true` with `incomplete: []`, and
+   list at least one duty of this skill's contract; anything else is UNKNOWN.
+4. **No `--inspect`, or one that did not inspect this skill:** the file must be
+   an `inspect-report` with at least one entry on this skill's text. Otherwise
+   UNKNOWN, naming round 2.
+5. **retire:** every duty of this skill's contract appears in a `shared` or
    `shadowed` overlap with another charter. The verdict names the owner of each
    duty.
-5. **trim:** round 4 recommends trim, and a variant passes. The passing variant
+6. **trim:** round 4 recommends trim, and a variant passes. The passing variant
    that removes the most words is drafted.
    - Its report row (`removes`, written as `"<file>: <first 80 chars>"`) must
      match the declaration. If they disagree, UNKNOWN.
+   - `removes` holds only 80 characters, so a longer passage is bound by the
+     row's `remove_sha256` (sha256 of the whole passage, requested of #736).
+     Absent or different: UNKNOWN. Without it, a declaration sharing only the
+     first 80 characters would be drafted as the passage round 4 tested.
+   - Its file must be a regular file inside the skill, reached through no
+     symlink; `..`, an absolute path or a symlink is UNKNOWN.
    - Its passage must occur **exactly once** in the file. Zero or several
      occurrences are UNKNOWN.
+   - Every clause in `per_clause` must carry intact and variant counts, with at
+     least one evaluable variant attempt. Missing counts are UNKNOWN: a trim is
+     never claimed without per-clause evidence.
    - The drafted diff only removes text (must-always 3), and the before and after
      pass counts are shown per clause.
-6. **keep:** otherwise.
+7. **keep:** otherwise.
 
 Round 2's **D** items are listed as removal candidates. **B** items become
 **proposed checks**, each naming its bad input, and their prose stays until the
@@ -65,7 +79,9 @@ claimed.
 (`<main checkout>/.skillc/gauntlet/<skill>/`, or `--draft-dir`). It uses the
 engine's own writer, so #759's symlink and exclusive-create rules apply:
 
-- `round5.json`: the verdict and its digest;
+- `round5.json`: the verdict, its digest and its fingerprint: the skill folder
+  (without the record), rounds 0-2 as recorded, and the sha256 of each input
+  file. The digest covers the fingerprint;
 - `round5-pr.md`: the PR text;
 - `round5.patch`: for trim only. An older trim's patch is removed when a later
   verdict is not a trim.
@@ -77,12 +93,15 @@ these files and GAUNTLET.json byte-identical.
 ## The owner's ruling
 
 `gauntlet rule` writes `rounds.5` into GAUNTLET.json: `{verdict, ruling,
-ruled_on, note, inputs: {verdict: <digest>}}`. `ruled_on` is the record's ONLY
+ruled_on, note, inputs: {verdict: <digest>, <input>: <sha256>...}}`. `ruled_on` is the record's ONLY
 dated field (gate ruling), taken from `--date`, which defaults to today in UTC.
 
 It refuses (exit 1):
 - a `--verdict-digest` that is not the drafted verdict's, so a ruling never
   lands on a verdict the owner did not read;
+- a skill or record that changed since the verdict was drafted. The draft
+  location is shared by every worktree of the checkout, so this is also what
+  stops a verdict drafted in one worktree being ruled on from another;
 - an UNKNOWN verdict;
 - a skill with no record.
 

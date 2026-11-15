@@ -24,7 +24,7 @@ from skillc import gauntlet, gauntlet_verdict
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "evals" / "subjects" / "gauntlet-verdict"
-REPORTS = FIX / "reports"
+REPORTS = FIX / "planted"
 PASSAGE = "You MUST also restate every rule twice for emphasis, even though saying it once is enough."
 
 
@@ -171,9 +171,11 @@ def test_a_report_and_declaration_that_disagree_on_the_passage_is_unknown(coll: 
 
 def test_class_b_findings_become_proposed_checks_and_keep_their_prose(coll: Path, tmp_path: Path) -> None:
     _engine(coll, "lean")
+    report = json.loads(_inspect(coll, tmp_path).read_text())  # the REAL report, plus one B rule line
     planted = tmp_path / "inspect-b.json"
-    planted.write_text(json.dumps({"findings": [{"bucket": "B", "path": "skills/lean/SKILL.md", "line": 5,
-                                                 "rule": "x", "detail": "names tests/test_missing.py"}]}))
+    report["rule_lines"].append({"bucket": "B", "path": "skills/lean/SKILL.md", "line": 5, "rule": "rule-line",
+                                 "detail": "names tests/test_missing.py"})
+    planted.write_text(json.dumps(report))
     _, lines = _verdict(coll, "lean", tmp_path, inspect=planted)
     assert any(line.startswith("  round 2 B -> proposed check") and "prose kept" in line for line in lines)
 
@@ -224,7 +226,8 @@ def test_rule_records_the_ruling_with_its_date(coll: Path, tmp_path: Path) -> No
                                  "keep, but revisit after the next CPP release", out=lambda _: None)
     entry = json.loads((coll / "skills" / "lean" / gauntlet.RECORD_NAME).read_text())["rounds"]["5"]
     assert code == 0 and entry["verdict"] == "KEEP" and entry["ruling"] == "amend"
-    assert entry["ruled_on"] == "2026-11-15" and entry["inputs"] == {"verdict": digest}
+    assert entry["ruled_on"] == "2026-11-15" and entry["inputs"]["verdict"] == digest
+    assert set(entry["inputs"]) == {"verdict", "round3", "round4", "declaration", "inspect", "overlap"}
 
 
 def test_rule_refuses_a_stale_verdict_digest(coll: Path, tmp_path: Path) -> None:
@@ -276,3 +279,123 @@ def test_the_real_round_report_carries_every_field_read() -> None:
                                  "RoundReport is not in this skillc; round 5 reads planted reports until then")
     fields = {f.name for f in dataclasses.fields(trials.RoundReport)}
     assert set(gauntlet_verdict.ROUND_FIELDS) <= fields
+
+
+# ------------------------------------------- counter-model review, pass 1 (#737)
+
+ALT = PASSAGE[:80] + " a different tail the round never tested."
+TRIM = {"round4": REPORTS / "round4-trim.json", "declaration": REPORTS / "declaration-trim.json"}
+
+
+def _planted(tmp_path: Path, name: str, edit: Any) -> Path:
+    data = json.loads((REPORTS / name).read_text())
+    edit(data)
+    out = tmp_path / f"edited-{name}"
+    out.write_text(json.dumps(data))
+    return out
+
+
+def test_a_passage_sharing_only_the_first_80_characters_is_unknown(coll: Path, tmp_path: Path) -> None:
+    """`removes` carries 80 characters; the digest binds the rest."""
+    skill_md = coll / "skills" / "trimmable" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text().replace(PASSAGE, ALT))
+    _engine(coll, "trimmable")
+    decl = tmp_path / "declaration-alt.json"
+    decl.write_text(json.dumps({"variants": [{"arm": "lean-1", "file": "SKILL.md", "remove": ALT, "clause": "x"}]}))
+    code, lines = _verdict(coll, "trimmable", tmp_path, round4=REPORTS / "round4-trim.json", declaration=decl)
+    assert "remove_sha256 does not match" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+def test_a_long_passage_with_no_digest_in_the_report_is_unknown(coll: Path, tmp_path: Path) -> None:
+    _engine(coll, "trimmable")
+    bare = _planted(tmp_path, "round4-trim.json", lambda d: d["variants"]["lean-1"].pop("remove_sha256"))
+    code, lines = _verdict(coll, "trimmable", tmp_path, **{**TRIM, "round4": bare})
+    assert "remove_sha256 is absent" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+def test_a_trim_without_per_clause_counts_is_unknown(coll: Path, tmp_path: Path) -> None:
+    _engine(coll, "trimmable")
+    bare = _planted(tmp_path, "round4-trim.json", lambda d: d.__setitem__("per_clause", {}))
+    code, lines = _verdict(coll, "trimmable", tmp_path, **{**TRIM, "round4": bare})
+    assert "per-clause" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+@pytest.mark.parametrize("file", ["../lean/SKILL.md", "/etc/hostname", "linked.md"])
+def test_a_trim_file_outside_the_skill_or_through_a_symlink_is_unknown(coll: Path, tmp_path: Path, file: str) -> None:
+    line = "You MUST report what you found, then stop."
+    (coll / "skills" / "trimmable" / "linked.md").symlink_to(coll / "skills" / "lean" / "SKILL.md")
+    _engine(coll, "trimmable")
+    decl = tmp_path / "declaration-out.json"
+    decl.write_text(json.dumps({"variants": [{"arm": "lean-1", "file": file, "remove": line, "clause": "x"}]}))
+    r4 = _planted(tmp_path, "round4-trim.json", lambda d: d["variants"]["lean-1"].update(
+        removes=f"{file}: {line}", remove_sha256=None))
+    code, lines = _verdict(coll, "trimmable", tmp_path, round4=r4, declaration=decl)
+    assert "is not a regular file inside the skill" in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+@pytest.mark.parametrize("edit,why", [
+    (lambda d: d.__setitem__("duties", [x for x in d["duties"] if x["contract"] != "lean"]), "lists no duty of lean"),
+    (lambda d: d.__setitem__("incomplete", ["skills/x/CHARTER.md: unreadable"]), "incomplete"),
+    (lambda d: d.pop("incomplete"), "lacks incomplete")])
+def test_an_overlap_that_did_not_examine_this_skill_is_unknown(coll: Path, tmp_path: Path, edit: Any, why: str) -> None:
+    _engine(coll, "lean")
+    code, lines = _verdict(coll, "lean", tmp_path, overlap=_planted(tmp_path, "overlap-none.json", edit))
+    assert why in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+@pytest.mark.parametrize("report,why", [({}, "is not an inspect-report"),
+                                        ({"kind": "inspect-report", "rule_lines": [{"path": "skills/other/SKILL.md"}]},
+                                         "shows nothing of skills/lean/SKILL.md")])
+def test_an_inspect_report_that_did_not_inspect_this_skill_is_unknown(coll: Path, tmp_path: Path, report: Any,
+                                                                       why: str) -> None:
+    _engine(coll, "lean")
+    planted = tmp_path / "inspect-other.json"
+    planted.write_text(json.dumps(report))
+    code, lines = _verdict(coll, "lean", tmp_path, inspect=planted)
+    assert why in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+@pytest.mark.parametrize("change", ["skill", "record"])
+def test_rule_refuses_when_the_skill_or_record_changed_since_the_verdict(coll: Path, tmp_path: Path,
+                                                                          change: str) -> None:
+    _engine(coll, "lean")
+    _, lines = _verdict(coll, "lean", tmp_path)
+    digest = re.search(r"VERDICT_DIGEST: (\S+)", "\n".join(lines)).group(1)  # type: ignore[union-attr]
+    record = coll / "skills" / "lean" / gauntlet.RECORD_NAME
+    if change == "skill":
+        skill_md = coll / "skills" / "lean" / "SKILL.md"
+        skill_md.write_text(skill_md.read_text() + "\nA rule added after the verdict.\n")
+    else:
+        data = json.loads(record.read_text())
+        data["rounds"]["2"]["detail"] = "re-run since"
+        record.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    before = record.read_bytes()
+    code = gauntlet_verdict.rule(coll, "skills/lean", gauntlet.Options(), "accept", digest, "2026-11-15", None,
+                                 out=lambda _: None)
+    assert code == gauntlet_verdict.EXIT_REFUSED and record.read_bytes() == before
+
+
+def test_from_a_linked_worktree_drafts_are_shared_but_a_ruling_binds_its_own_checkout(coll: Path,
+                                                                                       tmp_path: Path) -> None:
+    """The draft location is the MAIN checkout's, shared by every worktree; the
+    record is beside each checkout's charter. A verdict drafted in the worktree
+    must not be ruled on from a checkout whose skill differs."""
+    linked = tmp_path / "linked"
+    _git(coll, "worktree", "add", "-q", str(linked), "-b", "side")
+    skill_md = linked / "skills" / "lean" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\nA worktree-only rule.\n")
+    _engine(linked, "lean")
+    _engine(coll, "lean")
+    code, lines = _verdict(linked, "lean", tmp_path)
+    assert code == gauntlet_verdict.EXIT_PROPOSED
+    assert (_draft(coll, "lean") / gauntlet_verdict.VERDICT_FILE).is_file()  # the main checkout's draft location
+    assert not (linked / ".skillc").exists()
+    digest = re.search(r"VERDICT_DIGEST: (\S+)", "\n".join(lines)).group(1)  # type: ignore[union-attr]
+    main_record = coll / "skills" / "lean" / gauntlet.RECORD_NAME
+    before = main_record.read_bytes()
+    assert gauntlet_verdict.rule(coll, "skills/lean", gauntlet.Options(), "accept", digest, "2026-11-15", None,
+                                 out=lambda _: None) == gauntlet_verdict.EXIT_REFUSED
+    assert main_record.read_bytes() == before
+    assert gauntlet_verdict.rule(linked, "skills/lean", gauntlet.Options(), "accept", digest, "2026-11-15", None,
+                                 out=lambda _: None) == gauntlet_verdict.EXIT_PROPOSED
+    assert json.loads((linked / "skills" / "lean" / gauntlet.RECORD_NAME).read_text())["rounds"]["5"]["ruling"] == "accept"

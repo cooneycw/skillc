@@ -37,7 +37,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import gauntlet
+from . import gauntlet, source_digest
 
 KEEP, TRIM, RETIRE, UNKNOWN = "KEEP", "TRIM", "RETIRE", "UNKNOWN"
 EXIT_PROPOSED, EXIT_REFUSED, EXIT_USAGE, EXIT_UNKNOWN = 0, 1, 2, 3
@@ -47,13 +47,21 @@ VERDICT_FILE, PR_FILE, PATCH_FILE = "round5.json", "round5-pr.md", "round5.patch
 #: The ONE place the round 3/4 report fields are named (#736 `to_json`, i.e.
 #: `dataclasses.asdict(RoundReport)`). A rename upstream breaks this reader on
 #: purpose: `test_the_real_round_report_carries_every_field_read` pins it.
-ROUND_FIELDS = ("round", "verdict", "recommendation", "variants")
+ROUND_FIELDS = ("round", "verdict", "recommendation", "variants", "per_clause")
 VARIANT_FIELDS = ("removes", "source", "passes")
+#: Optional on a variant row, and REQUIRED to trim a passage longer than the
+#: 80 characters `removes` carries: sha256 of the whole passage (requested of
+#: #736). Without it a declaration whose passage shares only the first 80
+#: characters would be drafted as the one round 4 tested (counter-model review).
+PASSAGE_DIGEST = "remove_sha256"
 ROUND_COMPLETE = "COMPLETE"
 #: Rounds 0-2, as the engine records them, and the verdict each must hold.
 RECORD_PASSES = {"0": "OBSERVED", "1": "PASS", "2": "PASS"}
 #: The overlap kinds that make another charter the owner of this skill's duty.
 OWNED_ELSEWHERE = ("shared", "shadowed")
+#: The overlap report fields read (#726 part B), pinned here as round 3/4's are.
+OVERLAP_FIELDS = ("examined", "duties", "overlaps", "incomplete")
+INSPECT_KIND = "inspect-report"
 _CONTRACT = re.compile(r"^contract:\s*\"?([A-Za-z0-9_.-]+)\"?\s*$", re.MULTILINE)
 _REMOVES_HEAD = 80  # #736 records `f"{file}: {remove[:80]}"`
 
@@ -65,13 +73,15 @@ class Verdict:
     next_line: str
     evidence: list[str] = field(default_factory=list)
     patch: str | None = None
+    fingerprint: dict[str, object] = field(default_factory=dict)
 
     def text(self) -> str:
         return "\n".join([f"ROUND 5 verdict: {self.verdict} - {self.detail}", *self.evidence, self.next_line]) + "\n"
 
     @property
     def digest(self) -> str:
-        return "sha256:" + hashlib.sha256((self.text() + (self.patch or "")).encode()).hexdigest()
+        bound = json.dumps(self.fingerprint, sort_keys=True)
+        return "sha256:" + hashlib.sha256((self.text() + (self.patch or "") + bound).encode()).hexdigest()
 
 
 def _list(data: object, key: str) -> list[object]:
@@ -116,6 +126,28 @@ def _contract_name(charter: Path) -> str | None:
     return match.group(1) if match else None
 
 
+def _sha(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def skill_fingerprint(skill: gauntlet.Skill) -> str:
+    """The skill folder (and the command file, for a command skill) WITHOUT the
+    record, the one file the gauntlet writes beside the charter."""
+    folder = skill.charter.parent
+    try:
+        entries = {k: v for k, v in source_digest.tree_entries(folder).items() if k != gauntlet.RECORD_NAME}
+        if skill.command:
+            entries["<command>"] = _sha(skill.text.read_bytes())
+    except (source_digest.SourceUnreadable, OSError) as exc:
+        raise gauntlet.UsageError(f"the skill under review cannot be fingerprinted: {exc}") from None
+    return source_digest.digest_entries(entries)
+
+
+def record_fingerprint(record: dict[str, dict[str, object]]) -> str:
+    """Rounds 0-2 as recorded: the verdict is bound to the record it read."""
+    return _sha(json.dumps({k: record.get(k) for k in RECORD_PASSES}, sort_keys=True).encode())
+
+
 def _round_report(data: dict[str, object] | None, number: int) -> str | None:
     """None when the report is usable, else why it is not."""
     if data is None:
@@ -128,6 +160,42 @@ def _round_report(data: dict[str, object] | None, number: int) -> str | None:
     if data["verdict"] != ROUND_COMPLETE:
         return f"it reads {data['verdict']}"
     return None
+
+
+def _passage_target(skill: gauntlet.Skill, file: str) -> Path | None:
+    """The declared file, only when it is a regular file INSIDE the skill and
+    reached through no symlink (counter-model review: `../` or a symlinked
+    file would draft a patch against a file outside the skill)."""
+    base = skill.text.parent if not skill.command else skill.collection
+    rel = Path(file)
+    if not file or rel.is_absolute() or ".." in rel.parts:
+        return None
+    target = base / rel
+    try:
+        gauntlet._no_symlink_below(target, skill.collection)
+        inside = target.resolve().is_relative_to(base.resolve()) and target.is_file() and not target.is_symlink()
+    except (gauntlet.UsageError, OSError, ValueError):
+        return None
+    return target if inside else None
+
+
+def _clause_counts(round4: dict[str, object], arm: str) -> list[str] | str:
+    """Before/after pass counts for every clause, or why they are missing: a
+    trim is never drafted without per-clause evidence (counter-model review)."""
+    per_clause = round4["per_clause"]
+    if not isinstance(per_clause, dict) or not per_clause:
+        return "the report carries no per-clause counts"
+    lines = []
+    for clause, arms in sorted(per_clause.items()):
+        intact, lean = (arms.get("intact"), arms.get(arm)) if isinstance(arms, dict) else (None, None)
+        if not (isinstance(intact, dict) and isinstance(lean, dict)
+                and all(isinstance(c.get(k), int) for c in (intact, lean) for k in ("pass", "evaluable"))):
+            return f"clause {clause} has no intact and {arm} counts"
+        if lean["evaluable"] < 1:
+            return f"clause {clause} has no evaluable {arm} attempt"
+        lines.append(f"  clause {clause}: intact {intact['pass']}/{intact['evaluable']}"
+                     f" -> {arm} {lean['pass']}/{lean['evaluable']}")
+    return lines
 
 
 def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[str, object] | None,
@@ -149,9 +217,17 @@ def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[st
         if row["removes"] != f"{file}: {remove[:_REMOVES_HEAD]}":
             return _unknown("round 4", f"variant {arm}'s report says it removes {row['removes']!r}, the declaration "
                                        f"says {file}: {remove[:_REMOVES_HEAD]!r}")
+        # `removes` holds only the first 80 characters, so a longer passage is
+        # bound by its digest; with none, the report cannot say which passage it tested.
+        if len(remove) > _REMOVES_HEAD and row.get(PASSAGE_DIGEST) != _sha(remove.encode()):
+            why = ("does not match the declaration's passage" if PASSAGE_DIGEST in row else
+                   f"is absent, so a passage over {_REMOVES_HEAD} characters is not bound to the one round 4 tested")
+            return _unknown("round 4", f"variant {arm}'s {PASSAGE_DIGEST} {why}")
         candidates.append((len(remove.split()), arm, file, remove, row))
     _, arm, file, remove, row = max(candidates)
-    target = (skill.text.parent / file) if not skill.command else skill.collection / file
+    target = _passage_target(skill, file)
+    if target is None:
+        return _unknown("round 4", f"variant {arm}'s file {file} is not a regular file inside the skill")
     try:
         before = target.read_text()
     except OSError:
@@ -159,17 +235,16 @@ def _trim(skill: gauntlet.Skill, round4: dict[str, object], declaration: dict[st
     count = before.count(remove) if remove else 0
     if count != 1:
         return _unknown("round 4", f"variant {arm}'s passage occurs {count} times in {file}, not exactly once")
+    counts = _clause_counts(round4, arm)
+    if isinstance(counts, str):
+        return _unknown("round 4", f"variant {arm}: {counts}, so its passing is not shown per clause")
     after = before.replace(remove, "", 1)
     rel = target.relative_to(skill.collection).as_posix()
     patch = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), f"a/{rel}", f"b/{rel}"))
     # `after` is `before` with the passage cut once, so the patch can only remove (must-always 3).
     if not patch or len(after) >= len(before):
         return _unknown("round 4", f"variant {arm}'s change removes nothing")
-    evidence += [f"  trim {arm}: removes {len(remove.split())} words from {rel} (source: {row['source']})"]
-    for clause, arms in sorted(_dict(round4, "per_clause").items()):  # before/after per clause test
-        if isinstance(arms, dict) and isinstance(arms.get("intact"), dict) and isinstance(arms.get(arm), dict):
-            evidence.append(f"  clause {clause}: intact {arms['intact'].get('pass')}/{arms['intact'].get('evaluable')}"
-                            f" -> {arm} {arms[arm].get('pass')}/{arms[arm].get('evaluable')}")
+    evidence += [f"  trim {arm}: removes {len(remove.split())} words from {rel} (source: {row['source']})", *counts]
     return Verdict(TRIM, f"variant {arm} passed every clause test on held-out tasks and only removes text",
                    "NEXT: owner reviews round5.patch and runs `skillc gauntlet rule ... accept|reject|amend`; "
                    "the gauntlet applies nothing", evidence, patch)
@@ -212,19 +287,35 @@ def decide(skill: gauntlet.Skill, record: dict[str, dict[str, object]], round3: 
             return _unknown(f"round {number}", why)
     if overlap is None:
         return _unknown("round 1 overlap", "no overlap report, so retire is NOT EXAMINED")
-    if overlap.get("examined") is not True:
+    missing = [f for f in OVERLAP_FIELDS if f not in overlap]
+    if missing:
+        return _unknown("round 1 overlap", f"the overlap report lacks {', '.join(missing)} (not a #726 part B report)")
+    if overlap["examined"] is not True:
         return _unknown("round 1 overlap", "the overlap report says the collection was not examined")
+    if overlap["incomplete"] != []:
+        return _unknown("round 1 overlap", "the overlap report says its examination is incomplete")
+    contract = _contract_name(skill.charter)
+    if contract is None:
+        return _unknown("round 1", "the charter names no contract")
+    if not any(isinstance(d, dict) and d.get("contract") == contract for d in _list(overlap, "duties")):
+        return _unknown("round 1 overlap", f"the overlap report lists no duty of {contract}, so it did not examine "
+                                           "this skill")
     if inspect is None:
         return _unknown("round 2", "no inspect report, so its findings cannot be cited")
+    if inspect.get("kind") != INSPECT_KIND:
+        return _unknown("round 2", f"the --inspect file is not an {INSPECT_KIND}")
+    # Round 2's buckets are on `rule_lines` (emphasised rules) and `findings`
+    # (docs/specs/inspect.md); the engine reads both the same way (#764).
+    own = [f for key in ("findings", "rule_lines", "errors") for f in _list(inspect, key)
+           if isinstance(f, dict) and f.get("path") == skill.text_rel]
+    if not own:
+        return _unknown("round 2", f"the inspect report shows nothing of {skill.text_rel}, so it did not inspect "
+                                   "this skill")
     evidence = ["  evidence is observational: it shows what the rounds measured, never why"]
-    own = [f for f in _list(inspect, "findings") if isinstance(f, dict) and f.get("path") == skill.text_rel]
     evidence += [f"  round 2 D (removal candidate): {f.get('path')}:{f.get('line')} {f.get('detail')}"
                  for f in own if f.get("bucket") == "D"]
     evidence += [f"  round 2 B -> proposed check (bad input: the rule named at {f.get('path')}:{f.get('line')} "
                  f"broken), prose kept until the check exists: {f.get('detail')}" for f in own if f.get("bucket") == "B"]
-    contract = _contract_name(skill.charter)
-    if contract is None:
-        return _unknown("round 1", "the charter names no contract")
     assert round4 is not None
     return (_retire(contract, overlap, evidence) or _trim(skill, round4, declaration, evidence)
             or Verdict(KEEP, "no variant passed round 4 and no duty is owned elsewhere",
@@ -245,13 +336,18 @@ def verdict(collection: Path, skill_arg: str, options: gauntlet.Options, *, roun
                                                 (declaration, "--declaration"), (inspect, "--inspect"),
                                                 (overlap, "--overlap"))]
         draft_dir = gauntlet._draft_dir(skill, options)
+        fingerprint: dict[str, object] = {"skill": skill_fingerprint(skill), "record": record_fingerprint(record),
+                       "inputs": {w: _sha(p.read_bytes()) for p, w in ((round3, "round3"), (round4, "round4"),
+                                  (declaration, "declaration"), (inspect, "inspect"), (overlap, "overlap"))
+                                  if p is not None}}
     except gauntlet.UsageError as exc:
         print(f"skillc: {exc}")
         return EXIT_USAGE
     result = decide(skill, record, *inputs)
+    result.fingerprint = fingerprint
     try:
         gauntlet._ensure_ignored(draft_dir)
-        body = {"skill": skill.rel, "verdict": result.verdict, "digest": result.digest}
+        body = {"skill": skill.rel, "verdict": result.verdict, "digest": result.digest, "fingerprint": fingerprint}
         gauntlet._write_state(draft_dir / VERDICT_FILE, (json.dumps(body, indent=2, sort_keys=True) + "\n").encode())
         gauntlet._write_state(draft_dir / PR_FILE, (f"# skill-gauntlet round 5: {result.verdict} for {skill.rel}\n\n"
                                                     f"{result.text()}\nVerdict digest: {result.digest}\n").encode())
@@ -293,6 +389,17 @@ def rule(collection: Path, skill_arg: str, options: gauntlet.Options, ruling: st
     if drafted.get("verdict") == UNKNOWN:
         print("skillc: refusing: an UNKNOWN verdict has nothing to rule on; settle the round NEXT names first")
         return EXIT_REFUSED
+    drafted_print = _dict(drafted, "fingerprint")
+    try:
+        now = {"skill": skill_fingerprint(skill), "record": record_fingerprint(gauntlet.load_record(record_path))}
+    except gauntlet.UsageError as exc:
+        print(f"skillc: {exc}")
+        return EXIT_USAGE
+    changed = [k for k, v in now.items() if drafted_print.get(k) != v]
+    if changed:
+        print(f"skillc: refusing: the {' and the '.join(changed)} changed since the verdict was drafted; "
+              "re-run `skillc gauntlet verdict` and rule on what it prints")
+        return EXIT_REFUSED
     try:
         data = json.loads(record_path.read_text()) if record_path.is_file() else None
     except (OSError, json.JSONDecodeError):
@@ -302,7 +409,7 @@ def rule(collection: Path, skill_arg: str, options: gauntlet.Options, ruling: st
         return EXIT_REFUSED
     data.setdefault("rounds", {})["5"] = {
         "name": "verdict", "verdict": drafted["verdict"], "detail": f"owner ruling: {ruling}", "proceed": False,
-        "inputs": {"verdict": verdict_digest}, "ruling": ruling, "ruled_on": ruled_on, "note": note or ""}
+        "inputs": {"verdict": verdict_digest, **_dict(drafted_print, "inputs")}, "ruling": ruling, "ruled_on": ruled_on, "note": note or ""}
     try:
         gauntlet._write_state(record_path, (json.dumps(data, indent=2, sort_keys=True) + "\n").encode())
     except gauntlet.UnsafeRecord as exc:
