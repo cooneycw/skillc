@@ -24,6 +24,9 @@ from skillc import calibration_run as cr
 from skillc import matched_pilot as mp
 
 ROOT = Path(__file__).resolve().parent.parent
+#: The necessity task's CURRENT grader revision, read, never pinned (#537).
+_NECESSITY_REVISION = json.loads((ROOT / "evals" / "level3" / "flow-auto-necessity" / "grader.json")
+                                 .read_text(encoding="utf-8"))["revision"]
 REMOVED = "A\n  `skipped gates:` name is a SKIP row - never a PASS.\n"
 INTACT_REF = ("# reference\n\n- warn (...) - repeat the qualification verbatim. " + REMOVED + "- other rule\n").encode()
 DEGRADED_REF = INTACT_REF.replace(REMOVED.encode(), b"", 1)
@@ -395,7 +398,7 @@ def test_a_report_over_a_ledger_with_another_image_is_refused(tmp_path: Path) ->
 def test_640_discrimination_refuses_a_fixture_builder_before_any_store(tmp_path: Path) -> None:
     data = _approved(tmp_path, attempts=1)
     data["task"].update({"path": "evals/level3/flow-auto-necessity", "grader_id": "flow-auto-necessity",
-                         "grader_revision": "5", "fixture": "builder", "fixture_case": "clean"})
+                         "grader_revision": _NECESSITY_REVISION, "fixture": "builder", "fixture_case": "clean"})
     data["approval"]["task_fixture"] = "builder"
     declaration = _parse(stamp_approval(data))
     # Establish that approval itself passes, so the refusal exercises dispatch.
