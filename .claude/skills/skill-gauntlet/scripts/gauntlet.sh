@@ -71,17 +71,30 @@ why=${why:-the environment of the checkout does not import skillc}
 # the install) is WARNED about, never blocked: the verdict and exit code below
 # are the engine's whatever this prints.
 if [ -f "$locator" ]; then
-    "$python" -P -c 'import os, sys
+    # Only REGULAR files are opened (lstat first): a FIFO or a link is never read,
+    # so the check cannot block the engine; it, or any read error, is a warning.
+    "$python" -P -c 'import os, stat, sys
+def oops(exc):
+    raise exc
 def files(root):
     out = {}
-    for d, _, names in os.walk(root):
+    for d, _, names in os.walk(root, onerror=oops):
         for n in names:
-            rel = os.path.relpath(os.path.join(d, n), root)
-            if os.sep in rel or not rel.startswith("."):  # top-level dotfiles belong to the installer
-                with open(os.path.join(d, n), "rb") as f:
-                    out[rel] = f.read()
+            path = os.path.join(d, n)
+            rel = os.path.relpath(path, root)
+            if os.sep not in rel and rel.startswith("."):
+                continue  # top-level dotfiles belong to the installer
+            mode = os.lstat(path).st_mode
+            if not stat.S_ISREG(mode):
+                raise OSError(f"{rel} is not a regular file")
+            with open(path, "rb") as f:
+                out[rel] = (f.read(), bool(mode & 0o100))
     return out
-sys.exit(0 if files(sys.argv[1]) == files(sys.argv[2]) else 1)' "$skill_dir" "$checkout/.claude/skills/skill-gauntlet" \
+try:
+    a, b = files(sys.argv[1]), files(sys.argv[2])
+except OSError:
+    sys.exit(1)
+sys.exit(0 if a == b and "SKILL.md" in a else 1)' "$skill_dir" "$checkout/.claude/skills/skill-gauntlet" \
         >/dev/null 2>&1 \
         || echo "SKILL_GAUNTLET: warning: this installed copy differs from the checkout's .claude/skills/skill-gauntlet; re-run make install-skill" >&2
 fi

@@ -316,8 +316,9 @@ make uninstall-skill   # removes that copy, and only a copy skillc marked as its
   `~/.claude/skills` into its session image and fails on a symlink, or on a
   directory without SKILL.md. The copy holds regular files only, plus two small
   files the repository never has: `.skillc-checkout` (the main checkout, written
-  `~/...` under your home so no account name is in it) and `.skillc-install`
-  (a marker: kind, schema, digest; no paths).
+  `~/...` under your home so no account name is in it), `.skillc-install`
+  (a marker: kind, schema, digest; no paths), and `.kyle-exclude`, Kyle's
+  opt-out (kyle#2518): Kyle's deploy skips this host-only skill entirely.
 - **Updating:** a `git pull` does NOT update the copy. Re-run
   `make install-skill`. The skill warns when its copy differs from the
   checkout's (`SKILL_GAUNTLET: warning: ...`) and still runs.

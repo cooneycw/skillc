@@ -659,3 +659,64 @@ def test_the_installed_copy_carries_kyles_exclusion_marker(checkout: Path, tmp_p
     (skills / NAME / mod.KYLE_EXCLUDE).unlink()
     again = _installer(checkout, skills, "install")
     assert again.returncode == 0 and "refreshed" in again.stdout and (skills / NAME / mod.KYLE_EXCLUDE).is_file()
+
+
+# ----------------------------------------------- #774: counter-model pass 2
+
+KYLE_CONVENTION = ".kyle-exclude"  # kyle#2518, written here INDEPENDENTLY of the installer's constant
+
+
+def _kyle_stages(skills: Path) -> list[str]:
+    """Kyle's stage_operator_skills as kyle#2518 states it: every directory
+    under skills/ is staged unless it holds the exclusion file."""
+    return sorted(e.name for e in skills.iterdir() if e.is_dir() and not (e / KYLE_CONVENTION).exists())
+
+
+def test_kyle_skips_the_installed_copy_by_its_own_convention(checkout: Path, tmp_path: Path) -> None:
+    """The consumer contract: Kyle's name, not the installer's. Removing or
+    renaming the marker makes Kyle stage the copy again."""
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    assert _kyle_stages(skills) == [], "the installed copy is skipped by Kyle's convention"
+    (skills / NAME / KYLE_CONVENTION).rename(skills / NAME / ".unrecognized-marker")
+    assert _kyle_stages(skills) == [NAME], "a wrong name would be staged: the contract can fail"
+
+
+def test_reinstall_restores_a_launcher_that_lost_its_executable_bit(checkout: Path, tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    _installer(checkout, skills, "install")
+    launcher = skills / NAME / "scripts" / "gauntlet.sh"
+    launcher.chmod(0o644)
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0 and "refreshed" in done.stdout and os.access(launcher, os.X_OK)
+
+
+@pytest.mark.parametrize("planted", ["fifo", "symlink", "unreadable"])
+def test_the_drift_check_never_blocks_the_engine(tmp_path: Path, planted: str) -> None:
+    """A FIFO would block a naive read forever; a link or an unreadable tree
+    must not compare as "no drift". Each is a WARNING, and the engine runs."""
+    _repo, launcher = _installed_launcher(tmp_path)
+    copy = launcher.parent.parent
+    target = copy / "scripts" / "planted"
+    if planted == "fifo":
+        os.mkfifo(target)
+    elif planted == "symlink":
+        target.symlink_to(copy / "SKILL.md")
+    else:
+        if os.geteuid() == 0:
+            pytest.skip("root reads a mode-000 directory")
+        (copy / "extra").mkdir()
+        (copy / "extra" / "x").write_text("x")
+        (copy / "extra").chmod(0o100)
+    try:
+        coll = _collection(tmp_path)
+        done = subprocess.run(["bash", str(launcher), str(coll), "skills/alpha", "--offline", "--issue-states",
+                               str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                              text=True, check=False, cwd=tmp_path, timeout=60,
+                              env={**{k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"},
+                                   "HOME": str(tmp_path)})
+    finally:
+        if planted == "unreadable":
+            (copy / "extra").chmod(0o755)
+    assert "SKILL_GAUNTLET: warning: this installed copy differs" in done.stderr, done.stderr
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout

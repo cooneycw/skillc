@@ -66,13 +66,12 @@ NAME = "skill-gauntlet"
 SKILLS_ENV = "SKILLC_SKILLS_DIR"
 LOCATOR, MARKER = ".skillc-checkout", ".skillc-install"
 #: Kyle's deploy-staging opt-out (owner, 2026-11-15: this host-only skill stays
-#: out of Kyle's containers). ONE constant, and a PLACEHOLDER: Kyle names the
-#: marker in its own repo, and kyle-cli-helper relays the name through the wave
-#: orchestrator. #774 does not merge until this is that name. It must start
-#: with "." (the launcher's drift check skips the copy's top-level dotfiles).
+#: out of Kyle's containers). The name is Kyle's convention, kyle#2518: its
+#: stage_operator_skills skips, and logs, a skill directory holding this file.
+#: ONE constant. It must start with "." (the launcher's drift check skips the
+#: copy's top-level dotfiles).
 KYLE_EXCLUDE = ".kyle-exclude"
-KYLE_EXCLUDE_TEXT = ("skillc's /skill-gauntlet, installed on this host by `make install-skill`. Host-only:\n"
-                     "Kyle's deploy staging and public build skip this directory.\n")
+KYLE_EXCLUDE_TEXT = "host-only: written by skillc make install-skill (skillc#774); Kyle skips it (kyle#2518)\n"
 #: Files the installer writes into the copy; never part of the skill's payload.
 INSTALL_FILES = (LOCATOR, MARKER, KYLE_EXCLUDE)
 MARKER_KIND, MARKER_SCHEMA = "skillc-skill-install", "1"
@@ -150,6 +149,12 @@ def payload(root: Path) -> dict[str, bytes]:
                 except OSError as exc:
                     raise Refused(EXIT_REFUSED, f"{rel} in {root} cannot be read ({type(exc).__name__})") from None
     return files
+
+
+def exec_bits(root: Path, files: dict[str, bytes]) -> dict[str, bool]:
+    """Which payload files are executable: the launcher is run directly, so a
+    copy that lost its bit is not current (counter-model review)."""
+    return {rel: bool((root / rel).stat().st_mode & 0o100) for rel in files}
 
 
 def digest(files: dict[str, bytes]) -> str:
@@ -297,7 +302,7 @@ def _install(skills: Path, cache: Path) -> int:
             located = ""
         excluded = (entry / KYLE_EXCLUDE).is_file()
         if (current.get("digest") == digest(files) and located == locator_text(checkout) and excluded
-                and payload(entry) == files):
+                and payload(entry) == files and exec_bits(entry, files) == exec_bits(source, files)):
             return _say(EXIT_OK, f"already installed: {entry} is a current copy of {source}")
     skills.mkdir(parents=True, exist_ok=True)
     _same_device(cache, skills)
