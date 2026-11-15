@@ -49,3 +49,6 @@ Scope: 5 paths, ~250 lines. Risk: a widened instrument, answered by the committe
 
 Readers:
 - Reader: classify() and every clutter report consumer. A verdict changes only for delivered regular files whose non-execute permission bits differ from 0o644/0o755: NOT_CLEAN becomes CLEAN. Compatibility: the three-umask controls.
+
+### Lane correction (counter-model review, pass 1)
+- Execution backend: **not covered**. The new tests drive the host `Inventory` path (`test_clutter_capture.inventory()`, which reads the filesystem directly, with empty daemon surfaces). They do not drive DockerBackend, faked or real. The delivery matching that changed sits behind both, in `classify()`.
