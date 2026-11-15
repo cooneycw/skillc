@@ -121,3 +121,6 @@ Scope: ~8 paths plus control files, ~600-800 lines. Risks: the shared/shadowed s
 Readers:
 - Reader: the owner reads the overlap report. Compatibility: none mechanical; every overlap is a proposal.
 - Reader: a later local-model step writes `--verdicts` files. Compatibility: the verdicts parser tests.
+
+### Plan deviations
+- 2026-11-15, orchestrator mailbox rev 20: commit `60a6c7e` came AFTER the counter-model receipt's reviewed head (`2da2959`). It is test-only: it renames a shadowed comprehension variable in `tests/test_overlap.py` that mypy refused. No product code and no verdict changed.
