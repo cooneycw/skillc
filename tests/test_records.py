@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from skillc import checks, cli, contracts, records
+from skillc import checks, cli, contracts, records, usage
 from skillc.spec import DEFAULT_TARGET, discover
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
@@ -80,7 +80,7 @@ def test_EVERY_bundle_bad_case_fires_its_rule(rule: checks.BundleRule) -> None:
 
 @pytest.mark.parametrize("rule", checks.ALL_RULES, ids=lambda r: r.id)
 def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule | checks.CollectionRule,
 ) -> None:
     """Every rule in the repository, not only the record family.
 
@@ -132,12 +132,23 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
         collections = [contracts.load_collection(case) for case in sorted(p for p in bad_dir.iterdir() if p.is_dir())]
         own = [f for c in collections for f in checks.run_contracts(c, only=rule.id)]
         every = [f for c in collections for f in checks.run_contracts(c)]
+    elif isinstance(rule, checks.UsageRule):
+        # #719: the subject is one usage log; minimal means no OTHER usage rule fires.
+        logs = usage.discover_logs(bad_dir)
+        own = [f for log in logs for f in checks.run_usage_log(log, only=rule.id)]
+        every = [f for log in logs for f in checks.run_usage_log(log)]
     elif isinstance(rule, checks.ManifestRule):
         # Same shape as the BundleRule branch above: every CASE DIRECTORY is
         # the subject, and `run_manifest` returns `(findings, load_error)`.
         cases = sorted(p for p in bad_dir.iterdir() if p.is_dir())
         own = [f for case in cases for f in checks.run_manifest(case, only=rule.id)[0]]
         every = [f for case in cases for f in checks.run_manifest(case)[0]]
+    elif isinstance(rule, checks.CollectionRule):
+        # Issue #725: every CASE DIRECTORY is one collection; minimal means no
+        # OTHER decay rule fires on it either.
+        cases = sorted(p for p in bad_dir.iterdir() if p.is_dir())
+        own = [f for case in cases for f in checks.collection_findings(case, only=rule.id)[0]]
+        every = [f for case in cases for f in checks.collection_findings(case)[0]]
     else:
         skills = discover(bad_dir)
         own = [f for sk in skills for f in checks.run(sk, only=rule.id)]
