@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import decay, records
+from . import decay, records, usage
 from .spec import (
     BODY_LINE_BUDGET,
     CLAUDE_CODE,
@@ -558,6 +558,46 @@ def run_manifest(case: Path, only: str | None = None) -> tuple[list[Finding], st
 
 
 @dataclass(frozen=True)
+class UsageRule:
+    """A rule whose subject is a skill-usage LOG (#719): one `*usage.jsonl` file,
+    one `skill-usage` record per line.
+
+    A separate TYPE because its subject is neither one record nor a bundle - the
+    pairing rule reads facts BETWEEN lines of one file - but not a separate
+    machinery: it sits in `ALL_RULES`, and `selftest` differs for it only where
+    the subject is loaded."""
+
+    id: str
+    severity: str
+    summary: str
+    check: Callable[[usage.UsageLog], Iterator[str]]
+    parser: bool = False
+
+
+USAGE_RULES: tuple[UsageRule, ...] = (
+    UsageRule("skill-usage-envelope", ERROR, "usage log reads, and each line is a skill-usage record of a version this build reads",
+              usage.usage_envelope, parser=True),
+    UsageRule("skill-usage-fields", ERROR, "every field is present and in vocabulary, with UNKNOWN for what was not observed",
+              usage.usage_fields),
+    UsageRule("skill-usage-privacy", ERROR, "only identifiers and outcomes: no extra field, home path or email address",
+              usage.usage_privacy),
+    UsageRule("skill-usage-pairing", ERROR, "every end closes an earlier start, and a declared completion has its end",
+              usage.usage_pairing),
+)
+
+
+def run_usage_log(log: usage.UsageLog, only: str | None = None) -> list[Finding]:
+    """Apply every usage rule (or one) to a single usage log."""
+    require_known(only, evidence_rules())
+    findings: list[Finding] = []
+    for rule in USAGE_RULES:
+        if only and rule.id != only:
+            continue
+        findings.extend(Finding(rule.id, rule.severity, log.path, detail) for detail in rule.check(log))
+    return findings
+
+
+@dataclass(frozen=True)
 class CollectionRule:
     """A rule whose subject is a whole COLLECTION of instruction documents
     (issue #725): the decay rules, each needing something no single SKILL.md
@@ -635,10 +675,10 @@ def collection_findings(case: Path, only: str | None = None) -> tuple[list[Findi
     return findings, None
 
 
-def evidence_rules() -> tuple[RecordRule | BundleRule, ...]:
-    """Every rule `check-records` can run, either family - resolved at CALL time,
+def evidence_rules() -> tuple[RecordRule | BundleRule | UsageRule, ...]:
+    """Every rule `check-records` can run, any family - resolved at CALL time,
     so a registry patched in a test is the registry the selector is checked against."""
-    return RECORD_RULES + BUNDLE_RULES
+    return RECORD_RULES + BUNDLE_RULES + USAGE_RULES
 
 
 def record_rule_by_id(rule_id: str) -> RecordRule | None:
@@ -659,8 +699,8 @@ def applicable_population(rule: RecordRule, found: list[records.Record]) -> int:
 
 #: ONE registry. `selftest` iterates this; the coverage check, the totals and the
 #: exit code never learn which family a rule came from.
-ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule | CollectionRule, ...] = (
-    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES + COLLECTION_RULES
+ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule | UsageRule | CollectionRule, ...] = (
+    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES + USAGE_RULES + COLLECTION_RULES
 )
 
 
@@ -668,7 +708,8 @@ def require_known(
     only: str | None,
     family: (
         tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[ManifestRule, ...]
-        | tuple[RecordRule | BundleRule, ...] | tuple[CollectionRule, ...]
+        | tuple[RecordRule | BundleRule, ...] | tuple[RecordRule | BundleRule | UsageRule, ...]
+        | tuple[CollectionRule, ...]
     ),
 ) -> None:
     """An unknown selector is a caller error, never a request to check nothing.
