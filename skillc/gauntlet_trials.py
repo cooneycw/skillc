@@ -45,7 +45,21 @@ from pathlib import Path
 from typing import Protocol
 
 from .reliability import DISCRIMINATION_VERDICTS, TwoArmRule, evaluate_discrimination
-from .source_digest import digest_tree
+from .source_digest import digest_entries, tree_entries
+
+#: The engine's record (#754, `skillc.gauntlet.RECORD_NAME`), written beside a
+#: native skill's CHARTER.md on every run. It is never part of the skill, so it
+#: is left out of the skill digest. The charter itself stays IN: a changed
+#: charter must invalidate a declaration. Kept as a literal so this module
+#: imports no engine code (`tests/test_gauntlet_trials.py` pins the two equal).
+ENGINE_RECORD = "GAUNTLET.json"
+
+
+def skill_digest(skill: Path) -> str:
+    """The skill's digest, without the engine's record (#737 review)."""
+    entries = tree_entries(skill)
+    return digest_entries({path: value for path, value in entries.items()
+                           if path != ENGINE_RECORD})
 
 SCHEMA = 1
 PASS, FAIL, ERROR = "pass", "fail", "error"
@@ -145,7 +159,7 @@ def load(path: Path) -> Declaration:
     if not (skill / "SKILL.md").is_file():
         raise DeclarationError(f"no SKILL.md under the declared skill {skill}")
     declared_digest = str(_need(data, "skill_digest", str, "declaration"))
-    actual = digest_tree(skill)
+    actual = skill_digest(skill)
     if declared_digest != actual:
         raise DeclarationError(f"skill digest {declared_digest!r} is not the skill's ({actual}); the skill changed")
     raw_client = _need(data, "client", dict, "declaration")
@@ -206,6 +220,12 @@ def load(path: Path) -> Declaration:
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def remove_sha256(passage: Passage) -> str:
+    """The whole removed passage's identity. `removes` is cut to 80 characters
+    for display, so two passages can share it (#737 review)."""
+    return "sha256:" + hashlib.sha256(passage.remove.encode()).hexdigest()
 
 
 def arm_text(declaration: Declaration, passage: Passage | None) -> dict[str, str]:
@@ -565,12 +585,14 @@ def round3(declaration: Declaration, ledger: Ledger, runner: AttemptRunner | Non
             # Counter-model review, pass 2: dropping one arm's errors from its
             # denominator can fake a difference. Errors mean no comparable pair.
             report.separation[passage.arm] = {"clause": passage.clause, "removes": f"{passage.file}: {passage.remove[:80]}",
+                                              "remove_sha256": remove_sha256(passage),
                                               "verdict": "UNKNOWN", "p": None,
                                               "reason": "an attempt errored, so the arms are not comparable"}
             continue
         verdict = evaluate_discrimination(declaration.rule, intact["pass"], intact["evaluable"],
                                           damaged["pass"], damaged["evaluable"], certified=True)
         report.separation[passage.arm] = {"clause": passage.clause, "removes": f"{passage.file}: {passage.remove[:80]}",
+                                          "remove_sha256": remove_sha256(passage),
                                           "verdict": verdict.verdict, "p": verdict.p_value, "reason": verdict.reason}
     failed = [a for a, s in report.separation.items() if s["verdict"] != DISCRIMINATION_VERDICTS[0]]
     if failed:
@@ -628,7 +650,8 @@ def round4(declaration: Declaration, ledger: Ledger, runner: AttemptRunner | Non
                 worse.append(f"{clause} (an attempt errored, so not shown no-worse)")
             elif mine["pass"] < base["pass"] - declaration.tolerance:
                 worse.append(f"{clause} ({mine['pass']} < {base['pass']} - tolerance {declaration.tolerance})")
-        report.variants[variant.arm] = {"removes": f"{variant.file}: {variant.remove[:80]}", "source": variant.clause,
+        report.variants[variant.arm] = {"removes": f"{variant.file}: {variant.remove[:80]}",
+                                        "remove_sha256": remove_sha256(variant), "source": variant.clause,
                                         "passes": not worse, "worse_on": worse}
         if not worse:
             passing.append(variant.arm)

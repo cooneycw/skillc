@@ -473,3 +473,66 @@ def test_the_text_output_is_unchanged_by_the_json_flag(tmp_path: Path) -> None:
     fresh_r3 = golden.split("GAUNTLET ROUND 4")[0]
     assert g.render(r4) == "GAUNTLET ROUND 4" + golden.split("GAUNTLET ROUND 4")[1]
     assert g.render(r3).replace("reused 24, new 0, run 0", "reused 0, new 24, run 24") == fresh_r3
+
+
+# ---------------------------------------------------------------- #737 review (post-receipt, approved)
+
+
+def test_the_engines_record_beside_the_charter_does_not_change_the_skill_digest(tmp_path: Path) -> None:
+    """BUG: `gauntlet run` writes GAUNTLET.json beside CHARTER.md inside a native
+    skill, so every engine run made a valid declaration read 'the skill changed'."""
+    from skillc import gauntlet
+
+    path = _copy(tmp_path)
+    (path.parent / "skill" / gauntlet.RECORD_NAME).write_text('{"engine": "record"}\n', encoding="utf-8")
+    assert _decl(path).skill_digest  # accepted
+
+
+def test_a_real_skill_edit_is_still_refused(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    skill = path.parent / "skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "\nA new rule.\n", encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="the skill changed"):
+        _decl(path)
+
+
+def test_a_charter_edit_still_invalidates_the_declaration(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    (path.parent / "skill/CHARTER.md").write_text("---\ncontract: planner\n---\n", encoding="utf-8")
+    data["skill_digest"] = data["skill_digest"]  # unchanged on purpose: the charter is part of the skill
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="the skill changed"):
+        _decl(path)
+
+
+def test_variants_and_separation_carry_the_full_passage_digest(tmp_path: Path) -> None:
+    """`removes` is cut to 80 characters for display; `remove_sha256` names the
+    whole passage, so two passages sharing their first 80 characters differ."""
+    import hashlib
+
+    long_a = "A" * 90 + " first ending.\n"
+    long_b = "A" * 90 + " second ending.\n"
+    path = _copy(tmp_path)
+    skill = path.parent / "skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "\n" + long_a + "\n" + long_b, encoding="utf-8")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["skill_digest"] = digest_tree((path.parent / "skill").resolve())
+    data["variants"] = [{"arm": "va", "file": "SKILL.md", "clause": "x", "remove": long_a},
+                        {"arm": "vb", "file": "SKILL.md", "clause": "x", "remove": long_b}]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    declaration, ledger = _round3_complete(path)
+    r4 = json.loads(g.to_json(g.round4(declaration, ledger, _runner(declaration, {}))))
+    va, vb = r4["variants"]["va"], r4["variants"]["vb"]
+    assert va["removes"][:80] == vb["removes"][:80]
+    assert va["remove_sha256"] == "sha256:" + hashlib.sha256(long_a.encode()).hexdigest()
+    assert va["remove_sha256"] != vb["remove_sha256"]
+    r3 = json.loads(g.to_json(g.round3(declaration, ledger, _runner(declaration, {}))))
+    passage = data["damaged"][0]["remove"]
+    assert r3["separation"]["damaged-gate"]["remove_sha256"] == "sha256:" + hashlib.sha256(passage.encode()).hexdigest()
+
+
+def test_the_record_name_matches_the_engines() -> None:
+    from skillc import gauntlet
+
+    assert g.ENGINE_RECORD == gauntlet.RECORD_NAME

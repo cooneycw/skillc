@@ -17,7 +17,7 @@ runner over `calibration_run`'s path, under its own gate.
 
 | Field | Meaning |
 |---|---|
-| `skill`, `skill_digest` | the skill directory and its `source_digest.digest_tree`. A changed skill is refused |
+| `skill`, `skill_digest` | the skill directory and its digest (`gauntlet_trials.skill_digest`): every file, CHARTER.md included, except the engine's own `GAUNTLET.json` record. A changed skill or charter is refused |
 | `client` | `name`, `version`, `model`: part of every ledger key |
 | `attempt_cap`, `partial` | the declared attempt count (#718 decision 4). Without `partial`, a run needing more is refused |
 | `replicates`, `seed` | attempts per task and arm, and the split's seed |
@@ -69,6 +69,8 @@ clauses can never train one and be held out for the other.
 
 ## Round 4: challenge
 
+- Every variant and separation row carries `remove_sha256`, the digest of the
+  whole removed passage. `removes` is cut to 80 characters for display only.
 - Round 3 must be `COMPLETE`, and its attempts are reused from the ledger. A
   round-3 `UNKNOWN` makes round 4 `UNKNOWN`. Round 3 not run yet is `REFUSED`.
   `--plan` never needs round 3: it counts round 4's attempts and states the

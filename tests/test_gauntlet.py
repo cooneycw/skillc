@@ -75,16 +75,6 @@ def _absent(*commands: tuple[str, ...]):
     return fake
 
 
-def _absent(*commands: tuple[str, ...]):
-    """#736 PR 1 adds `gauntlet round3` to this skillc, so a test asserting the
-    NOT BUILT path pins the command's absence instead of relying on the build."""
-    real = gauntlet.available
-
-    def fake(words: list[str], cwd: Path) -> bool:
-        return False if tuple(words) in commands else real(words, cwd)
-    return fake
-
-
 def _present(*commands: tuple[str, ...]):
     real = gauntlet.available
 
