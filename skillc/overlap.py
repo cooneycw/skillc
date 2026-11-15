@@ -355,6 +355,46 @@ def render(report: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _duty_json(report: Report, duty: Duty) -> dict[str, object]:
+    try:
+        where = duty.path.relative_to(report.root).as_posix()
+    except ValueError:
+        where = duty.path.name
+    return {"contract": duty.contract, "id": duty.clause_id, "section": duty.section, "text": duty.text,
+            "observed_only": duty.observed_only, "charter": where}
+
+
+def to_data(report: Report) -> dict[str, object]:
+    """The report as plain data, for `--json`; round 5 (#737) reads these
+    names. `examined` is false when no comparator ran or no pair was judged.
+    A reader must then treat every overlap and orphan as NOT EXAMINED, never
+    as none found. `counts` is null in that case for the same reason."""
+    return {
+        "examined": report.examined,
+        "source": report.source,
+        "replicates": report.replicates,
+        "duties": [_duty_json(report, d) for d in report.duties],
+        "pairs": [{"a": p.a.clause_id, "b": p.b.clause_id, "answers": list(p.answers), "verdict": p.verdict}
+                  for p in report.pairs],
+        "overlaps": [{"kind": o.kind, "duties": [{"contract": d.contract, "id": d.clause_id} for d in o.duties],
+                      "answers": list(o.answers)} for o in report.overlaps],
+        "unknown_pairs": [{"a": p.a.clause_id, "b": p.b.clause_id, "answers": list(p.answers)}
+                          for p in report.unknown_pairs],
+        "unknown_orphans": [{"contract": d.contract, "id": d.clause_id} for d in report.unknown_orphans],
+        "skipped_same_id": [{"a": f"{a.contract}/{a.clause_id}", "b": f"{b.contract}/{b.clause_id}"}
+                            for a, b in report.skipped_same_id],
+        "incomplete": list(report.incomplete),
+        "notes": list(report.notes),
+        "counts": report.counts() if report.examined else None,
+    }
+
+
+def to_json(report: Report) -> str:
+    import json
+
+    return json.dumps(to_data(report), sort_keys=True, indent=2) + "\n"
+
+
 def load_verdicts(path: Path) -> RecordedComparator:
     return RecordedComparator(path.read_text(encoding="utf-8"), source=f"recorded verdicts: {path.name}")
 

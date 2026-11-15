@@ -124,3 +124,4 @@ Readers:
 
 ### Plan deviations
 - 2026-11-15, orchestrator mailbox rev 20: commit `60a6c7e` came AFTER the counter-model receipt's reviewed head (`2da2959`). It is test-only: it renames a shadowed comprehension variable in `tests/test_overlap.py` that mypy refused. No product code and no verdict changed.
+- 2026-11-15, orchestrator mailbox rev 57, at #737's (skillc-754) request and approved: `skillc charter overlap --json` prints `overlap.to_data(report)`. It is output-only and additive, with no behaviour change, and it was committed AFTER this run's counter-model receipt (reviewed head `2da2959`). `examined: false` and `counts: null` when nothing was compared. Paths: `skillc/overlap.py` (`to_data`, `to_json`), `skillc/cli.py` (the flag), `tests/test_overlap.py`, and `tests/fixtures/overlap/render-golden.txt`, the text output captured before the change.

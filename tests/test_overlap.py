@@ -297,3 +297,36 @@ def test_a_clause_id_two_charters_declare_is_unknown_whatever_the_file_order(tmp
     involved = [p for p in report.pairs if "common.duty" in (p.a.clause_id, p.b.clause_id)]
     assert involved and all(p.verdict == UNKNOWN for p in involved)
     assert not any("common.duty" in found for found in overlap.ids(report.overlaps))
+
+
+# ---------------------------------------------------------------- --json (#737 reads it; post-receipt, output-only)
+
+
+def test_json_carries_the_report_data_when_examined() -> None:
+    import json
+
+    fake = FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]})
+    report = overlap.compare(_collection(PARAPHRASE), fake)
+    data = json.loads(overlap.to_json(report))
+    assert data == json.loads(json.dumps(overlap.to_data(report)))
+    assert data["examined"] is True and data["counts"]["shared"] == 1
+    assert data["overlaps"] == [{"kind": "shared", "answers": ["same"] * 3,
+                                 "duties": [{"contract": "alpha", "id": "alpha.always-1"},
+                                            {"contract": "beta", "id": "beta.always-1"}]}]
+    assert {d["id"] for d in data["duties"]} == {"alpha.always-1", "alpha.always-2", "beta.always-1", "beta.always-2"}
+
+
+def test_json_says_not_examined_with_no_counts(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    assert cli.main(["charter", "overlap", str(PARAPHRASE), "--json"]) == overlap.EXIT_NOT_EXAMINED
+    data = json.loads(capsys.readouterr().out)
+    assert data["examined"] is False and data["counts"] is None and data["overlaps"] == []
+
+
+def test_the_text_output_is_unchanged_by_the_json_flag() -> None:
+    """The golden was captured BEFORE --json was added (post-receipt change)."""
+    fake = FakeComparator({("alpha.always-1", "beta.always-1"): [SAME]})
+    text = overlap.render(overlap.compare(_collection(PARAPHRASE), fake))
+    text += "=====NO COMPARATOR=====\n" + overlap.render(overlap.compare(_collection(PARAPHRASE), None))
+    assert text == (ROOT / "tests/fixtures/overlap/render-golden.txt").read_text(encoding="utf-8")

@@ -2746,7 +2746,7 @@ def cmd_charter_overlap(args: argparse.Namespace) -> int:
             print(f"skillc: verdicts not read: {exc}", file=sys.stderr)
             return overlap.EXIT_USAGE
     report = overlap.compare(collection, comparator, replicates=args.replicates)
-    text = overlap.render(report)
+    text = overlap.to_json(report) if args.json else overlap.render(report)
     if args.out:
         try:
             charter_confirm.write_new(Path(args.out), text)
@@ -3650,6 +3650,9 @@ def build_parser() -> argparse.ArgumentParser:
                                         "one replicate per line; without it nothing is compared (exit 3)")
     p_charter_overlap.add_argument("--replicates", type=int, default=3, help="judgements per pair (default 3)")
     p_charter_overlap.add_argument("--out", metavar="FILE", help="write the report here; never overwrites")
+    p_charter_overlap.add_argument("--json", action="store_true",
+                                   help="print the report as JSON (overlap.to_data; read by #737); "
+                                        "examined is false when nothing was compared")
     p_charter_overlap.set_defaults(func=cmd_charter_overlap)
 
     p_rules = sub.add_parser("rules", help="list the rules")
