@@ -720,3 +720,40 @@ def test_the_drift_check_never_blocks_the_engine(tmp_path: Path, planted: str) -
             (copy / "extra").chmod(0o755)
     assert "SKILL_GAUNTLET: warning: this installed copy differs" in done.stderr, done.stderr
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout
+
+
+# --------------------------- #774 post-receipt: #776 item 2 (orchestrator rev 47)
+
+@pytest.mark.parametrize("damage", ["fifo", "symlink", "unreadable", "deleted-launcher"])
+def test_reinstall_repairs_skillcs_own_damaged_copy(checkout: Path, tmp_path: Path, damage: str) -> None:
+    """The drift warning says "re-run make install-skill"; for skillc's OWN
+    (marked) copy that must REPAIR it, whatever is wrong inside it."""
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    copy = skills / NAME
+    if damage == "fifo":
+        os.mkfifo(copy / "scripts" / "planted")
+    elif damage == "symlink":
+        (copy / "scripts" / "planted").symlink_to(copy / "SKILL.md")
+    elif damage == "unreadable":
+        if os.geteuid() == 0:
+            pytest.skip("root reads a mode-000 directory")
+        (copy / "extra").mkdir()
+        (copy / "extra").chmod(0)
+    else:
+        (copy / "scripts" / "gauntlet.sh").unlink()
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0 and "refreshed" in done.stdout, done.stdout + done.stderr
+    assert not (copy / "scripts" / "planted").exists() and not (copy / "extra").exists()
+    assert (copy / "scripts" / "gauntlet.sh").is_file() and [p.name for p in skills.iterdir()] == [NAME]
+    _kyle_stageable(skills)
+
+
+def test_a_damaged_foreign_directory_is_still_refused(checkout: Path, tmp_path: Path) -> None:
+    """The negative control: repair is for skillc's MARKED copy only."""
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    shutil.copytree(checkout / ".claude" / "skills" / NAME, skills / NAME)
+    os.mkfifo(skills / NAME / "scripts" / "planted")
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 1 and "refusing" in done.stderr and (skills / NAME / "scripts" / "planted").exists()

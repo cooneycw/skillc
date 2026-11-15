@@ -301,8 +301,16 @@ def _install(skills: Path, cache: Path) -> int:
         except OSError:
             located = ""
         excluded = (entry / KYLE_EXCLUDE).is_file()
-        if (current.get("digest") == digest(files) and located == locator_text(checkout) and excluded
-                and payload(entry) == files and exec_bits(entry, files) == exec_bits(source, files)):
+        # skillc's OWN copy (its marker) is REPAIRED whatever state its files
+        # are in: a copy this installer cannot even compare (a link, a FIFO, an
+        # unreadable directory inside it) needs a refresh, never a refusal -
+        # the launcher's drift warning tells the owner to re-run exactly this
+        # (orchestrator ruling rev 47, #776 item 2). Foreign entries stay refused.
+        try:
+            intact = payload(entry) == files and exec_bits(entry, files) == exec_bits(source, files)
+        except (Refused, OSError):
+            intact = False
+        if current.get("digest") == digest(files) and located == locator_text(checkout) and excluded and intact:
             return _say(EXIT_OK, f"already installed: {entry} is a current copy of {source}")
     skills.mkdir(parents=True, exist_ok=True)
     _same_device(cache, skills)
