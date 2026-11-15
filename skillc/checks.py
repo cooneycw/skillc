@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import decay, records, usage
+from . import contracts, decay, records, usage
 from .spec import (
     BODY_LINE_BUDGET,
     CLAUDE_CODE,
@@ -530,6 +530,54 @@ MANIFEST_RULES: tuple[ManifestRule, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class ContractRule:
+    """A rule whose subject is a skill COLLECTION's contracts (#720): every
+    `CHARTER.md` under one root, read together because hand-offs, readers and
+    duty ownership are facts BETWEEN contracts. A separate type for the same
+    reason `BundleRule` is one - its subject is neither a SKILL.md nor a
+    record - and not a separate machinery: it sits in `ALL_RULES`."""
+
+    id: str
+    severity: str
+    summary: str
+    check: Callable[[contracts.Collection], Iterator[tuple[Path, str]]]
+    parser: bool = False
+
+
+CONTRACT_RULES: tuple[ContractRule, ...] = (
+    ContractRule("contract-shape", ERROR, "every CHARTER.md block parses and declares the required fields in their types",
+                 contracts.contract_shape, parser=True),
+    ContractRule("clause-backed", ERROR, "every clause names a test, and every path it names exists",
+                 contracts.clause_backed),
+    ContractRule("negative-backed", ERROR, "every never/authority clause names a bad case",
+                 contracts.negative_backed),
+    ContractRule("handoff-bilateral", ERROR, "every consumed clause is provided by a contract in the collection",
+                 contracts.handoff_bilateral),
+    ContractRule("handoff-version", ERROR, "every consumer names the version its provider is at",
+                 contracts.handoff_version),
+    ContractRule("reader-exists", ERROR, "every provides reader is owner, a contract, or a contract's existing clause",
+                 contracts.reader_exists),
+    ContractRule("scope-owned", ERROR, "every scope.out duty is in another contract's scope.in",
+                 contracts.scope_owned),
+    ContractRule("duty-single-owner", ERROR, "no scope.in duty is claimed by two contracts",
+                 contracts.duty_single_owner),
+    ContractRule("approval-present", WARN, "intent and authority clauses carry an owner approval date",
+                 contracts.approval_present),
+)
+
+
+def run_contracts(collection: contracts.Collection, only: str | None = None) -> list[Finding]:
+    """Apply every contract rule (or one) to one collection."""
+    require_known(only, CONTRACT_RULES)
+    findings: list[Finding] = []
+    for rule in CONTRACT_RULES:
+        if only and rule.id != only:
+            continue
+        findings.extend(Finding(rule.id, rule.severity, path, detail) for path, detail in rule.check(collection))
+    return findings
+
+
 def run_manifest(case: Path, only: str | None = None) -> tuple[list[Finding], str | None]:
     """Apply every manifest rule (or one) to the manifest at
     `case/.claude-plugin/plugin.json` - the convention both `cmd_check
@@ -699,15 +747,15 @@ def applicable_population(rule: RecordRule, found: list[records.Record]) -> int:
 
 #: ONE registry. `selftest` iterates this; the coverage check, the totals and the
 #: exit code never learn which family a rule came from.
-ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule | UsageRule | CollectionRule, ...] = (
-    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES + USAGE_RULES + COLLECTION_RULES
+ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule | UsageRule | CollectionRule | ContractRule, ...] = (
+    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES + USAGE_RULES + COLLECTION_RULES + CONTRACT_RULES
 )
 
 
 def require_known(
     only: str | None,
     family: (
-        tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[ManifestRule, ...]
+        tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[ManifestRule, ...] | tuple[ContractRule, ...]
         | tuple[RecordRule | BundleRule, ...] | tuple[RecordRule | BundleRule | UsageRule, ...]
         | tuple[CollectionRule, ...]
     ),
