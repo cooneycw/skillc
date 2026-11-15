@@ -27,7 +27,7 @@ import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 #: How many comments, and replies per comment, one read fetches. A thread
 #: longer than this is reported as truncated, never as complete.
@@ -143,7 +143,7 @@ class GhReader:
     runner: Runner = subprocess.run
     gh: str | None = field(default_factory=lambda: shutil.which("gh"))
 
-    def _gh(self, argv: list[str]) -> dict[str, object]:
+    def _gh(self, argv: list[str]) -> dict[str, Any]:
         assert_read_only(argv)
         if not self.gh:
             raise RepoReadError("gh not found on PATH")
@@ -160,7 +160,7 @@ class GhReader:
             raise RepoReadError(f"gh exited {done.returncode}: {reason[-1] if reason else 'no output'}")
         return data
 
-    def _query(self, kind: str, ref: Ref) -> dict[str, object] | None:
+    def _query(self, kind: str, ref: Ref) -> dict[str, Any] | None:
         """The node, or None when the number is not this kind (NOT_FOUND)."""
         owner, name = ref.repo.split("/", 1)
         data = self._gh(["api", "graphql", "-f", f"query={_QUERIES[kind]}",
@@ -196,25 +196,26 @@ class GhReader:
         if data.get("errors") or not isinstance(data.get("data"), dict):
             raise RepoReadError("GitHub refused the search")
         found: list[Ref] = []
+        result: dict[str, Any] = data["data"]
         for key, kind in (("discussions", "discussion"), ("issues", None)):
-            nodes = (data["data"].get(key) or {}).get("nodes") or []
+            nodes = (result.get(key) or {}).get("nodes") or []
             for n in nodes:
                 if isinstance(n, dict) and isinstance(n.get("number"), int):
                     found.append(Ref(repo, n["number"], kind))
         return sorted(set(found), key=lambda r: r.number)
 
 
-def _document(ref: Ref, kind: str, node: dict[str, object]) -> Document:
+def _document(ref: Ref, kind: str, node: dict[str, Any]) -> Document:
     if kind != "discussion":
         kind = "pr" if node.get("__typename") == "PullRequest" else "issue"
     parts = [Part(str(node.get("url") or ""), str(node.get("body") or ""))]
-    comments = node.get("comments") if isinstance(node.get("comments"), dict) else {}
+    comments: dict[str, Any] = node["comments"] if isinstance(node.get("comments"), dict) else {}
     truncated = bool((comments.get("pageInfo") or {}).get("hasNextPage"))
     for comment in comments.get("nodes") or []:
         if not isinstance(comment, dict):
             continue
         parts.append(Part(str(comment.get("url") or ""), str(comment.get("body") or "")))
-        replies = comment.get("replies") if isinstance(comment.get("replies"), dict) else {}
+        replies: dict[str, Any] = comment["replies"] if isinstance(comment.get("replies"), dict) else {}
         truncated = truncated or bool((replies.get("pageInfo") or {}).get("hasNextPage"))
         for reply in replies.get("nodes") or []:
             if isinstance(reply, dict):

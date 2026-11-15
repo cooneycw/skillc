@@ -39,7 +39,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import charter, usage
-from .repo_reader import Document, RepoReader, RepoReadError, Ref, parse_ref
+from .repo_reader import Document, Ref, RepoReader, RepoReadError, parse_ref
 from .spec import FrontmatterError, parse_contract_block
 
 SCHEMA = 1
