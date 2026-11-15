@@ -322,7 +322,7 @@ def test_731_the_control_root_is_still_an_enforcer(tmp_path: Path) -> None:
 
 
 def test_731_the_report_summary_says_when_a_copy_count_is_an_estimate(tmp_path: Path) -> None:
-    same = " ".join(["same"] * 200)
+    same = " ".join(["same"] * 1000)  # hits the extension cap (#741: 200 is now exact)
     _skill(tmp_path, "a", same + "\n")
     _skill(tmp_path, "b", same + "\n")
     report = inspect.run(decay.load(tmp_path, offline=True))

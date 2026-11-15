@@ -197,6 +197,36 @@ An earlier cut also dropped `if ! scripts/commands-mirror-sync.sh --check` and
 `elif ~/.claude/scripts/speckit-context.py refresh --body-file`; shell keywords
 were then added to the command prefixes, and a test now holds both.
 
+## Re-run after #741 (same SHAs, against the #731 numbers)
+
+| Run | Errors | Buckets / rule lines | Copied-passage | Prefixed refs / flags |
+|---|---|---|---|---|
+| CPP `d5ef0a66` | 6, identical | identical | 81, identical; 0 estimates | 336 / 240, unchanged |
+| CPP `93ae8540` | 6, identical | identical | 81, identical; 0 estimates | 336 / 240, unchanged |
+| mattpocock `5863806` | 0 | identical | 2, identical; 0 estimates | unchanged |
+
+The only movement is in the two counters of words this rule does NOT examine:
+`path_like_not_examined` 159 -> 158 and `placeholder_paths_not_examined`
+1092 -> 1137 (CPP, both SHAs). Each changed word was traced to the token it came
+from (`docs/measurements` keeps no script; the method is reproducible from
+`decay.shell_tokens`):
+- **+24 placeholder words from quoted strings that contain `$(...)` or carry an
+  unquoted `)`**, 19 of them `2>/dev/null` inside `"$(... 2>/dev/null)"`. These
+  are #741 items 2 and 3 working: such strings are now read word by word,
+  whereas #744 skipped the whole token as a substitution.
+- **±0, a change of spelling only**: `s|^https?://||` (formerly counted as
+  `s|^https?://`) and `s|refs/remotes/origin/||`. A quoted `|` is text, so it is
+  no longer stripped as if it were a separator (#741 item 1).
+- **path-like -1 (`AppleWebKit/537.36`), placeholder -1/+1** from
+  `--chrome-flags="--user-agent='Mozilla/5.0 ...'"`. An option with a quoted value
+  is an option, not a string (the orchestrator's `--opt="x y"` guard).
+- **+1** from `'-> Local-model lanes not installed (...)'`, a quoted message that
+  begins with `-` and is now read as an option. That is the one new blind spot,
+  listed by name in `docs/specs/inspect.md`.
+
+No examined reference moved, so prefixed references are 336 and flags 240 as
+before.
+
 ## Reproducing
 
 The SHAs above are public. `--issue-states` makes a run deterministic: issue

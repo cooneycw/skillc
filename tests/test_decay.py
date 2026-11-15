@@ -428,11 +428,20 @@ def test_731_a_repetitive_prefix_is_measured_whole_in_both_orders(tmp_path: Path
 
 
 def test_731_purely_repetitive_text_is_labelled_a_bounded_estimate(tmp_path: Path) -> None:
-    """The orchestrator's condition: where the first-8 fallback measured a
-    position, the finding says it is an estimate."""
+    """The orchestrator's condition: where the bounded search could not rule out
+    a missed run, the finding says it is an estimate.
+
+    #741 changed the input. With the fallback's alignments pooled before any word
+    is consumed, 200 x `same` is now measured EXACTLY (asserted below), so the
+    estimate case is an input that genuinely hits the extension cap."""
     same = " ".join(["same"] * 200)
     _skill(tmp_path, "a", same + "\n")
     _skill(tmp_path, "b", same + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["longest_words"] == 200 and hit.data["estimate"] is False
+    long_same = " ".join(["same"] * 1000)
+    _skill(tmp_path, "a", long_same + "\n")
+    _skill(tmp_path, "b", long_same + "\n")
     [hit] = decay.copied_passage(_load(tmp_path)).hits
     assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
 
@@ -576,3 +585,145 @@ def test_731_r2_a_path_inside_a_quoted_string_is_still_checked_for_existence(tmp
     _helper(tmp_path)
     _skill(tmp_path, "a", '```bash\necho "run scripts/gone.sh, then scripts/helper.sh --absent"\n```\n')
     assert _flag_refs(tmp_path) == ["scripts/gone.sh,"[:-1]]
+
+
+# ------------------------------------------------- #741 (five pass-3 false negatives)
+
+def test_741_a_quoted_separator_is_an_argument(tmp_path: Path) -> None:
+    """#741 item 1, the issue's exact input."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh ";" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_741_a_quoted_assignment_before_a_real_separator(tmp_path: Path) -> None:
+    """Orchestrator's guard: `p="a b"` stays ONE word (posix boundaries), and the
+    unquoted `;` after it still starts the helper's command."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\np="a b" ; scripts/helper.sh --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_741_a_quoted_option_value_stays_one_word(tmp_path: Path) -> None:
+    """Orchestrator's guard: `--opt="x y"` is one token; `--absent` is still checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --opt="x y" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --opt", "scripts/helper.sh --absent"]
+
+
+def test_741_a_path_beside_a_substitution_in_one_quoted_argument(tmp_path: Path) -> None:
+    """#741 item 2, the issue's exact input."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\necho "$(pwd) scripts/gone.sh"\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/gone.sh"]
+
+
+def test_741_wrapper_state_survives_a_substitution_with_a_separator_inside(tmp_path: Path) -> None:
+    """#741 item 3, the issue's exact input."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nsudo -u $(id -un; echo root) -g root scripts/helper.sh --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["A-first", "B-first"])
+def test_741_a_rare_anchor_does_not_starve_a_longer_repetitive_match(tmp_path: Path, swap: bool) -> None:
+    """#741 item 4, the issue's exact case: 70 words in both orders, and exact."""
+    tail = " ".join(f"t{i}" for i in range(20))
+    first = " ".join(["same"] * 70) + " " + tail
+    second = " ".join(["same"] * 100) + " separator " + " ".join(["same"] * 31) + " " + tail
+    if swap:
+        first, second = second, first
+    _skill(tmp_path, "a", first + "\n")
+    _skill(tmp_path, "b", second + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["longest_words"] == 70 and hit.data["estimate"] is False
+
+
+def test_741_the_fallback_extension_cap_labels_an_estimate(tmp_path: Path) -> None:
+    """Orchestrator's negative control: an input that hits the extension cap is
+    an estimate. (The 70-word case above is the exact, unlabelled side.)"""
+    same = " ".join(["same"] * 1000)
+    _skill(tmp_path, "a", same + "\n")
+    _skill(tmp_path, "b", same + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["estimate"] is True and "bounded estimate" in hit.detail
+
+
+def test_741_env_split_string_flags_are_counted(tmp_path: Path) -> None:
+    """#741 item 5, the issue's exact input: the -S value is command text - its
+    path is checked, and the flag after it is COUNTED, never silently dropped."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh" --absent\nenv --split-string="bash scripts/gone.sh" --x\n```\n')
+    result = decay.dangling_reference(_load(tmp_path))
+    assert [h.data["reference"] for h in result.hits] == ["scripts/gone.sh"]
+    assert result.population["flags_after_a_non_command_path"] == 2
+
+
+def test_741_the_tokeniser_keeps_shlex_posix_boundaries() -> None:
+    """Word boundaries are exactly shlex posix=True's (the orchestrator's
+    condition); only the quoting of operators is added."""
+    import shlex
+
+    cases = [
+        'p="a b" ; c', 'a"b c" d', 'x --opt="x y" --z', '"$(pwd)"; echo --a', "it's \"a\" b",
+        'sudo -u "$(id -un)" s.sh', 'a && b || c | d', "e 'single ; quoted' f", 'esc\\ aped word',
+    ]
+    for text in cases:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        try:
+            expected = list(lexer)
+        except ValueError:
+            # Unbalanced for shlex (the apostrophe in "it's"): ours refuses too,
+            # and the caller falls back to whitespace words.
+            with pytest.raises(ValueError):
+                decay.shell_tokens(text)
+            continue
+        assert [t.text for t in decay.shell_tokens(text)] == expected, text
+
+
+def test_741_single_quotes_are_quotes_too(tmp_path: Path) -> None:
+    """The single-quote twins: `';'` is an argument, and a path inside a
+    single-quoted string is still checked for existence."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "```bash\nscripts/helper.sh ';' --absent\necho 'run scripts/gone.sh now'\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent", "scripts/gone.sh"]
+
+
+def test_741_an_unquoted_substitution_as_an_option_value(tmp_path: Path) -> None:
+    """`sudo -u $(id -un)` unquoted: the substitution branch (not the string
+    branch) must consume the pending value, so the helper is still the command."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "```bash\nsudo -u $(id -un) scripts/helper.sh --absent\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_741_a_quoted_string_that_closes_a_substitution_still_closes_it(tmp_path: Path) -> None:
+    """`X=$(sed 's/a b/c/') scripts/helper.sh --absent`: the last token of the
+    substitution is a quoted string WITH the unquoted `)` attached. Its words are
+    a string, but the `)` still ends the substitution, so the helper after it is
+    the command and `--absent` is checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "```bash\nX=$(sed 's/a b/c/') scripts/helper.sh --absent\n"
+                          "sudo -u $(id 'a b') -g root scripts/helper.sh --absent\n```\n")
+    # The second line only passes if the `)` restores the OUTER state (the
+    # `sudo` prefix, so `-g root` is an option value and the helper the command).
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent", "scripts/helper.sh --absent"]
+
+
+def test_741_quoted_delimiters_are_not_substitution_delimiters() -> None:
+    """Only UNQUOTED `$(` and `)` move the substitution stack."""
+    tokens = decay.shell_tokens('a "$(pwd)" $(id x) "x)"')
+    assert [(t.text, t.opens, t.closes) for t in tokens] == [
+        ("a", 0, 0), ("$(pwd)", 0, 0), ("$(id", 1, 0), ("x)", 0, 1), ("x)", 0, 0),
+    ]
+
+
+def test_741_an_unquoted_single_token_substitution_restores_the_outer_command(tmp_path: Path) -> None:
+    """Unquoted `$(pwd)` opens and closes in one word: the outer command is
+    restored at once, so `--absent` is the helper's. (The quoted `"$(pwd)"` form is
+    self-contained and never touches the stack.)"""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", "```bash\nscripts/helper.sh --verbose $(pwd) --absent\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]

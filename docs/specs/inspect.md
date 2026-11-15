@@ -145,10 +145,16 @@ resolved script, in the same span or line, is looked up in the script's
 `flow-preflight.sh` that execs `flow-preflight.py "$@"` takes the flags its
 target defines.
 
-**How command text is split into words** (#731, a design change). Inline code
-spans and fenced-block lines - command-shaped text only, never running prose,
-where two apostrophes ("don't ... isn't") would pair up and swallow a reference
-- are tokenised with stdlib `shlex` (posix, `punctuation_chars=";&|"`). A
+**How command text is split into words** (#731, a design change; #741). Inline
+code spans and fenced-block lines - command-shaped text only, never running
+prose, where two apostrophes ("don't ... isn't") would pair up and swallow a
+reference - are split with EXACTLY the word boundaries of stdlib `shlex`
+(posix, `punctuation_chars=";&|"`): `p="a b"` and `--opt="x y"` stay one word.
+`decay.shell_tokens` reproduces those boundaries (checked identical to `shlex`
+on all 17,694 CPP and mattpocock code spans, and refusing the same 434) and adds
+what shlex discards: whether an operator, a `$(` or a `)` was UNQUOTED. Only an
+unquoted `;`/`|`/`&&` separates commands, and only unquoted `$(`/`)` open and
+close a substitution, so a quoted `"$(pwd)"` is self-contained. A
 quoted argument stays one word, so `"$(printf x);"` is a value and its `;` no
 separator, while an unquoted `;`, `|` or `&&` is a token of its own. A quoted
 argument that holds several words is a STRING: each of its paths must still
@@ -190,25 +196,16 @@ execute repository-controlled code on the host.
   `echo "..."` string, and a script named mid-sentence in a prose code span
   (`(re-run scripts/x.sh --write later)`) - their flags are not examined.
 
-**Known false negatives until #741 lands.** A CLEAN `dangling-reference`
-verdict does NOT cover these five shapes. Each one is missed today, and each
-names its tracking item:
-- **a quoted separator** - `scripts/helper.sh ";" --absent`: shlex returns `;`
-  for a quoted and an unquoted separator alike, so the command is reset and
-  `--absent` is never examined;
-- **a path beside a substitution in one quoted argument** -
-  `echo "$(pwd) scripts/gone.sh"`: the whole token is skipped as a
-  substitution, so the missing `scripts/gone.sh` is not reported;
-- **wrapper state across a substitution with a separator inside** -
-  `sudo -u $(id -un; echo root) -g root scripts/helper.sh --absent`: the inner
-  `;` clears the outer `sudo` prefix, `root` is then taken as the command and
-  `--absent` is skipped;
-- **`env -S` / `--split-string`** - `env -S "bash scripts/helper.sh" --absent`:
-  the operand is command text but is consumed as an option value, so neither
-  the flag nor an unowned flag is counted;
-- **(copied-passage) a rare anchor starving a repetitive match** - A = 70 x
-  `same` + a 20-word tail, B = 100 x `same` + a separator + 31 x `same` + the
-  same tail: 51 words are reported, unlabelled, where 70 are shared.
+**Fixed in #741** (each has a regression in `tests/test_decay.py` and no longer
+escapes): a quoted separator (`scripts/helper.sh ";" --absent`), a path beside a
+substitution in one quoted argument (`echo "$(pwd) scripts/gone.sh"`), wrapper
+state across a substitution with a separator inside, `env -S` (its value is
+command text; its paths are checked and the flags after it counted as unowned),
+and a rare copy anchor starving a longer repetitive match.
+
+**Still not seen** (after #741): a quoted string that BEGINS with `-` (an echo
+message such as `'-> step skipped: see scripts/x.sh'`) is read as an option with
+a value, so the paths inside it are not checked.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,
@@ -253,7 +250,10 @@ and forward, then accepts the runs longest first - so a repetitive prefix is
 recovered whole from the first distinctive word after it, and an early short
 match never starves a later longer one, in either document order. Only what no anchor
 reached - purely repetitive text - falls back to the first 8 starting points,
-forward only. A pair is an **estimate** exactly when a candidate search was
+forward only. Since #741 a repetitive window's first 8 alignments join the
+anchored ones BEFORE any word is consumed, so a rare anchor cannot starve a
+longer repetitive match; those extensions are capped at 512 per pair. A pair is
+an **estimate** exactly when that cap was hit, or a candidate search was
 cut while a free alignment beyond the cut existed - whether or not the cut
 search then accepted a run - and that finding and the report summary say
 **bounded estimate**; `population.estimated_pairs` counts them. No word on either side is counted
