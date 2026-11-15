@@ -429,3 +429,47 @@ def test_a_passage_outside_the_skill_is_refused(tmp_path: Path, file: str) -> No
 def test_partial_must_be_a_json_boolean(tmp_path: Path, value: object) -> None:
     with pytest.raises(g.DeclarationError, match="partial must be true or false"):
         _decl(_copy(tmp_path, partial=value))
+
+
+# ---------------------------------------------------------------- --json (#737 reads it; post-receipt, output-only)
+
+
+def _scripted_rounds(tmp_path: Path) -> tuple[g.RoundReport, g.RoundReport]:
+    declaration, ledger = _round3_complete(_copy(tmp_path))
+    r3 = g.round3(declaration, ledger, _runner(declaration, {}))  # cached: same verdict
+    r4 = g.round4(declaration, ledger, _runner(declaration, _fail_all("lean-lanes", LANE_TASKS)))
+    return r3, r4
+
+
+def test_json_is_exactly_asdict_of_the_report_for_rounds_3_and_4(tmp_path: Path) -> None:
+    import dataclasses
+
+    for report in _scripted_rounds(tmp_path):
+        parsed = json.loads(g.to_json(report))
+        assert parsed == json.loads(json.dumps(dataclasses.asdict(report)))
+        for name in ("round", "verdict", "recommendation", "variants", "per_clause", "separation"):
+            assert name in parsed  # the fields #737 reads
+
+
+def test_round4_json_carries_each_variants_passes_and_worse_on(tmp_path: Path) -> None:
+    _r3, r4 = _scripted_rounds(tmp_path)
+    variants = json.loads(g.to_json(r4))["variants"]
+    assert variants["lean-repeat"]["passes"] is True and variants["lean-repeat"]["worse_on"] == []
+    assert variants["lean-lanes"]["passes"] is False and variants["lean-lanes"]["worse_on"]
+
+
+def test_the_cli_json_flag_prints_the_plan_report(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = _copy(tmp_path)
+    assert cli.main(["gauntlet", "round3", str(path), "--plan", "--json"]) == 0
+    parsed = json.loads(capsys.readouterr().out)
+    assert parsed["verdict"] == g.PLANNED and parsed["declared"] == 24 and parsed["round"] == 3
+
+
+def test_the_text_output_is_unchanged_by_the_json_flag(tmp_path: Path) -> None:
+    """The golden was captured BEFORE --json was added (post-receipt change)."""
+    r3, r4 = _scripted_rounds(tmp_path)
+    golden = (ROOT / "tests/fixtures/gauntlet/render-golden.txt").read_text(encoding="utf-8")
+    # The golden's round 3 ran fresh (24 new attempts); here round 3 is a cached re-run.
+    fresh_r3 = golden.split("GAUNTLET ROUND 4")[0]
+    assert g.render(r4) == "GAUNTLET ROUND 4" + golden.split("GAUNTLET ROUND 4")[1]
+    assert g.render(r3).replace("reused 24, new 0, run 0", "reused 0, new 24, run 24") == fresh_r3

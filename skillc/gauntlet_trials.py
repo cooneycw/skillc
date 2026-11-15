@@ -34,6 +34,7 @@ Stdlib only (AGENTS.md).
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -638,6 +639,13 @@ def round4(declaration: Declaration, ledger: Ledger, runner: AttemptRunner | Non
         report.recommendation = KEEP
         report.reason = "no variant is no worse on every clause, so keep the skill as it is"
     return report
+
+
+def to_json(report: RoundReport) -> str:
+    """The report as JSON: exactly `dataclasses.asdict(report)`. Round 5
+    (#737) reads these field names, so they are an interface; renaming one
+    is a breaking change for that reader."""
+    return json.dumps(dataclasses.asdict(report), sort_keys=True, indent=2) + "\n"
 
 
 def render(report: RoundReport) -> str:

@@ -2698,7 +2698,7 @@ def cmd_gauntlet_round(args: argparse.Namespace) -> int:
     except gauntlet_trials.DeclarationError as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return GAUNTLET_EXIT_USAGE
-    sys.stdout.write(gauntlet_trials.render(report))
+    sys.stdout.write(gauntlet_trials.to_json(report) if args.json else gauntlet_trials.render(report))
     if report.verdict in (gauntlet_trials.COMPLETE, gauntlet_trials.PLANNED):
         return GAUNTLET_EXIT_OK
     if report.verdict == gauntlet_trials.REFUSED:
@@ -3574,6 +3574,8 @@ def build_parser() -> argparse.ArgumentParser:
         p_round.add_argument("declaration", help="the round declaration (JSON; docs/specs/gauntlet-rounds-3-4.md)")
         p_round.add_argument("--plan", action="store_true", help="print the declared attempt count; spend nothing")
         p_round.add_argument("--ledger", metavar="FILE", help="the attempt ledger (default: beside the declaration)")
+        p_round.add_argument("--json", action="store_true",
+                             help="print the report as JSON (dataclasses.asdict of the RoundReport; read by #737)")
         p_round.set_defaults(func=cmd_gauntlet_round)
 
     p_rules = sub.add_parser("rules", help="list the rules")

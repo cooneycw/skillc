@@ -58,3 +58,6 @@ Readers:
 ### Reader corrections (counter-model review, pass 1)
 - Reader: `Ledger.__init__` reads the persisted JSONL. Compatibility: rows are validated on load (fields, result vocabulary); a malformed line refuses the whole ledger. `test_an_untrustworthy_ledger_row_refuses_the_ledger`.
 - Reader: `cmd_gauntlet_round` maps report verdicts to exit codes (0 COMPLETE or PLANNED, 1 REFUSED, 2 a declaration or ledger it cannot read, 3 UNKNOWN or INCOMPLETE). Compatibility: the CLI tests for --plan, the PR-1 refusal and an untrusted ledger.
+
+### Plan deviations
+- 2026-11-15, orchestrator mailbox rev 55, at #737's (skillc-754) request and approved: `skillc gauntlet round3|round4 --json` prints `dataclasses.asdict(report)` (`gauntlet_trials.to_json`). It is output-only and additive, with no behaviour change, and it was committed AFTER the counter-model receipt's reviewed head (`9029c4c`). Paths: `skillc/gauntlet_trials.py` (`to_json`), `skillc/cli.py` (the flag), `tests/test_gauntlet_trials.py`, and `tests/fixtures/gauntlet/render-golden.txt`, the text output captured before the change. Tests: JSON equals asdict for a scripted round 3 and round 4, and the text output is unchanged against that golden.
