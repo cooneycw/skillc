@@ -336,9 +336,7 @@ def test_741_the_env_split_string_counter_reaches_the_assembled_report(tmp_path:
     report.md carry `flags_after_a_non_command_path`, with the real count."""
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "helper.sh").write_text("--verbose\n", encoding="utf-8")
-    # A genuine non-command path (#745: an env -S value is now command text, so its
-    # trailing flag has an owner and is checked, no longer counted here).
-    _skill(tmp_path, "a", "```bash\nmystery scripts/helper.sh --odd\n```\n")
+    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh" --absent\n```\n')
     _skill(tmp_path, "b", "other\n")
     report = inspect.run(decay.load(tmp_path, offline=True))
     assert report.data["rules"]["dangling-reference"]["population"]["flags_after_a_non_command_path"] == 1

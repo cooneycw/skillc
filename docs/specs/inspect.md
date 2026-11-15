@@ -194,7 +194,16 @@ execute repository-controlled code on the host.
 - a script that is not in command position: `a.sh b.sh --x` checks `--x`
   against `a.sh` (shell semantics; approved on #731), a script named inside an
   `echo "..."` string, and a script named mid-sentence in a prose code span
-  (`(re-run scripts/x.sh --write later)`) - their flags are not examined.
+  (`(re-run scripts/x.sh --write later)`) - their flags are not examined;
+- **flags inside or after an `env -S` / `--split-string` value are counted as
+  not examined, never checked** (`flags_after_a_non_command_path`; a stated
+  limit, ruled on #745). env splits its value into argv by rules of its own:
+  comments, escapes, and options such as `-u NAME` before the command. These
+  rules are not emulated, so no word in the value is taken as a command or a
+  flag owner, and a path after the value owns no later flag either. Every flag
+  in the value is counted (split on whitespace and on env's `\_` separator
+  escape), and its paths are still existence-checked: `env -S "bash
+  scripts/gone.sh"` is a finding.
 
 **Fixed in #741** (each has a regression in `tests/test_decay.py` and no longer
 escapes): a quoted separator (`scripts/helper.sh ";" --absent`), a path beside a
@@ -214,13 +223,7 @@ the option's value.
   word as `--absent="x y"`. It is checked against its owner, and no paths are
   read out of its value. With no owner but after a non-command path, it is
   counted as unowned. A quoted word whose first part is not a flag name stays a
-  string and is path-checked, and a lone `--` or `-` is not a flag;
-- **an `env -S` / `--split-string` value is spliced back in as a new command**,
-  as env does with its argv. `env -S "bash scripts/helper.sh --absent"` and
-  `env -S "bash scripts/helper.sh" --absent` both check `--absent` against the
-  helper. Splices are capped at 32 per code span; a value past the cap is read
-  as a string and counted in `population.split_strings_not_examined`, never
-  dropped silently.
+  string and is path-checked, and a lone `--` or `-` is not a flag.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,

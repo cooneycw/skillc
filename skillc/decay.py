@@ -27,10 +27,9 @@ from __future__ import annotations
 import functools
 import json
 import re
-import shlex
 import shutil
 import subprocess
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -444,8 +443,6 @@ COMMAND_PREFIXES = frozenset({
 ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: `env -S VALUE`: VALUE is itself a command line (#741).
 SPLIT_STRING_OPTIONS = frozenset({"-S", "--split-string"})
-#: `env -S` values spliced back in per code span; past it they are counted, not read.
-SPLICE_CAP = 32
 #: A prefix's options that take the NEXT word as their value (`sudo -u root`), so
 #: that value is not mistaken for the command (#731 review).
 #: Long forms too (#731 review); the `--opt=value` form carries its value inline.
@@ -473,7 +470,6 @@ class Token:
     opens: int = 0  # UNQUOTED `$(` in this word
     closes: int = 0  # UNQUOTED `)` in this word
     began_quoted: bool = False  # the word OPENS with a quote: a whole quoted string
-    literal: bool = False  # an argv word from `env -S`: never an operator or substitution
 
 
 SHELL_PUNCT = ";&|"
@@ -556,22 +552,6 @@ def shell_tokens(text: str) -> list[Token]:
     return tokens
 
 
-def env_split_words(value: str) -> list[Token]:
-    """An `env -S` value split the way env splits it (#745 review, checked
-    against /usr/bin/env): whitespace-separated words with quotes and escapes, a
-    `#` at the start of a word begins a comment, and NO shell operators or
-    substitutions - `;` is an argument here, never a separator. Each word is a
-    `literal` token, so the command logic never reads shell metadata into it."""
-    lexer = shlex.shlex(value, posix=True)
-    lexer.whitespace_split = True
-    lexer.commenters = "#"
-    try:
-        words = list(lexer)
-    except ValueError:
-        words = value.split()
-    return [Token(w, literal=True) for w in words]
-
-
 def _command_tokens(text: str) -> tuple[list[Token], bool]:
     """Words of one piece of COMMAND-SHAPED text (an inline code span or one
     fenced-block line - never running prose, where apostrophes would pair up and
@@ -635,7 +615,7 @@ def _decoded(target: str) -> str:
 
 def dangling_reference(coll: Collection) -> Result:
     result = Result()
-    links = prefixed = flags = flags_unowned = split_unexamined = 0
+    links = prefixed = flags = flags_unowned = 0
     unexamined_paths = 0
     placeholders = 0
     seen_unexamined: set[str] = set()
@@ -682,6 +662,21 @@ def dangling_reference(coll: Collection) -> Result:
                 return "missing", None
             return "exists", found
 
+        def examine_split(value: str, index: int) -> None:
+            """An `env -S` value (#745): its paths are existence-checked, and
+            every flag in it is COUNTED as unowned, never checked. env's own argv
+            rules (comments, escapes, options before the command) are not
+            emulated, so no word here is taken as a command or a flag owner.
+            `\\_` is env's escape for a separator, so a flag written after one
+            is still seen and counted."""
+            nonlocal flags_unowned
+            for inner in value.replace("\\_", " ").split():
+                inner_word = _clean_word(inner)
+                if FLAG_RE.match(inner_word.split("=", 1)[0]):
+                    flags_unowned += 1
+                else:
+                    check_path(inner_word, index)
+
         for span in code_spans(subject.lines):
             script: Path | None = None
             script_word = ""
@@ -699,31 +694,14 @@ def dangling_reference(coll: Collection) -> Result:
             State = tuple[Path | None, str, bool, bool, str, bool, bool]
             outer2: list[State] = []
             pending_split = False  # `env -S VALUE`: VALUE is command text
-            queue = deque(tokens)
-            splices = 0
-
-            def splice(value: str, queue: deque[Token] = queue) -> bool:
-                """Feed an `env -S` value back in as a NEW command (#745): env
-                splits it into argv and appends the words after it. Past the cap
-                the value is not spliced and is counted as unexamined."""
-                nonlocal splices, split_unexamined
-                splices += 1
-                if splices > SPLICE_CAP:
-                    split_unexamined += 1
-                    return False
-                queue.extendleft(reversed(env_split_words(value)))
-                return True
-
-            while queue:
-                token = queue.popleft()
+            for token in tokens:
                 raw = token.text
                 if reset_after:
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
                     pending_split = False
                     reset_after = False
-                is_separator = (not token.literal
-                                and (token.operator if quote_aware else raw in SHELL_SEPARATORS))
+                is_separator = token.operator if quote_aware else raw in SHELL_SEPARATORS
                 if is_separator:
                     # An UNQUOTED operator ends the command (`";"` is an argument,
                     # #741); the next word starts a new one.
@@ -738,30 +716,20 @@ def dangling_reference(coll: Collection) -> Result:
                 # one option with no paths read out of it (#741 review).
                 is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
                              and (token.began_quoted or not word.startswith("-")))
-                quoted_option = is_string and bool(FLAG_RE.match(word.split("=", 1)[0]))
-                handled_option = False
-                if quoted_option and expect_command and prefix == "env" \
-                        and word.split("=", 1)[0] in SPLIT_STRING_OPTIONS:
-                    # `env "--split-string=VALUE"` is `env --split-string="VALUE"`.
-                    is_string = quoted_option = False
-                    if "=" in raw:
-                        if splice(raw.split("=", 1)[1]):
-                            script, script_word, expect_command = None, "", True
-                            pending_operand, prefix, arg_path_seen = False, "", False
-                            continue
-                        arg_path_seen = True
-                    else:
-                        pending_split = True
-                    continue
+                quoted_option = (is_string and not pending_split
+                                 and bool(FLAG_RE.match(word.split("=", 1)[0])))
                 if quoted_option:
-                    # A FULLY quoted option (`"--absent=x y"`) is the same argv
-                    # word as `--absent="x y"` (#745): an option with an attached
-                    # value, checked against its owner, with no paths read out of
-                    # the value. With no owner but after a non-command path it is
-                    # counted as unowned, as an unquoted flag would be.
                     is_string = False
                     flag = word.split("=", 1)[0]
-                    if script is not None:
+                    if expect_command and prefix == "env" and flag in SPLIT_STRING_OPTIONS:
+                        # `env "--split-string=VALUE"` is `env --split-string="VALUE"`.
+                        examine_split(word.split("=", 1)[1] if "=" in word else "", span.index)
+                        arg_path_seen, expect_command = True, False
+                    elif script is not None:
+                        # A FULLY quoted option (`"--absent=x y"`) is the same argv
+                        # word as `--absent="x y"` (#745): an option with an
+                        # attached value, checked against its owner, with no paths
+                        # read out of the value.
                         flags += 1
                         source = _script_source(script, coll.root)
                         if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(flag) + r"(?![A-Za-z0-9-])", source):
@@ -771,28 +739,22 @@ def dangling_reference(coll: Collection) -> Result:
                                 {"reference": f"{script_word} {flag}", "kind": "flag"},
                             ))
                     elif arg_path_seen:
-                        flags_unowned += 1
+                        flags_unowned += 1  # no owner, after a non-command path
                     pending_operand = False
-                    handled_option = True  # still run the substitution delimiters below
-                if is_string and pending_split:
-                    pending_split = False
-                    if splice(raw):
-                        script, script_word, expect_command = None, "", True
-                        pending_operand, prefix, arg_path_seen = False, "", False
-                        continue
-                    is_string = True  # past the cap: read it as a string, as before
-                    pending_split = True
                 if is_string:
                     # A quoted multi-word argument is a STRING, read BEFORE the
                     # substitution logic (#741): its words still name paths that
                     # must exist (`echo "$(pwd) scripts/gone.sh"`), but none is a
                     # command or owns a flag. It can be an option's value
-                    # (`sudo -u "$(id -un)"`), or `env -S`'s command text, whose
-                    # following flags then have no owner this rule can read.
-                    for inner in raw.split():
-                        check_path(_clean_word(inner), span.index)
+                    # (`sudo -u "$(id -un)"`), or `env -S`'s command text (#745),
+                    # whose flags, and every flag after it, are counted, never
+                    # checked.
                     if pending_split:
-                        arg_path_seen = True
+                        examine_split(raw, span.index)
+                        arg_path_seen, expect_command = True, False
+                    else:
+                        for inner in raw.split():
+                            check_path(_clean_word(inner), span.index)
                     pending_split = False
                     pending_operand = False
                 # Only UNQUOTED `$(` / `)` move the stack (#741): `"$(pwd)"` is
@@ -819,18 +781,14 @@ def dangling_reference(coll: Collection) -> Result:
                          pending_operand, prefix, arg_path_seen, pending_split) = outer2.pop()
                     reset_after = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
                     continue
-                if is_string or handled_option:
+                if is_string or quoted_option:
                     continue
                 if pending_split:
                     # `env -S VALUE`: VALUE is command text, even when it is empty
                     # (`env -S ""`), so it is consumed here, before anything else.
-                    pending_split, pending_operand = False, False
-                    if word and splice(raw):
-                        script, script_word, expect_command = None, "", True
-                        prefix, arg_path_seen = "", False
-                        continue
-                    check_path(word, span.index)
-                    arg_path_seen = True
+                    examine_split(raw, span.index)
+                    arg_path_seen, pending_split, pending_operand = True, False, False
+                    expect_command = False
                     continue
                 if not word:
                     if pending_operand:
@@ -839,10 +797,9 @@ def dangling_reference(coll: Collection) -> Result:
                         pending_operand = False
                     continue
                 # Whitespace fallback only: a separator inside or trailing a word.
-                shellish = not quote_aware and not token.literal
-                trailing_break = shellish and raw.rstrip("\"'").endswith((";", "|", "&"))
-                inner_break = shellish and any(sep in raw for sep in SHELL_BREAKS)
-                if (inner_break and not trailing_break) or (shellish and word in SHELL_SEPARATORS):
+                trailing_break = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
+                inner_break = not quote_aware and any(sep in raw for sep in SHELL_BREAKS)
+                if (inner_break and not trailing_break) or (not quote_aware and word in SHELL_SEPARATORS):
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
                     pending_split = False
@@ -875,14 +832,8 @@ def dangling_reference(coll: Collection) -> Result:
                         name = word.split("=", 1)[0]
                         if prefix == "env" and name in SPLIT_STRING_OPTIONS:
                             if "=" in word:  # `--split-string=VALUE`, one word
-                                value = raw.split("=", 1)[1]
-                                if splice(value):
-                                    script, script_word, expect_command = None, "", True
-                                    pending_operand, prefix, arg_path_seen = False, "", False
-                                    continue
-                                for inner in value.split():
-                                    check_path(_clean_word(inner), span.index)
-                                arg_path_seen = True
+                                examine_split(word.split("=", 1)[1], span.index)
+                                arg_path_seen, expect_command = True, False
                             else:
                                 pending_split = True
                         else:
@@ -903,7 +854,6 @@ def dangling_reference(coll: Collection) -> Result:
         "prefixed_references_examined": prefixed,
         "flags_examined": flags,
         "flags_after_a_non_command_path": flags_unowned,
-        "split_strings_not_examined": split_unexamined,
         "path_like_not_examined": unexamined_paths,
         "placeholder_paths_not_examined": placeholders,
         "own_prefixes": list(coll.own_prefixes),
