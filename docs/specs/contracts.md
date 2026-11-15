@@ -62,6 +62,28 @@ or a list of paths). `version`, `readers` (on `provides`) and `approved` are
 optional clause fields, and any other clause field (`what`, `on_false`) is free
 text for the owner.
 
+### Where a charter lives, and `subject:`
+
+Owner decision, 2026-11-15 (#726, claude-power-pack#1838):
+
+- **A native skill** keeps `CHARTER.md` beside its `SKILL.md`. `subject:` is
+  optional there, but if it is given it must name that `SKILL.md`.
+- **A slash command** gets `charters/<ns>/<cmd>/CHARTER.md` at the collection
+  root, with a **required** `subject:` naming the command file, for example
+  `subject: .claude/commands/flow/auto.md`.
+- **Never in a generated mirror** (such as a `codex/skills/` copy).
+
+`subject:` resolves from the collection root. Each of these is a
+`contract-shape` error with a named reason:
+- a missing subject under `charters/`;
+- a subject that does not exist, or is not a file;
+- a subject outside the collection;
+- a subject beside a `SKILL.md` that names some other file.
+
+Committed cases: `controls/contract-shape/bad/{subject-missing,subject-dangling}` and
+`controls/contract-shape/good/subject-command`. This reuses `contract-shape`
+rather than adding a rule, so the selftest count is unchanged.
+
 ### The YAML subset
 
 The block uses the same small YAML subset as skill frontmatter
@@ -97,7 +119,7 @@ contract's `version:`.
 
 | Rule | Severity | Reports BAD when | Committed bad cases (`controls/<rule>/bad/`) |
 |---|---|---|---|
-| `contract-shape` | error (parser rule) | the block does not parse or uses unsupported YAML; a required field is missing; an unknown field; a field of the wrong type; a duplicate contract name or clause id | `unparseable`, `no-intent`, `wrapped-plain-scalar`, `unknown-field` |
+| `contract-shape` | error (parser rule) | the block does not parse or uses unsupported YAML; a required field is missing; an unknown field; a field of the wrong type; a duplicate contract name or clause id; a missing or dangling `subject:` | `unparseable`, `no-intent`, `wrapped-plain-scalar`, `unknown-field`, `duplicate-provider`, `subject-missing`, `subject-dangling` |
 | `clause-backed` | error | a clause has no `test`; a test path does not exist; a brace expansion yields a missing path; more than one brace group; a path outside the collection | `no-test`, `missing-path`, `brace-one-missing`, `two-brace-groups` |
 | `negative-backed` | error | a `never` or `authority` clause names no test path with a `bad` segment | `never-good-only`, `authority-good-only` |
 | `handoff-bilateral` | error | a `consumes` names a clause no contract `provides` | `nothing-provides` |
