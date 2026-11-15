@@ -351,7 +351,10 @@ def test_qualify_judge_qualifies_the_plumbing_and_says_only_that() -> None:
     done = subprocess.run([sys.executable, str(QUALIFY_JUDGE)], capture_output=True, text=True, timeout=300, check=False,
                           cwd=QUALIFY_JUDGE.parent)
     assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
-    assert "judge plumbing on 98 candidates: 98 carried intact" in done.stdout
+    task = QUALIFY_JUDGE.parent   # the whole population, counted, not pinned (#537 added rows)
+    n = len(list((task / "candidates").glob("*/*"))) + len(list((task / "judge-candidates").glob("*/*")))
+    assert n > 100   # the population exists: at least revision 6's 109 candidates
+    assert f"judge plumbing on {n} candidates: {n} carried intact" in done.stdout
     assert done.stdout.count(": REFUSED (") == 3 and "PLUMBING QUALIFIED - PLUMBING ONLY" in done.stdout
 
 

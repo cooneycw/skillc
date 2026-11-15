@@ -1679,18 +1679,41 @@ def test_the_revision_5_allow_list_catches_any_other_difference() -> None:
 def test_the_revision_5_campaign_carries_the_owners_approval_and_is_pinned() -> None:
     """The owner approved the revision-5 campaign on 2026-10-21 ("Yes",
     replying to the package skillc-400 relayed). The stamp changed nothing the
-    owner approved: the content digest is the packaged one, and the file
-    authorizes as committed."""
+    owner approved: the content digest is the packaged one. It ran once
+    (20261021T050644Z-25a382) and is spent since grader revision 6 (below)."""
     declaration = fl.load_declaration(CAMPAIGN_REV5)
     assert declaration.digest == CAMPAIGN_REV5_DIGEST
     approval = declaration.approval
     assert approval is not None and approval["by"] == "owner (cooneycw)" and approval["attempts_per_case"] == 5
     assert "'Yes'" in approval["source"] and CAMPAIGN_REV5_DIGEST in approval["source"]
     assert approval["declaration_digest"] == CAMPAIGN_REV5_DIGEST
-    fl.require_approved(declaration, ROOT)
     assert declaration.task["grader_revision"] == "5" and declaration.attempts_per_case == 5
     assert declaration.order == fl.load_declaration(CAMPAIGN_REV4).order   # the same order, kept on purpose
     assert declaration.endpoint == ENDPOINT and declaration.tolerance == 1
+
+
+def test_the_spent_revision_5_campaign_declaration_is_refused_since_grader_revision_6() -> None:
+    """The owner-approved revision-5 campaign ran (20261021T050644Z-25a382).
+    Revision 6 (#537) moved the grader, so that approval does not carry over:
+    the committed file is the record and authorizes nothing. A revision-6
+    campaign needs its own declaration and approval."""
+    declaration = fl.load_declaration(CAMPAIGN_REV5)
+    with pytest.raises(fl.LiveRefused, match=r"differ from the repository: \['grader_revision', 'grader_digest'\]"):
+        fl.require_approved(declaration, ROOT)
+
+
+def test_the_revision_5_approval_authorizes_its_own_identities(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The control for the refusal above: pinned to the file's own identities,
+    the unchanged revision-5 file still authorizes, so the refusal is the
+    grader's move and nothing else."""
+    data = json.loads(CAMPAIGN_REV5.read_text())
+    real = fl.task_identity
+
+    def as_declared(root: Path, task_path: str = fl.TASK_PATH) -> dict[str, object]:
+        return {k: data["task"][k] for k in real(root, task_path)}
+
+    monkeypatch.setattr(fl, "task_identity", as_declared)
+    fl.require_approved(fl.load_declaration(CAMPAIGN_REV5), ROOT)
 
 
 #: The owner-approved revision-4 campaign run (20261020T195431Z-fab3ce): the
@@ -1743,8 +1766,18 @@ def test_the_revision_5_campaign_does_not_false_stop_on_the_revision_4_run(attem
     assert stopped is not None and "future_item_type" in stopped
 
 
-def test_the_revision_5_approval_does_not_survive_a_changed_field() -> None:
+def test_the_revision_5_approval_does_not_survive_a_changed_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Since grader revision 6 (#537) the spent file is refused on its identities
+    first, so they are pinned to the file's own, as for revision 4: only the
+    changed field refuses."""
     data = json.loads(CAMPAIGN_REV5.read_text())
+    real = fl.task_identity
+
+    def as_declared(root: Path, task_path: str = fl.TASK_PATH) -> dict[str, object]:
+        return {k: data["task"][k] for k in real(root, task_path)}
+
+    monkeypatch.setattr(fl, "task_identity", as_declared)
+    data = copy.deepcopy(data)
     data["shared"]["per_attempt_seconds"] = 901
     with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
         fl.require_approved(fl.parse_declaration(data), ROOT)
