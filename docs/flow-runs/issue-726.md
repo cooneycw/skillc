@@ -75,3 +75,53 @@ Readers of the changed output:
 - Reader: `contracts.load` and the nine contract rules read drafts and confirmed charters, including `subject`, `draft` and `approved`. Compatibility: `test_a_draft_passes_contract_shape_warns_approval_and_fails_clause_backed` and `test_a_command_draft_carries_its_subject_and_passes_shape`.
 - Reader: `decay.copied_passage` (`skillc inspect`) reads reports that hold quotes. Compatibility: `test_a_quote_never_trips_the_copied_passage_detector`, which runs the real detector.
 - Reader: the owner, who reads drafts and the round-1 README. Compatibility: none mechanical; this is the confirmation dialogue.
+
+<!-- flow-run n=2 id=5fd838e9876342658cc40b9677d2528c -->
+## Run 2
+
+- Run-id:            5fd838e9876342658cc40b9677d2528c
+- Run-start:         9dc1a7de3be7f8c2a42f0aa402195dd33e0dc20a
+- Issue:             #726 (PR B of two: the overlap view, stacked on PR A's head 9dc1a7d)
+- Base SHA:          9dc1a7d (PR A, unpushed and unmerged, on #746 ac3b30c)
+- Necessity verdict: Still needed
+- Approval:          granted (GO-WITH-CONDITIONS, the #726 gate; PR B started at rev 19)
+- Approver:          wave orchestrator skillc-orch, wave skillc-work (authority-model orchestrator-only, owner-delegated), mailbox revs 16 and 19
+- Recorded at:       2026-11-15T11:35:00Z
+
+### Section B evidence
+- as Run 1 (PR A): nothing since 2026-11-14T20:33:20Z implements overlap; #749 holds PR A's deferred findings; no sibling worktree touches skillc/overlap*
+
+### Section C - the approved plan
+1. `skillc/overlap.py` - a DutyComparator protocol (judge.py seam) and FakeComparator; duties read from a contracts collection; pairs across contracts, with exact duty-id duplicates left to duty-single-owner; N replicates per pair, where any disagreement makes the pair UNKNOWN; shared (both claim it), shadowed (one only observed doing what another claims), orphan (observed, unstated, matched by no other charter); no comparator means not examined; every overlap framed as a proposal for the owner, never a finding
+2. `skillc/cli.py` - `charter overlap <collection>`: with no comparator, exit 3 "not examined"; `--verdicts FILE` reads recorded verdicts (labelled by source); a report with counts, evidence and a diagram
+3. `evals/subjects/overlap-controls` - acceptance 1 as data: one duty shared in different wording, and no shared duty despite deliberately shared vocabulary
+4. `tests/test_overlap.py` - classification, replicate disagreement as UNKNOWN, exit 3 without a comparator, both controls under FakeComparator, and a word-overlap strawman getting both controls wrong (so the controls separate meaning from wording)
+5. `docs/specs/charter-round1.md` - the overlap section
+6. `README.md` - charter overlap in the commands block
+7. `AGENTS.md` - overlap.py layout line
+8. `changelog.d/726.md` - overlap bullet
+
+Conditions (rev 16, 19): FakeComparator only; no product model call and no local-model run until PR B merges; the 3-pass counter-model ceiling; no local full suite; nothing pushed during the silent period
+Scope: ~8 paths plus control files, ~600-800 lines. Risks: the shared/shadowed split leans on PR A's column and on scope; the controls' live verdict is unmeasured until a model runs
+
+### Lanes for this change
+| Lane | Answer |
+|---|---|
+| Checkout | not applicable - reads a collection directory given on the command line |
+| Run placement | will test - Woodpecker CI (the full-suite gate); host `make verify` targeted set only; real-Docker runner VM not applicable |
+| Execution backend | not applicable - no trial runs |
+| Agent client | not applicable - no client and no model call; FakeComparator only |
+| Client invocation | not applicable - no client runs |
+| Static-check target | not applicable - no new static rule |
+| Subject collection | will test - synthetic overlap controls; CPP not covered (needs the model run) |
+| Subject installation | not applicable - nothing installed |
+| skillc distribution | will test - source checkout (uv sync, editable) via the suite; built wheel in a clean venv not covered for charter overlap |
+| Python version | not covered - 3.12 only, unchanged |
+
+Readers:
+- Reader: the owner reads the overlap report. Compatibility: none mechanical; every overlap is a proposal.
+- Reader: a later local-model step writes `--verdicts` files. Compatibility: the verdicts parser tests.
+
+### Plan deviations
+- 2026-11-15, orchestrator mailbox rev 20: commit `60a6c7e` came AFTER the counter-model receipt's reviewed head (`2da2959`). It is test-only: it renames a shadowed comprehension variable in `tests/test_overlap.py` that mypy refused. No product code and no verdict changed.
+- 2026-11-15, orchestrator mailbox rev 57, at #737's (skillc-754) request and approved: `skillc charter overlap --json` prints `overlap.to_data(report)`. It is output-only and additive, with no behaviour change, and it was committed AFTER this run's counter-model receipt (reviewed head `2da2959`). `examined: false` and `counts: null` when nothing was compared. Paths: `skillc/overlap.py` (`to_data`, `to_json`), `skillc/cli.py` (the flag), `tests/test_overlap.py`, and `tests/fixtures/overlap/render-golden.txt`, the text output captured before the change.
