@@ -102,6 +102,7 @@ skillc charter draft <skill> [--usage LOG] [--subject PATH] [--out FILE]  # #726
 skillc charter confirm <draft> --answers FILE --out FILE  # #726: apply the owner's answers; refuses without them; stamps approved only on intent and authority
 skillc charter overlap <collection> [--verdicts FILE]  # #726: shared, shadowed and orphan duties across charters, by meaning; proposals only; exit 3 not examined without a comparator
 skillc charter evidence <collection> <skill> [--ref REF]... [--search] [--doc P] [--usage LOG] --out FILE  # #778: every existing piece of the skill's charter (discussions, issues and PRs, read-only; the charter and its history; skill text; usage; tests) as cited suggestions; every source reports examined, none found or not examined (docs/specs/charter-create.md)
+skillc charter create <collection> <skill> --evidence FILE --answers FILE [--replace-draft]  # #778: the owner's answers become a CHARTER.md with a trap-task stub per clause at evals/trap-tasks/; refuses (exit 1, nothing written) on an unanswered suggestion, a never or authority rule with no shortcut, or an approval without the owner's yes and date; never commits
 skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
