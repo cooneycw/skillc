@@ -2799,6 +2799,29 @@ def cmd_gauntlet_run(args: argparse.Namespace) -> int:
     return gauntlet.run(Path(args.path), args.skill, options)
 
 
+def cmd_gauntlet_verdict(args: argparse.Namespace) -> int:
+    """`skillc gauntlet verdict` (#737): round 5, one keep/trim/retire proposal or
+    UNKNOWN, drafted into the draft location; nothing is applied
+    (docs/specs/gauntlet-verdict.md)."""
+    from . import gauntlet, gauntlet_verdict
+
+    options = gauntlet.Options(draft_dir=Path(args.draft_dir) if args.draft_dir else None)
+    opt = {k: Path(v) if v else None for k, v in (("round3", args.round3), ("round4", args.round4),
+                                                  ("declaration", args.declaration), ("inspect", args.inspect),
+                                                  ("overlap", args.overlap))}
+    return gauntlet_verdict.verdict(Path(args.path), args.skill, options, **opt)
+
+
+def cmd_gauntlet_rule(args: argparse.Namespace) -> int:
+    """`skillc gauntlet rule` (#737): the owner's ruling on a drafted verdict,
+    recorded with a date in GAUNTLET.json."""
+    from . import gauntlet, gauntlet_verdict
+
+    options = gauntlet.Options(draft_dir=Path(args.draft_dir) if args.draft_dir else None)
+    return gauntlet_verdict.rule(Path(args.path), args.skill, options, args.ruling, args.verdict_digest, args.date,
+                                 args.note)
+
+
 def cmd_charter_overlap(args: argparse.Namespace) -> int:
     """`skillc charter overlap <collection>` (#726, PR B). With no comparator
     it exits 3, "not examined"; overlaps are proposals and never fail it."""
@@ -3774,6 +3797,31 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="where the draft and record go before a CHARTER.md exists "
                                      "(default: <main checkout>/.skillc/gauntlet/)")
     p_gauntlet_run.set_defaults(func=cmd_gauntlet_run)
+    p_gauntlet_verdict = gauntlet_sub.add_parser(
+        "verdict", help="round 5 (#737): one keep/trim/retire proposal, or UNKNOWN naming the round; drafts only"
+    )
+    p_gauntlet_verdict.add_argument("path", help="the collection root")
+    p_gauntlet_verdict.add_argument("skill", help="the skill, as for `gauntlet run`")
+    p_gauntlet_verdict.add_argument("--round3", metavar="JSON", help="`gauntlet round3 --json` report")
+    p_gauntlet_verdict.add_argument("--round4", metavar="JSON", help="`gauntlet round4 --json` report")
+    p_gauntlet_verdict.add_argument("--declaration", metavar="JSON", help="the round 3/4 declaration (variants)")
+    p_gauntlet_verdict.add_argument("--inspect", metavar="JSON", help="`inspect --json` report (round 2 findings)")
+    p_gauntlet_verdict.add_argument("--overlap", metavar="JSON",
+                                    help="round 1 overlap report; without it retire is NOT EXAMINED -> UNKNOWN")
+    p_gauntlet_verdict.add_argument("--draft-dir", metavar="DIR", help="as for `gauntlet run`")
+    p_gauntlet_verdict.set_defaults(func=cmd_gauntlet_verdict)
+    p_gauntlet_rule = gauntlet_sub.add_parser(
+        "rule", help="the owner's ruling on the drafted verdict, recorded with a date in GAUNTLET.json (#737)"
+    )
+    p_gauntlet_rule.add_argument("path", help="the collection root")
+    p_gauntlet_rule.add_argument("skill", help="the skill, as for `gauntlet run`")
+    p_gauntlet_rule.add_argument("ruling", choices=["accept", "reject", "amend"])
+    p_gauntlet_rule.add_argument("--verdict-digest", required=True, metavar="SHA",
+                                 help="the VERDICT_DIGEST `gauntlet verdict` printed; a stale one is refused")
+    p_gauntlet_rule.add_argument("--date", metavar="YYYY-MM-DD", help="the ruling's date (default: today, UTC)")
+    p_gauntlet_rule.add_argument("--note", help="the owner's words, e.g. what an amend changes")
+    p_gauntlet_rule.add_argument("--draft-dir", metavar="DIR", help="as for `gauntlet run`")
+    p_gauntlet_rule.set_defaults(func=cmd_gauntlet_rule)
 
     p_charter_overlap = charter_sub.add_parser(
         "overlap", help="shared, shadowed and orphan duties across a collection's charters; proposals only"

@@ -1,0 +1,29 @@
+{
+  "duties": [
+    {
+      "contract": "shadowed",
+      "id": "shadowed.report"
+    },
+    {
+      "contract": "reporter",
+      "id": "reporter.report"
+    }
+  ],
+  "examined": true,
+  "incomplete": [],
+  "overlaps": [
+    {
+      "duties": [
+        {
+          "contract": "shadowed",
+          "id": "shadowed.report"
+        },
+        {
+          "contract": "reporter",
+          "id": "reporter.report"
+        }
+      ],
+      "kind": "shadowed"
+    }
+  ]
+}
