@@ -37,6 +37,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/contracts.py` - `skillc contracts` (#720): the `CHARTER.md` contract beside each `SKILL.md`,
   nine rules read across a whole collection (unbacked clauses, missing bad cases, two-sided hand-offs,
   readers, duty ownership); reads declarations only and runs no test - see [docs/specs/contracts.md](docs/specs/contracts.md)
+- `skillc/gauntlet.py` - `skillc gauntlet run` (#754): the skill-gauntlet engine. Runs the round commands
+  (usage, charter, contracts, inspect) as subprocesses and reads only their verdicts; imports no round module;
+  writes `GAUNTLET.json` beside the charter only on change and never commits it - see [docs/specs/gauntlet.md](docs/specs/gauntlet.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module

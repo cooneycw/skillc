@@ -373,7 +373,7 @@ def test_on_cpp_flow_wave_at_d5ef0a66_round_2_surfaces_the_closed_rules_as_d(tmp
     #788 surface as D, and #640 does not - inspect's documented miss
     (docs/measurements/inspect/2026-11-14-cpp-and-mattpocock.md). Host-only."""
     if not (CPP / ".git").exists() or subprocess.run(["git", "-C", str(CPP), "cat-file", "-e", CPP_PIN],
-                                                     capture_output=True).returncode != 0:
+                                                     capture_output=True, check=False).returncode != 0:
         pytest.skip(f"CPP CHECKOUT ABSENT: {CPP} at {CPP_PIN[:8]} is not on this host; the purpose control did not run")
     export = tmp_path / "cpp"
     export.mkdir()
