@@ -254,7 +254,7 @@ def test_the_leak_scan_can_find_each_kind_of_leak() -> None:
     home = Path.home()
     assert _leaks("x planted-session-7f3a91 x", [])
     assert _leaks(f'"{home}/data"', [home])
-    assert _leaks('"/home/someone/x"', [])
+    assert _leaks('"/' + 'home/someone/x"', [])  # split, so the repository's own leak-check does not read it
     assert _leaks('"2026-11-15T10:01:00Z"', [])
     assert _leaks('{"verdict": "PASS"}', [home]) == []
 
