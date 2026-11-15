@@ -209,15 +209,18 @@ opens mid-word is an attached option value (`--opt="x y"`): one option, with no
 paths read out of it. A value that cleans to nothing (`sudo -p ";"`) is still
 the option's value.
 
-**Known false negatives until #745 lands.** A CLEAN `dangling-reference`
-verdict does NOT cover these two shapes:
-- **a fully quoted option** - `scripts/helper.sh "--absent=x y"`: a word that
-  opens with a quote and holds whitespace is read as a string, so its flag is
-  never checked. This is a REGRESSION against #731's code (`1cf7bc1`), which
-  caught it; the unquoted-name form `--absent="x y"` is still checked;
-- **flags inside an `env -S` value** - `env -S "bash scripts/helper.sh --absent"`
-  (and `--split-string="..."`): the value's paths are checked, but its flags are
-  neither checked against their owner nor counted as unowned.
+**Fixed in #745** (each has a regression in `tests/test_decay.py`):
+- **a fully quoted option** (`scripts/helper.sh "--absent=x y"`) is the same argv
+  word as `--absent="x y"`. It is checked against its owner, and no paths are
+  read out of its value. With no owner but after a non-command path, it is
+  counted as unowned. A quoted word whose first part is not a flag name stays a
+  string and is path-checked, and a lone `--` or `-` is not a flag;
+- **an `env -S` / `--split-string` value is spliced back in as a new command**,
+  as env does with its argv. `env -S "bash scripts/helper.sh --absent"` and
+  `env -S "bash scripts/helper.sh" --absent` both check `--absent` against the
+  helper. Splices are capped at 32 per code span; a value past the cap is read
+  as a string and counted in `population.split_strings_not_examined`, never
+  dropped silently.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,

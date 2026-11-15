@@ -29,7 +29,7 @@ import json
 import re
 import shutil
 import subprocess
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -443,6 +443,8 @@ COMMAND_PREFIXES = frozenset({
 ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: `env -S VALUE`: VALUE is itself a command line (#741).
 SPLIT_STRING_OPTIONS = frozenset({"-S", "--split-string"})
+#: `env -S` values spliced back in per code span; past it they are counted, not read.
+SPLICE_CAP = 32
 #: A prefix's options that take the NEXT word as their value (`sudo -u root`), so
 #: that value is not mistaken for the command (#731 review).
 #: Long forms too (#731 review); the `--opt=value` form carries its value inline.
@@ -615,7 +617,7 @@ def _decoded(target: str) -> str:
 
 def dangling_reference(coll: Collection) -> Result:
     result = Result()
-    links = prefixed = flags = flags_unowned = 0
+    links = prefixed = flags = flags_unowned = split_unexamined = 0
     unexamined_paths = 0
     placeholders = 0
     seen_unexamined: set[str] = set()
@@ -679,7 +681,27 @@ def dangling_reference(coll: Collection) -> Result:
             State = tuple[Path | None, str, bool, bool, str, bool, bool]
             outer2: list[State] = []
             pending_split = False  # `env -S VALUE`: VALUE is command text
-            for token in tokens:
+            queue = deque(tokens)
+            splices = 0
+
+            def splice(value: str, queue: deque[Token] = queue) -> bool:
+                """Feed an `env -S` value back in as a NEW command (#745): env
+                splits it into argv and appends the words after it. Past the cap
+                the value is not spliced and is counted as unexamined."""
+                nonlocal splices, split_unexamined
+                splices += 1
+                if splices > SPLICE_CAP:
+                    split_unexamined += 1
+                    return False
+                try:
+                    inner = shell_tokens(value)
+                except ValueError:
+                    inner = [Token(w, opens=w.count("$("), closes=w.count(")")) for w in value.split()]
+                queue.extendleft(reversed(inner))
+                return True
+
+            while queue:
+                token = queue.popleft()
                 raw = token.text
                 if reset_after:
                     script, script_word, expect_command = None, "", True
@@ -701,6 +723,36 @@ def dangling_reference(coll: Collection) -> Result:
                 # one option with no paths read out of it (#741 review).
                 is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
                              and (token.began_quoted or not word.startswith("-")))
+                quoted_option = is_string and bool(FLAG_RE.match(word.split("=", 1)[0]))
+                if quoted_option:
+                    # A FULLY quoted option (`"--absent=x y"`) is the same argv
+                    # word as `--absent="x y"` (#745): an option with an attached
+                    # value, checked against its owner, with no paths read out of
+                    # the value. With no owner but after a non-command path it is
+                    # counted as unowned, as an unquoted flag would be.
+                    is_string = False
+                    flag = word.split("=", 1)[0]
+                    if script is not None:
+                        flags += 1
+                        source = _script_source(script, coll.root)
+                        if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(flag) + r"(?![A-Za-z0-9-])", source):
+                            result.hits.append(Hit(
+                                subject.rel, subject.lineno(span.index),
+                                f"passes {flag} to {script_word}, whose source never mentions it",
+                                {"reference": f"{script_word} {flag}", "kind": "flag"},
+                            ))
+                    elif arg_path_seen:
+                        flags_unowned += 1
+                    pending_operand = False
+                    continue
+                if is_string and pending_split:
+                    pending_split = False
+                    if splice(raw):
+                        script, script_word, expect_command = None, "", True
+                        pending_operand, prefix, arg_path_seen = False, "", False
+                        continue
+                    is_string = True  # past the cap: read it as a string, as before
+                    pending_split = True
                 if is_string:
                     # A quoted multi-word argument is a STRING, read BEFORE the
                     # substitution logic (#741): its words still name paths that
@@ -743,8 +795,13 @@ def dangling_reference(coll: Collection) -> Result:
                 if pending_split:
                     # `env -S VALUE`: VALUE is command text, even when it is empty
                     # (`env -S ""`), so it is consumed here, before anything else.
+                    pending_split, pending_operand = False, False
+                    if word and splice(raw):
+                        script, script_word, expect_command = None, "", True
+                        prefix, arg_path_seen = "", False
+                        continue
                     check_path(word, span.index)
-                    arg_path_seen, pending_split, pending_operand = True, False, False
+                    arg_path_seen = True
                     continue
                 if not word:
                     if pending_operand:
@@ -788,7 +845,12 @@ def dangling_reference(coll: Collection) -> Result:
                         name = word.split("=", 1)[0]
                         if prefix == "env" and name in SPLIT_STRING_OPTIONS:
                             if "=" in word:  # `--split-string=VALUE`, one word
-                                for inner in word.split("=", 1)[1].split():
+                                value = raw.split("=", 1)[1]
+                                if splice(value):
+                                    script, script_word, expect_command = None, "", True
+                                    pending_operand, prefix, arg_path_seen = False, "", False
+                                    continue
+                                for inner in value.split():
                                     check_path(_clean_word(inner), span.index)
                                 arg_path_seen = True
                             else:
@@ -811,6 +873,7 @@ def dangling_reference(coll: Collection) -> Result:
         "prefixed_references_examined": prefixed,
         "flags_examined": flags,
         "flags_after_a_non_command_path": flags_unowned,
+        "split_strings_not_examined": split_unexamined,
         "path_like_not_examined": unexamined_paths,
         "placeholder_paths_not_examined": placeholders,
         "own_prefixes": list(coll.own_prefixes),

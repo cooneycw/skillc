@@ -649,13 +649,18 @@ def test_741_the_fallback_extension_cap_labels_an_estimate(tmp_path: Path) -> No
 
 
 def test_741_env_split_string_flags_are_counted(tmp_path: Path) -> None:
-    """#741 item 5, the issue's exact input: the -S value is command text - its
-    path is checked, and the flag after it is COUNTED, never silently dropped."""
+    """#741 item 5, revised by #745 (approved): an env -S value is command text.
+    The flag after `env -S "bash scripts/helper.sh"` is now the helper's and is
+    CHECKED (#745 splices the value in); the missing path inside the second value
+    is still found. The unowned counter keeps its negative control on a genuine
+    non-command path: `cat scripts/helper.sh --absent` (cat owns --absent, and
+    the helper is an argument)."""
     _helper(tmp_path)
-    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh" --absent\nenv --split-string="bash scripts/gone.sh" --x\n```\n')
+    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh" --absent\nenv --split-string="bash scripts/gone.sh" --x\n'
+                          'mystery scripts/helper.sh --odd\n```\n')
     result = decay.dangling_reference(_load(tmp_path))
-    assert [h.data["reference"] for h in result.hits] == ["scripts/gone.sh"]
-    assert result.population["flags_after_a_non_command_path"] == 2
+    assert [h.data["reference"] for h in result.hits] == ["scripts/helper.sh --absent", "scripts/gone.sh"]
+    assert result.population["flags_after_a_non_command_path"] == 1
 
 
 def test_741_the_tokeniser_keeps_shlex_posix_boundaries() -> None:
@@ -818,3 +823,63 @@ def test_741_r2_too_many_run_heads_is_an_estimate(tmp_path: Path) -> None:
     _skill(tmp_path, "b", second + "\n")
     [hit] = decay.copied_passage(_load(tmp_path)).hits
     assert hit.data["longest_words"] == 46 or hit.data["estimate"] is True
+
+
+# ------------------------------------------------- #745 (two #741 pass-3 false negatives)
+
+@pytest.mark.parametrize("quoted", ['"--absent=x y"', "'--absent=x y'"])
+def test_745_a_fully_quoted_option_is_checked_like_the_attached_form(tmp_path: Path, quoted: str) -> None:
+    """#745 item 1, the issue's exact inputs (both quote styles)."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", f"```bash\nscripts/helper.sh {quoted}\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_745_guards_on_quoted_option_shapes(tmp_path: Path) -> None:
+    """The other side: the attached form still fires; a quoted string whose first
+    word is not a FLAG_RE name stays a string (path-checked); a lone `--` or `-`
+    is not a flag."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --absent="x y"\n'
+                          'echo "-> see scripts/gone.sh"\n'
+                          'scripts/helper.sh "-- scripts/gone2.sh"\n'
+                          'scripts/helper.sh "- scripts/gone3.sh"\n```\n')
+    assert _flag_refs(tmp_path) == [
+        "scripts/helper.sh --absent", "scripts/gone.sh", "scripts/gone2.sh", "scripts/gone3.sh",
+    ]
+
+
+@pytest.mark.parametrize("form", ['env -S "bash scripts/helper.sh --absent"',
+                                  'env --split-string="bash scripts/helper.sh --absent"',
+                                  'env --split-string "bash scripts/helper.sh --absent"',
+                                  'env -i -S "bash scripts/helper.sh --absent"'])
+def test_745_flags_inside_an_env_split_string_are_checked(tmp_path: Path, form: str) -> None:
+    """#745 item 2, the issue's exact inputs plus `env -i -S`: the value is spliced
+    in as command text, so --absent is checked against the helper."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", f"```bash\n{form}\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_745_a_split_string_value_continues_with_the_words_after_it(tmp_path: Path) -> None:
+    """`env -S "bash scripts/helper.sh" --absent`: env splits the value into argv
+    and appends the rest, so --absent IS the helper's (the #741 test that counted
+    it as unowned encoded the gap)."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nenv -S "bash scripts/helper.sh" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_745_nested_split_strings_are_bounded_and_reported(tmp_path: Path) -> None:
+    """`env -S "env -S ..."` recursion stays bounded; past the splice cap the rest
+    of the line is COUNTED as unexamined, never silently dropped."""
+    _helper(tmp_path)
+    nested = "scripts/helper.sh --absent"
+    for _ in range(3):
+        nested = 'env -S "' + nested.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    _skill(tmp_path, "a", f"```bash\n{nested}\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+    flood = " ; ".join(['env -S "env -S x"'] * 40) + " ; scripts/helper.sh --absent"
+    _skill(tmp_path, "b", f"```bash\n{flood}\n```\n")
+    result = decay.dangling_reference(_load(tmp_path))
+    assert int(result.population["split_strings_not_examined"]) > 0  # type: ignore[call-overload]
