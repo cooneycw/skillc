@@ -24,6 +24,11 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/spec.py` - the Agent Skills specification as a checkable object; its
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
+- `skillc/decay.py` - the decay rules (#725): `dangling-reference`, `expired-marker`,
+  `copied-passage`, `emphasis-density`, over a whole collection; UNKNOWN is never fine
+- `skillc/inspect.py` - `skillc inspect`, skill-gauntlet round 2: sorts decay findings into
+  claude-power-pack #1830's A/B/C/D (A only when the enforcer's known-bad case exists) or
+  UNSORTED with a reason; never edits. Charter and blind spots: [docs/specs/inspect.md](docs/specs/inspect.md)
 - `skillc/records.py` - the evaluation-record contracts and bundle rules; the authoritative kind table is in the [records spec](docs/specs/evaluation-facility/records.md)
 - `skillc/usage.py` - `skill-usage` records (#719): the append-only per-repo usage log
   (`<main checkout>/.skillc/usage.jsonl`), its four rules, the fail-open Claude Code hook that
