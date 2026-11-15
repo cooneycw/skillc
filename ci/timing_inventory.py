@@ -66,12 +66,12 @@ DEFAULT_BASELINE = "ci/timing-baseline.txt"
 
 TIMEISH = re.compile(
     r"(timeout|settle|interval|deadline|budget|grace|wait|poll|delay|seconds|sleep|stall|ttl|period|backoff|patience)",
-    re.I,
+    re.IGNORECASE,
 )
-ELAPSED_NAMES = re.compile(r"(elapsed|duration|took|seconds|monotonic|perf_counter|time)", re.I)
+ELAPSED_NAMES = re.compile(r"(elapsed|duration|took|seconds|monotonic|perf_counter|time)", re.IGNORECASE)
 STR_PATTERNS = (
     ("str-sleep", re.compile(r"\bsleep\s*\(?\s*([0-9]*\.?[0-9]+)")),
-    ("str-kw", re.compile(r"\b[A-Za-z_]*(?:timeout|settle|interval|deadline|wait|poll|delay|seconds)\s*=\s*([0-9]*\.?[0-9]+)\b", re.I)),
+    ("str-kw", re.compile(r"\b[A-Za-z_]*(?:timeout|settle|interval|deadline|wait|poll|delay|seconds)\s*=\s*([0-9]*\.?[0-9]+)\b", re.IGNORECASE)),
     ("str-deadline", re.compile(r"monotonic\(\)\s*\+\s*([0-9]*\.?[0-9]+)")),
     ("str-timeout-cli", re.compile(r"\btimeout\s+([0-9]*\.?[0-9]+)s?\b")),
 )
@@ -220,7 +220,7 @@ def scan_tree(root: Path, subdir: str) -> list[Hit]:
     return hits
 
 
-def annotations(path: Path) -> dict[int, tuple[str, str]]:
+def timing_notes(path: Path) -> dict[int, tuple[str, str]]:
     """Line -> (role, reason) for every `# timing:` comment in the file."""
     found: dict[int, tuple[str, str]] = {}
     with path.open("rb") as fh:
@@ -241,7 +241,7 @@ def ratchet_candidates(root: Path) -> tuple[list[Hit], list[Hit], list[str]]:
     for hit in scan_tree(root, "tests"):
         if not 0 < hit.value < RATCHET_BELOW:
             continue
-        notes = notes_by_file.setdefault(hit.path, annotations(root / hit.path))
+        notes = notes_by_file.setdefault(hit.path, timing_notes(root / hit.path))
         note = notes.get(hit.line)
         if note is None:
             unannotated.append(hit)
@@ -271,8 +271,8 @@ def check(root: Path, baseline_path: Path) -> tuple[bool, list[str]]:
     new = current - baseline
     stale = baseline - current
     lines = [
-        f"TIMING_SCANNED: {len(unannotated) + len(annotated)} sub-second literal(s) in tests/ "
-        f"({len(unannotated)} baselined or new, {len(annotated)} annotated must-fire)",
+        (f"TIMING_SCANNED: {len(unannotated) + len(annotated)} sub-second literal(s) in tests/ "
+         f"({len(unannotated)} baselined or new, {len(annotated)} annotated must-fire)"),
         f"TIMING_BASELINE: {sum(baseline.values())} entr(ies)",
     ]
     by_key: dict[str, list[Hit]] = {}
@@ -308,7 +308,7 @@ def write_baseline(root: Path, baseline_path: Path) -> int:
     return 0
 
 
-def report(root: Path) -> dict[str, object]:
+def report(root: Path) -> tuple[dict[str, object], list[Hit]]:
     tests = scan_tree(root, "tests")
     product = [h for h in scan_tree(root, "skillc") if h.kind in ("const", "default") and h.value <= 5]
 
@@ -326,8 +326,7 @@ def report(root: Path) -> dict[str, object]:
         "tests_hits_by_kind": dict(Counter(h.kind for h in tests)),
         "test_functions_by_band": {k: len(v) for k, v in sorted(funcs.items())},
         "test_files_by_band": {k: len({p for p, _ in v}) for k, v in sorted(funcs.items())},
-        "skillc_defaults_at_most_5s": [asdict(h) for h in product],
-    }
+    }, product
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -346,11 +345,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if ok else 1
         if args.command == "write-baseline":
             return write_baseline(root, baseline)
-        data = report(root)
-        print(json.dumps(data, indent=1) if args.json else "\n".join(
-            f"{k}: {v}" for k, v in data.items() if k != "skillc_defaults_at_most_5s")
-            + "\nskillc defaults <= 5 s:\n" + "\n".join(
-                f"  {h['path']}:{h['line']} {h['detail']}" for h in data["skillc_defaults_at_most_5s"]))  # type: ignore[union-attr]
+        data, defaults = report(root)
+        if args.json:
+            print(json.dumps({**data, "skillc_defaults_at_most_5s": [asdict(h) for h in defaults]}, indent=1))
+        else:
+            print("\n".join(f"{k}: {v}" for k, v in data.items()))
+            print("skillc defaults <= 5 s:")
+            print("\n".join(f"  {h.path}:{h.line} {h.detail}" for h in defaults))
         return 0
     except (ScanError, tokenize.TokenError, io.UnsupportedOperation) as exc:
         print(f"TIMING_CHECK: error - {exc}", file=sys.stderr)
