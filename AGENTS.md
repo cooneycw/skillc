@@ -40,6 +40,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/charter.py` - `skillc charter draft` (#726, gauntlet round 1): a draft CHARTER.md from a skill's text and
   usage records, sorted into observed-and-stated / stated-not-observed / unknown / observed-not-stated; no model call,
   never approves. `skillc/charter_confirm.py` applies the owner's answers. Spec: [docs/specs/charter-round1.md](docs/specs/charter-round1.md)
+- `skillc/gauntlet.py` - `skillc gauntlet run` (#754): the skill-gauntlet engine. Runs the round commands
+  (usage, charter, contracts, inspect) as subprocesses and reads only their verdicts; imports no round module;
+  writes `GAUNTLET.json` beside the charter only on change and never commits it - see [docs/specs/gauntlet.md](docs/specs/gauntlet.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module
