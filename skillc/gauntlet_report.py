@@ -186,8 +186,8 @@ TABLE: dict[tuple[str, str], Entry] = {
         lambda c: f"the charter {c.rel(c.skill.charter)} makes {_promises(c)}, but you have not approved its "
                   "purpose or authority",
         lambda c: "the gauntlet judges a skill only against a purpose you approved",
-        lambda c: f"read the purpose in {c.rel(c.skill.charter)}; if it says what you intend, add `approved: "
-                  "<date>` under it (or run `skillc charter confirm`)"),
+        lambda c: _create(c, f"Or read the purpose in {c.rel(c.skill.charter)}; if it says what you intend, add "
+                             "`approved: <date>` under it (or run `skillc charter confirm`).")),
     ("1", ""): (
         lambda c: (f"the charter is valid and you approved its purpose; it makes {_promises(c)}"),
         lambda c: "the skill has a settled purpose to be judged against",

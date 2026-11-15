@@ -11,7 +11,7 @@ Round 1: stop
   Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
   Found:   no charter yet; a draft is ready (1 'never' promise (0 with a test), 1 'always' promise (0 with a test))
   Means:   no keep/trim/retire is possible until you settle what the skill promises; normal for a new skill
-  Do next: Read the draft .skillc/gauntlet/skills__beta/CHARTER.draft.md and run `skillc charter confirm` on it, as the NEXT line below shows. (`/charter-create`, which composes a charter with you, is not in this skillc yet: skillc #778.)
+  Do next: run `/charter-create <COLL> skills/beta`: it composes the charter with you and gives every promise a test. Or read the draft .skillc/gauntlet/skills__beta/CHARTER.draft.md and run `skillc charter confirm` on it, as the NEXT line below shows.
 
 No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
 

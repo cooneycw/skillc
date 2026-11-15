@@ -11,7 +11,7 @@ Round 1: fail
   Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
   Found:   the charter skills/alpha/CHARTER.md makes 2 'never' promises (0 with a test); a promise names no test that exists
   Means:   a promise without a test cannot be checked, so the gauntlet cannot go on
-  Do next: Add a test for each promise in skills/alpha/CHARTER.md; `skillc contracts <COLL>` lists the missing ones. (`/charter-create`, which composes a charter with you, is not in this skillc yet: skillc #778.)
+  Do next: run `/charter-create <COLL> skills/alpha`: it composes the charter with you and gives every promise a test. Or add a test for each promise in skills/alpha/CHARTER.md; `skillc contracts <COLL>` lists the missing ones.
 
 No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
 
