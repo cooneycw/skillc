@@ -331,7 +331,7 @@ def _inside_collection(root: Path, rel: str) -> bool:
         return False
     try:
         return (root / path).resolve().is_relative_to(root.resolve()) and (root / path).exists()
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):  # RuntimeError: a symlink loop (Python 3.12) backs nothing
         return False
 
 
@@ -776,8 +776,9 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
         try:
             result = step(key, inputs(), fresh)
         except UnsafeRecord as exc:
-            for line in machine:  # what was printed before #783 is still printed
-                final_out(line)
+            if options.output != "plain":  # what was printed before #783 is still printed, unless suppressed
+                for line in machine:
+                    final_out(line)
             print(f"skillc: {exc}", file=sys.stderr)
             return EXIT_USAGE
         results.append(result)
@@ -795,8 +796,9 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
                                                    "reason": r.reason, "facts": r.facts}
                                          for r in results if not r.cached or r.round in display})
     except UnsafeRecord as exc:
-        for line in machine:
-            final_out(line)
+        if options.output != "plain":
+            for line in machine:
+                final_out(line)
         print(f"skillc: {exc}", file=sys.stderr)
         return EXIT_USAGE
     out(f"RECORD: {record.relative_to(skill.collection) if record.is_relative_to(skill.collection) else record}"

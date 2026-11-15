@@ -342,3 +342,44 @@ def test_plain_only_on_no_charter_gives_the_exact_confirm_step(tmp_path: Path) -
     text = "\n".join(lines)
     assert "NEXT line below" not in text and "ROUND " not in text
     assert "Exact next step: owner reviews the draft" in text and "skillc charter confirm" in text
+
+
+# ----------------- #784 items 1 and 3, folded in post-receipt (orchestrator rev 55)
+
+def test_a_looping_test_path_never_crashes_round_1(tmp_path: Path) -> None:
+    """A test path that is a symlink loop: `contracts` reports it unbacked, and
+    the plain report's facts count it untested, never a traceback, in any mode."""
+    coll = _collection(tmp_path)
+    (coll / "checks").mkdir()
+    (coll / "checks" / "loop").symlink_to(coll / "checks" / "loop")
+    _edit(_charter(coll), "owner: owner\n", "owner: owner\ninvariants:\n  always: []\n  never:\n"
+                                            "    - id: alpha.never-x\n      test: checks/loop\n")
+    assert gauntlet._charter_facts(_charter(coll), coll)["never"] == {"count": 1, "tested": 0}
+    for mode in ("both", "machine", "plain"):
+        lines: list[str] = []
+        code = gauntlet.run(coll, "skills/alpha", gauntlet.Options(issue_states=coll / "issue-states.json",
+                                                                   repo="example/gauntlet", output=mode),
+                            out=lines.append)
+        assert code == gauntlet.EXIT_FAILED and lines, (mode, lines)
+
+
+def test_a_normal_test_path_still_counts(tmp_path: Path) -> None:
+    coll = _collection(tmp_path)
+    (coll / "checks").mkdir()
+    (coll / "checks" / "real.txt").write_text("x\n")
+    _edit(_charter(coll), "owner: owner\n", "owner: owner\ninvariants:\n  always: []\n  never:\n"
+                                            "    - id: alpha.never-x\n      test: checks/real.txt\n")
+    assert gauntlet._charter_facts(_charter(coll), coll)["never"] == {"count": 1, "tested": 1}
+
+
+@pytest.mark.parametrize("mode,machine", [("plain", False), ("both", True), ("machine", True)])
+def test_a_refused_record_respects_the_output_mode(tmp_path: Path, mode: str, machine: bool) -> None:
+    coll = _collection(tmp_path)
+    record = coll / "skills" / "alpha" / gauntlet.RECORD_NAME
+    record.symlink_to(tmp_path / "elsewhere.json")
+    lines: list[str] = []
+    code = gauntlet.run(coll, "skills/alpha", gauntlet.Options(issue_states=coll / "issue-states.json",
+                                                               repo="example/gauntlet", output=mode),
+                        out=lines.append)
+    assert code == gauntlet.EXIT_USAGE
+    assert any(line.startswith("ROUND ") for line in lines) is machine, (mode, lines)
