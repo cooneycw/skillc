@@ -39,6 +39,10 @@ _TEST_PINS = ({"path": ".codex/skills/tdd/SKILL.md", "body_digest": "sha256:" + 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "evals" / "calibration-204" / "run-manifest.json"
 TASK = ROOT / "evals" / "level3" / "slugkit-pipeline"
+#: The necessity task's CURRENT grader revision, read, never pinned: these
+#: declarations target the task as it stands (#537 moved it to revision 6).
+_NECESSITY_REVISION = json.loads((ROOT / "evals" / "level3" / "flow-auto-necessity" / "grader.json")
+                                 .read_text(encoding="utf-8"))["revision"]
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "agent-trial" / "fake_agent_client.py"
 CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
@@ -1250,7 +1254,7 @@ def _fixture_declaration_data(case: str = "clean", **task: object) -> dict[str, 
     data["arm_order"]["sequence"] = calibration.derive_arm_order(data["arm_order"]["seed"], names, 1)
     data["approval"]["attempts_per_arm"] = 1
     data["task"].update({"path": "evals/level3/flow-auto-necessity", "grader_id": "flow-auto-necessity",
-                         "grader_revision": "5", "fixture": "builder", "fixture_case": case, **task})
+                         "grader_revision": _NECESSITY_REVISION, "fixture": "builder", "fixture_case": case, **task})
     data["task"] = {k: v for k, v in data["task"].items() if v is not None}
     data["approval"]["task_fixture"] = data["task"].get("fixture", "fixture")
     return stamp_approval(data)
