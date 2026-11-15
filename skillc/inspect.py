@@ -140,6 +140,14 @@ def _red_case(path: Path, root: Path) -> str | None:
     return None
 
 
+def _is_control_input(rel: str | None) -> bool:
+    """`controls/<id>/{bad,good,targets}/...`: a committed case, not an enforcer."""
+    if rel is None:
+        return False
+    parts = rel.split("/")
+    return len(parts) >= 3 and parts[0] == "controls" and parts[2] in ("bad", "good", "targets")
+
+
 def _under(word: str, roots: Sequence[str]) -> bool:
     return any(word.startswith(r) for r in roots)
 
@@ -165,6 +173,11 @@ def enforcers_named(line: str, subject: decay.Subject, coll: decay.Collection) -
         if not candidates:
             continue
         existing = next((c for c in candidates if c.exists() and _rel(c, coll.root) is not None), None)
+        if existing is not None and _is_control_input(_rel(existing, coll.root)):
+            # A file INSIDE a control's bad/ or good/ is an input the check
+            # runs on, not the check (#731): naming one proves nothing about
+            # what enforces this rule.
+            continue
         if existing is None:
             if under:
                 found.append(Enforcer(word, None, None, True))
@@ -409,6 +422,16 @@ def run(
     else:
         verdict, code = CLEAN, 0
         summary = "clean - every rule examined, no finding, no UNKNOWN"
+
+    estimated = sum(
+        int(result.population.get("estimated_pairs", 0) or 0)  # type: ignore[call-overload]
+        for rule, result in results if rule.id == "copied-passage"
+    )
+    if estimated:
+        # The first-candidates fallback measured part of this (#731): say so
+        # beside the verdict, not only on the finding.
+        summary += (f"; {estimated} copied-passage measurement(s) are a bounded estimate "
+                    f"(repetitive text)")
 
     by_rule = Counter(i.rule for i in items)
     by_rule.update(Counter(str(e["rule"]) for e in errors))
