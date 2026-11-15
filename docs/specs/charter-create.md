@@ -214,7 +214,7 @@ The `/charter-create` dialogue writes it from the owner's words:
 | `approve` outside intent and authority; an approval without `approved_on`; `approved_on` with nothing approved; an impossible or future date | only the owner approves, and only intent and authority (the `charter confirm` allowlist) |
 | a clause with no text, an unknown section, or a repeated id | the charter would not parse, or would be ambiguous |
 | a `test` that is not an existing path in the collection | an offered test must exist |
-| the evidence file is for another skill, or not schema 1 | the answers must match the evidence they answer |
+| the evidence file is for another skill, or not schema 1, or its `suggestions` is missing or not a list of entries with unique string ids | the answers must match the evidence they answer; a malformed population is never read as empty (an explicit `[]` is allowed) |
 | the CHARTER.md exists | never overwritten, unless every clause in it is a `draft` and `--replace-draft` is given |
 | a stub directory exists | never overwritten |
 | any output's path from the collection root holds a symlink, or resolves outside the collection | never written through a link (a symlinked `charters/` or `evals/` would redirect it) |
@@ -249,7 +249,8 @@ reads:
 After writing, `create` runs the real contracts rules over the collection and
 reads every finding on this charter:
 - **any error rolls back everything create wrote**, including a replaced
-  draft, which is restored;
+  draft, which is restored byte for byte. Directory cleanup runs even if that
+  restoration fails;
 - `approval-present` may warn **only** on an intent or authority clause whose
   approval the owner withheld. A warning on a clause the owner approved also
   rolls back.

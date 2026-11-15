@@ -391,3 +391,81 @@ def test_create_in_a_git_main_checkout_writes_and_commits_nothing(work: Path) ->
     assert "?? evals/" in status and "?? skills/demo/CHARTER.md" in status
     assert subprocess.run([*git, "diff", "--cached", "--name-only"], capture_output=True, text=True,
                           check=True).stdout == ""
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2
+
+
+_DRAFT = ('---\ncontract: "demo"\nversion: 1\nintent:\n  id: "demo.intent"\n  draft: true\n  what: "x"\n'
+          'purpose: "p"\nowner: "owner"\n---\n')
+
+
+def test_a_failed_draft_write_still_cleans_up_every_stub_directory(work: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = work / "c/skills/demo/CHARTER.md"
+    draft.write_text(_DRAFT, encoding="utf-8")
+    real_open = Path.open
+
+    def refuse_charter(self: Path, mode: str = "r", *a: Any, **k: Any):  # type: ignore[no-untyped-def]
+        if self == draft and "w" in mode:
+            raise PermissionError("read-only charter")
+        return real_open(self, mode, *a, **k)
+
+    monkeypatch.setattr(Path, "open", refuse_charter)
+    before = _files(work / "c")
+    with pytest.raises(PermissionError):
+        _run(work, _answers(), replace_draft=True)
+    assert _files(work / "c") == before
+    assert draft.read_text(encoding="utf-8") == _DRAFT
+
+
+@pytest.mark.parametrize("suggestions", [None, {"e1": "x"}, [{"no": "id"}], [{"id": 3}], [{"id": "e1"}, {"id": "e1"}]])
+def test_malformed_evidence_suggestions_are_refused_not_read_as_empty(work: Path, suggestions: object) -> None:
+    data = json.loads((work / "evidence.json").read_text(encoding="utf-8"))
+    if suggestions is None:
+        del data["suggestions"]
+    else:
+        data["suggestions"] = suggestions
+    (work / "evidence.json").write_text(json.dumps(data), encoding="utf-8")
+    _refused(work, _answers(answers={}), "suggestions")
+
+
+def test_an_explicitly_empty_evidence_list_is_allowed(work: Path) -> None:
+    data = json.loads((work / "evidence.json").read_text(encoding="utf-8"))
+    data["suggestions"] = []
+    (work / "evidence.json").write_text(json.dumps(data), encoding="utf-8")
+    answers = _answers(answers={})
+    answers["intent"]["from"] = []
+    for c in answers["clauses"]:
+        c["from"] = []
+    _run(work, answers)
+
+
+def test_rollback_restores_a_crlf_draft_byte_for_byte(work: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = work / "c/skills/demo/CHARTER.md"
+    raw = _DRAFT.replace("\n", "\r\n").encode()
+    draft.write_bytes(raw)
+    real = charter_create._findings
+
+    def failing(root: Path, path: Path, before: Any = frozenset()):  # type: ignore[no-untyped-def]
+        yield from real(root, path, before)
+        yield "clause-backed", "planted failure"
+
+    monkeypatch.setattr(charter_create, "_findings", failing)
+    with pytest.raises(CreateRefused):
+        _run(work, _answers(), replace_draft=True)
+    assert draft.read_bytes() == raw
+
+
+def test_charter_evidence_reads_back_the_charter_create_wrote(work: Path) -> None:
+    """The producer-to-reader path: a later `charter evidence` offers every
+    clause create wrote, with its test, list-valued ones included."""
+    (work / "c/tests").mkdir()
+    (work / "c/tests/test_demo.py").write_text("def test_x(): pass\n", encoding="utf-8")
+    answers = _answers()
+    answers["clauses"][1]["test"] = "tests/test_demo.py"
+    _run(work, answers)
+    found = gather(work / "c", "skills/demo", reader=None)
+    items = {s.cite.split(": ", 1)[1]: s for s in found.suggestions if s.source == "existing charter"}
+    assert set(items) >= {"demo.intent", "demo.cite-every-claim", "demo.never-approve", "demo.owner-merges"}
+    assert items["demo.never-approve"].test == "tests/test_demo.py, evals/trap-tasks/demo/never-approve/{bad,good}"
+    assert items["demo.cite-every-claim"].test == "evals/trap-tasks/demo/cite-every-claim/{bad,good}"

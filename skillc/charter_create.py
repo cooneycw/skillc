@@ -138,6 +138,23 @@ class Plan:
     approved_on: str | None
 
 
+def offered_suggestions(evidence: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    """The evidence file's suggestions by id. A missing or malformed population
+    is refused, never read as empty (counter-model review): only an explicit
+    empty list means "nothing was found"."""
+    listed = evidence.get("suggestions")
+    if not isinstance(listed, list):
+        raise CreateRefused("the evidence file has no suggestions list; refusing to read it as empty")
+    offered: dict[str, Mapping[str, object]] = {}
+    for n, entry in enumerate(listed, 1):
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
+            raise CreateRefused(f"evidence suggestions entry {n} has no string id")
+        if entry["id"] in offered:
+            raise CreateRefused(f"evidence suggestions repeat the id {entry['id']!r}")
+        offered[entry["id"]] = entry
+    return offered
+
+
 def plan(evidence: Mapping[str, object], answers: Mapping[str, object], default_contract: str,
          today: _dt.date) -> Plan:
     """Check the answers against the evidence. Raises `CreateRefused`."""
@@ -145,9 +162,7 @@ def plan(evidence: Mapping[str, object], answers: Mapping[str, object], default_
         raise CreateRefused("the evidence file is not schema 1 (`skillc charter evidence`)")
     if answers.get("schema") != SCHEMA:
         raise CreateRefused("the answers file is not schema 1 (docs/specs/charter-create.md)")
-    listed = evidence.get("suggestions")
-    offered = {str(s["id"]): s for s in (listed if isinstance(listed, list) else [])
-               if isinstance(s, dict) and "id" in s}
+    offered = offered_suggestions(evidence)
     given = answers.get("answers")
     if not isinstance(given, dict):
         raise CreateRefused("answers: needs an 'answers' object, one answer per suggestion")
@@ -447,9 +462,7 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
         pass
     default = charter._slug(str(front.get("name") or charter.primary_name(target.text)))
     plan_ = plan(evidence, answers, default, today)
-    listed = evidence.get("suggestions")
-    offered = {str(s["id"]): s for s in (listed if isinstance(listed, list) else [])
-               if isinstance(s, dict) and "id" in s}
+    offered = offered_suggestions(evidence)
     for c in plan_.clauses:
         if c.test and (not contracts._inside(root, c.test) or not (root / c.test).exists()):
             raise CreateRefused(f"clause {c.id}: test {c.test!r} is not an existing path in the collection")
@@ -457,12 +470,12 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
     text = render(plan_, subject, offered, root)
 
     out = target.charter
-    old: str | None = None
+    old: bytes | None = None
     if out.exists() or out.is_symlink():
         if out.is_symlink() or not (replace_draft and _all_draft(out)):
             raise CreateRefused(f"{out.relative_to(root)} exists; create never overwrites a charter (--replace-draft "
                                 "replaces one whose every clause is still a draft)")
-        old = out.read_text(encoding="utf-8")
+        old = out.read_bytes()  # restored byte for byte (counter-model review: CRLF)
     stubs = [stub_dir(root, plan_.contract, c) for c in plan_.clauses if c.stubbed]
     for d in stubs:
         if d.exists() or d.is_symlink():
@@ -484,6 +497,7 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
     before = skill_tree_digest(target.text, target.command, tuple(stubs))
     made_files: list[Path] = []
     made_dirs: list[Path] = []
+    touched = False  # the draft is restored only if create began writing it
 
     def mkdirs(path: Path) -> None:
         missing = []
@@ -497,7 +511,10 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
 
     def write(path: Path, content: str) -> None:
         mkdirs(path.parent)
+        nonlocal touched
         fresh = path != out or old is None
+        if not fresh:
+            touched = True
         if fresh:
             # Owned BEFORE it is opened (counter-model review): every target was
             # checked absent above, so a failure anywhere in creating or writing
@@ -511,15 +528,19 @@ def create(collection: Path, skill: str, evidence_path: Path, answers_path: Path
             raise CreateRefused(f"{path} appeared while composing; create never overwrites") from None
 
     def rollback() -> None:
-        for f in reversed(made_files):
-            f.unlink(missing_ok=True)
-        if old is not None:
-            out.write_text(old, encoding="utf-8")
-        for d in reversed(made_dirs):
-            try:
-                d.rmdir()
-            except OSError:
-                pass
+        try:
+            for f in reversed(made_files):
+                f.unlink(missing_ok=True)
+            if old is not None and touched:
+                out.write_bytes(old)
+        finally:
+            # Directory cleanup runs even if restoring the draft fails
+            # (counter-model review): an empty stub directory blocks a retry.
+            for d in reversed(made_dirs):
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
 
     try:
         for clause, d in zip([c for c in plan_.clauses if c.stubbed], stubs, strict=True):
