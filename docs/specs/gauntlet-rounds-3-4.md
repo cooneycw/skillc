@@ -28,17 +28,22 @@ runner over `calibration_run`'s path, under its own gate.
 | `tolerance` | round 4's no-worse tolerance, 0 unless the owner declares one |
 | `discrimination_rule` | the `reliability.TwoArmRule` for round 3's separation test |
 
-A passage must occur **exactly once** in its file. Otherwise the arm would not
-be the one its name says.
+A passage must occur **exactly once** in its file, and the file must be a
+regular file **inside the skill** (no absolute path, no `..`, no symlink).
+Otherwise the arm would not be the one its name says, or would leave the skill
+undamaged. `partial` must be a JSON boolean.
 
 ## Tasks and the split
 
-**A task is identified by content, not by path.**
-- Its task digest covers `goal.md` and `fixture/`.
+**A task is identified by what the agent sees.**
+- Its task digest covers `goal.md` and `fixture/`, which are both required: a
+  task missing either is refused.
+- The task digest alone decides the minimums and the split. Directories with
+  the same goal and fixture are one task, whatever their graders. If such
+  directories declare different graders, the declaration is refused.
 - Its grader digest is `verify.GraderDef.digest()`: the definition, plus the
-  probe, inputs and judge it names. Editing a README beside the grader changes
-  nothing.
-- Byte-identical task directories are one task, so copies never meet a minimum.
+  probe, inputs and judge it names. It is part of the ledger key. Editing a
+  README beside the grader changes nothing.
 
 **One global split** covers every distinct task, so a task shared by two
 clauses can never train one and be held out for the other.
@@ -55,6 +60,8 @@ clauses can never train one and be held out for the other.
   every clause, `replicates` times.
 - **Separation:** for each damaged arm, its clause's pass counts against the
   intact skill's, through `reliability.evaluate_discrimination`.
+- **An error in either arm makes that separation `UNKNOWN`.** Dropping one
+  arm's errors from its denominator could fake a difference.
 - **The verdict is `COMPLETE` only if every damaged arm reads `DISCRIMINATING`.**
   Otherwise it is `UNKNOWN`: tasks that cannot tell a damaged skill from an
   intact one show nothing about the intact one. That is the charter's guard
@@ -90,6 +97,8 @@ clauses can never train one and be held out for the other.
 - **The runner must report the declared client, version and model.** A
   mismatch refuses the round, and that grade is never recorded, so a re-run
   never reuses another client's result.
+- **A cached row must be the attempt its key names** (client, version, model,
+  arm, skill digest, replicate). Otherwise the ledger is refused, never reused.
 - **Ledger rows are validated on load.** Each needs every field and a result of
   pass, fail or error. One bad row refuses the whole ledger (exit 2).
 - **Every clause and arm must hold its whole population** (tasks x replicates)

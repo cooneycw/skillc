@@ -365,3 +365,67 @@ def test_missing_evidence_is_never_a_verdict(tmp_path: Path) -> None:
     report.per_clause = {GATE: {g.INTACT: {"pass": 0, "evaluable": 0, "error": 0, "missing": 6}}}
     assert g._evidence_problem(report, {GATE: 6}) is not None
     del declaration
+
+
+# ---------------------------------------------------------------- counter-model review, pass 2
+
+
+def test_one_agent_visible_task_with_different_graders_is_refused(tmp_path: Path) -> None:
+    """HIGH: graders do not make two tasks; what the agent sees does."""
+    path = _copy(tmp_path)
+    tasks = path.parent / "tasks"
+    for name in ("a2", "a3"):
+        (tasks / name / "goal.md").write_text((tasks / "a1/goal.md").read_text(encoding="utf-8"), encoding="utf-8")
+        (tasks / name / "fixture/README.md").write_text((tasks / "a1/fixture/README.md").read_text(encoding="utf-8"),
+                                                        encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="same task with different graders"):
+        _decl(path)
+
+
+def test_errors_in_one_arm_never_fake_a_separation(tmp_path: Path) -> None:
+    """HIGH: intact passes a1 and fails a3; damaged errors on a1 and fails a3."""
+    path = _copy(tmp_path, replicates=10, attempt_cap=100, discrimination_rule={
+        "rule_id": "c", "alpha": 0.05, "tolerance": 4, "citation_url": "https://example.invalid"})
+    declaration = _decl(path)
+    train = [t.path.name for t in g.split(declaration, GATE)[0]]
+    script = {(g.INTACT, train[1]): [g.FAIL], ("damaged-gate", train[0]): [g.ERROR], ("damaged-gate", train[1]): [g.FAIL]}
+    report = g.round3(declaration, g.Ledger(tmp_path / "l.jsonl"), _runner(declaration, script))
+    assert report.verdict == g.UNKNOWN and report.separation["damaged-gate"]["verdict"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("remove", ["goal.md", "fixture"])
+def test_a_task_without_its_agent_inputs_is_refused(tmp_path: Path, remove: str) -> None:
+    path = _copy(tmp_path)
+    target = path.parent / "tasks/a1" / remove
+    shutil.rmtree(target) if target.is_dir() else target.unlink()
+    with pytest.raises(g.DeclarationError, match="needs a goal.md file and a fixture/ directory"):
+        _decl(path)
+
+
+def test_a_tampered_cached_row_is_never_reused(tmp_path: Path) -> None:
+    path = _copy(tmp_path)
+    _declaration, ledger = _round3_complete(path)
+    rows = [json.loads(line) for line in ledger.path.read_text(encoding="utf-8").splitlines()]
+    ledger.path.write_text("".join(json.dumps(r | {"client": "codex", "model": "other"}) + "\n" for r in rows),
+                           encoding="utf-8")
+    declaration = _decl(path)
+    runner = _runner(declaration, {})
+    report = g.round3(declaration, g.Ledger(ledger.path), runner)
+    assert report.verdict == g.REFUSED and "not trusted" in report.reason and runner.calls == 0
+
+
+@pytest.mark.parametrize("file", ["../tasks/a1/goal.md", "/etc/hostname", "missing.md"])
+def test_a_passage_outside_the_skill_is_refused(tmp_path: Path, file: str) -> None:
+    path = _copy(tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["damaged"][0]["file"] = file
+    path.write_text(json.dumps(data), encoding="utf-8")
+    declaration = _decl(path)
+    with pytest.raises(g.DeclarationError, match="not a regular file inside the skill"):
+        g.round3(declaration, g.Ledger(tmp_path / "l.jsonl"), _runner(declaration, {}))
+
+
+@pytest.mark.parametrize("value", ["false", 1, "true"])
+def test_partial_must_be_a_json_boolean(tmp_path: Path, value: object) -> None:
+    with pytest.raises(g.DeclarationError, match="partial must be true or false"):
+        _decl(_copy(tmp_path, partial=value))

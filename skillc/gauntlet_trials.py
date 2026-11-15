@@ -180,7 +180,10 @@ def load(path: Path) -> Declaration:
             raise DeclarationError(f"clause {clause_id!r}: tasks must be a list of task directories")
         distinct: dict[str, Task] = {}
         for task in (read_task((base / t).resolve()) for t in sorted(set(tasks))):
-            distinct.setdefault(task.identity, task)  # byte-identical copies are ONE task
+            seen = distinct.setdefault(task.identity, task)  # identical copies are ONE task
+            if seen.grader_digest != task.grader_digest:
+                raise DeclarationError(f"clause {clause_id!r}: {seen.path} and {task.path} are the same task "
+                                       f"with different graders; declare one")
         clauses[str(clause_id)] = tuple(sorted(distinct.values(), key=lambda t: t.path))
     if not clauses:
         raise DeclarationError("no clause is declared")
@@ -190,7 +193,10 @@ def load(path: Path) -> Declaration:
     variants = _passages(data.get("variants", []), "variants", clause_ids=None)
     if {p.arm for p in damaged} & {p.arm for p in variants}:
         raise DeclarationError("an arm name is both damaged and a variant")
-    return Declaration(path, skill, actual, client, cap, bool(data.get("partial", False)), replicates,
+    partial = data.get("partial", False)
+    if not isinstance(partial, bool):
+        raise DeclarationError("partial must be true or false (a JSON boolean)")
+    return Declaration(path, skill, actual, client, cap, partial, replicates,
                        str(data.get("seed", "0")), minimum, min_heldout, tolerance, rule, clauses, damaged, variants)
 
 
@@ -207,7 +213,16 @@ def arm_text(declaration: Declaration, passage: Passage | None) -> dict[str, str
     be the one named."""
     if passage is None:
         return {}
-    target = declaration.skill / passage.file
+    rel = Path(passage.file)
+    target = declaration.skill / rel
+    try:
+        inside = (not rel.is_absolute() and ".." not in rel.parts and not target.is_symlink()
+                  and target.resolve().is_relative_to(declaration.skill.resolve()) and target.is_file())
+    except (OSError, ValueError):
+        inside = False
+    if not inside:
+        raise DeclarationError(f"arm {passage.arm!r}: {passage.file} is not a regular file inside the skill; "
+                               f"a passage outside it would leave the skill undamaged")
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as exc:
@@ -243,7 +258,10 @@ class Task:
 
     @property
     def identity(self) -> str:
-        return _sha(f"{self.task_digest}:{self.grader_digest}".encode())
+        """What the AGENT sees (counter-model review, pass 2): two directories
+        with the same goal and fixture are one task for the minimums and the
+        split, whatever their graders. The grader stays in the ledger key."""
+        return self.task_digest
 
 
 def read_task(path: Path) -> Task:
@@ -251,7 +269,10 @@ def read_task(path: Path) -> Task:
     README beside it changes nothing, while editing the grader does."""
     from .verify import GraderDef, Refused
 
-    seen = [path / "goal.md", *sorted(p for p in (path / "fixture").rglob("*") if p.is_file())]
+    goal, fixture = path / "goal.md", path / "fixture"
+    if not goal.is_file() or goal.is_symlink() or not fixture.is_dir() or fixture.is_symlink():
+        raise DeclarationError(f"task {path}: needs a goal.md file and a fixture/ directory (the agent's inputs)")
+    seen = [goal, *sorted(p for p in fixture.rglob("*") if p.is_file())]
     try:
         grader = GraderDef.load(path).digest()
     except (Refused, OSError, ValueError) as exc:
@@ -437,6 +458,15 @@ def _record_clients(planned: Sequence[Planned], ledger: Ledger, report: RoundRep
 def _execute(declaration: Declaration, planned: list[Planned], ledger: Ledger,
              runner: AttemptRunner | None, report: RoundReport, plan_only: bool = False) -> bool:
     """Run what the ledger lacks, within the cap. False when the round stops."""
+    for attempt, digest, _changes in planned:
+        row = ledger.get(attempt.key)
+        if row is not None and not (_row_matches(declaration, row) and row.get("arm") == attempt.arm
+                                    and row.get("skill") == digest and row.get("replicate") == attempt.replicate):
+            # Counter-model review, pass 2: a cached row must be the attempt
+            # its key names, or it is not reused - the ledger is refused.
+            report.verdict, report.reason = REFUSED, (f"ledger row {attempt.key[:12]} disagrees with the attempt its key "
+                                                      f"names (client, arm, skill or replicate); the ledger is not trusted")
+            return False
     needed = [p for p in planned if ledger.get(p[0].key) is None]
     report.declared, report.reused, report.new = len(planned), len(planned) - len(needed), len(needed)
     cap = declaration.attempt_cap
@@ -530,6 +560,13 @@ def round3(declaration: Declaration, ledger: Ledger, runner: AttemptRunner | Non
     for passage in declaration.damaged:
         intact = report.per_clause[passage.clause][INTACT]
         damaged = report.per_clause[passage.clause][passage.arm]
+        if intact["error"] or damaged["error"]:
+            # Counter-model review, pass 2: dropping one arm's errors from its
+            # denominator can fake a difference. Errors mean no comparable pair.
+            report.separation[passage.arm] = {"clause": passage.clause, "removes": f"{passage.file}: {passage.remove[:80]}",
+                                              "verdict": "UNKNOWN", "p": None,
+                                              "reason": "an attempt errored, so the arms are not comparable"}
+            continue
         verdict = evaluate_discrimination(declaration.rule, intact["pass"], intact["evaluable"],
                                           damaged["pass"], damaged["evaluable"], certified=True)
         report.separation[passage.arm] = {"clause": passage.clause, "removes": f"{passage.file}: {passage.remove[:80]}",
