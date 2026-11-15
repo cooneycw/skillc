@@ -84,10 +84,16 @@ class Document:
     truncated: bool = False  # more comments exist than one read fetches
 
 
+@dataclass(frozen=True)
+class SearchResult:
+    refs: tuple[Ref, ...]
+    truncated: bool = False  # more matches exist than one search returns
+
+
 class RepoReader(Protocol):
     def read(self, ref: Ref) -> Document: ...
 
-    def search(self, repo: str, term: str) -> list[Ref]: ...
+    def search(self, repo: str, term: str) -> SearchResult: ...
 
 
 def parse_ref(text: str, default_repo: str | None) -> Ref:
@@ -113,9 +119,11 @@ _QUERIES = {
     "issue": "query($o:String!,$n:String!,$k:Int!){repository(owner:$o,name:$n){issueOrPullRequest(number:$k){"
              "__typename ... on Issue{" + _THREAD + "} ... on PullRequest{" + _THREAD + "}}}}",
 }
-_SEARCH = ("query($q:String!){issues:search(query:$q,type:ISSUE,first:20){nodes{... on Issue{number} "
-           "... on PullRequest{number}}} discussions:search(query:$q,type:DISCUSSION,first:20){nodes{"
-           "... on Discussion{number}}}}")
+SEARCH_PAGE = 20
+_SEARCH = (f"query($q:String!){{issues:search(query:$q,type:ISSUE,first:{SEARCH_PAGE}){{pageInfo{{hasNextPage}} "
+           "nodes{... on Issue{number} ... on PullRequest{number}}} "
+           f"discussions:search(query:$q,type:DISCUSSION,first:{SEARCH_PAGE}){{pageInfo{{hasNextPage}} "
+           "nodes{... on Discussion{number}}}}")
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -169,6 +177,12 @@ class GhReader:
         repo = (data.get("data") or {}).get("repository") if isinstance(data.get("data"), dict) else None
         node = repo.get("discussion" if kind == "discussion" else "issueOrPullRequest") if isinstance(repo, dict) else None
         if isinstance(node, dict):
+            if errors:
+                # A partial answer (counter-model review): GitHub returned the
+                # node but refused part of it, such as its comments. A read
+                # that is partly refused is a failed read, never a complete one.
+                first = errors[0] if isinstance(errors[0], dict) else {}
+                raise RepoReadError(f"GitHub answered only in part: {first.get('message', 'an error')}")
             return node
         if errors and all(isinstance(e, dict) and e.get("type") == "NOT_FOUND" for e in errors) \
                 and isinstance(repo, dict):
@@ -189,20 +203,22 @@ class GhReader:
                 return doc
         raise RepoReadError(f"{ref} is not a {' or '.join(str(k) for k in order)}")
 
-    def search(self, repo: str, term: str) -> list[Ref]:
+    def search(self, repo: str, term: str) -> SearchResult:
         if not REPO_RE.match(repo):
             raise RepoReadError(f"not a repository: {repo!r}")
         data = self._gh(["api", "graphql", "-f", f"query={_SEARCH}", "-f", f"q=repo:{repo} {term}"])
         if data.get("errors") or not isinstance(data.get("data"), dict):
             raise RepoReadError("GitHub refused the search")
         found: list[Ref] = []
+        truncated = False
         result: dict[str, Any] = data["data"]
         for key, kind in (("discussions", "discussion"), ("issues", None)):
-            nodes = (result.get(key) or {}).get("nodes") or []
-            for n in nodes:
+            block = result.get(key) or {}
+            truncated = truncated or bool((block.get("pageInfo") or {}).get("hasNextPage"))
+            for n in block.get("nodes") or []:
                 if isinstance(n, dict) and isinstance(n.get("number"), int):
                     found.append(Ref(repo, n["number"], kind))
-        return sorted(set(found), key=lambda r: r.number)
+        return SearchResult(tuple(sorted(set(found), key=lambda r: r.number)), truncated)
 
 
 def _document(ref: Ref, kind: str, node: dict[str, Any]) -> Document:
@@ -235,6 +251,7 @@ class FakeReader:
     documents: dict[tuple[str, int], Document] = field(default_factory=dict)
     fail: str | None = None
     searches: dict[tuple[str, str], list[Ref]] = field(default_factory=dict)
+    search_truncated: bool = False
     calls: list[str] = field(default_factory=list)
 
     def read(self, ref: Ref) -> Document:
@@ -246,8 +263,8 @@ class FakeReader:
             raise RepoReadError(f"{ref} is not readable")
         return doc
 
-    def search(self, repo: str, term: str) -> list[Ref]:
+    def search(self, repo: str, term: str) -> SearchResult:
         self.calls.append(f"search {repo} {term}")
         if self.fail:
             raise RepoReadError(self.fail)
-        return list(self.searches.get((repo, term), []))
+        return SearchResult(tuple(self.searches.get((repo, term), [])), self.search_truncated)

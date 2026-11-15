@@ -2741,7 +2741,7 @@ def cmd_charter_evidence(args: argparse.Namespace) -> int:
         found = charter_evidence.gather(
             collection, args.skill, reader=GhReader(), refs=args.ref or [], repo=repo, search=args.search,
             docs=[Path(d) for d in args.doc or []], usage_paths=[Path(u) for u in args.usage or []],
-            aliases=args.alias or [],
+            aliases=args.alias or [], drafts=[Path(d) for d in args.draft or []],
         )
     except UsageError as exc:
         print(f"skillc: {exc}", file=sys.stderr)
@@ -3667,6 +3667,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_charter_evidence.add_argument("--usage", action="append", metavar="PATH",
                                     help="a usage log, or a directory searched for them; repeatable")
     p_charter_evidence.add_argument("--alias", action="append", metavar="NAME", help="another name usage records carry")
+    p_charter_evidence.add_argument("--draft", action="append", metavar="FILE",
+                                    help="a CHARTER.draft.md somewhere else to read too; repeatable")
     p_charter_evidence.add_argument("--out", required=True, metavar="FILE", help="the evidence file; never overwrites")
     p_charter_evidence.set_defaults(func=cmd_charter_evidence)
     p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4 and the engine)")

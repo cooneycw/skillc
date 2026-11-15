@@ -4,6 +4,7 @@ charter, as cited suggestions, with a status for every source."""
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -336,3 +337,96 @@ def test_the_cli_writes_schema_1_and_never_overwrites(tmp_path: Path, capsys: py
     assert {s["source"] for s in data["sources"]} == set(SOURCES)
     assert "SOURCE repository evidence: not examined" in capsys.readouterr().out
     assert cli.main(["charter", "evidence", str(root), "skills/demo", "--out", str(out)]) == 2
+
+
+# ---------------------------------------------------------------- counter-model review, pass 1
+
+
+def test_a_search_that_finds_nothing_is_none_found_not_a_crash(tmp_path: Path) -> None:
+    reader = FakeReader(searches={("o/n", "demo"): []})
+    found = gather(_collection(tmp_path), "skills/demo", reader=reader, repo="o/n", search=True)
+    (row,) = [s for s in found.sources if s.source == charter_evidence.REPOSITORY]
+    assert row.status == charter_evidence.NONE_FOUND and "demo" in row.ref
+
+
+def test_a_partial_graphql_answer_with_an_error_is_a_failed_read() -> None:
+    reply = json.dumps({"data": {"repository": {"discussion": {
+        "url": "u", "title": "t", "body": "**Must never**\n- X.\n", "comments": None}}},
+        "errors": [{"type": "FORBIDDEN", "path": ["repository", "discussion", "comments"], "message": "no access"}]})
+    with pytest.raises(RepoReadError, match="no access"):
+        GhReader(runner=_Recorder([reply]), gh="gh").read(Ref("o/n", 9, "discussion"))
+
+
+def test_a_search_with_more_results_than_one_page_says_truncated(tmp_path: Path) -> None:
+    page = {"pageInfo": {"hasNextPage": True}, "nodes": [{"number": n} for n in range(1, 21)]}
+    reply = json.dumps({"data": {"issues": page, "discussions": {"pageInfo": {"hasNextPage": False}, "nodes": []}}})
+    result = GhReader(runner=_Recorder([reply]), gh="gh").search("o/n", "demo")
+    assert result.truncated and len(result.refs) == 20
+    reader = FakeReader(searches={("o/n", "demo"): [Ref("o/n", 4)]}, search_truncated=True,
+                        documents={("o/n", 4): _doc("**Must never**\n- X.\n", number=4)})
+    found = gather(_collection(tmp_path), "skills/demo", reader=reader, repo="o/n", search=True)
+    assert any("TRUNCATED" in s.detail for s in found.sources if s.source == charter_evidence.REPOSITORY)
+
+
+def test_an_unreadable_test_directory_is_not_none_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _collection(tmp_path)
+    (root / "tests").mkdir()
+    real = Path.iterdir
+
+    def iterdir(self: Path):  # type: ignore[no-untyped-def]
+        if self.name == "tests":
+            raise PermissionError("denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    found = gather(root, "skills/demo", reader=None)
+    (row,) = [s for s in found.sources if s.source == charter_evidence.TESTS]
+    assert row.status.startswith(NOT_EXAMINED) and "1 director" in row.status
+
+
+def test_an_oversized_test_file_is_not_none_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _collection(tmp_path)
+    (root / "tests").mkdir()
+    (root / "tests/test_big.py").write_text("x = 'demo'\n" * 10, encoding="utf-8")
+    monkeypatch.setattr(charter_evidence, "TEST_MAX_BYTES", 5)
+    found = gather(root, "skills/demo", reader=None)
+    (row,) = [s for s in found.sources if s.source == charter_evidence.TESTS]
+    assert row.status.startswith(NOT_EXAMINED) and "too large" in row.status
+
+
+def test_the_gauntlets_own_draft_under_skillc_gauntlet_is_found(tmp_path: Path) -> None:
+    root = _collection(tmp_path)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    from skillc.gauntlet import resolve_skill
+    draft_dir = root / ".skillc" / "gauntlet" / resolve_skill(root, "skills/demo").slug
+    draft_dir.mkdir(parents=True)
+    (draft_dir / "CHARTER.draft.md").write_text(
+        '---\ncontract: "demo"\nversion: 1\nintent: "Draft intent."\npurpose: "p"\nowner: "owner"\n---\n',
+        encoding="utf-8")
+    found = gather(root, "skills/demo", reader=None)
+    items = [s for s in found.suggestions if s.source == charter_evidence.EXISTING_CHARTER]
+    assert ("intent", "Draft intent.") in [(s.section, s.text) for s in items]
+    explicit = gather(root, "skills/demo", reader=None, drafts=[draft_dir / "CHARTER.draft.md"])
+    assert len([s for s in explicit.suggestions if s.source == charter_evidence.EXISTING_CHARTER]) == len(items)
+
+
+def test_a_clause_with_only_an_id_and_a_test_is_still_offered_with_its_test(tmp_path: Path) -> None:
+    root = _collection(tmp_path)
+    alpha = Path(__file__).parent.parent / "controls/contract-shape/good/valid/alpha/CHARTER.md"
+    (root / "skills/demo/CHARTER.md").write_text(alpha.read_text(encoding="utf-8"), encoding="utf-8")
+    found = gather(root, "skills/demo", reader=None)
+    items = {s.cite.split(": ", 1)[1]: s for s in found.suggestions if s.source == charter_evidence.EXISTING_CHARTER}
+    assert {"alpha.out", "alpha.never", "alpha.no-self-approval"} <= set(items)
+    assert items["alpha.never"].section == "never"
+    assert items["alpha.never"].test == "checks/alpha-never/{bad,good}"
+
+
+def test_a_usage_suggestion_cites_its_log_and_line(tmp_path: Path) -> None:
+    """#726's committed complete-coverage log: each observed token cites the
+    record lines that carry it."""
+    logs = Path(__file__).parent.parent / "evals/subjects/charter-draft/logs/complete"
+    found = gather(_collection(tmp_path), "skills/demo", reader=None, usage_paths=[logs])
+    items = [s for s in found.suggestions if s.source == charter_evidence.USAGE]
+    assert items
+    for item in items:
+        assert re.search(r"usage\.jsonl:\d+", item.cite), item.cite

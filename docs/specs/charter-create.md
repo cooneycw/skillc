@@ -35,9 +35,9 @@ is written, and 2 on a usage error. **No model is called.**
 | Source | What is read | Kind |
 |---|---|---|
 | `repository evidence` | each `--ref` (a discussion, issue or PR, with every comment and reply); with `--search`, also what a search of the repository for the skill's name finds | observational |
-| `existing charter` | the skill's `CHARTER.md` and any `CHARTER.draft.md`, every clause, plus the charter file's git history | stated |
+| `existing charter` | the skill's `CHARTER.md`; every `CHARTER.draft.md` (beside it, where `skillc gauntlet run` keeps it before a charter exists, `<main checkout>/.skillc/gauntlet/<slug>/`, and any `--draft`); every clause, including one with only an `id` and a `test`; plus each file's git history | stated |
 | `skill text` | the SKILL.md description and its MUST/ALWAYS/NEVER sentences (the `charter draft` rules), and each `--doc` | stated |
-| `usage records` | the `stop_reason` tokens the skill's #719 records carry | observed |
+| `usage records` | the `stop_reason` tokens the skill's #719 records carry, each cited by `<log>:<line>` (up to 5 lines, then a count) | observed |
 | `existing tests` | test files in the collection (`test_*.py`, `*_test.py`, `*.test.*`, `*.bats`) that name the skill, offered as a clause's test before a new trap task is stubbed | test |
 
 A REF is `[discussion:|issue:|pr:][owner/name]#N`. A bare number names the
@@ -89,6 +89,8 @@ what someone wrote, never that the skill behaves that way.
 - `text` is a quote of at most 39 words (`charter.MAX_QUOTE_WORDS`). A longer
   item is cut and marked ` ...`, so the copied-passage detector stays clean.
 - `cite` is the comment's URL, or `<file>:<line>`, or `<charter file>: <clause id>`.
+- `test` is an existing charter clause's own `test` path(s), when it names any;
+  otherwise empty.
 - `section` is a charter section. Two more values exist: `observed` (a usage
   token the owner must place) and `test` (an existing test, which has no section).
 - `id`s run `e1, e2, ...` in gathering order. `charter create` (PR B) refuses a
@@ -101,13 +103,15 @@ Each source gets at least one row. The command asserts this before it writes.
 | Status | Means |
 |---|---|
 | `examined` | read, and at least one suggestion came from it |
-| `none found` | read in full, and nothing in it is charter-shaped (or no test names the skill) |
-| `not examined: <reason>` | not read: no `gh` on PATH, a GitHub error, an unparseable charter, no `--usage` given, no `--ref` and no `--search` |
+| `none found` | read in full, and nothing in it is charter-shaped (or a search matched nothing, or no test names the skill) |
+| `not examined: <reason>` | not read, or not read in full: no `gh` on PATH, a GitHub error (including a partial answer, data beside an error), an unparseable charter, no `--usage` given, no `--ref` and no `--search`, a test directory or file that could not be read, or a test file too large to read |
 
 A source that could not be read is never left out. So a file with no
 repository suggestions always says why: either nothing was there
 (`none found`) or nothing was read (`not examined`). A thread longer than one
-read fetches (100 comments, 50 replies each) is `TRUNCATED` in its detail.
+read fetches (100 comments, 50 replies each) is `TRUNCATED` in its detail, and
+so is a search with more than one page (20) of matches. A search reports its
+own row: how many matches, and how many were not already named by `--ref`.
 
 The evidence file:
 

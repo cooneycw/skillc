@@ -103,6 +103,7 @@ class Suggestion:
     cite: str  # a URL, or <file>:<line>
     kind: str
     source: str
+    test: str = ""  # the clause's existing test path(s), comma-separated, when it has any
 
 
 @dataclass(frozen=True)
@@ -239,12 +240,12 @@ class _Builder:
     out: EvidenceFile
     n: int = 0
 
-    def add(self, section: str, text: str, cite: str, kind: str, source: str) -> None:
+    def add(self, section: str, text: str, cite: str, kind: str, source: str, test: str = "") -> None:
         quote = charter._quote(text)
         if not quote:
             return
         self.n += 1
-        self.out.suggestions.append(Suggestion(f"e{self.n}", section, quote, cite, kind, source))
+        self.out.suggestions.append(Suggestion(f"e{self.n}", section, quote, cite, kind, source, test))
 
     def status(self, source: str, status: str, detail: str = "", ref: str = "") -> None:
         self.out.sources.append(SourceStatus(source, status, detail, ref))
@@ -276,15 +277,21 @@ def _repository(b: _Builder, reader: RepoReader | None, refs: Sequence[str], rep
         except ValueError as exc:
             b.status(REPOSITORY, f"{NOT_EXAMINED}: {exc}", ref=text)
     if search:
+        where = f"search {search!r} in {repo}" if repo else f"search {search!r}"
         if not repo:
-            b.status(REPOSITORY, f"{NOT_EXAMINED}: --search needs a repository (--repo owner/name)")
+            b.status(REPOSITORY, f"{NOT_EXAMINED}: --search needs a repository (--repo owner/name)", ref=where)
         else:
             try:
-                for ref in reader.search(repo, search):
-                    if all((r.repo, r.number) != (ref.repo, ref.number) for r in wanted):
-                        wanted.append(ref)
+                result = reader.search(repo, search)
             except RepoReadError as exc:
-                b.status(REPOSITORY, f"{NOT_EXAMINED}: the search failed: {exc}", ref=f"search {search!r}")
+                b.status(REPOSITORY, f"{NOT_EXAMINED}: the search failed: {exc}", ref=where)
+            else:
+                fresh = [r for r in result.refs if all((w.repo, w.number) != (r.repo, r.number) for w in wanted)]
+                wanted.extend(fresh)
+                detail = f"{len(result.refs)} match(es), {len(fresh)} not already named by --ref"
+                if result.truncated:
+                    detail += "; TRUNCATED: more matches exist than one search returns, and those were not read"
+                b.status(REPOSITORY, EXAMINED if result.refs else NONE_FOUND, detail, ref=where)
     for ref in wanted:
         try:
             doc = reader.read(ref)
@@ -342,10 +349,16 @@ def _charter_file(b: _Builder, path: Path, label: str) -> bool:
     for section, entries in sections:
         for entry in entries if isinstance(entries, list) else []:
             if isinstance(entry, dict):
+                # Every clause, even one with only an id and a test (counter-
+                # model review): its test is evidence too.
+                clause_id = str(entry.get("id", section))
                 text = entry.get("what") or entry.get("on_false")
-                if isinstance(text, str):
-                    draft = " (draft)" if entry.get("draft") is True else ""
-                    b.add(section, text, f"{label}: {entry.get('id', section)}{draft}", STATED, EXISTING_CHARTER)
+                if not isinstance(text, str) or not text.strip():
+                    text = f"{clause_id} (no text in the charter)"
+                tests = entry.get("test")
+                test = ", ".join(str(t) for t in tests) if isinstance(tests, list) else str(tests or "")
+                draft = " (draft)" if entry.get("draft") is True else ""
+                b.add(section, text, f"{label}: {clause_id}{draft}", STATED, EXISTING_CHARTER, test)
     history = _git_versions(path) or "git history: not examined (git could not read it)"
     b.status(EXISTING_CHARTER, EXAMINED if b.n > before else NONE_FOUND,
              f"{b.n - before} clause(s); {history}", ref=label)
@@ -388,9 +401,12 @@ def _usage(b: _Builder, skill_file: Path, usage_paths: Sequence[Path], aliases: 
     for path in usage_paths:
         logs.extend(usage.discover_logs(path))
     ev = charter.read_evidence(logs, names)
+    cites = _usage_cites(logs, names)
     for o in ev.observations:
+        where = cites.get(o.token, [])
+        shown = ", ".join(where[:5]) + (f" and {len(where) - 5} more" if len(where) > 5 else "")
         b.add(OBSERVED, f"seen ending with stop_reason {o.token} ({o.count} record(s))",
-              f"usage records: stop_reason {o.token}", OBSERVED, USAGE)
+              shown or f"usage records: stop_reason {o.token}", OBSERVED, USAGE)
     detail = f"{ev.records} record(s) in {ev.logs} log(s)"
     if not ev.can_show_absence:
         detail += f"; absences UNKNOWN ({ev.why_unknown()})"
@@ -402,15 +418,36 @@ def _usage(b: _Builder, skill_file: Path, usage_paths: Sequence[Path], aliases: 
         b.status(USAGE, EXAMINED if ev.observations else NONE_FOUND, detail)
 
 
+def _usage_cites(logs: Sequence[usage.UsageLog], names: set[str]) -> dict[str, list[str]]:
+    """token -> the `<log>:<line>` of every end record that carries it, under
+    the SAME filters `charter.read_evidence` counts by."""
+    out: dict[str, list[str]] = {}
+    for log in logs:
+        if log.parse_error is not None:
+            continue
+        for entry in log.entries:
+            data = entry.data
+            skill = data.get("skill")
+            if not isinstance(skill, str) or skill not in names or usage.record_problems(data):
+                continue
+            reason = data.get("stop_reason")
+            if data.get("event") == "end" and isinstance(reason, str) and usage.STOP_REASON_RE.fullmatch(reason):
+                out.setdefault(reason, []).append(f"{log.path}:{entry.line}")
+    return out
+
+
 def _tests(b: _Builder, collection: Path, names: set[str]) -> None:
     patterns = [re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(n)}(?![A-Za-z0-9_-])") for n in sorted(names) if n]
     found = 0
     unreadable = 0
-    for path in _walk(collection):
+    too_large = 0
+    walk = _Walk(collection)
+    for path in walk:
         if found >= TEST_LIMIT:
             break
         try:
             if path.stat().st_size > TEST_MAX_BYTES:
+                too_large += 1
                 continue
             lines = path.read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeDecodeError):
@@ -422,30 +459,59 @@ def _tests(b: _Builder, collection: Path, names: set[str]) -> None:
                 b.add(TEST, f"{rel} names the skill", f"{rel}:{number}", TEST, TESTS)
                 found += 1
                 break
-    detail = f"{found} test file(s) name {', '.join(sorted(names))}"
+    detail = f"{walk.candidates} test file(s) read, {found} name {', '.join(sorted(names))}"
     if found >= TEST_LIMIT:
         detail += f"; stopped at {TEST_LIMIT}"
+    # What the scan could not read (counter-model review). A zero is only
+    # "none found" when the whole population was read.
+    gaps = []
+    if walk.unreadable_dirs:
+        gaps.append(f"{walk.unreadable_dirs} director{'y' if walk.unreadable_dirs == 1 else 'ies'} not readable")
     if unreadable:
-        detail += f"; {unreadable} test file(s) not readable"
-    b.status(TESTS, EXAMINED if found else NONE_FOUND, detail)
+        gaps.append(f"{unreadable} test file(s) not readable")
+    if too_large:
+        gaps.append(f"{too_large} test file(s) too large to read (over {TEST_MAX_BYTES} bytes)")
+    if found:
+        b.status(TESTS, EXAMINED, detail + "".join(f"; {g}" for g in gaps))
+    elif gaps:
+        b.status(TESTS, f"{NOT_EXAMINED}: {', '.join(gaps)}", detail)
+    else:
+        b.status(TESTS, NONE_FOUND, detail)
 
 
-def _walk(root: Path) -> Iterator[Path]:
-    stack = [root]
-    while stack:
-        here = stack.pop()
-        try:
-            entries = sorted(here.iterdir(), key=lambda p: p.name, reverse=True)
-        except OSError:
-            continue
-        for entry in entries:
-            if entry.is_symlink():
+class _Walk:
+    """Test files under a root, counting what could not be read."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.unreadable_dirs = 0
+        self.candidates = 0
+
+    def __iter__(self) -> Iterator[Path]:
+        stack = [self.root]
+        while stack:
+            here = stack.pop()
+            try:
+                entries = sorted(here.iterdir(), key=lambda p: p.name, reverse=True)
+            except OSError:
+                self.unreadable_dirs += 1
                 continue
-            if entry.is_dir():
-                if entry.name not in SKIP_DIRS:
-                    stack.append(entry)
-            elif TEST_NAME_RE.match(entry.name):
-                yield entry
+            for entry in entries:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir():
+                    if entry.name not in SKIP_DIRS:
+                        stack.append(entry)
+                elif TEST_NAME_RE.match(entry.name):
+                    self.candidates += 1
+                    yield entry
+
+
+def _label_of(path: Path, root: Path) -> str:
+    try:
+        return path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def gather(
@@ -459,10 +525,11 @@ def gather(
     docs: Sequence[Path] = (),
     usage_paths: Sequence[Path] = (),
     aliases: Sequence[str] = (),
+    drafts: Sequence[Path] = (),
 ) -> EvidenceFile:
     """Gather every source for `skill` (relative to `collection`). Raises
     `gauntlet.UsageError` for a skill that cannot be resolved."""
-    from .gauntlet import DRAFT_NAME, resolve_skill
+    from .gauntlet import DRAFT_NAME, main_checkout, resolve_skill
 
     target = resolve_skill(collection, skill)
     root = target.collection
@@ -475,8 +542,21 @@ def gather(
     _repository(b, reader, refs, repo, term)
     charter_label = target.charter.relative_to(root).as_posix()
     present = _charter_file(b, target.charter, charter_label)
-    draft_path = target.charter.parent / DRAFT_NAME
-    present = _charter_file(b, draft_path, draft_path.relative_to(root).as_posix()) or present
+    # Every draft: beside the charter, where `skillc gauntlet run` keeps it
+    # before a charter exists (the main checkout's .skillc/gauntlet/<slug>/,
+    # counter-model review), and any the caller names.
+    candidates = [target.charter.parent / DRAFT_NAME]
+    main = main_checkout(root)
+    if main is not None:
+        candidates.append(main / ".skillc" / "gauntlet" / target.slug / DRAFT_NAME)
+    candidates.extend(drafts)
+    seen: set[Path] = set()
+    for path in candidates:
+        key = path.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        present = _charter_file(b, path, _label_of(path, root)) or present
     if not present:
         b.status(EXISTING_CHARTER, NONE_FOUND, f"no {charter_label} and no {DRAFT_NAME}")
     doc_pairs: list[tuple[Path, str]] = []
