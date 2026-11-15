@@ -3,7 +3,7 @@
 
 Under #462, a test whose verdict depends on how busy the host is turns main
 red for reasons that are not about the code, and a red main push holds the
-shared main-merge barrier. #758 makes that family visible and stops it
+shared merge barrier. #758 makes that family visible and stops it
 growing. This tool is the instrument behind both.
 
 Every bound has one of three ROLES, and the right fix depends on it:
