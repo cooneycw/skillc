@@ -897,6 +897,104 @@ future report must satisfy, proven against synthetic fixtures
 (`controls/pilot-report/`, `controls/ledger-binding/*/pilot-report-*`), not
 a generator.
 
+## `skill-usage`: a per-repo usage log (#719)
+
+The skill gauntlet (#718) needs a history of **which skill version ran, where,
+and how it ended**, and that history only starts once something writes it.
+`skill-usage` is that record. It is **not** an evaluation record: it carries no
+verdict, belongs to no trial and no bundle, and is not in `KINDS`. A `completed`
+outcome is a skill's own account (or the hook's `"UNKNOWN"`), never a grade.
+Owner decision 2 on #718: records start as an **append-only local file per
+repository**; sending them anywhere is a later, opt-in step.
+
+**Subject.** A usage log is one file named `usage.jsonl` or `*.usage.jsonl`,
+one record per line - a third subject beside a record and a bundle, because
+pairing is a fact between lines. Only those names are read: evidence bundles
+already hold transcript `.jsonl` files, which are not usage logs. An unreadable
+line makes the whole log unreadable, exactly as an unparseable `.json` record
+is: only `skill-usage-envelope` speaks. `check-records` counts usage-log records
+in its population (an empty log alone is still "nothing was checked", exit 2)
+and reports every `start` with no `end` as **read as outcome UNKNOWN (reported,
+not refused)** - a crashed session cannot write its end.
+
+**Shape** (version 1; this kind's versions are its own, unrelated to the
+evaluation envelope's retired v1). Every key is required and no other key is
+allowed:
+
+| Field | Value |
+|---|---|
+| `kind`, `version` | `"skill-usage"`, `1` |
+| `event` | `start` or `end` |
+| `skill` | the name as invoked: `name` or `namespace:name` |
+| `skill_digest` | `sha256:<hex>` or `"UNKNOWN"` - see below |
+| `collection` | `<main checkout name>@<commit sha>` of the checkout the skill's real file lives in, or `"UNKNOWN"` |
+| `invocation` | `explicit` (a typed `/<skill>`), `model-selected` (a `Skill` tool call), or `"UNKNOWN"` |
+| `origin` | `observed` (the hook saw it) or `declared` (the skill said so through `skillc usage end`) |
+| `coverage` | `complete`, `partial`, `unsupported` - this document's observation vocabulary |
+| `repo`, `commit` | `<owner>/<name>` and HEAD of the checkout the session ran in, each or `"UNKNOWN"` |
+| `outcome` | `completed`, `stopped`, `abandoned`, or `"UNKNOWN"` |
+| `stop_reason` | `null` or a short token (`approval-gate`) |
+| `session` | the client's opaque session id |
+| `client` | `claude-code` or `codex` |
+| `model` | a model id, or `"UNKNOWN"` |
+| `at` | RFC 3339 UTC, `...Z` |
+
+**Digest.** `profile.skill_md_digests` (#265, #424) is the one definition of a
+skill's `(description_digest, body_digest)`. `skill_digest` is
+`sha256("<description_digest>\n<body_digest>\n")` over the entry file
+(`SKILL.md`, or a command's `.md`): one value that moves when either the
+description (what selection reads) or the body changes. A file that cannot be
+read or parsed is `"UNKNOWN"`.
+
+**Coverage.** The Claude Code hook writes `partial`: it observes `Skill` tool
+calls and typed slash commands, not a skill used only by reading its file.
+Codex has no observed route (see `skill-invocations` above), so a `codex` record
+must declare `unsupported`, and nothing writes one yet; **no file-read heuristic
+stands in for it**. `origin: observed` through `coverage: unsupported` is refused.
+
+**Rules.**
+
+- `skill-usage-envelope` (parser rule): the log reads; each line is
+  `kind: skill-usage` with a version in `(1,)` - missing, non-integer (`true`)
+  and unsupported versions are refused, as `record-envelope` refuses its own.
+- `skill-usage-fields`: **unknown is not absent.** Every field is present; a
+  field that could not be observed is `"UNKNOWN"`, never omitted, empty, `0` or
+  another type; each value is in its vocabulary or shape; `at` is UTC.
+- `skill-usage-privacy`: **identifiers and outcomes only.** The key set is
+  closed, so prompt text or transcript content has no field to live in; any
+  string (keys included, at any depth) holding an absolute `/home/` or
+  `/Users/` path or an email address is refused. Every field's own shape already
+  excludes both, so in practice a leak can only arrive through an extra key; the
+  scan is the second wall. `collection` revisions are commit SHAs, never dotted
+  versions, so `name@rev` can never read as an email.
+- `skill-usage-pairing`: an `end` closes the oldest open `start` of the same
+  `session` and `skill` (first in, first out); an `end` with none open - an
+  orphan, or a second end - is refused. A `start` declaring `outcome: completed`
+  with `origin: declared` and no `end` is refused: a completion is recorded by
+  its end.
+
+**Writer.** `skillc usage hook` (see [docs/skill-usage-hook.md](../../skill-usage-hook.md))
+appends to `<main checkout>/.skillc/usage.jsonl`, resolved through
+`git rev-parse --git-common-dir`, so a linked worktree's run lands in the main
+checkout's file (CPP #471's lesson). Creating `.skillc/` also writes
+`.skillc/.gitignore` (`*`): ignored by default, without touching the
+repository's own ignore file. The hook never reads the transcript, writes
+nothing its own rules would refuse, and always exits 0. A typed `/<name>` is
+recorded only when `name` resolves by exact lookup to an installed skill or
+command (`~/.claude/` first, then the project's `.claude/`); `/clear` or
+`/tmp/x` resolve to nothing. A `Skill` tool call is always recorded, with
+`skill_digest: "UNKNOWN"` when its file is not found (a plugin skill, today).
+`skillc usage end --skill X --outcome stopped --stop-reason approval-gate` is
+the optional declared outcome: it closes the oldest open start of
+`($CLAUDE_CODE_SESSION_ID, X)`, and with none open it writes nothing (an end
+without a start is what pairing refuses) and still exits 0.
+
+**Reader.** `skillc usage report <file>` counts invocations by skill and
+digest, the outcome mix (an unended start counts as `UNKNOWN`) and the
+`UNKNOWN` rate per field. It refuses (exit 1) a log `check-records` refuses and
+says `no records` (exit 2) on an empty one, never a clean zero. Trend and
+deterioration analysis is a follow-up with its own planted-worsening control.
+
 ## Producers and authority
 
 `producer-authority` refuses a record whose declared producer is not the one role
@@ -1128,6 +1226,10 @@ bundle cases as well, including against every record rule.
 | `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
 | `skill-evidence` | record | empty `skills` list; a `child` entry with no `parent_path`, naming a path absent from this record, or forming a cycle with no root (even where no single link self-references); a duplicate `skill.path`; a `lifecycle` value outside `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`; `CONFIRMED` with no evidence reference; `UNKNOWN` with no reason or with one anyway; `external_evidence.present: true` with no `artifact_ref` or a malformed `source` label; a `reconciliation` outside the four R9 states, or disagreeing with `present`; a non-`matched`/`absent` reconciliation with no reason (#268) |
+| `skill-usage-envelope` | usage log | an unreadable line; a missing, `true` or `2` version; a kind other than `skill-usage` (#719) |
+| `skill-usage-fields` | usage log | an omitted `skill_digest`; an empty `commit`; a `0` model; an outcome outside the vocabulary; a `codex` record claiming coverage other than `unsupported`; a non-UTC `at` (#719) |
+| `skill-usage-privacy` | usage log | an absolute home-directory path, an email address, or prompt text, each in a field the closed key set does not allow (#719) |
+| `skill-usage-pairing` | usage log | an orphan `end`; an `end` for another session; a second `end` for one `start`; a declared `completed` start with no `end` (#719) |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured; a well-formed `external_evidence.source` the attempt's trial does not list in its own `external_evidence_sources` (undeclared, #268); under a trial declaring `skill_digests`, a `skill-evidence` entry whose skill is unpinned, which omits a digest, or whose digest differs from the pin (stale, #354) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
