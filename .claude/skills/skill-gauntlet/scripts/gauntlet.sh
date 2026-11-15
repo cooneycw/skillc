@@ -77,7 +77,7 @@ def files(root):
     for d, _, names in os.walk(root):
         for n in names:
             rel = os.path.relpath(os.path.join(d, n), root)
-            if rel not in (".skillc-checkout", ".skillc-install"):
+            if os.sep in rel or not rel.startswith("."):  # top-level dotfiles belong to the installer
                 with open(os.path.join(d, n), "rb") as f:
                     out[rel] = f.read()
     return out

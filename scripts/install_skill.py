@@ -65,6 +65,16 @@ from pathlib import Path
 NAME = "skill-gauntlet"
 SKILLS_ENV = "SKILLC_SKILLS_DIR"
 LOCATOR, MARKER = ".skillc-checkout", ".skillc-install"
+#: Kyle's deploy-staging opt-out (owner, 2026-11-15: this host-only skill stays
+#: out of Kyle's containers). ONE constant, and a PLACEHOLDER: Kyle names the
+#: marker in its own repo, and kyle-cli-helper relays the name through the wave
+#: orchestrator. #774 does not merge until this is that name. It must start
+#: with "." (the launcher's drift check skips the copy's top-level dotfiles).
+KYLE_EXCLUDE = ".kyle-exclude"
+KYLE_EXCLUDE_TEXT = ("skillc's /skill-gauntlet, installed on this host by `make install-skill`. Host-only:\n"
+                     "Kyle's deploy staging and public build skip this directory.\n")
+#: Files the installer writes into the copy; never part of the skill's payload.
+INSTALL_FILES = (LOCATOR, MARKER, KYLE_EXCLUDE)
 MARKER_KIND, MARKER_SCHEMA = "skillc-skill-install", "1"
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
 LOCK_WAIT_ENV, LOCK_WAIT = "SKILLC_INSTALL_LOCK_WAIT", 30.0
@@ -134,7 +144,7 @@ def payload(root: Path) -> dict[str, bytes]:
             if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
                 raise Refused(EXIT_USAGE, f"{rel} in {root} is not a regular file or directory; "
                                           "the installed copy holds regular files only")
-            if stat.S_ISREG(mode) and rel not in (LOCATOR, MARKER):
+            if stat.S_ISREG(mode) and rel not in INSTALL_FILES:
                 try:
                     files[rel] = path.read_bytes()
                 except OSError as exc:
@@ -241,6 +251,7 @@ def _build(cache: Path, source: Path, files: dict[str, bytes], checkout: Path) -
         os.chmod(build / rel, (source / rel).stat().st_mode & 0o777)  # the launcher stays executable
     (build / LOCATOR).write_text(locator_text(checkout))
     (build / MARKER).write_text(f"kind {MARKER_KIND}\nschema {MARKER_SCHEMA}\ndigest {digest(files)}\n")
+    (build / KYLE_EXCLUDE).write_text(KYLE_EXCLUDE_TEXT)
     return build
 
 
@@ -284,7 +295,9 @@ def _install(skills: Path, cache: Path) -> int:
             located = (entry / LOCATOR).read_text()
         except OSError:
             located = ""
-        if current.get("digest") == digest(files) and located == locator_text(checkout) and payload(entry) == files:
+        excluded = (entry / KYLE_EXCLUDE).is_file()
+        if (current.get("digest") == digest(files) and located == locator_text(checkout) and excluded
+                and payload(entry) == files):
             return _say(EXIT_OK, f"already installed: {entry} is a current copy of {source}")
     skills.mkdir(parents=True, exist_ok=True)
     _same_device(cache, skills)

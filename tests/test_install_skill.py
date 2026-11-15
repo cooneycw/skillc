@@ -638,3 +638,24 @@ def test_a_cache_inside_what_kyle_reads_is_refused_before_anything_is_created(
                           text=True, check=False, cwd=checkout, env=env)
     assert done.returncode == 2 and "which Kyle's deploy reads" in done.stderr, done.stderr
     assert list(skills.iterdir()) == [] and not (home / ".claude" / "cache").exists()
+
+
+def test_the_installed_copy_carries_kyles_exclusion_marker(checkout: Path, tmp_path: Path) -> None:
+    """Owner, 2026-11-15: keep the host-only skill out of Kyle's deploy staging
+    and public build. The name is ONE constant, Kyle's convention."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("install_skill_kx", INSTALLER)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    assert (skills / NAME / mod.KYLE_EXCLUDE).read_text() == mod.KYLE_EXCLUDE_TEXT
+    assert not (ROOT / ".claude" / "skills" / NAME / mod.KYLE_EXCLUDE).exists(), "never committed in the repo"
+    assert mod.KYLE_EXCLUDE.startswith("."), "the launcher's drift check skips top-level dotfiles only"
+    assert not [p for p in (ROOT / ".claude" / "skills" / NAME).iterdir() if p.name.startswith(".")], \
+        "the repository's skill has no top-level dotfile, so skipping them hides nothing of the skill"
+    (skills / NAME / mod.KYLE_EXCLUDE).unlink()
+    again = _installer(checkout, skills, "install")
+    assert again.returncode == 0 and "refreshed" in again.stdout and (skills / NAME / mod.KYLE_EXCLUDE).is_file()
