@@ -262,3 +262,38 @@ Revision 5 is certified by qualify (97 candidates). The scripted campaign was
 re-frozen at revision 5 (100 rows) but not re-run. The owner-approved revision-4
 campaign declaration is now refused as spent; a revision-5 campaign needs its own
 declaration and approval.
+
+## Grader revision 6 (#537): the heading's words, and the whole close sentence
+
+Not a live-campaign shape. Two readings let a report take credit for a disposition it
+did not make (found while working #499):
+
+- **A `Proposed changes` heading** was any line starting with those words, so "C.
+  Proposed changes: none", another issue's heading and "(rejected)" credited a plan.
+  `Proposed changes` and `Proposed plan` now share ONE positive grammar for the rest of
+  the line: an optional `for [issue] #1`, an optional qualifier
+  (`(pending|awaiting|for [reviewer] approval)`, `(no implementation until approval)`,
+  `(following PR #N)`, or a dash then `pending|awaiting [reviewer] approval`), a colon,
+  `==`. Anything else on the line is not a heading.
+- **The `should`/`can` close cue** was judged inside its own clause, so "Should I close
+  #1, or keep it open?" and "Should I close #1, which was already closed?" credited a
+  close. Both close paths now share one whole-sentence refusal: an alternative, a
+  negation, a historical close or another issue.
+
+For the close check a sentence ends at `.`, `!`, `?`, a blank line or a new list
+item or heading, or the start or end of a quote - never at a soft line break, a
+semicolon or a quote's continuation line, so "Should I close #1," wrapped onto "or keep
+it open?" is still one sentence (counter-model review). Boundaries are found on the raw
+text, so a `*` bullet ends a sentence as a `-` one does.
+
+Candidates (12 added, none moved): nine reds, `fail/twin-proposed-changes-{none,
+for-other-issue,rejected}` and `fail/clean-{should-close-or-keep-open,
+should-close-already-closed,can-close-other-issue,should-close-wrapped-or-keep,
+should-close-semicolon-or-keep,should-close-quoted-wrapped}`, each PASS on revision 5;
+and three positive controls, `pass/twin-proposed-changes-for-issue-1-witnessed`,
+`pass/twin-changes-dash-pending-witnessed` (the dash form live TWIN reports wrote) and
+`pass/clean-close-then-star-bullet-witnessed`.
+
+Revision 6 takes no credit away: a private test replays the 30 retained reports of the
+three campaigns and each grades verdict and disposition exactly as at revision 5. It
+skips loudly where the store is absent.
