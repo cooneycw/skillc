@@ -443,8 +443,24 @@ def _population(
         # good control emptied to zero bytes would otherwise certify a rule that
         # refuses every real record (counter-model review). It reads as
         # unparsed, so a good side refuses UNPARSED and a bad side BLIND.
+        #
+        # One level deeper (#723): the SEMANTIC usage rules (fields, privacy,
+        # pairing - every usage rule but the parser-rule envelope) read only
+        # envelope-accepted lines, so a log with none of those gave them nothing
+        # to read, however many lines it has. It is unexercised for them too,
+        # and both sides then refuse UNPARSED. The envelope rule keeps its own
+        # population: an unreadable envelope is exactly what it examines.
+        def unexercised(log: usage.UsageLog) -> str | None:
+            if log.parse_error is not None:
+                return log.parse_error
+            if not log.entries:
+                return "empty usage log: no record to examine"
+            if not rule.parser and usage.readable_count(log) == 0:
+                return "no envelope-readable record: the rule had nothing to read"
+            return None
+
         return [
-            _Subject(log.path, log.parse_error or (None if log.entries else "empty usage log: no record to examine"),
+            _Subject(log.path, unexercised(log),
                      sum(f.rule == rule.id for f in checks.run_usage_log(log, only=rule.id)))
             for log in usage.discover_logs(where)
         ]

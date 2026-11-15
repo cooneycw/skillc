@@ -915,7 +915,10 @@ line makes the whole log unreadable, exactly as an unparseable `.json` record
 is: only `skill-usage-envelope` speaks. `check-records` counts usage-log records
 in its population (an empty log alone is still "nothing was checked", exit 2)
 and reports every `start` with no `end` as **read as outcome UNKNOWN (reported,
-not refused)** - a crashed session cannot write its end.
+not refused)** - a crashed session cannot write its end. In `selftest`, a semantic
+usage rule (fields, privacy, pairing) is exercised only by a control with at
+least one envelope-readable record; a control whose every line the envelope
+refuses gave it nothing to read and does not certify it (#723).
 
 **Shape** (version 1; this kind's versions are its own, unrelated to the
 evaluation envelope's retired v1). Every key is required and no other key is
