@@ -28,6 +28,7 @@ from . import (
     __version__,
     charter,
     charter_confirm,
+    charter_create,
     charter_evidence,
     checks,
     configuration_compare,
@@ -2724,6 +2725,30 @@ def cmd_charter_confirm(args: argparse.Namespace) -> int:
     return CHARTER_EXIT_OK
 
 
+def cmd_charter_create(args: argparse.Namespace) -> int:
+    """`skillc charter create <collection> <skill> --evidence FILE --answers FILE`
+    (#778): the owner's answers become a CHARTER.md plus a trap-task stub per
+    clause, checked by the real contracts rules; any failure keeps nothing."""
+    from .gauntlet import UsageError
+
+    try:
+        made = charter_create.create(Path(args.collection), args.skill, Path(args.evidence), Path(args.answers),
+                                     replace_draft=args.replace_draft)
+    except UsageError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    except charter_create.CreateRefused as exc:
+        print(f"skillc: charter create refused: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_REFUSED
+    print(f"skillc: charter written to {made.charter}")
+    for stub in made.stubs:
+        print(f"skillc: trap-task stub {stub}/{{bad,good}} (a stub: no grader until #736 PR 2 fills it)")
+    for warning in made.warnings:
+        print(f"skillc: warn: {warning} (the owner withheld this approval)")
+    print("skillc: nothing was committed; committing the charter and its stubs is the owner's act")
+    return CHARTER_EXIT_OK
+
+
 def cmd_charter_evidence(args: argparse.Namespace) -> int:
     """`skillc charter evidence <collection> <skill> --out FILE` (#778): every
     piece of existing evidence of the skill's charter, as suggestions for the
@@ -3671,6 +3696,17 @@ def build_parser() -> argparse.ArgumentParser:
                                     help="a CHARTER.draft.md somewhere else to read too; repeatable")
     p_charter_evidence.add_argument("--out", required=True, metavar="FILE", help="the evidence file; never overwrites")
     p_charter_evidence.set_defaults(func=cmd_charter_evidence)
+    p_charter_create = charter_sub.add_parser(
+        "create", help="the owner's answers become a CHARTER.md with a trap-task stub per clause (#778); no model call"
+    )
+    p_charter_create.add_argument("collection", help="the collection root")
+    p_charter_create.add_argument("skill", help="the skill, relative to the collection, as `charter evidence` took it")
+    p_charter_create.add_argument("--evidence", required=True, metavar="FILE", help="the `charter evidence` output")
+    p_charter_create.add_argument("--answers", required=True, metavar="FILE",
+                                  help="the owner's answers (docs/specs/charter-create.md)")
+    p_charter_create.add_argument("--replace-draft", action="store_true",
+                                  help="replace an existing CHARTER.md whose every clause is still a draft")
+    p_charter_create.set_defaults(func=cmd_charter_create)
     p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4 and the engine)")
     gauntlet_sub = p_gauntlet.add_subparsers(dest="gauntlet_command", required=True)
     p_gauntlet_run = gauntlet_sub.add_parser(
