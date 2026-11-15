@@ -52,6 +52,11 @@ skillc on this host: an installed `skillc`, or
 The hook always exits 0. A payload it cannot use writes nothing and prints a
 line to stderr. It never reads the transcript.
 
+If `.skillc/`, `.skillc/.gitignore` or `.skillc/usage.jsonl` is a symlink,
+the hook and `usage end` write nothing and say so (#721). A cloned repository
+cannot use them to append to a file outside it. Tested by the
+`test_NEGATIVE_CONTROL_*symlink*` cases in `tests/test_usage.py`.
+
 ## Declaring an outcome (optional)
 
 A skill that knows how it ended can say so:

@@ -978,7 +978,9 @@ appends to `<main checkout>/.skillc/usage.jsonl`, resolved through
 `git rev-parse --git-common-dir`, so a linked worktree's run lands in the main
 checkout's file (CPP #471's lesson). Creating `.skillc/` also writes
 `.skillc/.gitignore` (`*`): ignored by default, without touching the
-repository's own ignore file. The hook never reads the transcript, writes
+repository's own ignore file. A symlinked `.skillc/`, `.skillc/.gitignore`
+or log is refused and nothing is written (#721): every open is relative to a
+`.skillc/` descriptor opened with `O_NOFOLLOW`. The hook never reads the transcript, writes
 nothing its own rules would refuse, and always exits 0. A typed `/<name>` is
 recorded only when `name` resolves by exact lookup to an installed skill or
 command (`~/.claude/` first, then the project's `.claude/`); `/clear` or

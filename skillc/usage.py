@@ -36,10 +36,12 @@ that runs it, and writes nothing it would itself refuse.
 from __future__ import annotations
 
 import datetime as _dt
+import errno
 import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from collections import Counter
@@ -458,6 +460,71 @@ def record_problems(record: Mapping[str, object]) -> list[str]:
     return [*usage_envelope(log), *usage_fields(log), *usage_privacy(log)]
 
 
+class SymlinkRefused(ValueError):
+    """A path under `.skillc/` the writer would have followed out of the
+    checkout (#721). The callers' fail-open paths turn it into a printed
+    "nothing recorded", never an exit code."""
+
+
+_NOFOLLOW = os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _refusal(name: str) -> SymlinkRefused:
+    return SymlinkRefused(f"refusing to write through a symlink or non-regular file: {name}; nothing written")
+
+
+def _open_state_dir(state: Path) -> int:
+    """A descriptor for `.skillc/`, created if absent, opened WITHOUT following
+    a symlink (#721). A checkout controls what `.skillc` is; if it is a link,
+    every file under it is wherever the link points. Every later open is
+    relative to this descriptor, so nothing is checked and then swapped."""
+    try:
+        os.mkdir(state, 0o755)
+    except FileExistsError:
+        pass
+    try:
+        return os.open(state, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise _refusal(STATE_DIR) from None
+        raise
+
+
+def _open_file(state_fd: int, name: str, flags: int) -> int:
+    """Open `.skillc/<name>` relative to the state descriptor, refusing a
+    symlink (O_NOFOLLOW) or anything that is not a regular file (#721)."""
+    try:
+        fd = os.open(name, flags | _NOFOLLOW, 0o644, dir_fd=state_fd)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise _refusal(f"{STATE_DIR}/{name}") from None
+        raise
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise _refusal(f"{STATE_DIR}/{name}")
+    return fd
+
+
+def _check_entry(state_fd: int, name: str) -> None:
+    """Refuse `.skillc/<name>` if it exists as a symlink or a non-regular
+    file, WITHOUT creating or changing anything (#721). Run for every entry
+    before the first write, so a refusal really means nothing was written
+    (counter-model review: refusing the log after writing `.gitignore` did not)."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW, dir_fd=state_fd)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise _refusal(f"{STATE_DIR}/{name}") from None
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise _refusal(f"{STATE_DIR}/{name}")
+    finally:
+        os.close(fd)
+
+
 def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]]]) -> list[Mapping[str, object]]:
     """Read, decide and append as ONE operation under an exclusive lock.
 
@@ -467,11 +534,17 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     second end was an orphan that refused the whole log (counter-model
     review). Creating the state directory also writes its own `.gitignore`
     (`*`), so the log is ignored by default without editing the repository's
-    own ignore file. Returns what was written."""
-    state = path.parent
-    state.mkdir(parents=True, exist_ok=True)
-    ensure_ignored(state)
-    with path.open("a+", encoding="utf-8") as handle:
+    own ignore file. A symlinked `.skillc/`, `.skillc/.gitignore` or log is
+    refused before anything is written (#721). Returns what was written."""
+    state_fd = _open_state_dir(path.parent)
+    try:
+        for name in (".gitignore", path.name):
+            _check_entry(state_fd, name)
+        ensure_ignored(state_fd)
+        fd = _open_file(state_fd, path.name, os.O_RDWR | os.O_CREAT | os.O_APPEND)
+    finally:
+        os.close(state_fd)
+    with os.fdopen(fd, "a+", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             handle.seek(0)
@@ -496,20 +569,29 @@ def append(path: Path, build: Callable[[UsageLog], Sequence[Mapping[str, object]
     return new
 
 
-def ensure_ignored(state: Path) -> None:
+def ensure_ignored(state_fd: int) -> None:
     """The log is ignored by default, even when `.skillc/` already existed
     without an ignore file (counter-model review, pass 2): create
     `.skillc/.gitignore` (`*`) when it is missing, and add `usage.jsonl` to an
-    existing one that ignores neither everything nor the log."""
-    ignore = state / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8")
+    existing one that ignores neither everything nor the log. Opened relative
+    to the state descriptor and never through a symlink (#721): O_EXCL on the
+    create does not follow a planted link, and the fallback open refuses one."""
+    try:
+        fd = os.open(".gitignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o644, dir_fd=state_fd)
+    except FileExistsError:
+        pass
+    else:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("*\n")
         return
-    lines = {line.strip() for line in ignore.read_text(encoding="utf-8").splitlines()}
+    # Read-only first: an ignore file that already ignores the log needs no
+    # write permission (counter-model review). Append only when a line is owed.
+    with os.fdopen(_open_file(state_fd, ".gitignore", os.O_RDONLY | os.O_NONBLOCK), "r", encoding="utf-8") as handle:
+        existing = handle.read()
+    lines = {line.strip() for line in existing.splitlines()}
     if not lines & {"*", LOG_NAME, f"/{LOG_NAME}"}:
-        existing = ignore.read_text(encoding="utf-8")
-        ignore.write_text(existing + ("" if not existing or existing.endswith("\n") else "\n") + f"{LOG_NAME}\n",
-                          encoding="utf-8")
+        with os.fdopen(_open_file(state_fd, ".gitignore", os.O_WRONLY | os.O_APPEND), "w", encoding="utf-8") as handle:
+            handle.write(("" if not existing or existing.endswith("\n") else "\n") + f"{LOG_NAME}\n")
 
 
 def _open_starts(log: UsageLog, session: str, skill: str | None = None) -> list[Entry]:

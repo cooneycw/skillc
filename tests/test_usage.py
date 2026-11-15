@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -430,3 +431,153 @@ def test_an_empty_usage_log_beside_a_neighbour_record_checked_nothing(
     for rule in ("skill-usage-envelope", "skill-usage-fields"):
         assert cli.main(["check-records", str(tmp_path), "--rule", rule]) == 2, rule
         assert "checked nothing" in capsys.readouterr().out
+
+
+# ------------------------------------------- no write-through a symlink (#721)
+#
+# A checkout controls what `.skillc/` holds. If any of the three paths the
+# writer touches is a symlink, the writer must refuse and write NOTHING, so a
+# cloned repository cannot use an unprompted hook to append to a file outside
+# it (an SSH config, say). Every case below plants the symlink, runs the real
+# writer, and asserts the target's bytes did not move.
+
+OUTSIDE_TEXT = "Host example\n  User someone\n"
+
+
+def _plant(repo: Path, tmp_path: Path, which: str) -> Path:
+    """Plant the symlink `which` names under `repo/.skillc` and return the
+    outside path whose bytes must stay unchanged (a file, or a directory)."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    state = repo / ".skillc"
+    if which == "state":
+        # The whole state dir points outside; the outside dir already holds a
+        # log with an open start, so `usage end` would also have something to close.
+        (outside / "usage.jsonl").write_text(json.dumps(_rec(session="s-1", skill="hello-probe")) + "\n", encoding="utf-8")
+        state.symlink_to(outside, target_is_directory=True)
+        return outside
+    state.mkdir()
+    target = outside / "config"
+    if which == "log-dangling":
+        (state / ".gitignore").write_text("*\n", encoding="utf-8")
+        (state / "usage.jsonl").symlink_to(target)
+        return target
+    target.write_text(OUTSIDE_TEXT if which != "log" else json.dumps(_rec(session="s-1", skill="hello-probe")) + "\n", encoding="utf-8")
+    if which == "log":
+        (state / ".gitignore").write_text("*\n", encoding="utf-8")
+        (state / "usage.jsonl").symlink_to(target)
+    elif which == "gitignore":
+        (state / "usage.jsonl").write_text(json.dumps(_rec(session="s-1", skill="hello-probe")) + "\n", encoding="utf-8")
+        (state / ".gitignore").symlink_to(target)
+    return target
+
+
+def _snapshot(path: Path) -> object:
+    if path.is_dir():
+        return sorted((p.name, p.read_bytes()) for p in path.iterdir())
+    return path.read_bytes() if path.exists() else None
+
+
+SYMLINKED = ["log", "log-dangling", "gitignore", "state"]
+
+
+@needs_git
+@pytest.mark.parametrize("which", SYMLINKED)
+def test_NEGATIVE_CONTROL_the_hook_never_writes_through_a_symlink(repo: Path, tmp_path: Path, which: str) -> None:
+    target = _plant(repo, tmp_path, which)
+    before = _snapshot(target)
+    err = _hook(_skill_call(repo), tmp_path / "home")  # _hook asserts exit 0
+    assert _snapshot(target) == before, f"the hook wrote through the symlinked {which}"
+    assert "nothing recorded" in err and "symlink" in err
+
+
+@needs_git
+@pytest.mark.parametrize("which", SYMLINKED)
+def test_NEGATIVE_CONTROL_usage_end_never_writes_through_a_symlink(
+    repo: Path, tmp_path: Path, which: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _plant(repo, tmp_path, which)
+    before = _snapshot(target)
+    monkeypatch.chdir(repo)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", "approval-gate", "s-1", repo, out) == 0
+    assert _snapshot(target) == before, f"usage end wrote through the symlinked {which}"
+    if which != "log-dangling":  # a dangling log is no log: no-open-start, nothing written
+        assert "SKILLC_USAGE: not recorded" in out.getvalue() and "symlink" in out.getvalue()
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_linked_worktree_run_refuses_the_main_checkouts_symlinked_log(
+    repo: Path, tmp_path: Path,
+) -> None:
+    target = _plant(repo, tmp_path, "log")
+    before = _snapshot(target)
+    worktree = tmp_path / "demo-wt"
+    _git(repo, "worktree", "add", "-q", "-b", "side", str(worktree))
+    err = _hook(_skill_call(worktree), tmp_path / "home")
+    assert _snapshot(target) == before
+    assert "symlink" in err and not (worktree / ".skillc").exists()
+
+
+@needs_git
+def test_a_real_state_dir_is_still_written_after_the_symlink_guard(repo: Path, tmp_path: Path) -> None:
+    """The positive half: the guard must not refuse an ordinary `.skillc/`."""
+    _hook(_skill_call(repo), tmp_path / "home")
+    _hook(_skill_call(repo, session="s-2"), tmp_path / "home")
+    assert len(_lines(repo)) == 2
+    assert (repo / ".skillc" / ".gitignore").read_text(encoding="utf-8") == "*\n"
+
+
+def _tree(state: Path) -> list[tuple[str, bool, bytes | str]]:
+    """Every entry under `.skillc/` as (name, is-link, bytes or link target)."""
+    return sorted(
+        (p.name, p.is_symlink(), str(p.readlink()) if p.is_symlink() else p.read_bytes())
+        for p in state.iterdir()
+    )
+
+
+@needs_git
+@pytest.mark.parametrize("ignore", [None, "notes.txt\n"])
+def test_NEGATIVE_CONTROL_a_symlinked_log_refusal_writes_nothing_at_all(
+    repo: Path, tmp_path: Path, ignore: str | None,
+) -> None:
+    """Counter-model review: with the log symlinked and `.gitignore` missing or
+    incomplete, the refusal came AFTER `.gitignore` was written. Nothing in
+    `.skillc/` may change, not only the outside target."""
+    state = repo / ".skillc"
+    state.mkdir()
+    target = tmp_path / "config"
+    target.write_text(OUTSIDE_TEXT, encoding="utf-8")
+    (state / "usage.jsonl").symlink_to(target)
+    if ignore is not None:
+        (state / ".gitignore").write_text(ignore, encoding="utf-8")
+    before = _tree(state)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "symlink" in err
+    assert _tree(state) == before and target.read_text(encoding="utf-8") == OUTSIDE_TEXT
+
+
+@needs_git
+@pytest.mark.parametrize("name", [".gitignore", "usage.jsonl"])
+def test_NEGATIVE_CONTROL_a_fifo_entry_is_refused_not_opened(repo: Path, tmp_path: Path, name: str) -> None:
+    state = repo / ".skillc"
+    state.mkdir()
+    os.mkfifo(state / name)
+    err = _hook(_skill_call(repo), tmp_path / "home")
+    assert "non-regular" in err
+    assert (state / name).is_fifo()
+
+
+@needs_git
+def test_a_read_only_ignore_file_that_already_ignores_the_log_still_records(repo: Path, tmp_path: Path) -> None:
+    """Counter-model review: a sufficient `.gitignore` needs no write permission."""
+    state = repo / ".skillc"
+    state.mkdir()
+    ignore = state / ".gitignore"
+    ignore.write_text("*\n", encoding="utf-8")
+    ignore.chmod(0o444)
+    try:
+        _hook(_skill_call(repo), tmp_path / "home")
+        assert len(_lines(repo)) == 1 and ignore.read_text(encoding="utf-8") == "*\n"
+    finally:
+        ignore.chmod(0o644)
