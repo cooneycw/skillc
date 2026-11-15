@@ -333,3 +333,17 @@ def test_a_checkout_reached_through_a_symlinked_path_still_runs(tmp_path: Path) 
     _environment(ck, link)
     done = _run_launcher(link / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+def test_the_real_editable_install_runs_through_a_symlinked_checkout_path(tmp_path: Path) -> None:
+    """Counter-model pass 1: the stand-in controls above inject a source path;
+    this one is the REAL editable install (this checkout's own synced .venv)
+    reached through a link to the checkout, with no stand-in at all."""
+    if os.environ.get("UV_PROJECT_ENVIRONMENT"):
+        pytest.skip("UV_PROJECT_ENVIRONMENT is set for this run; the case needs the in-tree editable .venv")
+    if not (ROOT / ".venv" / "bin" / "python").is_file():
+        pytest.skip("no in-tree .venv: this checkout's editable install is not synced here")
+    link = tmp_path / "checkout-link"
+    link.symlink_to(ROOT, target_is_directory=True)
+    done = _run_launcher(link / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
