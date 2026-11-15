@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -89,12 +90,18 @@ with open(log, "a") as fh:
 if argv[0] == "rm":
     if mode == "sleep-rmhang":
         time.sleep(3600)  # blocks until the probe's bound kills it (role F, #758)
+    if mode.startswith("sleep-rmslow:"):
+        time.sleep(float(mode.split(":", 1)[1]))  # an rm slowed as a loaded host slows it (#758 review)
     sys.exit(1 if mode == "sleep-rmfail" else 0)
 if mode == "badbytes":
     sys.stdout.buffer.write(b"codex-cli \\xff\\xfe\\n")
     sys.exit(0)
 if mode == "late":
-    time.sleep(1)
+    # Blocks on a FIFO that the TEST opens only after the probe's first wait
+    # has timed out (#758 review): "answers after the bound" by construction,
+    # never by a finite sleep a descheduled parent could miss.
+    with open(log + ".release"):
+        pass
     sys.exit(0)
 if mode in ("signal", "late-signal"):
     import os, signal
@@ -158,8 +165,52 @@ def test_548_probe_keeps_build_metadata_so_a_custom_build_is_not_the_declared_on
     assert tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex").version == "0.157.1+custom"
 
 
-def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path):
-    docker_bin, log = _probe_docker(tmp_path, "sleep")
+def _generous_rm(monkeypatch):
+    """`settle` also bounds `docker rm -f`. Where the test needs that removal
+    to SUCCEED (must-beat), widen only the rm call (#758)."""
+    real_remove = tb._remove_probe_container
+    monkeypatch.setattr(tb, "_remove_probe_container",
+                        lambda docker_bin, name, _timeout: real_remove(docker_bin, name, TEST_SETUP_BOUND))
+
+
+def _release_after_the_first_timeout(monkeypatch, fifo, parent_delay=0.0):
+    """Wrap `Popen.communicate`: optionally delay the parent before its first
+    call (a descheduled parent), and open the "late" fake's FIFO only once a
+    wait has raised TimeoutExpired, so the CLI answers strictly after the bound."""
+    import subprocess as sp
+    import threading
+    import time
+    real_communicate = sp.Popen.communicate
+    state = {"delayed": False, "released": False}
+
+    def wrapped(self, *args, **kwargs):
+        if parent_delay and not state["delayed"]:
+            state["delayed"] = True
+            time.sleep(parent_delay)
+        try:
+            return real_communicate(self, *args, **kwargs)
+        except sp.TimeoutExpired:
+            if not state["released"]:
+                state["released"] = True
+                # Opening a FIFO's write end blocks until the fake opens its
+                # read end. Bound that wait, so a fake that never opens it
+                # fails clearly here instead of hanging until pytest-timeout.
+                opener = threading.Thread(target=lambda: open(fifo, "w").close(), daemon=True)
+                opener.start()
+                opener.join(TEST_SETUP_BOUND)
+                assert not opener.is_alive(), "the late fake never opened its release FIFO"
+            raise
+
+    monkeypatch.setattr(sp.Popen, "communicate", wrapped)
+    return state
+
+
+@pytest.mark.parametrize("mode", ["sleep", "sleep-rmslow:0.8"])
+def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path, monkeypatch, mode):
+    """`sleep-rmslow:0.8` is the reviewer's input (#758 pass 2): an rm 0.8 s
+    slow read as a cleanup timeout while settle (0.3 s) also bounded it."""
+    _generous_rm(monkeypatch)
+    docker_bin, log = _probe_docker(tmp_path, mode)
     probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
                                        timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
                                        settle=0.3)  # timing: must-fire - the blocked create never settles
@@ -169,13 +220,19 @@ def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path):
     assert rm == ["rm", "-f", run[run.index("--name") + 1]]
 
 
-def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path):
+@pytest.mark.parametrize("parent_delay", [0, 1.2])
+def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path, monkeypatch, parent_delay):
     """#540's race: the CLI answers after the bound. Removal waits for it, so
-    the cleanup is confirmed rather than racing a create still landing."""
+    the cleanup is confirmed rather than racing a create still landing.
+    `parent_delay=1.2` is the reviewer's input (#758 pass 2): with a finite
+    1 s sleep, a descheduled parent missed the timeout entirely."""
     docker_bin, log = _probe_docker(tmp_path, "late")
+    os.mkfifo(str(log) + ".release")
+    state = _release_after_the_first_timeout(monkeypatch, str(log) + ".release", parent_delay)
     probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
-                                       timeout=0.3,  # timing: must-fire - the CLI sleeps 1 s, so the probe's bound fires
-                                       settle=TEST_SETUP_BOUND)  # must-beat (#758): the late create settles, then rm -f
+                                       timeout=0.3,  # timing: must-fire - the CLI blocks until released after it fires
+                                       settle=TEST_SETUP_BOUND)  # must-beat (#758): the released CLI settles, then rm -f
+    assert state["released"]
     assert probe.version is None and probe.reason == "`codex --version` did not answer within 0.3s"
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 

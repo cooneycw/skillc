@@ -56,9 +56,11 @@ ALL_SHAPES = _j(
     "    fake = 'x_time", "out=", DOT, "6'\n",
     "    gate = 'deadline=time.monot", "onic()+", DOT, "7'\n",
     "    shell = 'time", "out ", DOT, "8s true'\n",
+    "    until = time.monotonic() + ", DOT, "25\n",
+    "    threading.Event().wait(", DOT, "15)\n",
 )
 EXPECTED_KINDS = {"const", "default", "param", "kw", "sleep", "elapsed", "str-sleep", "str-kw", "str-deadline",
-                  "str-timeout-cli"}
+                  "str-timeout-cli", "deadline", "wait-arg"}
 
 
 def test_the_scanner_sees_every_shape_it_names(tmp_path: Path) -> None:
@@ -220,3 +222,18 @@ def test_an_empty_population_is_an_error_never_a_clean_scan(tmp_path: Path) -> N
     root = _tree(tmp_path, {})
     (root / "tests").mkdir()
     assert ti.main(["check", "--root", str(root)]) == 2
+
+
+# --------------------------------------------- counter-model pass 2 (#758)
+
+@pytest.mark.parametrize("source", [
+    _j("import time\n", "def test_x():\n", "    deadline = time.monotonic() + ", DOT, "3\n"),
+    _j("import threading\n", "def test_x():\n", "    threading.Event().wait(", DOT, "3)\n"),
+    _j("def test_x():\n", "    script = 'import time; time.sl", "eep(3e-1)'\n"),
+], ids=["clock-arithmetic", "positional-wait", "embedded-exponent"])
+def test_pass_2_forms_are_new_to_an_empty_baseline(tmp_path: Path, source: str) -> None:
+    """Reviewer's exact inputs: each stayed green before the fix. The exponent
+    case is 0.3 s, which the old parser read as 3 s and so did not ratchet."""
+    root = _tree(tmp_path, {"tests/test_x.py": source})
+    ok, lines = ti.check(root, root / "ci" / "timing-baseline.txt")
+    assert not ok and any(line.startswith("TIMING_NEW: tests/test_x.py:") and " 0.3 " in line for line in lines), lines

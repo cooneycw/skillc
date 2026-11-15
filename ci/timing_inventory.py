@@ -31,12 +31,21 @@ truthfully as members are fixed and a freed slot is not silently reused.
 Shapes (per function, or <module>):
   kw       a time-ish keyword argument with a numeric literal (timeout=0.3)
   param    a time-ish column of a pytest parametrize table
+  deadline clock arithmetic (time.monotonic() + 0.3)
+  wait-arg a positional timeout to wait/join/result (Event().wait(0.3))
   sleep    sleep(N) / time.sleep(N)
   elapsed  a comparison of a time-ish expression with a literal (elapsed < 2)
   default  a time-ish parameter default (seconds=5)
   const    NAME = N where NAME is time-ish
   str-*    inside a string literal (an embedded script or shell fake):
            `sleep N`, `x_timeout=N`, `monotonic()+N`, `timeout Ns`
+           (numbers include exponents: `sleep(3e-1)` is 0.3 s)
+
+THESE LISTED SHAPES are what the ratchet sees, not every bound a test can
+express. A bound computed at run time, read from a file or passed through a
+variable is invisible to it. Each review pass of #758 found another syntactic
+form, so the claim is deliberately this list. After #758, a new shape goes to
+the Nit Store unless it caused a real CI red (orchestrator ruling).
 
 Usage:
   python3 ci/timing_inventory.py report [--root DIR] [--json]
@@ -69,11 +78,19 @@ TIMEISH = re.compile(
     re.IGNORECASE,
 )
 ELAPSED_NAMES = re.compile(r"(elapsed|duration|took|seconds|monotonic|perf_counter|time)", re.IGNORECASE)
+#: A whole numeric token, exponents included: `3e-1` is 0.3 s, not 3 (#758 review).
+_NUM = r"([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)"
+#: Clock reads a deadline is built from (`time.monotonic() + 0.3`).
+CLOCKS = frozenset({"monotonic", "time", "perf_counter", "monotonic_ns", "perf_counter_ns"})
+#: Waiting APIs whose FIRST positional argument is a timeout
+#: (`Event().wait(0.3)`, `thread.join(0.3)`, `future.result(0.3)`).
+POSITIONAL_WAITS = frozenset({"wait", "join", "result"})
 STR_PATTERNS = (
-    ("str-sleep", re.compile(r"\bsleep\s*\(?\s*([0-9]*\.?[0-9]+)")),
-    ("str-kw", re.compile(r"\b[A-Za-z_]*(?:timeout|settle|interval|deadline|wait|poll|delay|seconds)\s*=\s*([0-9]*\.?[0-9]+)\b", re.IGNORECASE)),
-    ("str-deadline", re.compile(r"monotonic\(\)\s*\+\s*([0-9]*\.?[0-9]+)")),
-    ("str-timeout-cli", re.compile(r"\btimeout\s+([0-9]*\.?[0-9]+)s?\b")),
+    ("str-sleep", re.compile(r"\bsleep\s*\(?\s*" + _NUM)),
+    ("str-kw", re.compile(r"\b[A-Za-z_]*(?:timeout|settle|interval|deadline|wait|poll|delay|seconds)\s*=\s*" + _NUM + r"\b",
+                          re.IGNORECASE)),
+    ("str-deadline", re.compile(r"monotonic\(\)\s*\+\s*" + _NUM)),
+    ("str-timeout-cli", re.compile(r"\btimeout\s+" + _NUM + r"s?\b")),
 )
 ANNOTATION = re.compile(r"#\s*timing:\s*(?P<role>[A-Za-z-]*)\s*(?:-\s*(?P<why>.*))?$")
 
@@ -154,10 +171,24 @@ class _Scan(ast.NodeVisitor):
                     if value is not None:
                         self._add("param", cells[i], value, f"parametrize {names[i]}={_src(cells[i])}")
 
+    def visit_BinOp(self, node: ast.BinOp) -> None:
+        if isinstance(node.op, ast.Add):
+            for clock, other in ((node.left, node.right), (node.right, node.left)):
+                if isinstance(clock, ast.Call) and _src(clock.func).split(".")[-1] in CLOCKS:
+                    value = _num(other)
+                    if value is not None:
+                        self._add("deadline", other, value, _src(node))
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
         name = _src(node.func)
-        if name.split(".")[-1] == "parametrize":
+        leaf = name.split(".")[-1]
+        if leaf == "parametrize":
             self._parametrize(node)
+        if leaf in POSITIONAL_WAITS and isinstance(node.func, ast.Attribute) and node.args:
+            value = _num(node.args[0])
+            if value is not None:
+                self._add("wait-arg", node.args[0], value, _src(node))
         if name.split(".")[-1] == "sleep" and node.args:
             value = _num(node.args[0])
             if value is not None:

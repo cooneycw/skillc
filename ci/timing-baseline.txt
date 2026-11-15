@@ -35,6 +35,8 @@ tests/test_calibration_signal_recovery.py::_controller.attempt.ControlledBackend
 tests/test_calibration_signal_recovery.py::_pause::sleep::0.02
 tests/test_calibration_signal_recovery.py::_wait_ready::sleep::0.02
 tests/test_calibration_signal_recovery_live.py::_cleanup::sleep::0.02
+tests/test_calibration_signal_recovery_live.py::_controller.attempt.ControlledBackend.execute.bridge::wait-arg::0.05
+tests/test_calibration_signal_recovery_live.py::_controller.attempt.ControlledBackend.execute.bridge::wait-arg::0.05
 tests/test_cicd_deploy_verify_live.py::_fresh::str-sleep::0.1
 tests/test_cicd_profile_live.py::test_the_cicd_profile_runs_cpps_local_ci_cd_in_a_cold_container::str-sleep::0.1
 tests/test_cicd_profile_live.py::test_the_cicd_profile_runs_cpps_local_ci_cd_in_a_cold_container::str-sleep::0.1
@@ -101,6 +103,7 @@ tests/test_gate_witness.py::test_confirmed_kill_needs_no_standalone_kill_binary_
 tests/test_gate_witness.py::test_exec_in_attempt_never_stops_the_container_on_its_own_timeout::kw::0.3
 tests/test_gate_witness.py::test_exec_in_attempt_never_stops_the_container_on_its_own_timeout::kw::0.5
 tests/test_gate_witness.py::test_production_backend_normal_none_stop_flag_can_admit::sleep::0.01
+tests/test_gate_witness.py::test_snapshot_waits_for_prior_gate_execution::wait-arg::0.2
 tests/test_gate_witness_live.py::_wait_for_file_via_exec::sleep::0.2
 tests/test_inventory_oracle_live.py::<module>::str-sleep::0.01
 tests/test_inventory_runtime.py::test_oracle_sweep_distinguishes_a_live_escaped_child::str-sleep::0.01
@@ -136,6 +139,7 @@ tests/test_load_harness.py::test_slow_removals_stay_inside_the_sweep_budget::sle
 tests/test_managed_backend.py::stub::sleep::0.02
 tests/test_profile_flow_auto_87ecb097_cold.py::test_actual_actor_call_retains_command_evidence.ready_wait::const::0.01
 tests/test_profile_flow_auto_87ecb097_cold.py::test_actual_actor_call_retains_command_evidence.ready_wait::sleep::0.005
+tests/test_prompt_retention.py::test_terminal_writer_and_reader_take_existing_experiment_lock::wait-arg::0.03
 tests/test_qualify_scripts_run.py::test_hung_qualify_script_is_rejected::kw::0.1
 tests/test_real_docker_optin.py::test_owned_helper_refuses_unverified_cleanup_and_budget_reset::str-sleep::0.8
 tests/test_real_docker_optin.py::test_owned_session_escape_and_helper_signal_cleanup::str-sleep::0.005
