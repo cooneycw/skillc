@@ -27,7 +27,6 @@ from __future__ import annotations
 import functools
 import json
 import re
-import shlex
 import shutil
 import subprocess
 from collections import defaultdict
@@ -63,6 +62,10 @@ COPIED_MIN_WORDS = 40
 COPIED_CANDIDATES = 8
 #: How many cut-off candidates are probed for a free alignment before a cut is assumed lossy.
 TRUNCATION_PROBE = 64
+#: Bidirectional extensions allowed per pair from repetitive windows; past it, the pair is an estimate.
+FALLBACK_EXTENSION_CAP = 512
+#: Contiguous-run heads tried per repetitive window; more than this and the pair is an estimate.
+HEAD_CANDIDATES = 64
 
 #: `emphasis-density`: these words, uppercase and whole, count as emphasis.
 EMPHASIS_WORDS: tuple[str, ...] = ("MUST", "NEVER", "CRITICAL", "ALWAYS", "IMPORTANT")
@@ -438,6 +441,8 @@ COMMAND_PREFIXES = frozenset({
     "if", "elif", "then", "else", "while", "until", "do", "!", "{", "(",
 })
 ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: `env -S VALUE`: VALUE is itself a command line (#741).
+SPLIT_STRING_OPTIONS = frozenset({"-S", "--split-string"})
 #: A prefix's options that take the NEXT word as their value (`sudo -u root`), so
 #: that value is not mistaken for the command (#731 review).
 #: Long forms too (#731 review); the `--opt=value` form carries its value inline.
@@ -445,7 +450,7 @@ OPTION_OPERANDS: dict[str, frozenset[str]] = {
     "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U",
                        "--user", "--group", "--close-from", "--chdir", "--host",
                        "--prompt", "--role", "--type", "--other-user"}),
-    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "env": frozenset({"-u", "-C", "--unset", "--chdir"}),
     "time": frozenset({"-o", "-f", "--output", "--format"}),
     "exec": frozenset({"-a"}),
     "python": frozenset({"-W", "-X"}),
@@ -454,22 +459,108 @@ OPTION_OPERANDS: dict[str, frozenset[str]] = {
 SHELL_BREAKS = ("`", "|", ";", "&&")
 
 
-def _command_tokens(text: str) -> tuple[list[str], bool]:
+@dataclass(frozen=True)
+class Token:
+    """One shell word: its text with quotes removed, whether it is an UNQUOTED
+    operator run (`;`, `|`, `&&`, ...), and whether any part of it was quoted."""
+
+    text: str
+    operator: bool = False
+    quoted: bool = False
+    opens: int = 0  # UNQUOTED `$(` in this word
+    closes: int = 0  # UNQUOTED `)` in this word
+    began_quoted: bool = False  # the word OPENS with a quote: a whole quoted string
+
+
+SHELL_PUNCT = ";&|"
+#: shlex's own whitespace - NOT str.isspace(), which also splits on a
+#: non-breaking space, a vertical tab or a form feed (#741 review).
+SHLEX_WHITESPACE = " \t\r\n"
+
+
+def shell_tokens(text: str) -> list[Token]:
+    """Split command text into words with EXACTLY the boundaries of stdlib
+    `shlex` (posix=True, `punctuation_chars=";&|"`, whitespace_split) - a
+    `p="a b"` or `--opt="x y"` stays one word (#741, orchestrator's condition) -
+    and additionally record which operator runs were unquoted, which shlex
+    discards: `";"` is an argument, `;` a separator. Raises ValueError on an
+    unterminated quote or a trailing escape, as shlex does."""
+    tokens: list[Token] = []
+    buf: list[str] = []
+    in_word = quoted = began = False
+    opens = closes = 0
+
+    def flush() -> None:
+        nonlocal buf, in_word, quoted, opens, closes, began
+        if in_word:
+            tokens.append(Token("".join(buf), False, quoted, opens, closes, began))
+        buf, in_word, quoted, opens, closes, began = [], False, False, 0, 0, False
+
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in SHLEX_WHITESPACE:
+            flush()
+            i += 1
+        elif c in SHELL_PUNCT:
+            flush()
+            j = i
+            while j < n and text[j] in SHELL_PUNCT:
+                j += 1
+            tokens.append(Token(text[i:j], True, False))
+            i = j
+        elif c == "'":
+            began = began or not in_word
+            j = text.find("'", i + 1)
+            if j < 0:
+                raise ValueError("unterminated single quote")
+            buf.append(text[i + 1:j])
+            in_word = quoted = True
+            i = j + 1
+        elif c == '"':
+            began = began or not in_word
+            in_word = quoted = True
+            i += 1
+            while True:
+                if i >= n:
+                    raise ValueError("unterminated double quote")
+                ch = text[i]
+                if ch == '"':
+                    i += 1
+                    break
+                if ch == "\\" and i + 1 < n and text[i + 1] in '"\\':
+                    buf.append(text[i + 1])
+                    i += 2
+                    continue
+                buf.append(ch)
+                i += 1
+        elif c == "\\":
+            if i + 1 >= n:
+                raise ValueError("trailing escape")
+            buf.append(text[i + 1])
+            in_word = quoted = True  # an escape quotes what follows (`run\ x` is one word)
+            i += 2
+        else:
+            if c == "$" and i + 1 < n and text[i + 1] == "(":
+                opens += 1
+            elif c == ")":
+                closes += 1
+            buf.append(c)
+            in_word = True
+            i += 1
+    flush()
+    return tokens
+
+
+def _command_tokens(text: str) -> tuple[list[Token], bool]:
     """Words of one piece of COMMAND-SHAPED text (an inline code span or one
     fenced-block line - never running prose, where apostrophes would pair up and
-    swallow a reference, #731), and whether they are quote-aware.
-
-    stdlib `shlex` (posix) keeps a quoted argument as ONE word - `"$(printf x);"`
-    stays a value, its `;` no separator - and gives an unquoted `;`, `|`, `&&`
-    a token of its own. Text whose quotes do not balance is read as plain
-    whitespace words instead, the reading this rule used before shlex."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|")
-    lexer.whitespace_split = True
-    lexer.commenters = ""
+    swallow a reference, #731), and whether they are quote-aware. Text whose
+    quotes do not balance is read as plain whitespace words instead."""
     try:
-        return list(lexer), True
+        return shell_tokens(text), True
     except ValueError:  # unterminated quote or escape
-        return text.split(), False
+        return [Token(w, opens=w.count("$("), closes=w.count(")")) for w in text.split()], False
 
 
 @functools.lru_cache(maxsize=1024)
@@ -571,6 +662,21 @@ def dangling_reference(coll: Collection) -> Result:
                 return "missing", None
             return "exists", found
 
+        def examine_split(value: str, index: int) -> None:
+            """An `env -S` value (#745): its paths are existence-checked, and
+            every flag in it is COUNTED as unowned, never checked. env's own argv
+            rules (comments, escapes, options before the command) are not
+            emulated, so no word here is taken as a command or a flag owner.
+            `\\_` is env's escape for a separator, so a flag written after one
+            is still seen and counted."""
+            nonlocal flags_unowned
+            for inner in value.replace("\\_", " ").split():
+                inner_word = _clean_word(inner)
+                if FLAG_RE.match(inner_word.split("=", 1)[0]):
+                    flags_unowned += 1
+                else:
+                    check_path(inner_word, index)
+
         for span in code_spans(subject.lines):
             script: Path | None = None
             script_word = ""
@@ -581,58 +687,126 @@ def dangling_reference(coll: Collection) -> Result:
             pending_operand = False
             prefix = ""
             arg_path_seen = False
-            outer: list[tuple[Path | None, str, bool]] = []  # commands suspended by `$(`
             reset_after = False
             tokens, quote_aware = _command_tokens(span.text)
-            for raw in tokens:
+            # The whole segment state, saved across `$(...)` (#741): an inner
+            # `;` must not clear the outer `sudo` or its pending option value.
+            State = tuple[Path | None, str, bool, bool, str, bool, bool]
+            outer2: list[State] = []
+            pending_split = False  # `env -S VALUE`: VALUE is command text
+            for token in tokens:
+                raw = token.text
                 if reset_after:
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
+                    pending_split = False
                     reset_after = False
+                is_separator = token.operator if quote_aware else raw in SHELL_SEPARATORS
+                if is_separator:
+                    # An UNQUOTED operator ends the command (`";"` is an argument,
+                    # #741); the next word starts a new one.
+                    script, script_word, expect_command = None, "", True
+                    pending_operand, prefix, arg_path_seen = False, "", False
+                    pending_split = False
+                    continue
                 word = _clean_word(raw)
-                opens = raw.count("$(")
-                closes = raw.count(")") if (outer or opens) else 0
+                # A word that OPENS with a quote is a whole quoted string, even if
+                # its text begins with `-` (`echo "-> see scripts/x.sh"`); only a
+                # quote that opens mid-word is an attached value (`--opt="x y"`),
+                # one option with no paths read out of it (#741 review).
+                is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
+                             and (token.began_quoted or not word.startswith("-")))
+                quoted_option = (is_string and not pending_split
+                                 and bool(FLAG_RE.match(word.split("=", 1)[0])))
+                if quoted_option:
+                    is_string = False
+                    flag = word.split("=", 1)[0]
+                    if expect_command and prefix == "env" and flag in SPLIT_STRING_OPTIONS:
+                        # `env "--split-string=VALUE"` is `env --split-string="VALUE"`.
+                        examine_split(word.split("=", 1)[1] if "=" in word else "", span.index)
+                        arg_path_seen, expect_command = True, False
+                    elif script is not None:
+                        # A FULLY quoted option (`"--absent=x y"`) is the same argv
+                        # word as `--absent="x y"` (#745): an option with an
+                        # attached value, checked against its owner, with no paths
+                        # read out of the value.
+                        flags += 1
+                        source = _script_source(script, coll.root)
+                        if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(flag) + r"(?![A-Za-z0-9-])", source):
+                            result.hits.append(Hit(
+                                subject.rel, subject.lineno(span.index),
+                                f"passes {flag} to {script_word}, whose source never mentions it",
+                                {"reference": f"{script_word} {flag}", "kind": "flag"},
+                            ))
+                    elif arg_path_seen:
+                        flags_unowned += 1  # no owner, after a non-command path
+                    pending_operand = False
+                if is_string:
+                    # A quoted multi-word argument is a STRING, read BEFORE the
+                    # substitution logic (#741): its words still name paths that
+                    # must exist (`echo "$(pwd) scripts/gone.sh"`), but none is a
+                    # command or owns a flag. It can be an option's value
+                    # (`sudo -u "$(id -un)"`), or `env -S`'s command text (#745),
+                    # whose flags, and every flag after it, are counted, never
+                    # checked.
+                    if pending_split:
+                        examine_split(raw, span.index)
+                        arg_path_seen, expect_command = True, False
+                    else:
+                        for inner in raw.split():
+                            check_path(_clean_word(inner), span.index)
+                    pending_split = False
+                    pending_operand = False
+                # Only UNQUOTED `$(` / `)` move the stack (#741): `"$(pwd)"` is
+                # self-contained, while `'s/a b/c/')` still closes a substitution.
+                opens, closes = token.opens, token.closes
+                if not outer2 and not opens:
+                    closes = 0
                 if opens or closes:
-                    # A substitution is a command of its own. Process the token's
-                    # delimiters in order - pushes, then pops - so `"$(pwd)"`,
-                    # which opens and closes in one token, restores the outer
-                    # command at once (#731).
+                    # A substitution is a command of its own. Delimiters in token
+                    # order - pushes, then pops - so `$(pwd)` restores at once.
                     if pending_operand:
-                        # `sudo -u "$(id -un)"`: the substitution IS the option's
-                        # value; the command is still to come (#731 review).
-                        pending_operand = False
+                        pending_operand = False  # the substitution IS the option's value
+                    if pending_split:
+                        pending_split = False  # `env -S $(...)`: the substitution IS the value
+                        arg_path_seen = True
                     for _ in range(opens):
-                        outer.append((script, script_word, expect_command))
+                        outer2.append((script, script_word, expect_command,
+                                       pending_operand, prefix, arg_path_seen, pending_split))
                         script, script_word, expect_command = None, "", True
-                    for _ in range(min(closes, len(outer))):
-                        script, script_word, expect_command = outer.pop()
-                    # `"$(pwd)";` - a separator after the substitution ends the
-                    # restored command too (#731 review).
+                        pending_operand, prefix, arg_path_seen = False, "", False
+                        pending_split = False
+                    for _ in range(min(closes, len(outer2))):
+                        (script, script_word, expect_command,
+                         pending_operand, prefix, arg_path_seen, pending_split) = outer2.pop()
                     reset_after = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
                     continue
-                if raw in SHELL_SEPARATORS:
-                    # A separator token of its own (quote-aware text): the next
-                    # word starts a new command. Checked before cleaning, which
-                    # would strip `;` to nothing (#731 review).
-                    script, script_word, expect_command = None, "", True
-                    pending_operand, prefix, arg_path_seen = False, "", False
+                if is_string or quoted_option:
+                    continue
+                if pending_split:
+                    # `env -S VALUE`: VALUE is command text, even when it is empty
+                    # (`env -S ""`), so it is consumed here, before anything else.
+                    examine_split(raw, span.index)
+                    arg_path_seen, pending_split, pending_operand = True, False, False
+                    expect_command = False
                     continue
                 if not word:
+                    if pending_operand:
+                        # `sudo -p ";"`: a value that cleans to nothing is still
+                        # the option's value (#741 review).
+                        pending_operand = False
                     continue
-                # A separator ends the command. One that TRAILS the word
-                # (`--bad;`) ends it after this word is read, so the word's own
-                # flag still belongs to the command it was written against.
-                # Quote-aware text gives every separator a token of its own, so
-                # only the whitespace fallback has to find one inside a word.
+                # Whitespace fallback only: a separator inside or trailing a word.
                 trailing_break = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
                 inner_break = not quote_aware and any(sep in raw for sep in SHELL_BREAKS)
-                if (inner_break and not trailing_break) or raw in SHELL_SEPARATORS or word in SHELL_SEPARATORS:
-                    # A flag after `|`, `;` or `&&` belongs to another command.
+                if (inner_break and not trailing_break) or (not quote_aware and word in SHELL_SEPARATORS):
                     script, script_word, expect_command = None, "", True
                     pending_operand, prefix, arg_path_seen = False, "", False
+                    pending_split = False
                     if not word.strip("|;&()$`"):
                         continue
-                word = word.rstrip(";|&")
+                if not quote_aware:
+                    word = word.rstrip(";|&")
                 reset_after = trailing_break
                 if script is not None and FLAG_RE.match(word.split("=", 1)[0]):
                     flag = word.split("=", 1)[0]
@@ -645,29 +819,29 @@ def dangling_reference(coll: Collection) -> Result:
                             {"reference": f"{script_word} {flag}", "kind": "flag"},
                         ))
                     continue
+                if script is None and arg_path_seen and FLAG_RE.match(word.split("=", 1)[0]):
+                    # A flag after a path that was NOT the command (checked
+                    # before this word's own handling can set arg_path_seen): its owner is
+                    # unknown here, so it is counted, never silently dropped.
+                    flags_unowned += 1
                 is_command_position = expect_command and not pending_operand
                 if expect_command:
                     if pending_operand:
                         pending_operand = False  # `sudo -u root`: `root` is the option's value
                     elif word.startswith("-"):
-                        pending_operand = word in OPTION_OPERANDS.get(prefix, ())
+                        name = word.split("=", 1)[0]
+                        if prefix == "env" and name in SPLIT_STRING_OPTIONS:
+                            if "=" in word:  # `--split-string=VALUE`, one word
+                                examine_split(word.split("=", 1)[1], span.index)
+                                arg_path_seen, expect_command = True, False
+                            else:
+                                pending_split = True
+                        else:
+                            pending_operand = word in OPTION_OPERANDS.get(prefix, ())
                     elif word in COMMAND_PREFIXES:
                         prefix = word
                     elif not ASSIGNMENT_RE.match(word):
                         expect_command = False
-                if script is None and arg_path_seen and FLAG_RE.match(word.split("=", 1)[0]):
-                    # A flag after a path that was NOT the command: its owner is
-                    # unknown here, so it is counted, never silently dropped.
-                    flags_unowned += 1
-                if quote_aware and any(ch.isspace() for ch in raw):
-                    # A quoted multi-word argument is a STRING (`echo "run
-                    # scripts/x.sh"`): its words still name paths that must
-                    # exist, but none of them is a command or owns a flag. The
-                    # whitespace reading checked them before shlex; shlex alone
-                    # would hide them in one word (#731 review).
-                    for inner in raw.split():
-                        check_path(_clean_word(inner), span.index)
-                    continue
                 state, found = check_path(word, span.index)
                 if state != "exists" or found is None:
                     continue
@@ -900,12 +1074,17 @@ def _pair_runs(
     starting points, forward only; those runs are flagged as ESTIMATES. No word
     on either side is counted in two runs, so repeated text is not double counted.
     """
-    used_a, used_b = bytearray(len(ta)), bytearray(len(tb))
+    na, nb = len(ta), len(tb)
+    used_a, used_b = bytearray(na), bytearray(nb)
     visit = sorted(p for h in hashes for p in pa[h])
     runs: list[tuple[int, int, int, bool]] = []
 
     def free(i: int, j: int) -> bool:
         return not used_a[i] and not used_b[j]
+
+    def heads(positions_sorted: Sequence[int]) -> list[int]:
+        """The first position of each contiguous run of occurrences."""
+        return [p for k, p in enumerate(positions_sorted) if k == 0 or positions_sorted[k - 1] != p - 1]
 
     def take(sa: int, sb: int, length: int, estimate: bool) -> None:
         used_a[sa:sa + length] = b"\x01" * length
@@ -917,28 +1096,54 @@ def _pair_runs(
     # longer one in either document order (#731 review). A diagonal already
     # extended through this position is not extended again, which keeps
     # identical documents linear.
+    #
+    # A REPETITIVE window (more than COPIED_CANDIDATES occurrences) contributes
+    # its first COPIED_CANDIDATES alignments to the SAME pool, before anything is
+    # consumed (#741): otherwise a rare 51-word anchor starves a 70-word
+    # repetitive match it overlaps. Those extensions are capped per pair; a pair
+    # that hits the cap is an estimate, never silently exact.
     extended: dict[int, list[tuple[int, int]]] = defaultdict(list)
     found: list[tuple[int, int, int]] = []
+    fallback_extensions = 0
+    capped = False
     for pos in visit:
         window = ta[pos:pos + min_words]
         candidates = pb.get(hash(tuple(window)), ())
-        if len(candidates) > COPIED_CANDIDATES:
-            continue  # repetitive here: a distinctive anchor (or phase 2) reaches it
-        for bp in candidates:
+        repetitive = len(candidates) > COPIED_CANDIDATES
+        if repetitive and capped:
+            continue  # the cap is already spent; the pair is an estimate either way
+        if repetitive:
+            # The first COPIED_CANDIDATES alignments PLUS the head of every
+            # contiguous run of this window in the other document (#741 review):
+            # eight short 40-word blocks must not crowd out one 100-word block.
+            runs_heads = heads(candidates)
+            if len(runs_heads) > HEAD_CANDIDATES:
+                capped = True  # too many distinct blocks to try them all
+            pool = list(dict.fromkeys([*candidates[:COPIED_CANDIDATES], *runs_heads[:HEAD_CANDIDATES]]))
+        else:
+            pool = list(candidates)
+        for bp in pool:
             diagonal = pos - bp
             if any(lo <= pos < hi for lo, hi in extended[diagonal]):
                 continue
             if tb[bp:bp + min_words] != window:
                 continue
+            if repetitive:
+                if fallback_extensions >= FALLBACK_EXTENSION_CAP:
+                    capped = True
+                    break
+                fallback_extensions += 1
             sa, sb = pos, bp
             while sa > 0 and sb > 0 and ta[sa - 1] == tb[sb - 1]:
                 sa, sb = sa - 1, sb - 1
             ea, eb = pos + min_words, bp + min_words
-            while ea < len(ta) and eb < len(tb) and ta[ea] == tb[eb]:
+            while ea < na and eb < nb and ta[ea] == tb[eb]:
                 ea, eb = ea + 1, eb + 1
             extended[diagonal].append((sa, ea))
             found.append((ea - sa, sa, sb))
     for length, sa, sb in sorted(found, key=lambda c: (-c[0], c[1], c[2])):
+        if b"\x00" not in used_a[sa:sa + length] or b"\x00" not in used_b[sb:sb + length]:
+            continue  # wholly consumed on one side already: nothing free to take
         start = None
         for k in range(length + 1):
             ok = k < length and free(sa + k, sb + k)
@@ -965,7 +1170,7 @@ def _pair_runs(
         if not truncated and len(candidates) > COPIED_CANDIDATES:
             beyond = candidates[COPIED_CANDIDATES:COPIED_CANDIDATES + TRUNCATION_PROBE]
             truncated = len(candidates) > COPIED_CANDIDATES + TRUNCATION_PROBE or any(
-                bp + min_words <= len(tb) and all(free(pos + k, bp + k) for k in range(min_words))
+                bp + min_words <= nb and all(free(pos + k, bp + k) for k in range(min_words))
                 for bp in beyond
             )
         best: tuple[int, int, int] | None = None
@@ -975,14 +1180,14 @@ def _pair_runs(
             ):
                 continue
             ea, eb = pos + min_words, bp + min_words
-            while ea < len(ta) and eb < len(tb) and free(ea, eb) and ta[ea] == tb[eb]:
+            while ea < na and eb < nb and free(ea, eb) and ta[ea] == tb[eb]:
                 ea, eb = ea + 1, eb + 1
             if best is None or ea - pos > best[2]:
                 best = (pos, bp, ea - pos)
         if best is not None:
             take(*best, True)
     runs.sort()
-    return runs, truncated
+    return runs, truncated or capped
 
 
 # ------------------------------------------------------------- emphasis-density

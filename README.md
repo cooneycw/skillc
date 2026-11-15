@@ -106,6 +106,7 @@ skillc materialize <subject>   # install a declared skill surface and prove what
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
 skillc inspect <collection>    # #725: skill-gauntlet round 2 - decay rules, findings sorted A/B/C/D; never edits
+skillc gauntlet run <collection> <skill> # #754: the skill-gauntlet engine - rounds 0-2 in order, one verdict per round, one NEXT: line; rounds 3-5 read NOT BUILT, so it never exits 0 yet (docs/specs/gauntlet.md)
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)
@@ -301,6 +302,31 @@ cd skillc
 uv sync --extra dev
 uv run skillc selftest
 ```
+
+### `/skill-gauntlet` in every Claude Code session (#763)
+
+Claude Code loads a repository's own skills only in sessions opened in that
+repository. To use `/skill-gauntlet` from any session (CPP, Kyle, anywhere):
+
+```bash
+make install-skill     # links ~/.claude/skills/skill-gauntlet to this checkout's skill
+make uninstall-skill   # removes that link, and only that link
+```
+
+- **Updating:** it is a link, so a `git pull` here updates the skill everywhere.
+- **Safety:** it refuses to replace a real `~/.claude/skills/skill-gauntlet`, or
+  a link pointing somewhere else, and names it. It links the main checkout even
+  when run from a linked worktree. `SKILLC_SKILLS_DIR` overrides the directory.
+- **If the checkout moves:** the link dangles, so the skill simply disappears
+  from the list. The installer will not replace a link pointing somewhere
+  else, so check `ls -l ~/.claude/skills/skill-gauntlet`, remove that stale
+  link yourself (`rm ~/.claude/skills/skill-gauntlet`), then run
+  `make install-skill` from the new place.
+- **If skillc is present but cannot run** (never `uv sync`ed, or its environment
+  does not import this checkout's engine): the skill prints
+  `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no verdict. The
+  skill runs the checkout's own environment directly, so `uv` itself is needed
+  only to sync it.
 
 ## Contributing
 

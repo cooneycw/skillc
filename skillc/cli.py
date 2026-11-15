@@ -2722,6 +2722,19 @@ def cmd_charter_confirm(args: argparse.Namespace) -> int:
         return CHARTER_EXIT_REFUSED
     print(f"skillc: confirmed charter written to {args.out}")
     return CHARTER_EXIT_OK
+def cmd_gauntlet_run(args: argparse.Namespace) -> int:
+    """`skillc gauntlet run <collection> <skill>` (#754): the skill-gauntlet engine
+    for the free rounds 0-2. It runs the round commands and reads their verdicts;
+    rounds 3-5 read NOT BUILT and the run stops, so it never exits 0 in part 1
+    (docs/specs/gauntlet.md)."""
+    from . import gauntlet
+
+    options = gauntlet.Options(
+        usage=[Path(p) for p in args.usage or []], aliases=list(args.alias or []), offline=args.offline,
+        issue_states=Path(args.issue_states) if args.issue_states else None, repo=args.repo,
+        draft_dir=Path(args.draft_dir) if args.draft_dir else None, include=list(args.include or []),
+        exclude=list(args.exclude or []), maps=list(args.map or []))
+    return gauntlet.run(Path(args.path), args.skill, options)
 
 
 def cmd_charter_overlap(args: argparse.Namespace) -> int:
@@ -3641,6 +3654,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_charter_confirm.add_argument("--answers", metavar="FILE", help="the owner's answers (docs/specs/charter-round1.md)")
     p_charter_confirm.add_argument("--out", required=True, metavar="FILE", help="the confirmed charter; never overwrites")
     p_charter_confirm.set_defaults(func=cmd_charter_confirm)
+    p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4 and the engine)")
+    gauntlet_sub = p_gauntlet.add_subparsers(dest="gauntlet_command", required=True)
+    p_gauntlet_run = gauntlet_sub.add_parser(
+        "run", help="the engine (#754): rounds 0-2 in order, one verdict per round, one NEXT: line; "
+                    "rounds 3-5 read NOT BUILT, so it never exits 0 yet"
+    )
+    p_gauntlet_run.add_argument("path", help="the collection root")
+    p_gauntlet_run.add_argument("skill", help="a skill directory holding SKILL.md, or a command .md file, "
+                                              "relative to the collection")
+    p_gauntlet_run.add_argument("--usage", action="append", metavar="PATH",
+                                help="a usage log, or a directory searched for usage.jsonl (repeatable); "
+                                     "the collection's own .skillc/usage.jsonl is always read")
+    p_gauntlet_run.add_argument("--alias", action="append", metavar="NAME",
+                                help="another name usage records carry for this skill (repeatable)")
+    p_gauntlet_run.add_argument("--offline", action="store_true", help="round 2 never asks gh for issue states")
+    p_gauntlet_run.add_argument("--issue-states", metavar="FILE", help="round 2's offline issue states")
+    p_gauntlet_run.add_argument("--repo", metavar="OWNER/NAME", help="repository a bare #N belongs to (round 2)")
+    p_gauntlet_run.add_argument("--include", action="append", metavar="GLOB",
+                                help="round 2's inspect subject glob, passed through (repeatable)")
+    p_gauntlet_run.add_argument("--exclude", action="append", metavar="GLOB",
+                                help="round 2's inspect exclusion, passed through (repeatable)")
+    p_gauntlet_run.add_argument("--map", action="append", metavar="FROM=TO",
+                                help="round 2's inspect installed-path map, passed through (repeatable)")
+    p_gauntlet_run.add_argument("--draft-dir", metavar="DIR",
+                                help="where the draft and record go before a CHARTER.md exists "
+                                     "(default: <main checkout>/.skillc/gauntlet/)")
+    p_gauntlet_run.set_defaults(func=cmd_gauntlet_run)
+
     p_charter_overlap = charter_sub.add_parser(
         "overlap", help="shared, shadowed and orphan duties across a collection's charters; proposals only"
     )

@@ -126,7 +126,10 @@ to `invariants.never`, worded "Never: ...".
 - It does not read repository evidence (GitHub issues and PRs). That is #718
   build step 4, and every draft lists it as a missing source.
 - It writes nothing into the skill's own repository. The proof drafts for CPP
-  live under `docs/measurements/round1/`.
+  live under `docs/measurements/round1/`. The one exception is the gauntlet
+  engine (#754): it writes only `GAUNTLET.json` beside a confirmed charter, and
+  only when that file's contents change. It never stages or commits it
+  ([docs/specs/gauntlet.md](gauntlet.md)).
 
 ## The overlap view (part B)
 

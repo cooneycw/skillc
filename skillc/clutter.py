@@ -288,10 +288,10 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot, *,
     if extra:
         unknown.append({'surface': '*', 'reason': 'capture contains undeclared surfaces'})
     delivered, allowed = policy.selected('delivered'), policy.selected('declared_allowed')
-    derived: dict[str, dict[str, str]] = {}
+    derived: dict[str, dict[str, Any]] = {}
     commits: dict[str, dict[str, str]] = {}
     missing_delivery: set[str] = set()
-    from .clutter_delivery import selectors, validate_handoff
+    from .clutter_delivery import accepts, selectors, validate_handoff
     captures: Mapping[str, Any] = {}
     if policy.data.get('delivered_commit_roles'):
         try:
@@ -322,7 +322,9 @@ def classify(policy: Policy, before: Snapshot, after: Snapshot, *,
         for key in sorted(right.items.keys() - left.items.keys()) if surface not in missing_delivery else []:
             item = {'surface': surface, 'key': key, 'value': right.items[key]}
             selected = (surface, key)
-            matches_tree = key in derived.get(surface, {}) and right.items[key] == derived[surface][key]
+            # A delivered file matches the way git sees it: same bytes, same
+            # owner-execute bit, whatever else the umask set (#727).
+            matches_tree = key in derived.get(surface, {}) and accepts(derived[surface][key], right.items[key])
             category = 'delivered' if selected in delivered or matches_tree else 'declared-allowed' if selected in allowed else 'clutter'
             bins[category].append(item)
         for key in sorted(left.items.keys() - right.items.keys()):
