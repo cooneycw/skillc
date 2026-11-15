@@ -662,6 +662,21 @@ def dangling_reference(coll: Collection) -> Result:
                 return "missing", None
             return "exists", found
 
+        def examine_split(value: str, index: int) -> None:
+            """An `env -S` value (#745): its paths are existence-checked, and
+            every flag in it is COUNTED as unowned, never checked. env's own argv
+            rules (comments, escapes, options before the command) are not
+            emulated, so no word here is taken as a command or a flag owner.
+            `\\_` is env's escape for a separator, so a flag written after one
+            is still seen and counted."""
+            nonlocal flags_unowned
+            for inner in value.replace("\\_", " ").split():
+                inner_word = _clean_word(inner)
+                if FLAG_RE.match(inner_word.split("=", 1)[0]):
+                    flags_unowned += 1
+                else:
+                    check_path(inner_word, index)
+
         for span in code_spans(subject.lines):
             script: Path | None = None
             script_word = ""
@@ -701,17 +716,45 @@ def dangling_reference(coll: Collection) -> Result:
                 # one option with no paths read out of it (#741 review).
                 is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
                              and (token.began_quoted or not word.startswith("-")))
+                quoted_option = (is_string and not pending_split
+                                 and bool(FLAG_RE.match(word.split("=", 1)[0])))
+                if quoted_option:
+                    is_string = False
+                    flag = word.split("=", 1)[0]
+                    if expect_command and prefix == "env" and flag in SPLIT_STRING_OPTIONS:
+                        # `env "--split-string=VALUE"` is `env --split-string="VALUE"`.
+                        examine_split(word.split("=", 1)[1] if "=" in word else "", span.index)
+                        arg_path_seen, expect_command = True, False
+                    elif script is not None:
+                        # A FULLY quoted option (`"--absent=x y"`) is the same argv
+                        # word as `--absent="x y"` (#745): an option with an
+                        # attached value, checked against its owner, with no paths
+                        # read out of the value.
+                        flags += 1
+                        source = _script_source(script, coll.root)
+                        if not re.search(r"(?<![A-Za-z0-9-])" + re.escape(flag) + r"(?![A-Za-z0-9-])", source):
+                            result.hits.append(Hit(
+                                subject.rel, subject.lineno(span.index),
+                                f"passes {flag} to {script_word}, whose source never mentions it",
+                                {"reference": f"{script_word} {flag}", "kind": "flag"},
+                            ))
+                    elif arg_path_seen:
+                        flags_unowned += 1  # no owner, after a non-command path
+                    pending_operand = False
                 if is_string:
                     # A quoted multi-word argument is a STRING, read BEFORE the
                     # substitution logic (#741): its words still name paths that
                     # must exist (`echo "$(pwd) scripts/gone.sh"`), but none is a
                     # command or owns a flag. It can be an option's value
-                    # (`sudo -u "$(id -un)"`), or `env -S`'s command text, whose
-                    # following flags then have no owner this rule can read.
-                    for inner in raw.split():
-                        check_path(_clean_word(inner), span.index)
+                    # (`sudo -u "$(id -un)"`), or `env -S`'s command text (#745),
+                    # whose flags, and every flag after it, are counted, never
+                    # checked.
                     if pending_split:
-                        arg_path_seen = True
+                        examine_split(raw, span.index)
+                        arg_path_seen, expect_command = True, False
+                    else:
+                        for inner in raw.split():
+                            check_path(_clean_word(inner), span.index)
                     pending_split = False
                     pending_operand = False
                 # Only UNQUOTED `$(` / `)` move the stack (#741): `"$(pwd)"` is
@@ -738,13 +781,14 @@ def dangling_reference(coll: Collection) -> Result:
                          pending_operand, prefix, arg_path_seen, pending_split) = outer2.pop()
                     reset_after = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
                     continue
-                if is_string:
+                if is_string or quoted_option:
                     continue
                 if pending_split:
                     # `env -S VALUE`: VALUE is command text, even when it is empty
                     # (`env -S ""`), so it is consumed here, before anything else.
-                    check_path(word, span.index)
+                    examine_split(raw, span.index)
                     arg_path_seen, pending_split, pending_operand = True, False, False
+                    expect_command = False
                     continue
                 if not word:
                     if pending_operand:
@@ -788,9 +832,8 @@ def dangling_reference(coll: Collection) -> Result:
                         name = word.split("=", 1)[0]
                         if prefix == "env" and name in SPLIT_STRING_OPTIONS:
                             if "=" in word:  # `--split-string=VALUE`, one word
-                                for inner in word.split("=", 1)[1].split():
-                                    check_path(_clean_word(inner), span.index)
-                                arg_path_seen = True
+                                examine_split(word.split("=", 1)[1], span.index)
+                                arg_path_seen, expect_command = True, False
                             else:
                                 pending_split = True
                         else:
