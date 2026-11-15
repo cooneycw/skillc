@@ -459,7 +459,7 @@ def test_round_2_reading_live_issue_states_is_never_served_from_cache(coll: Path
     _run(coll, "skills/alpha", issue_states=None)
     _, lines = _run(coll, "skills/alpha", issue_states=None)
     assert not _rounds(lines)["2"].endswith("(cached)")
-    _, frozen = _run(coll, "skills/alpha")
+    _run(coll, "skills/alpha")
     _, again = _run(coll, "skills/alpha")
     assert _rounds(again)["2"].endswith("(cached)"), "a frozen issue-state snapshot is cached"
 
