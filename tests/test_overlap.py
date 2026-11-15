@@ -296,4 +296,4 @@ def test_a_clause_id_two_charters_declare_is_unknown_whatever_the_file_order(tmp
     report = overlap.compare(_collection(tmp_path / "c"), recorded, replicates=1)
     involved = [p for p in report.pairs if "common.duty" in (p.a.clause_id, p.b.clause_id)]
     assert involved and all(p.verdict == UNKNOWN for p in involved)
-    assert not any("common.duty" in o for o in overlap.ids(report.overlaps) for o in o)
+    assert not any("common.duty" in found for found in overlap.ids(report.overlaps))
