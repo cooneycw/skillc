@@ -40,7 +40,6 @@ part 1.
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -48,7 +47,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 EXIT_FAILED = 1
 EXIT_USAGE = 2
@@ -140,19 +139,39 @@ def _tree_digest(root: Path, *, only: str | None = None) -> str:
     entries: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        for name in dirnames if only is None else []:
+            path = Path(dirpath, name)  # a directory's existence is an input (an empty declared test dir)
+            entries.append((path.relative_to(root).as_posix() + "/",
+                            "symlink:" + os.readlink(path) if path.is_symlink() else "dir"))
         for name in sorted(filenames):
             if name in _NOT_INPUTS or (only is not None and name != only):
                 continue
             path = Path(dirpath, name)
-            if path.is_symlink() or not path.is_file():
-                continue
-            entries.append((path.relative_to(root).as_posix(), _file_digest(path)))
+            rel = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                entries.append((rel, "symlink:" + os.readlink(path)))  # a retargeted link changes the digest
+            elif path.is_file():
+                entries.append((rel, _file_digest(path)))
     return _sha(json.dumps(entries, sort_keys=True).encode())
+
+
+_IMPLEMENTATION: str | None = None
+
+
+def implementation() -> str:
+    """The skillc that produces the verdicts: every round's command and this
+    engine. A cached verdict from another skillc is not reused."""
+    global _IMPLEMENTATION
+    if _IMPLEMENTATION is None:
+        _IMPLEMENTATION = _tree_digest(Path(__file__).resolve().parent)
+    return _IMPLEMENTATION
 
 
 def _skillc(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run one skillc command, exactly as an operator would."""
-    return subprocess.run([sys.executable, "-m", "skillc.cli", *args], cwd=cwd, capture_output=True,
+    # -P: never prepend the working directory (the collection) to sys.path, so a
+    # collection holding its own `skillc/` package is read, never executed.
+    return subprocess.run([sys.executable, "-P", "-m", "skillc.cli", *args], cwd=cwd, capture_output=True,
                           text=True, timeout=COMMAND_TIMEOUT, check=False)
 
 
@@ -172,6 +191,10 @@ def resolve_skill(collection: Path, skill: str) -> Skill:
         rel = target.relative_to(root).as_posix()
     except ValueError:
         raise UsageError(f"the skill {skill} is not inside the collection {root}") from None
+    for candidate in (target / "SKILL.md", target):
+        if candidate.is_symlink():
+            raise UsageError(f"{candidate.relative_to(root)} is a symlink; round 2's inspect skips symlinked "
+                             "files, so the skill could never be shown inspected")
     if target.is_dir() and (target / "SKILL.md").is_file():
         return Skill(root, rel, target / "SKILL.md", target / "CHARTER.md", command=False)
     if target.is_file() and target.suffix == ".md":
@@ -197,12 +220,25 @@ def main_checkout(path: Path) -> Path | None:
 
 def _draft_dir(skill: Skill, options: Options) -> Path:
     if options.draft_dir is not None:
-        return options.draft_dir.resolve() / skill.slug
+        top = options.draft_dir.resolve()
+        _no_symlink_below(top / skill.slug, top)
+        return top / skill.slug
     main = main_checkout(skill.collection)
     if main is None:
         raise UsageError(f"{skill.collection} is not in a git checkout, so the draft and the record have no "
                          "place before a CHARTER.md exists; pass --draft-dir")
+    _no_symlink_below(main / ".skillc" / "gauntlet" / skill.slug, main)
     return main / ".skillc" / "gauntlet" / skill.slug
+
+
+def _no_symlink_below(path: Path, top: Path) -> None:
+    """Refuse an engine-owned state path with a symlinked component at or below
+    `top`, so the engine never writes outside where it says it writes."""
+    for part in [path, *path.parents]:
+        if part.is_symlink():
+            raise UsageError(f"{part} is a symlink - refusing to keep gauntlet state through it")
+        if part == top:
+            return
 
 
 def _ensure_ignored(draft_dir: Path) -> None:
@@ -363,10 +399,19 @@ def _round2_args(skill: Skill, options: Options) -> list[str]:
     return args
 
 
-def _excluded(skill: Skill, options: Options) -> str | None:
-    """An --exclude that would drop this skill: then round 2 cannot show it was inspected."""
-    path = PurePosixPath(skill.text_rel)
-    return next((g for g in options.exclude if path.match(g) or fnmatch.fnmatch(skill.text_rel, g)), None)
+def _inspected(skill: Skill, options: Options) -> bool | None:
+    """Ask inspect itself, with its own matcher, whether the passed-through
+    surface keeps this skill: the same --exclude list, and only this skill's
+    path included. None when inspect could not answer."""
+    args = ["inspect", str(skill.collection), "--json", "--offline", "--include", skill.text_rel]
+    for value in options.exclude:
+        args += ["--exclude", value]
+    try:
+        report = json.loads(_skillc(args, skill.collection).stdout)
+    except json.JSONDecodeError:
+        return None
+    subjects = report.get("collection", {}).get("subjects")
+    return subjects == 1 if isinstance(subjects, int) else None
 
 
 def _round2_inputs(skill: Skill, options: Options) -> dict[str, str]:
@@ -379,10 +424,11 @@ def _round2_inputs(skill: Skill, options: Options) -> dict[str, str]:
 
 def round2(skill: Skill, options: Options) -> Result:
     inputs = _round2_inputs(skill, options)
-    dropped = _excluded(skill, options)
-    if dropped is not None:
-        return Result("2", "inspect", "UNKNOWN", f"--exclude {dropped} drops this skill, so it was not inspected",
-                      proceed=False, inputs=inputs)
+    member = _inspected(skill, options) if options.exclude else True
+    if not member:
+        why = "an --exclude drops this skill" if member is False else "inspect could not say whether it is a subject"
+        return Result("2", "inspect", "UNKNOWN", f"{why}, so it was not shown inspected", proceed=False,
+                      inputs=inputs)
     done = _skillc(_round2_args(skill, options), skill.collection)
     try:
         report = json.loads(done.stdout)
@@ -396,6 +442,8 @@ def round2(skill: Skill, options: Options) -> Result:
     unexamined = sorted(r for r, v in rules.items() if not v.get("examined", False))
     own = [f for f in report.get("findings", []) if f.get("path") == skill.text_rel]
     own_unknown = [u for u in report.get("unknown", []) if u.get("path") == skill.text_rel]
+    # emphasised rule statements are sorted under `rule_lines`, apart from `findings` (docs/specs/inspect.md)
+    own_rules = [r for r in report.get("rule_lines", []) if r.get("path") == skill.text_rel]
     # error-severity hits are reported under `errors`, not `findings` (docs/specs/inspect.md)
     errors = [e for e in report.get("errors", []) if e.get("path") == skill.text_rel]
     errors += [f for f in own if rules.get(f.get("rule"), {}).get("severity") == "error"]
@@ -403,8 +451,13 @@ def round2(skill: Skill, options: Options) -> Result:
              for e in errors if e not in own]
     lines += [f"  {f.get('bucket')} {f.get('path')}:{f.get('line')} {f.get('rule')} - {f.get('detail')}"
               for f in sorted(own, key=lambda f: (str(f.get("bucket")), int(f.get("line") or 0)))]
+    lines += [f"  rule {r.get('bucket')} {r.get('path')}:{r.get('line')} - {r.get('reason') or r.get('detail') or ''}"
+              .rstrip(" -") for r in sorted(own_rules, key=lambda r: int(r.get("line") or 0))]
     buckets = {b: sum(f.get("bucket") == b for f in own) for b in ("A", "B", "C", "D", "UNSORTED")}
-    counted = ", ".join(f"{b}={n}" for b, n in buckets.items())
+    rule_buckets = {b: sum(r.get("bucket") == b for r in own_rules) for b in buckets}
+    counted = (", ".join(f"{b}={n}" for b, n in buckets.items()) + "; rule statements "
+               + ", ".join(f"{b}={n}" for b, n in rule_buckets.items() if n) if own_rules else
+               ", ".join(f"{b}={n}" for b, n in buckets.items()))
     if errors:
         return Result("2", "inspect", "FAIL", f"{len(errors)} error finding(s) on {skill.text_rel} ({counted})",
                       proceed=False, inputs=inputs, lines=lines)
@@ -476,9 +529,14 @@ def _display_path(skill: Skill, options: Options) -> Path | None:
     (`.skillc/` ignores itself), because the published record holds digests and
     verdicts only. No main checkout and no --draft-dir: no display cache."""
     if options.draft_dir is not None:
-        return options.draft_dir.resolve() / skill.slug / "display.json"
+        top = options.draft_dir.resolve()
+        _no_symlink_below(top / skill.slug, top)
+        return top / skill.slug / "display.json"
     main = main_checkout(skill.collection)
-    return None if main is None else main / ".skillc" / "gauntlet" / skill.slug / "display.json"
+    if main is None:
+        return None
+    _no_symlink_below(main / ".skillc" / "gauntlet" / skill.slug, main)
+    return main / ".skillc" / "gauntlet" / skill.slug / "display.json"
 
 
 def _load_display(path: Path | None) -> dict[str, dict[str, object]]:
@@ -534,6 +592,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
         skill = resolve_skill(collection, skill_arg)
         logs = discover_usage(skill, options)
         draft_dir = _draft_dir(skill, options) if not skill.charter.is_file() else None
+        display_path = _display_path(skill, options)
     except UsageError as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return EXIT_USAGE
@@ -542,12 +601,12 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
     previous = load_record(record)
     if draft_dir is not None:
         _ensure_ignored(draft_dir)
-    display_path = _display_path(skill, options)
     display = _load_display(display_path)
     # Live issue states have no digest, so a round 2 that reads them is never served from cache.
     live_states = not options.offline and options.issue_states is None
 
     def step(key: str, inputs: dict[str, str], fresh) -> Result:
+        inputs = {**inputs, "skillc": implementation()}  # another skillc's verdict is never reused
         hit = None if key == "2" and live_states else _cached(previous, key, inputs)
         # a cached "draft ready" whose draft has since been removed is re-drafted
         if hit is not None and not (key == "1" and hit.verdict == "STOP" and not draft.is_file()
@@ -560,7 +619,9 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
                 hit.lines = [("  (cached: the finding lines are not on this host; change an input or delete the "
                               "record to list them)")]
             return hit
-        return fresh()
+        result = fresh()
+        result.inputs = {**result.inputs, "skillc": implementation()}
+        return result
 
     tools = {name: available(words, skill.collection) for name, words in
              (("charter", ["charter", "draft"]), ("overlap", ["charter", "overlap"]),

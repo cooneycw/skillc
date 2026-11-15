@@ -430,7 +430,14 @@ def test_round_2_inspects_the_selected_skill_even_outside_the_given_surface(coll
 
 def test_an_exclude_that_drops_the_skill_is_unknown_not_a_clean_round_2(coll: Path) -> None:
     code, lines = _run(coll, "skills/alpha", exclude=["skills/alpha/*"])
-    assert _rounds(lines)["2"].startswith("UNKNOWN - --exclude") and code == gauntlet.EXIT_STOPPED
+    assert _rounds(lines)["2"].startswith("UNKNOWN - an --exclude drops this skill") and code == gauntlet.EXIT_STOPPED
+
+
+def test_an_exclude_inspect_does_not_apply_to_the_skill_keeps_it_inspected(coll: Path) -> None:
+    """Codex pass 2: membership is inspect's own answer, not a re-implemented
+    matcher. In inspect a `*` does not cross `/`, so `skills/*` drops nothing."""
+    _, lines = _run(coll, "skills/alpha", exclude=["skills/*"])
+    assert _rounds(lines)["2"].startswith("PASS"), lines
 
 
 def test_a_neighbours_broken_contract_makes_round_1_unknown_not_pass(coll: Path) -> None:
@@ -484,10 +491,65 @@ def test_an_unreadable_usage_log_is_unknown_and_the_run_continues(coll: Path, mo
     rounds = _rounds(lines)
     assert rounds["0"].startswith("UNKNOWN") and "1" in rounds and code != 0
     data = json.loads((coll / "skills" / "alpha" / gauntlet.RECORD_NAME).read_text())
-    assert data["rounds"]["0"]["inputs"] == {"usage-1": "unreadable"}
+    assert data["rounds"]["0"]["inputs"]["usage-1"] == "unreadable"
 
 
 def test_the_skill_passes_skillc_check_for_the_claude_code_target() -> None:
     done = subprocess.run(["python", "-m", "skillc.cli", "check", "--target", "claude-code", str(SKILL_MD.parent)],
                           capture_output=True, text=True, check=False, cwd=ROOT)
     assert done.returncode == 0 and "0 error(s), 0 warning(s)" in done.stdout, done.stdout
+
+
+# ------------------------------------- counter-model review pass 2 (Codex), each a red
+
+def test_a_collection_holding_its_own_skillc_package_is_never_executed(coll: Path, tmp_path: Path) -> None:
+    marker = tmp_path / "executed"
+    (coll / "skillc").mkdir()
+    (coll / "skillc" / "__init__.py").write_text("")
+    (coll / "skillc" / "cli.py").write_text(f"open({str(marker)!r}, 'w').write('ran')\n")
+    _run(coll, "skills/alpha")
+    assert not marker.exists(), "the round subprocess imported the collection's own skillc"
+
+
+def test_a_symlinked_state_directory_is_refused_and_nothing_is_written_through_it(
+        coll: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gauntlet, "available", _absent(("charter", "draft")))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (coll / ".skillc").symlink_to(outside, target_is_directory=True)
+    code, _ = _run(coll, "skills/beta")
+    assert code == gauntlet.EXIT_USAGE and list(outside.iterdir()) == []
+
+
+def test_a_symlinked_skill_file_is_refused(coll: Path) -> None:
+    target = coll / "skills" / "beta" / "real.md"
+    (coll / "skills" / "beta" / "SKILL.md").rename(target)
+    (coll / "skills" / "beta" / "SKILL.md").symlink_to("real.md")
+    code, _ = _run(coll, "skills/beta")
+    assert code == gauntlet.EXIT_USAGE
+
+
+def test_round_2_keeps_the_skills_classified_rule_statements(coll: Path) -> None:
+    _, lines = _run(coll, "skills/alpha")
+    assert any(line.startswith("  rule UNSORTED skills/alpha/SKILL.md:5") for line in lines), lines
+    assert "rule statements UNSORTED=1" in _rounds(lines)["2"]
+
+
+def test_another_skillc_implementation_reruns_every_round(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _run(coll, "skills/alpha")
+    monkeypatch.setattr(gauntlet, "_IMPLEMENTATION", "sha256:" + "1" * 64)
+    _, lines = _run(coll, "skills/alpha")
+    assert not any(v.endswith("(cached)") for v in _rounds(lines).values())
+
+
+def test_the_tree_digest_sees_a_retargeted_link_and_a_removed_empty_directory(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    (root / "checks" / "empty").mkdir(parents=True)
+    (root / "a.txt").write_text("a")
+    (root / "link").symlink_to("a.txt")
+    before = gauntlet._tree_digest(root)
+    (root / "link").unlink()
+    (root / "link").symlink_to("missing.txt")
+    retargeted = gauntlet._tree_digest(root)
+    (root / "checks" / "empty").rmdir()
+    assert len({before, retargeted, gauntlet._tree_digest(root)}) == 3

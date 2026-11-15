@@ -17,7 +17,8 @@ skillc gauntlet run <collection> <skill> [--usage PATH]... [--alias NAME]...
 ## It orchestrates only
 
 The engine runs each round's own command as a subprocess
-(`python -m skillc.cli <command>`). It reads that command's exit code, its
+(`python -P -m skillc.cli <command>`; `-P` keeps the collection off `sys.path`,
+so a collection holding its own `skillc/` package is read, never executed). It reads that command's exit code, its
 verdict lines or its report JSON, and nothing else. It imports no round module,
 and it copies no round's rules, so a round changes in one place
 (cooneycw/claude-power-pack#1830 Part 7). `tests/test_gauntlet.py` holds both
@@ -45,7 +46,11 @@ Round 2 runs `inspect` on the whole collection, never on this skill alone:
 `copied-passage` needs at least two subjects, so a one-skill run would always
 read as not examined. The skill's own path is added as an `--include`, so a
 passed-through surface that misses it cannot yield a zero that only means "not
-looked at"; an `--exclude` that drops it reads UNKNOWN. Its findings for this skill are then listed by group. A D
+looked at". With an `--exclude`, inspect itself is asked (a one-subject probe
+using inspect's own matcher) whether the skill survives it; if not, round 2
+reads UNKNOWN. A symlinked `SKILL.md` is refused at the start (exit 2), because
+inspect skips symlinked files. Both `findings` and the skill's classified rule
+statements (`rule_lines`) are shown and counted. Its findings for this skill are then listed by group. A D
 item is a stale rule the owner may move or delete; the run trims nothing.
 
 Round 1 never confirms or writes a charter (#718: "never changes a charter
@@ -85,7 +90,9 @@ skill's `CHARTER.md`: beside `SKILL.md` for a native skill, or at
   path and no host name.
 - **It is never written through a link.** A symlinked or non-regular record
   path is refused (exit 2), and the write replaces the path itself (temp file,
-  then rename), so it cannot land in the file a link points at.
+  then rename), so it cannot land in the file a link points at. A symlinked
+  component of the draft location (`.skillc`, `gauntlet`, the skill's directory)
+  is refused too.
 
 **Resume.** A round whose recorded input digests equal the current ones is not
 re-run; its line reads `(cached)`. Round 0's inputs are the usage logs (an
@@ -96,6 +103,11 @@ exists. Round 2's are the skill text, the collection's files, the issue-state
 file and the passed-through options. So editing `SKILL.md` re-runs rounds 1 and
 2 and leaves round 0 cached. A cached "draft ready" whose draft has been deleted
 is drafted again.
+
+Every round's inputs also carry the skillc implementation's digest (its
+package source, rounds and engine alike), so an upgraded skillc re-runs every
+round. The collection digest covers directories and symlink targets as well as
+file contents.
 
 Two things are never served from cache. Round 2 reading **live** issue states
 (no `--issue-states`, no `--offline`) re-runs every time, because an issue that
