@@ -511,11 +511,17 @@ def round3(tool: bool) -> Result:
 
 # --------------------------------------------------------------------- record
 
-def render_record(skill: Skill, results: list[Result]) -> bytes:
-    body = {"kind": RECORD_KIND, "schema": RECORD_SCHEMA, "skill": skill.rel,
-            "rounds": {r.round: {"name": r.name, "verdict": r.verdict, "detail": r.detail,
-                                 "proceed": r.proceed, "inputs": dict(sorted(r.inputs.items()))}
-                       for r in results}}
+#: Rounds the engine does not run but must carry: round 5 is the owner's
+#: recorded ruling (`gauntlet rule`, #737), never re-derived by `run`.
+KEPT_ROUNDS = ("5",)
+
+
+def render_record(skill: Skill, results: list[Result], kept: dict[str, dict[str, object]] | None = None) -> bytes:
+    rounds: dict[str, object] = {r.round: {"name": r.name, "verdict": r.verdict, "detail": r.detail,
+                                           "proceed": r.proceed, "inputs": dict(sorted(r.inputs.items()))}
+                                 for r in results}
+    rounds.update({k: v for k, v in (kept or {}).items() if k in KEPT_ROUNDS})
+    body = {"kind": RECORD_KIND, "schema": RECORD_SCHEMA, "skill": skill.rel, "rounds": rounds}
     return (json.dumps(body, indent=2, sort_keys=True) + "\n").encode()
 
 
@@ -696,7 +702,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
             break
     assert stopped is not None, "round 3 never proceeds in part 1"
     try:
-        written = write_record(record, render_record(skill, results))
+        written = write_record(record, render_record(skill, results, previous))
         if display_path is not None:
             _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines}
                                          for r in results if not r.cached or r.round in display})

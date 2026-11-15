@@ -42,6 +42,12 @@ ran; this is not a keep/trim/retire verdict".
 | 2 inspect | `inspect <collection> --json`, filtered to this skill | `PASS`: no error and no UNKNOWN on this skill | `FAIL` an error finding on this skill; `UNKNOWN` an unreadable issue state, an unexamined rule, nothing inspected, or an `--exclude` that drops this skill |
 | 3 trials | not built | never | always: `NOT BUILT` (or `NOT RUN` once the command exists: part 1 never runs paid trials) |
 
+Round 5, the verdict (#737), is reached by `skillc gauntlet verdict`, which reads
+this record plus round 3/4 reports ([gauntlet-verdict.md](gauntlet-verdict.md)).
+`run` does not call it yet: it stops at round 3, and the wiring goes with #736 PR 3.
+A ruling recorded by `gauntlet rule` (`rounds.5`) is carried across `run`s, never
+re-derived.
+
 Round 2 runs `inspect` on the whole collection, never on this skill alone:
 `copied-passage` needs at least two subjects, so a one-skill run would always
 read as not examined. The skill's own path is added as an `--include`, so a
