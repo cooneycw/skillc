@@ -11,6 +11,10 @@
 # (no PATH lookup, no uv needed), and its output and exit code are the
 # engine's own (docs/specs/gauntlet.md).
 set -u
+# -P keeps the caller's directory off sys.path, but PYTHONPATH would still be
+# honoured, so a caller's PYTHONPATH could import another skillc for the check
+# or the run (or the engine's round subprocesses, which inherit it). Drop it.
+unset PYTHONPATH
 
 refuse() {
     echo "SKILL_GAUNTLET: cannot find a usable skillc ($1)" >&2

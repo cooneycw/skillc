@@ -236,3 +236,19 @@ def test_the_make_targets_run_the_installer_and_carry_its_exit(checkout: Path, t
     refused = subprocess.run(["make", "-s", "-f", str(ROOT / "Makefile"), f"{verb}-skill"], capture_output=True,
                              text=True, check=False, cwd=checkout, env=env)
     assert refused.returncode != 0 and (skills / NAME).is_dir()
+
+
+def test_a_callers_pythonpath_never_picks_another_skillc(tmp_path: Path) -> None:
+    """Codex pass 2: -P still honours PYTHONPATH, so a caller's PYTHONPATH could
+    make validation and execution import different skillc packages."""
+    impostor = tmp_path / "caller"
+    (impostor / "skillc").mkdir(parents=True)
+    (impostor / "skillc" / "__init__.py").write_text("")
+    marker = tmp_path / "impostor-ran"
+    (impostor / "skillc" / "cli.py").write_text(f"open({str(marker)!r}, 'w').write('ran')\n")
+    coll = _collection(tmp_path)
+    done = subprocess.run(["bash", str(LAUNCHER), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd=impostor, env={**os.environ, "PYTHONPATH": "."})
+    assert not marker.exists(), "the caller's skillc package was imported"
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
