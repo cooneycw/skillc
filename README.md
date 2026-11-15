@@ -317,7 +317,10 @@ make uninstall-skill   # removes that link, and only that link
   a link pointing somewhere else, and names it. It links the main checkout even
   when run from a linked worktree. `SKILLC_SKILLS_DIR` overrides the directory.
 - **If the checkout moves:** the link dangles, so the skill simply disappears
-  from the list. Run `make install-skill` again from the new place.
+  from the list. The installer will not replace a link pointing somewhere
+  else, so check `ls -l ~/.claude/skills/skill-gauntlet`, remove that stale
+  link yourself (`rm ~/.claude/skills/skill-gauntlet`), then run
+  `make install-skill` from the new place.
 - **If skillc is present but cannot run** (no `uv sync`, no `uv`): the skill
   prints `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no verdict.
 

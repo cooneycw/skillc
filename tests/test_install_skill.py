@@ -174,11 +174,65 @@ def test_a_dangling_link_lists_no_skill_and_gives_no_verdict(checkout: Path, tmp
     assert done.returncode != 0 and "ROUND" not in done.stdout
 
 
+def _account_paths(text: str) -> list[str]:
+    return [marker for marker in ("/" + "home/", "/" + "Users/") if marker in text]
+
+
 def test_no_committed_install_file_holds_an_account_path() -> None:
     for path in (INSTALLER, LAUNCHER, LAUNCHER.parent.parent / "SKILL.md", ROOT / "Makefile"):
-        text = path.read_text()
-        assert "/" + "home/" not in text and "/" + "Users/" not in text, path
+        assert _account_paths(path.read_text()) == [], path
 
 
 def test_the_account_path_scan_finds_one() -> None:
-    assert "/" + "home/" in "cd /" + "home/someone/skillc"
+    """The scan above, on a planted path: it is not blind (Codex pass 1)."""
+    assert _account_paths(LAUNCHER.read_text() + "\ncd /" + "home/someone/skillc\n") == ["/" + "home/"]
+
+
+# ------------------------------------- counter-model review pass 1 (Codex), each a red
+
+def _real_env() -> Path:
+    env = os.environ.get("UV_PROJECT_ENVIRONMENT")
+    return Path(env) if env else ROOT / ".venv"
+
+
+def test_a_relative_project_environment_resolves_against_the_checkout(tmp_path: Path) -> None:
+    if os.environ.get("UV_PROJECT_ENVIRONMENT"):
+        pytest.skip("UV_PROJECT_ENVIRONMENT is set for this run; the relative case needs the in-tree .venv")
+    coll = _collection(tmp_path)
+    done = subprocess.run(["bash", str(LAUNCHER), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd="/", env={**os.environ, "UV_PROJECT_ENVIRONMENT": ".venv"})
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+def test_an_environment_without_skillc_is_reported_not_run(tmp_path: Path) -> None:
+    """A python that runs but cannot import this checkout's engine: the
+    cannot-find line, exit 2, no ROUND line, no uv startup error."""
+    fake = tmp_path / "fake-skillc"
+    (fake / "skillc").mkdir(parents=True)
+    (fake / "skillc" / "gauntlet.py").write_text("")
+    (fake / "pyproject.toml").write_text("[project]\nname = 'skillc'\n")
+    shutil.copytree(LAUNCHER.parent.parent, fake / ".claude" / "skills" / NAME)
+    (fake / ".venv" / "bin").mkdir(parents=True)
+    (fake / ".venv" / "bin" / "python").symlink_to(shutil.which("python3") or "/usr/bin/python3")
+    done = subprocess.run(["bash", str(fake / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh"),
+                           str(tmp_path), "x"], capture_output=True, text=True, check=False, cwd=tmp_path,
+                          env={k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"})
+    assert done.returncode == 2 and "SKILL_GAUNTLET: cannot find a usable skillc" in done.stderr, done.stderr
+    assert "ROUND" not in done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("verb", ["install", "uninstall"])
+def test_the_make_targets_run_the_installer_and_carry_its_exit(checkout: Path, tmp_path: Path, verb: str) -> None:
+    skills = tmp_path / "skills"
+    env = {**os.environ, "SKILLC_SKILLS_DIR": str(skills)}
+    if verb == "uninstall":
+        _installer(checkout, skills, "install")
+    ok = subprocess.run(["make", "-s", "-f", str(ROOT / "Makefile"), f"{verb}-skill"], capture_output=True, text=True,
+                        check=False, cwd=checkout, env=env)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    (skills / NAME).unlink(missing_ok=True)
+    (skills / NAME).mkdir(parents=True, exist_ok=True)  # a foreign real entry: refused, and make says so
+    refused = subprocess.run(["make", "-s", "-f", str(ROOT / "Makefile"), f"{verb}-skill"], capture_output=True,
+                             text=True, check=False, cwd=checkout, env=env)
+    assert refused.returncode != 0 and (skills / NAME).is_dir()
