@@ -1,0 +1,70 @@
+{
+  "branch": "issue-778-charter-create-compose-a-charter-from-the-owner-s",
+  "counts": {
+    "accepted": 13,
+    "deferred": 2,
+    "rejected": 0
+  },
+  "extra_passes_reason": "the wave orchestrator skillc-orch set a 3-pass ceiling per PR for #778 (gate rev 72, orchestrator-only, owner-delegated); passes 1 and 2 found 7 and 6 MEDIUM defects, all fixed red-first; pass-3 findings deferred to #779",
+  "head": "4bab5a943ac306118e1174867ef9a7a8c1a9b601",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "4442f745-f19b-4ef8-bdb6-71fc92ee505a",
+    "sources": [
+      {
+        "bytes": 21223192,
+        "path": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl",
+        "sha256": "3dc0d03d5487ec781a09e1b248cc4696d11e904dc4f6598c745e661aed1cfe36"
+      }
+    ],
+    "transcript": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl"
+  },
+  "issue": "778",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-11-15T18:51:04Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 9
+  },
+  "reviewed_artifact": {
+    "base_sha": "295e743be21b4a94b06c55eb174ac682dd8b3363",
+    "merge_base": "295e743be21b4a94b06c55eb174ac682dd8b3363",
+    "method": "runtime-head",
+    "patch_sha256": "0e84ffa350e151c082547a6083ea87e99b01625915c7ebb0ac46558e062dcf7a",
+    "report_record": 98,
+    "target_head": "4bab5a943ac306118e1174867ef9a7a8c1a9b601"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.NLgCaA",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/15/rollout-2026-11-15T13-46-07-01a1e087-ee75-7603-b1c7-dba418c85821.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 120458,
+        "path": "codex-review-stream.NLgCaA",
+        "sha256": "a9c54335d413777eb3a90124c01fd15338de2eff0f6bedf00d40094f27ce23cb"
+      },
+      {
+        "bytes": 830450,
+        "path": "2026/11/15/rollout-2026-11-15T13-46-07-01a1e087-ee75-7603-b1c7-dba418c85821.jsonl",
+        "sha256": "5526d5b1ad520370e0c3e02bdde4064b376136289290abb7abc9ae82a4348cb5"
+      }
+    ],
+    "thread_id": "01a1e087-ee75-7603-b1c7-dba418c85821"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}

@@ -28,6 +28,7 @@ from . import (
     __version__,
     charter,
     charter_confirm,
+    charter_evidence,
     checks,
     configuration_compare,
     contracts,
@@ -2722,6 +2723,42 @@ def cmd_charter_confirm(args: argparse.Namespace) -> int:
         return CHARTER_EXIT_REFUSED
     print(f"skillc: confirmed charter written to {args.out}")
     return CHARTER_EXIT_OK
+
+
+def cmd_charter_evidence(args: argparse.Namespace) -> int:
+    """`skillc charter evidence <collection> <skill> --out FILE` (#778): every
+    piece of existing evidence of the skill's charter, as suggestions for the
+    owner. Every source reports a status; none is ever silently empty."""
+    from .gauntlet import UsageError
+    from .repo_reader import GhReader
+
+    out = Path(args.out)
+    if out.exists() or out.is_symlink():
+        print(f"skillc: {out} exists; charter evidence never overwrites", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    collection = Path(args.collection)
+    repo = args.repo or charter_evidence.default_repo(collection)
+    try:
+        found = charter_evidence.gather(
+            collection, args.skill, reader=GhReader(), refs=args.ref or [], repo=repo, search=args.search,
+            docs=[Path(d) for d in args.doc or []], usage_paths=[Path(u) for u in args.usage or []],
+            aliases=args.alias or [], drafts=[Path(d) for d in args.draft or []],
+        )
+    except UsageError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        charter_confirm.write_new(out, found.to_json())
+    except charter_confirm.ConfirmRefused:
+        print(f"skillc: {out} appeared while gathering; charter evidence never overwrites", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    for s in found.sources:
+        where = f" [{s.ref}]" if s.ref else ""
+        print(f"SOURCE {s.source}{where}: {s.status}" + (f" - {s.detail}" if s.detail else ""))
+    print(f"skillc: {len(found.suggestions)} suggestion(s) written to {out}; each is for the owner to accept, "
+          "edit or drop")
+    return CHARTER_EXIT_OK
 def cmd_gauntlet_run(args: argparse.Namespace) -> int:
     """`skillc gauntlet run <collection> <skill>` (#754): the skill-gauntlet engine
     for the free rounds 0-2. It runs the round commands and reads their verdicts;
@@ -3677,6 +3714,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_charter_confirm.add_argument("--answers", metavar="FILE", help="the owner's answers (docs/specs/charter-round1.md)")
     p_charter_confirm.add_argument("--out", required=True, metavar="FILE", help="the confirmed charter; never overwrites")
     p_charter_confirm.set_defaults(func=cmd_charter_confirm)
+    p_charter_evidence = charter_sub.add_parser(
+        "evidence", help="gather every existing piece of a skill's charter as cited suggestions (#778); no model call"
+    )
+    p_charter_evidence.add_argument("collection", help="the collection root")
+    p_charter_evidence.add_argument("skill", help="a skill directory holding SKILL.md, or a command .md file, "
+                                    "relative to the collection")
+    p_charter_evidence.add_argument("--ref", action="append", metavar="REF",
+                                    help="a discussion, issue or PR: [discussion:|issue:|pr:][owner/name]#N; repeatable")
+    p_charter_evidence.add_argument("--repo", metavar="OWNER/NAME",
+                                    help="the repository a bare ref names (default: the collection's origin remote)")
+    p_charter_evidence.add_argument("--search", action="store_true",
+                                    help="also search the repository for the skill's name (off by default)")
+    p_charter_evidence.add_argument("--doc", action="append", metavar="PATH", help="a spec document to read; repeatable")
+    p_charter_evidence.add_argument("--usage", action="append", metavar="PATH",
+                                    help="a usage log, or a directory searched for them; repeatable")
+    p_charter_evidence.add_argument("--alias", action="append", metavar="NAME", help="another name usage records carry")
+    p_charter_evidence.add_argument("--draft", action="append", metavar="FILE",
+                                    help="a CHARTER.draft.md somewhere else to read too; repeatable")
+    p_charter_evidence.add_argument("--out", required=True, metavar="FILE", help="the evidence file; never overwrites")
+    p_charter_evidence.set_defaults(func=cmd_charter_evidence)
     p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4 and the engine)")
     gauntlet_sub = p_gauntlet.add_subparsers(dest="gauntlet_command", required=True)
     p_gauntlet_run = gauntlet_sub.add_parser(
