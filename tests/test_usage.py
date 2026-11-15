@@ -694,3 +694,117 @@ def test_usage_end_refuses_a_log_git_cannot_ignore(
     assert usage.declare_end("hello-probe", "stopped", "approval-gate", "s-1", repo, out) == 0
     assert "SKILLC_USAGE: not recorded" in out.getvalue() and "not ignored by git" in out.getvalue()
     assert (repo / ".skillc" / "usage.jsonl").read_bytes() == before
+
+
+# ------------------- submodule and --separate-git-dir checkouts (#724)
+#
+# destination() and collection_of() assumed git's common dir is named `.git`
+# with the checkout beside it, so a submodule (`.git/modules/<name>`) and a
+# `--separate-git-dir` checkout recorded NOTHING, silently. `git worktree list`
+# names the git dir in both layouts (measured, git 2.43), so it is not the
+# source either; see the #724 reframing comment.
+
+
+def _gitc(cwd: Path, *args: str) -> str:
+    return _git(cwd, "-c", "protocol.file.allow=always", *args)
+
+
+def _skill_repo(root: Path, origin: str) -> Path:
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "remote", "add", "origin", origin)
+    skill = root / ".claude" / "skills" / "hello-probe" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: hello-probe\ndescription: Say hello. Use when asked to probe.\n---\nSay hello.\n",
+                     encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+@pytest.fixture
+def submodule(tmp_path: Path) -> tuple[Path, Path]:
+    """(superproject, its submodule checkout `mod`) holding the skill."""
+    source = _skill_repo(tmp_path / "mod-src", "git@github.com:example/mod.git")
+    sup = _skill_repo(tmp_path / "super", "git@github.com:example/super.git")
+    _gitc(sup, "submodule", "-q", "add", str(source), "mod")
+    _git(sup, "commit", "-q", "-m", "add submodule")
+    return sup, sup / "mod"
+
+
+@pytest.fixture
+def separate(tmp_path: Path) -> Path:
+    """A checkout whose git dir lives elsewhere, under a name that is not `.git`."""
+    root = tmp_path / "sep"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main", "--separate-git-dir", str(tmp_path / "gd.weird"))
+    _git(root, "remote", "add", "origin", "git@github.com:example/sep.git")
+    skill = root / ".claude" / "skills" / "hello-probe" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: hello-probe\ndescription: Say hello. Use when asked to probe.\n---\nSay hello.\n",
+                     encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_submodule_checkout_records_into_the_submodule(
+    submodule: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    sup, mod = submodule
+    _hook(_skill_call(mod), tmp_path / "home")
+    lines = _lines(mod)
+    assert len(lines) == 1, "the submodule recorded nothing"
+    assert str(lines[0]["collection"]).startswith("mod@"), lines[0]["collection"]
+    assert checks.run_usage_log(usage.load_log(mod / ".skillc" / "usage.jsonl")) == []
+    # #722 cross-check: git ignores the log inside the submodule, so the
+    # superproject does not see "untracked content" either.
+    assert _git(mod, "status", "--porcelain", "--untracked-files=all") == ""
+    assert _git(sup, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_submodule_linked_worktree_lands_in_the_submodule_checkout(
+    submodule: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    _sup, mod = submodule
+    worktree = tmp_path / "mod-wt"
+    _git(mod, "worktree", "add", "-q", "-b", "side", str(worktree))
+    _hook(_skill_call(worktree), tmp_path / "home")
+    assert len(_lines(mod)) == 1, "the submodule worktree's run did not land in the submodule checkout"
+    assert not (worktree / ".skillc").exists()
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_separate_git_dir_checkout_records(separate: Path, tmp_path: Path) -> None:
+    _hook(_skill_call(separate), tmp_path / "home")
+    lines = _lines(separate)
+    assert len(lines) == 1, "the separate-git-dir checkout recorded nothing"
+    assert str(lines[0]["collection"]).startswith("sep@"), lines[0]["collection"]
+
+
+@needs_git
+def test_NEGATIVE_CONTROL_a_separate_git_dir_linked_worktree_refuses_loudly(
+    separate: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Git records this layout's main checkout nowhere. Writing into the linked
+    worktree would split one collection's history across files (CPP #471), and
+    silence is the defect #724 is about, so it says why it recorded nothing."""
+    worktree = tmp_path / "sep-wt"
+    _git(separate, "worktree", "add", "-q", "-b", "side", str(worktree))
+    err = _hook(_skill_call(worktree), tmp_path / "home")
+    assert "nothing recorded" in err and "separate-git-dir" in err
+    assert list(tmp_path.rglob("usage.jsonl")) == []
+    monkeypatch.chdir(worktree)
+    out = io.StringIO()
+    assert usage.declare_end("hello-probe", "stopped", None, "s-1", worktree, out) == 0
+    assert "SKILLC_USAGE: not recorded" in out.getvalue() and "separate-git-dir" in out.getvalue()
+
+
+@needs_git
+def test_a_bare_repository_still_records_nothing_silently(tmp_path: Path) -> None:
+    bare = tmp_path / "bare.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    assert usage.destination(bare) is None
+    assert _hook(_skill_call(bare), tmp_path / "home") == ""

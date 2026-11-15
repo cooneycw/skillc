@@ -974,9 +974,13 @@ stands in for it**. `origin: observed` through `coverage: unsupported` is refuse
   its end.
 
 **Writer.** `skillc usage hook` (see [docs/skill-usage-hook.md](../../skill-usage-hook.md))
-appends to `<main checkout>/.skillc/usage.jsonl`, resolved through
-`git rev-parse --git-common-dir`, so a linked worktree's run lands in the main
-checkout's file (CPP #471's lesson). Creating `.skillc/` also writes
+appends to `<main checkout>/.skillc/usage.jsonl`, so a linked worktree's run
+lands in the main checkout's file (CPP #471's lesson). The main checkout is
+asked of git (#724): in the main worktree it is `--show-toplevel`; from a linked
+worktree it is the common dir's `core.worktree` (a submodule) or the parent of a
+common dir named `.git`. A linked worktree of a `--separate-git-dir` repository
+has no recorded main checkout, and nothing is written there, with the reason
+printed. `git worktree list` is not used: it names the git dir in those layouts. Creating `.skillc/` also writes
 `.skillc/.gitignore` (`*`): ignored by default, without touching the
 repository's own ignore file. A symlinked `.skillc/`, `.skillc/.gitignore`
 or log is refused and nothing is written (#721): every open is relative to a
