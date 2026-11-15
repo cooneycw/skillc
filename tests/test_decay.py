@@ -778,3 +778,43 @@ def test_741_r1_a_valueless_split_string_ends_at_the_separator(tmp_path: Path) -
     _helper(tmp_path)
     _skill(tmp_path, "a", "```bash\nenv -S; scripts/helper.sh --absent\n```\n")
     assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+# ------------------------------------------------- #741 counter-model pass 2 (ratified)
+
+def test_741_r2_a_quoted_string_beginning_with_a_dash_is_still_a_string(tmp_path: Path) -> None:
+    """Reviewer's exact inputs: a token that BEGINS with a quote is a string,
+    whatever its first character, so its paths are checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\necho "-> see scripts/gone.sh"\nenv -S "-i bash scripts/gone2.sh" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/gone.sh", "scripts/gone2.sh"]
+
+
+def test_741_r2_an_attached_quoted_value_stays_one_option(tmp_path: Path) -> None:
+    """The other side of the distinction: `--opt="x y scripts/nope.sh"` is ONE
+    option with an attached value, so no path is read out of it, and `--absent`
+    after it is still the helper's."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", '```bash\nscripts/helper.sh --opt="x y scripts/nope.sh" --absent\n```\n')
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --opt", "scripts/helper.sh --absent"]
+
+
+@pytest.mark.parametrize("wrapper", ['sudo -p ";"', 'env -u ";"'])
+def test_741_r2_a_quoted_separator_as_an_option_value_is_consumed(tmp_path: Path, wrapper: str) -> None:
+    """Reviewer's exact inputs: the quoted `;` IS the option's value, so the
+    helper after it is the command and `--absent` is checked."""
+    _helper(tmp_path)
+    _skill(tmp_path, "a", f"```bash\n{wrapper} scripts/helper.sh --absent\n```\n")
+    assert _flag_refs(tmp_path) == ["scripts/helper.sh --absent"]
+
+
+def test_741_r2_too_many_run_heads_is_an_estimate(tmp_path: Path) -> None:
+    """Reviewer's exact case: A = 46 x same; B = 65 blocks of 40 x same with
+    distinct separators, then 100 x same. Either the 46-word match is found, or
+    the pair says it is an estimate (the head cutoff's negative control)."""
+    first = " ".join(["same"] * 46)
+    second = " ".join(" ".join(["same"] * 40) + f" sep{i}" for i in range(65)) + " " + " ".join(["same"] * 100)
+    _skill(tmp_path, "a", first + "\n")
+    _skill(tmp_path, "b", second + "\n")
+    [hit] = decay.copied_passage(_load(tmp_path)).hits
+    assert hit.data["longest_words"] == 46 or hit.data["estimate"] is True

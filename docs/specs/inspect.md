@@ -203,9 +203,11 @@ state across a substitution with a separator inside, `env -S` (its value is
 command text; its paths are checked and the flags after it counted as unowned),
 and a rare copy anchor starving a longer repetitive match.
 
-**Still not seen** (after #741): a quoted string that BEGINS with `-` (an echo
-message such as `'-> step skipped: see scripts/x.sh'`) is read as an option with
-a value, so the paths inside it are not checked.
+A word that OPENS with a quote is a whole quoted string even when its text
+begins with `-` (`echo "-> see scripts/x.sh"` is checked). Only a quote that
+opens mid-word is an attached option value (`--opt="x y"`): one option, with no
+paths read out of it. A value that cleans to nothing (`sudo -p ";"`) is still
+the option's value.
 
 **Known ambiguity.** In a skill about *the user's* project, `scripts/deploy.sh`
 names a file in that project, not in the collection. The rule reports it,

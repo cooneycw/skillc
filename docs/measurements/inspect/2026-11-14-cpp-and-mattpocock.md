@@ -207,9 +207,9 @@ were then added to the command prefixes, and a test now holds both.
 
 The only movement is in the two counters of words this rule does NOT examine:
 `path_like_not_examined` 159 -> 158 and `placeholder_paths_not_examined`
-1092 -> 1137 (CPP, both SHAs). Both were reconciled code span by code span. Each
-version was instrumented to record which span every count came from (the
-instrument reproduces both totals, 1092 and 1137, exactly), the two were diffed
+1092 -> 1136 (CPP, both SHAs; final #741 code). Both were reconciled code span by
+code span. Each version was instrumented to record which span every count came
+from (the instrument reproduces both totals, 1092 and 1136, exactly), the two were diffed
 span by span, and each differing span was classified by its token shapes. The
 categories sum to the totals:
 
@@ -218,8 +218,12 @@ categories sum to the totals:
 | +30 | a quoted string containing `$(...)` (`if ! LANES_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`) | #741 item 2: the string is read word by word; #744 skipped the whole token as a substitution |
 | +13 | a quoted string carrying an unquoted `$(` or `)` (`... sed 's\|branch refs/h...'` closing a `$(`) | the same reading, plus the closer fix: the attached `)` still closes the substitution |
 | +1 | both of the above (`CAND="$(dirname "$(pwd)")/.claude/commands"`) | as above |
-| +1 | a quoted string starting with `-` (`echo "-> Local-model lanes not installed ..."`) | read as an option with a value: the one new, named blind spot |
-| **+45** | | |
+| **+44** | | |
+
+(An interim #741 build also counted +1 for `echo "-> Local-model lanes not
+installed ..."`: a quoted string starting with `-` was read as an option. That
+was fixed during the counter-model review. The string is read word by word again,
+and the +1 is gone.)
 
 | Path-like delta | Span | Cause |
 |---|---|---|

@@ -469,6 +469,7 @@ class Token:
     quoted: bool = False
     opens: int = 0  # UNQUOTED `$(` in this word
     closes: int = 0  # UNQUOTED `)` in this word
+    began_quoted: bool = False  # the word OPENS with a quote: a whole quoted string
 
 
 SHELL_PUNCT = ";&|"
@@ -486,14 +487,14 @@ def shell_tokens(text: str) -> list[Token]:
     unterminated quote or a trailing escape, as shlex does."""
     tokens: list[Token] = []
     buf: list[str] = []
-    in_word = quoted = False
+    in_word = quoted = began = False
     opens = closes = 0
 
     def flush() -> None:
-        nonlocal buf, in_word, quoted, opens, closes
+        nonlocal buf, in_word, quoted, opens, closes, began
         if in_word:
-            tokens.append(Token("".join(buf), False, quoted, opens, closes))
-        buf, in_word, quoted, opens, closes = [], False, False, 0, 0
+            tokens.append(Token("".join(buf), False, quoted, opens, closes, began))
+        buf, in_word, quoted, opens, closes, began = [], False, False, 0, 0, False
 
     i, n = 0, len(text)
     while i < n:
@@ -509,6 +510,7 @@ def shell_tokens(text: str) -> list[Token]:
             tokens.append(Token(text[i:j], True, False))
             i = j
         elif c == "'":
+            began = began or not in_word
             j = text.find("'", i + 1)
             if j < 0:
                 raise ValueError("unterminated single quote")
@@ -516,6 +518,7 @@ def shell_tokens(text: str) -> list[Token]:
             in_word = quoted = True
             i = j + 1
         elif c == '"':
+            began = began or not in_word
             in_word = quoted = True
             i += 1
             while True:
@@ -692,8 +695,12 @@ def dangling_reference(coll: Collection) -> Result:
                     pending_split = False
                     continue
                 word = _clean_word(raw)
+                # A word that OPENS with a quote is a whole quoted string, even if
+                # its text begins with `-` (`echo "-> see scripts/x.sh"`); only a
+                # quote that opens mid-word is an attached value (`--opt="x y"`),
+                # one option with no paths read out of it (#741 review).
                 is_string = (quote_aware and token.quoted and any(ch.isspace() for ch in raw)
-                             and not word.startswith("-"))
+                             and (token.began_quoted or not word.startswith("-")))
                 if is_string:
                     # A quoted multi-word argument is a STRING, read BEFORE the
                     # substitution logic (#741): its words still name paths that
@@ -740,6 +747,10 @@ def dangling_reference(coll: Collection) -> Result:
                     arg_path_seen, pending_split, pending_operand = True, False, False
                     continue
                 if not word:
+                    if pending_operand:
+                        # `sudo -p ";"`: a value that cleans to nothing is still
+                        # the option's value (#741 review).
+                        pending_operand = False
                     continue
                 # Whitespace fallback only: a separator inside or trailing a word.
                 trailing_break = not quote_aware and raw.rstrip("\"'").endswith((";", "|", "&"))
