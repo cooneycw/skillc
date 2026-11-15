@@ -520,3 +520,24 @@ def test_an_undecided_round_4_is_unknown_never_keep(coll: Path, tmp_path: Path, 
     code, lines = _verdict(coll, "lean", tmp_path, round4=_planted(tmp_path, "round4-keep.json", edit))
     assert _verdict_line(lines).startswith("ROUND 5 verdict: UNKNOWN - round 4 did not decide")
     assert why in _verdict_line(lines) and code == gauntlet_verdict.EXIT_UNKNOWN
+
+
+def test_the_real_overlap_report_carries_every_field_read_and_drives_retire(tmp_path: Path) -> None:
+    """Against the REAL `charter overlap --json` (#726 part B, now on main), as
+    the RoundReport test does for #736: a rename upstream breaks this reader
+    loudly. With alpha's every duty `shared` with beta, retire names beta."""
+    verdicts = tmp_path / "verdicts.txt"
+    verdicts.write_text("alpha.always-1 beta.always-1: same\n" * 3 + "alpha.always-2 beta.always-2: same\n" * 3)
+    done = subprocess.run(["python", "-m", "skillc.cli", "charter", "overlap",
+                           str(ROOT / "evals" / "subjects" / "overlap-controls" / "shared-paraphrase"),
+                           "--json", "--verdicts", str(verdicts)], capture_output=True, text=True, check=False, cwd=ROOT)
+    report = json.loads(done.stdout)
+    assert set(gauntlet_verdict.OVERLAP_FIELDS) <= set(report), sorted(report)
+    assert report["examined"] is True and report["incomplete"] == []
+    assert all({"contract", "id"} <= set(d) for d in report["duties"])
+    assert all({"kind", "duties"} <= set(o) for o in report["overlaps"])
+    evidence: list[str] = []
+    verdict = gauntlet_verdict._retire("alpha", report, evidence)
+    assert verdict is not None and verdict.verdict == gauntlet_verdict.RETIRE and "beta" in verdict.detail
+    assert gauntlet_verdict._retire("beta", {**report, "overlaps": report["overlaps"][:1]}, []) is None, \
+        "one of beta's duties is not owned elsewhere: no retire"
