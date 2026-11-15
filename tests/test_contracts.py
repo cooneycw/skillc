@@ -254,3 +254,16 @@ def test_an_unusable_filesystem_path_is_a_finding_not_a_crash(tmp_path: Path, va
     # An attributed clause-backed finding and a completed run - never a traceback.
     assert any("unbacked" in d and "alpha.out" in d for d in details)
     assert cli.main(["contracts", str(case)]) == contracts.EXIT_FINDINGS
+
+
+def test_every_run_says_a_bad_segment_proves_presence_not_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#720 gate: a green `skillc contracts` must never read as "this clause's test
+    can fail". Every run that examined contracts prints the limit, and the spec
+    states it under the same words."""
+    cli.main(["contracts", str(FIXTURE)])
+    out = capsys.readouterr().out
+    assert "shows a negative case is present, not that it can fail" in out
+    spec = (Path(__file__).resolve().parents[1] / "docs/specs/contracts.md").read_text(encoding="utf-8")
+    assert "It proves a negative case is PRESENT,\nnot that it can fail." in spec
