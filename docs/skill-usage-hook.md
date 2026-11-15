@@ -57,6 +57,13 @@ the hook and `usage end` write nothing and say so (#721). A cloned repository
 cannot use them to append to a file outside it. Tested by the
 `test_NEGATIVE_CONTROL_*symlink*` cases in `tests/test_usage.py`.
 
+The hook writes only once git itself says `.skillc/usage.jsonl` is ignored
+(`git check-ignore`), so a later `!usage.jsonl` in `.skillc/.gitignore` cannot
+leave the log committable. If git says no, the hook adds a final `/usage.jsonl`
+and asks again. If the log is still not ignored (it is tracked, say), or git
+cannot answer, nothing is recorded and the refusal is printed (#722). Tested by
+the negation, tracked-log and unanswerable-check cases in `tests/test_usage.py`.
+
 ## Declaring an outcome (optional)
 
 A skill that knows how it ended can say so:
