@@ -755,19 +755,87 @@ def test_a_damaged_foreign_directory_is_still_refused(checkout: Path, tmp_path: 
     assert done.returncode == 1 and "refusing" in done.stderr and (skills / NAME / "scripts" / "planted").exists()
 
 
-# ------------- #774 owner reversal (2026-11-16): "make it work in Kyle containers"
+# ------------- owner ruling 2026-11-16: ALL of skillc stays out of Kyle containers (kyle #2518)
 
-def test_the_installed_copy_carries_no_kyle_exclusion_marker(checkout: Path, tmp_path: Path) -> None:
-    """The owner reversed the opt-out: the skill should reach Kyle containers,
-    so no `.kyle-exclude` is written, and an old copy's marker is removed."""
+KYLE_EXCLUDE = ".kyle-exclude"
+
+
+def _marker_digest(entry: Path) -> str:
+    return dict(l.split(" ", 1) for l in (entry / ".skillc-install").read_text().splitlines())["digest"]
+
+
+def test_a_fresh_install_writes_an_empty_kyle_exclude(checkout: Path, tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0 and "installed:" in done.stdout, done.stderr
+    exclude = skills / NAME / KYLE_EXCLUDE
+    assert exclude.is_file() and not exclude.is_symlink() and exclude.read_bytes() == b""
+    _kyle_stageable(skills)
+
+
+def test_a_refresh_keeps_kyle_exclude(checkout: Path, tmp_path: Path) -> None:
+    """The failure Kyle cares about: a refresh used to rebuild the copy without it."""
     skills = tmp_path / "skills"
     assert _installer(checkout, skills, "install").returncode == 0
-    assert not (skills / NAME / ".kyle-exclude").exists()
-    (skills / NAME / ".kyle-exclude").write_text("from an earlier install\n")
-    again = _installer(checkout, skills, "install")
-    assert again.returncode == 0 and "refreshed" in again.stdout
-    assert not (skills / NAME / ".kyle-exclude").exists(), "a reinstall drops the old marker"
-    assert ".kyle-exclude" not in INSTALLER.read_text(), "the installer no longer names the marker"
+    (checkout / ".claude" / "skills" / NAME / "SKILL.md").write_text("an updated skill\n")
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0 and "refreshed" in done.stdout, done.stdout + done.stderr
+    assert (skills / NAME / KYLE_EXCLUDE).is_file()
+
+
+@pytest.mark.parametrize("state", ["missing", "symlink", "present"])
+def test_a_current_marked_copy_is_refreshed_only_when_kyle_exclude_is_not_a_file(
+        checkout: Path, tmp_path: Path, state: str) -> None:
+    """The "already installed" shortcut must not leave a copy without it. The
+    twin: a copy that has it is left alone."""
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    exclude = skills / NAME / KYLE_EXCLUDE
+    if state != "present":
+        exclude.unlink()
+    if state == "symlink":
+        (tmp_path / "elsewhere").write_text("")
+        exclude.symlink_to(tmp_path / "elsewhere")
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert ("already installed" in done.stdout) == (state == "present"), done.stdout
+    assert exclude.is_file() and not exclude.is_symlink() and exclude.read_bytes() == b""
+    _kyle_stageable(skills)
+
+
+def test_an_unmarked_copy_with_a_hand_made_kyle_exclude_is_adopted(checkout: Path, tmp_path: Path) -> None:
+    """kyle-cli-helper's hand-made marker in an otherwise identical copy: the
+    copy is still ours to adopt, and the marker is outside the digest."""
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    shutil.copytree(checkout / ".claude" / "skills" / NAME, skills / NAME)
+    (skills / NAME / KYLE_EXCLUDE).write_text("")
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0 and "adopted the identical copy" in done.stdout, done.stdout + done.stderr
+    assert (skills / NAME / KYLE_EXCLUDE).is_file()
+    plain = tmp_path / "plain"
+    assert _installer(checkout, plain / "skills", "install").returncode == 0
+    assert _marker_digest(skills / NAME) == _marker_digest(plain / "skills" / NAME)
+
+
+def test_uninstall_removes_kyle_exclude_with_the_copy(checkout: Path, tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    assert (skills / NAME / KYLE_EXCLUDE).is_file()
+    done = _installer(checkout, skills, "uninstall")
+    assert done.returncode == 0 and not (skills / NAME).exists() and not list(skills.iterdir())
+
+
+@pytest.mark.parametrize("extra", [KYLE_EXCLUDE, "EXTRA.md"])
+def test_the_drift_check_ignores_kyle_exclude_but_not_a_top_level_file(tmp_path: Path, extra: str) -> None:
+    """A guard on gauntlet.sh: the copy's top-level dotfiles belong to the
+    installer, so .kyle-exclude is silent; a non-dot extra file still warns."""
+    _repo, launcher = _installed_launcher(tmp_path)
+    copy = launcher.parent.parent
+    (copy / extra).write_text("")
+    done = _run_installed(launcher, tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+    assert ("warning: this installed copy differs" in done.stderr) == (extra != KYLE_EXCLUDE), done.stderr
 
 
 def _launch(launcher: Path, tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
