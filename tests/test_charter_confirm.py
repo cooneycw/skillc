@@ -234,3 +234,13 @@ def test_the_output_is_created_exclusively(tmp_path: Path, monkeypatch: pytest.M
     with pytest.raises(ConfirmRefused, match="appeared"):
         charter_confirm.confirm_file(draft, answers, out, DAY)
     assert out.read_text(encoding="utf-8") == "the owner's charter\n"
+
+
+# ---------------------------------------------------------------- #749: intent/authority id collision
+
+
+def test_one_answer_cannot_approve_an_intent_and_an_authority_sharing_an_id() -> None:
+    collided = RICH.replace("  id: rich.intent\n", "  id: rich.no-self-approval\n", 1)
+    answers = "rich.no-self-approval: accept\nrich.out: accept\nrich.auth-drop: accept\nrich.input: accept\n"
+    with pytest.raises(ConfirmRefused, match="fails contract-shape"):
+        charter_confirm.confirm(collided, answers, DAY)

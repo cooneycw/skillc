@@ -34,6 +34,7 @@ CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "clean-install": ("clean-install",),
     "git-tests-control": ("git-tests-control",),
     "pytest-population-control": ("pytest-population-control",),
+    "timing-check": ("timing-check",),
 }
 
 

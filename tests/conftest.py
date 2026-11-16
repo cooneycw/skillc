@@ -105,6 +105,25 @@ def _no_real_credential_defaults(
 #: and a delay past it still reports UNKNOWN/inconclusive/quarantined.
 FAKE_DOCKER_DAEMON_TIMEOUT = 30.0
 
+#: The bound for work a test needs to FINISH that is not the property under
+#: test (#758, the "must-beat" role under #462). Examples: a fake `docker rm`
+#: that exits 1 at once, the setup `prepare()` before a stall test, or a
+#: reviewed oracle candidate's own `unittest` run. Such work is a real process
+#: spawn, so host load stretches it. The day #758 was filed, a 0.5 s settle,
+#: a 0.2 s setup bound and the oracle's 5 s per-run default each ran out on
+#: kyleci at psi_io10 10-47 (pipelines 1475, 1477, 1478), and none of those
+#: reds was about the code. A must-FIRE bound (the property itself, such as a
+#: probe's 0.3 s timeout) stays small: its fake BLOCKS until killed rather
+#: than racing the bound with a finite sleep.
+#:
+#: The value matches `FAKE_DOCKER_DAEMON_TIMEOUT`'s 30 s, six times the 5 s
+#: bound seen exceeded at psi_io10 ~45. It has NOT been measured under
+#: `ci/load-repro.sh`: the load proof is deferred (no host load runs while
+#: Kyle prod and series 25 are live), and stays open on #758 and #462. A test
+#: that uses this bound must still show, by a committed or recorded negative
+#: control, that the work exceeding the bound turns it red.
+TEST_SETUP_BOUND = 30.0
+
 #: Daemon budget for the REAL-Docker live tests (`tests/*_live.py`, #390). Not
 #: the fake-CLI margin above: this one answers a real daemon's stalls. On
 #: #315's dedicated runner a `docker run -d` with the live tests' arguments

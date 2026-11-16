@@ -1,0 +1,27 @@
+{
+  "cap": 8,
+  "clients": [
+    "fixture"
+  ],
+  "declared": 4,
+  "new": 0,
+  "notes": [],
+  "per_clause": {
+    "report": {
+      "intact": {
+        "error": 0,
+        "evaluable": 4,
+        "pass": 4
+      }
+    }
+  },
+  "reason": "fixture",
+  "recommendation": null,
+  "reused": 4,
+  "round": 3,
+  "run": 0,
+  "separation": {},
+  "tolerance": 0,
+  "variants": {},
+  "verdict": "COMPLETE"
+}

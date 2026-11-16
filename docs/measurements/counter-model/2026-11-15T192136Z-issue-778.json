@@ -1,0 +1,70 @@
+{
+  "branch": "issue-778-charter-create-part-b",
+  "counts": {
+    "accepted": 12,
+    "deferred": 3,
+    "rejected": 0
+  },
+  "extra_passes_reason": "the wave orchestrator skillc-orch set a 3-pass ceiling per PR for #778 (gate rev 72, orchestrator-only, owner-delegated); passes 1 and 2 found 8 and 4 defects (1 HIGH), all fixed red-first; pass-3 findings deferred to #781 and Nit Store #20",
+  "head": "f2430db474bd12e26e589f7d4cb9d926f30afa15",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "4442f745-f19b-4ef8-bdb6-71fc92ee505a",
+    "sources": [
+      {
+        "bytes": 22479039,
+        "path": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl",
+        "sha256": "a1b7f0c92b3f6bc0ae4dba17198818c9174c44c12a4e2eed283a5bccb34355d4"
+      }
+    ],
+    "transcript": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl"
+  },
+  "issue": "778",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-11-15T19:21:36Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 12
+  },
+  "reviewed_artifact": {
+    "base_sha": "7c630d2632b799493c20c73891d1ed8460c3ad41",
+    "merge_base": "7c630d2632b799493c20c73891d1ed8460c3ad41",
+    "method": "runtime-head",
+    "patch_sha256": "24adba2ce70a50c75ab2b153e1c8e74b5f957ce3294cc943b90e3a33a93d2e1f",
+    "report_record": 132,
+    "target_head": "f2430db474bd12e26e589f7d4cb9d926f30afa15"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.8JCFSl",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/15/rollout-2026-11-15T14-15-55-01a1e0a3-36fe-7cb2-9bfe-5b12185520d4.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 193991,
+        "path": "codex-review-stream.8JCFSl",
+        "sha256": "05ee431c33d472c0fd445b0217a7f7634815db1c6706008415f6e0e41caba84e"
+      },
+      {
+        "bytes": 998479,
+        "path": "2026/11/15/rollout-2026-11-15T14-15-55-01a1e0a3-36fe-7cb2-9bfe-5b12185520d4.jsonl",
+        "sha256": "334b1334a5bd151aaae3b6260470f059f029bca8e803f5d4282ec57bd31af54d"
+      }
+    ],
+    "thread_id": "01a1e0a3-36fe-7cb2-9bfe-5b12185520d4"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}
