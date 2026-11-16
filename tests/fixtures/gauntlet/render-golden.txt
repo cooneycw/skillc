@@ -1,0 +1,17 @@
+GAUNTLET ROUND 3: COMPLETE
+  every damaged arm scored measurably worse on its clause
+  attempts: declared 24, reused 0, new 24, run 24; cap 60
+  no-worse tolerance: 0 (strict)
+  client: claude scripted scripted
+  clause planner.always-report-lanes: intact 6/6; damaged-gate 6/6
+  clause planner.never-edit-before-approval: intact 6/6; damaged-gate 0/6
+  separation damaged-gate on planner.never-edit-before-approval: DISCRIMINATING (p=0.0011)
+GAUNTLET ROUND 4: COMPLETE - trim
+  variant(s) no worse on every clause: lean-repeat
+  attempts: declared 18, reused 0, new 18, run 18; cap 60
+  no-worse tolerance: 0 (strict)
+  client: claude scripted scripted
+  clause planner.always-report-lanes: intact 3/3; lean-repeat 3/3; lean-lanes 0/3
+  clause planner.never-edit-before-approval: intact 3/3; lean-repeat 3/3; lean-lanes 3/3
+  variant lean-lanes: worse on planner.always-report-lanes (0 < 3 - tolerance 0)
+  variant lean-repeat: PASSES
