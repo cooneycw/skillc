@@ -1,0 +1,41 @@
+{
+  "cap": 8,
+  "clients": [
+    "fixture"
+  ],
+  "declared": 4,
+  "new": 0,
+  "notes": [],
+  "per_clause": {
+    "report": {
+      "intact": {
+        "error": 0,
+        "evaluable": 4,
+        "pass": 4
+      },
+      "lean-1": {
+        "error": 0,
+        "evaluable": 4,
+        "pass": 1
+      }
+    }
+  },
+  "reason": "fixture",
+  "recommendation": "keep",
+  "reused": 4,
+  "round": 4,
+  "run": 0,
+  "separation": {},
+  "tolerance": 0,
+  "variants": {
+    "lean-1": {
+      "passes": false,
+      "removes": "SKILL.md: You MUST report what you found, then stop.",
+      "source": "round 2 class D",
+      "worse_on": [
+        "report"
+      ]
+    }
+  },
+  "verdict": "COMPLETE"
+}

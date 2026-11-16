@@ -19,7 +19,8 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 .PHONY: sync selftest test lint typecheck negative-control typecheck-control \
-	leak-check changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install verify
+	leak-check changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install \
+	timing-check verify
 
 sync:
 	uv sync --locked --extra dev
@@ -53,6 +54,11 @@ lint: sync
 
 typecheck: sync
 	uv run --no-sync mypy
+
+# Load-timing ratchet (#758, under #462); its red cases are in
+# tests/test_timing_inventory.py.
+timing-check: sync
+	uv run --no-sync python3 ci/timing_inventory.py check
 
 negative-control: sync
 	uv run --no-sync bash ci/negative-control.sh
@@ -115,7 +121,7 @@ pytest-population-control: test
 	bash ci/pytest-population-control.sh
 	bash ci/pytest-lanes-control.sh
 
-verify: selftest test lint typecheck negative-control typecheck-control leak-check \
+verify: selftest test lint typecheck negative-control typecheck-control leak-check timing-check \
 	changelog-check readme-drift secret-scan git-tests-control pytest-population-control clean-install
 
 # Explicit advisory network reading; posting requires the operator's POST=1.

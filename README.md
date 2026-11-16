@@ -100,11 +100,16 @@ skillc usage report <usage.jsonl> # #719: skill-usage counts by skill and digest
 skillc contracts <collection>  # #720: check every CHARTER.md contract together; exit 0 clean, 1 findings, 2 usage, 3 none declared (docs/specs/contracts.md)
 skillc charter draft <skill> [--usage LOG] [--subject PATH] [--out FILE]  # #726 round 1: a draft CHARTER.md from the skill's text and usage records; approves nothing; exit 3 nothing to draft from (docs/specs/charter-round1.md)
 skillc charter confirm <draft> --answers FILE --out FILE  # #726: apply the owner's answers; refuses without them; stamps approved only on intent and authority
+skillc gauntlet round3|round4 <declaration> [--plan]  # #736: skill-gauntlet baseline and challenge trials; a declared attempt cap; UNKNOWN unless a named damaged copy separates; --plan spends nothing (real runs: #736 PR 3)
+skillc charter overlap <collection> [--verdicts FILE]  # #726: shared, shadowed and orphan duties across charters, by meaning; proposals only; exit 3 not examined without a comparator
+skillc charter evidence <collection> <skill> [--ref REF]... [--search] [--doc P] [--usage LOG] --out FILE  # #778: every existing piece of the skill's charter (discussions, issues and PRs, read-only; the charter and its history; skill text; usage; tests) as cited suggestions; every source reports examined, none found or not examined (docs/specs/charter-create.md)
+skillc charter create <collection> <skill> --evidence FILE --answers FILE [--replace-draft]  # #778: the owner's answers become a CHARTER.md with a trap-task stub per clause at evals/trap-tasks/; refuses (exit 1, nothing written) on an unanswered suggestion, a never or authority rule with no shortcut, or an approval without the owner's yes and date; never commits
 skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
 skillc inspect <collection>    # #725: skill-gauntlet round 2 - decay rules, findings sorted A/B/C/D; never edits
+skillc gauntlet verdict <collection> <skill> --round3 F --round4 F --declaration F --inspect F --overlap F # #737: round 5 - one keep/trim/retire proposal or UNKNOWN naming the round; drafts only, the owner rules with `gauntlet rule` (docs/specs/gauntlet-verdict.md)
 skillc gauntlet run <collection> <skill> # #754: the skill-gauntlet engine - rounds 0-2 in order, one verdict per round, one NEXT: line; rounds 3-5 read NOT BUILT, so it never exits 0 yet (docs/specs/gauntlet.md)
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity

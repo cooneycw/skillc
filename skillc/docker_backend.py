@@ -154,6 +154,7 @@ from .backend import (
     Confirmation,
     ExecuteResult,
     Limits,
+    ObservationsWrite,
 )
 from .completion import CompletionUnavailable, number
 from .decide_reply_channel import DecideFn, DecideReplyChannel, LoggedDecision
@@ -2694,7 +2695,14 @@ class DockerBackend:
         # left in place). `observations_capture` now names the checked
         # outcome instead of swallowing it.
         observations_capture = None
+        observations_write = None
         if not self.witness_io:
+            # #761: the write is DECLARED - its window and exact bytes - so an
+            # authority interceptor polling concurrently can tell its own
+            # in-between states (docker cp replaces the file and its content
+            # is visible partly written) from a subject's action.
+            written = stdout
+            started = time.monotonic()
             try:
                 payload = _owned_tar_bytes("observations", stdout)
                 write_back = subprocess.run(
@@ -2705,12 +2713,15 @@ class DockerBackend:
                 observations_capture = "written" if write_back.returncode == 0 else "failed"
             except (OSError, subprocess.TimeoutExpired):
                 observations_capture = "failed"
+            observations_write = ObservationsWrite(started, time.monotonic(),
+                                                   hashlib.sha256(written).hexdigest(), written)
 
         return ExecuteResult(
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
             term_forwarding=term_forwarding, observations_capture=observations_capture,
+            observations_write=observations_write,
             stop_confirmed=stop_confirmed, stdout=stdout,
             # #334: the raw stream on EVERY exit, beside the summary in
             # `error` (nonzero exits only, stripped, annotated), so a gate's

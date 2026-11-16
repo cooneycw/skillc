@@ -465,6 +465,12 @@ def round2(skill: Skill, options: Options) -> Result:
     except json.JSONDecodeError:
         return Result("2", "inspect", "UNKNOWN", f"`skillc inspect` printed no report (exit {done.returncode})",
                       proceed=False, inputs=inputs)
+    return read_round2(skill, report, inputs)
+
+
+def read_round2(skill: Skill, report: dict, inputs: dict[str, str]) -> Result:
+    """Round 2's reading of one `inspect --json` report, in ONE place: the
+    engine and round 5 (#737, `gauntlet verdict --inspect`) both use it."""
     if report.get("verdict") == "NOTHING-INSPECTED":
         return Result("2", "inspect", "UNKNOWN", "nothing inspected - not a clean result", proceed=False,
                       inputs=inputs)
@@ -511,11 +517,17 @@ def round3(tool: bool) -> Result:
 
 # --------------------------------------------------------------------- record
 
-def render_record(skill: Skill, results: list[Result]) -> bytes:
-    body = {"kind": RECORD_KIND, "schema": RECORD_SCHEMA, "skill": skill.rel,
-            "rounds": {r.round: {"name": r.name, "verdict": r.verdict, "detail": r.detail,
-                                 "proceed": r.proceed, "inputs": dict(sorted(r.inputs.items()))}
-                       for r in results}}
+#: Rounds the engine does not run but must carry: round 5 is the owner's
+#: recorded ruling (`gauntlet rule`, #737), never re-derived by `run`.
+KEPT_ROUNDS = ("5",)
+
+
+def render_record(skill: Skill, results: list[Result], kept: dict[str, dict[str, object]] | None = None) -> bytes:
+    rounds: dict[str, object] = {r.round: {"name": r.name, "verdict": r.verdict, "detail": r.detail,
+                                           "proceed": r.proceed, "inputs": dict(sorted(r.inputs.items()))}
+                                 for r in results}
+    rounds.update({k: v for k, v in (kept or {}).items() if k in KEPT_ROUNDS})
+    body = {"kind": RECORD_KIND, "schema": RECORD_SCHEMA, "skill": skill.rel, "rounds": rounds}
     return (json.dumps(body, indent=2, sort_keys=True) + "\n").encode()
 
 
@@ -696,7 +708,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
             break
     assert stopped is not None, "round 3 never proceeds in part 1"
     try:
-        written = write_record(record, render_record(skill, results))
+        written = write_record(record, render_record(skill, results, previous))
         if display_path is not None:
             _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines}
                                          for r in results if not r.cached or r.round in display})
