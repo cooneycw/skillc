@@ -411,6 +411,7 @@ def test_install_from_a_linked_worktree_locates_the_main_checkout(checkout: Path
 
 def test_a_source_holding_a_symlink_is_refused(checkout: Path, tmp_path: Path) -> None:
     (checkout / ".claude" / "skills" / NAME / "extra.md").symlink_to(checkout / ".claude" / "skills" / NAME / "SKILL.md")
+    _git(checkout, "add", "-A")  # only tracked entries are read (#738); an untracked link is never copied
     skills = tmp_path / "skills"
     done = _installer(checkout, skills, "install")
     assert done.returncode == 2 and "regular files only" in done.stderr and not (skills / NAME).exists()
@@ -915,3 +916,137 @@ def test_the_default_runtime_is_the_checkouts_own_venv_even_read_only(tmp_path: 
         assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
     finally:
         subprocess.run(["chmod", "-R", "u+w", str(ck)], check=False)
+
+
+# ------------------- #738: only git-tracked files (orchestrator rev 82)
+# The owner's untracked GAUNTLET.json sat in the checkout's skill folder: the
+# installer copied it into ~/.claude/skills (and so into Kyle's images) and the
+# drift check warned about it. Both now read the checkout's TRACKED files; the
+# installed copy is still read in full.
+
+DRIFT = "SKILL_GAUNTLET: warning: this installed copy differs"
+NOTE = "SKILL_GAUNTLET: note: drift not checked"
+
+
+@pytest.mark.parametrize("tracked", [False, True], ids=["untracked", "tracked"])
+def test_only_tracked_source_files_are_installed(checkout: Path, tmp_path: Path, tracked: bool) -> None:
+    extra = checkout / ".claude" / "skills" / NAME / "GAUNTLET.json"
+    extra.write_text("{}\n")
+    if tracked:
+        _git(checkout, "add", "-A")
+    skills = tmp_path / "skills"
+    done = _installer(checkout, skills, "install")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (skills / NAME / "GAUNTLET.json").exists() is tracked
+
+
+def test_a_tracked_file_missing_from_disk_is_refused(checkout: Path, tmp_path: Path) -> None:
+    (checkout / ".claude" / "skills" / NAME / "CHARTER.md").unlink()
+    skills = tmp_path / "skills"
+    done = _installer(checkout, skills, "install")
+    assert done.returncode != 0 and "CHARTER.md" in done.stderr, done.stdout + done.stderr
+    assert not (skills / NAME).exists()
+
+
+def _archive(repo: Path, dest: Path) -> Path:
+    """What Kyle stages (#2535): `git archive` of a commit - the tracked files, no .git."""
+    dest.mkdir()
+    tar = subprocess.run(["git", "-C", str(repo), "archive", "HEAD"], capture_output=True, check=True).stdout
+    subprocess.run(["tar", "-x", "-C", str(dest)], input=tar, check=True)
+    assert not (dest / ".git").exists()
+    return dest
+
+
+def test_the_installer_refuses_an_export_with_no_git_work_tree(checkout: Path, tmp_path: Path) -> None:
+    export = _archive(checkout, tmp_path / "export")
+    skills = tmp_path / "skills"
+    done = _installer(export, skills, "install")
+    assert done.returncode == 2 and "export" in done.stderr and "not supported" in done.stderr, done.stderr
+    assert not skills.exists() or not (skills / NAME).exists()
+
+
+def _failing_git(tmp_path: Path, only: str) -> dict[str, str]:
+    """A PATH whose `git` exits 128 (as git does when it refuses a repository)
+    whenever its arguments mention `only`, and is the real git otherwise."""
+    real = shutil.which("git")
+    assert real
+    bin_dir = tmp_path / "fake-git-bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text(f'#!/bin/sh\ncase "$*" in *{only}*) echo "fatal: refused" >&2; exit 128 ;; esac\n'
+                                 f'exec {real!r} "$@"\n')
+    (bin_dir / "git").chmod(0o755)
+    return {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+
+def test_the_installer_refuses_when_git_cannot_list_the_skill(checkout: Path, tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    env = {**os.environ, "SKILLC_SKILLS_DIR": str(skills), "HOME": str(tmp_path / "home"),
+           "XDG_CACHE_HOME": str(tmp_path / "cache"), **_failing_git(tmp_path, "ls-files")}
+    done = subprocess.run(["python3", str(checkout / "scripts" / "install_skill.py"), "install"], capture_output=True,
+                          text=True, check=False, cwd=checkout, env=env)
+    assert done.returncode != 0 and "git" in done.stderr, done.stdout + done.stderr
+    assert not (skills / NAME).exists()
+
+
+@pytest.mark.parametrize("change", ["untracked-file", "tracked-edit", "none"])
+def test_the_drift_check_reads_only_tracked_checkout_files(tmp_path: Path, change: str) -> None:
+    repo, launcher = _installed_launcher(tmp_path)
+    skill = repo / ".claude" / "skills" / NAME
+    if change == "untracked-file":
+        (skill / "GAUNTLET.json").write_text("{}\n")
+    elif change == "tracked-edit":
+        (skill / "SKILL.md").write_text((skill / "SKILL.md").read_text() + "\nedited\n")
+    done = _run_installed(launcher, tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+    assert (DRIFT in done.stderr) is (change == "tracked-edit"), done.stderr
+    assert NOTE not in done.stderr
+
+
+@pytest.mark.parametrize("same", [True, False], ids=["identical", "differs"])
+def test_an_archive_checkout_is_compared_in_full(tmp_path: Path, same: bool) -> None:
+    """Kyle's pinned checkout is a `git archive` export: no .git, and exactly
+    the tracked files, so it is walked in full and real drift still warns."""
+    repo, launcher = _installed_launcher(tmp_path)
+    export = _archive(repo, tmp_path / "export")
+    shutil.rmtree(export / ".venv")  # the fixture tracks one that imports `repo`
+    _environment(export, export)
+    if not same:
+        md = export / ".claude" / "skills" / NAME / "SKILL.md"
+        md.write_text(md.read_text() + "\nnewer engine\n")
+    coll = _collection(tmp_path)
+    done = subprocess.run(["bash", str(launcher), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd=tmp_path,
+                          env={**{k: v for k, v in os.environ.items() if k not in ("UV_PROJECT_ENVIRONMENT",
+                                                                                     "SKILLC_RUNTIME")},
+                               "HOME": str(tmp_path), "SKILLC_CHECKOUT": str(export)})
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+    assert (DRIFT in done.stderr) is (not same), done.stderr
+    assert NOTE not in done.stderr
+
+
+def test_a_git_checkout_git_will_not_read_skips_the_drift_check_with_a_note(tmp_path: Path) -> None:
+    """A .git is there but git fails on it (missing, or refusing ownership):
+    SKIP, said in one line - never a walk that would count untracked files."""
+    repo, launcher = _installed_launcher(tmp_path)
+    (repo / ".claude" / "skills" / NAME / "GAUNTLET.json").write_text("{}\n")  # a walk would warn
+    coll = _collection(tmp_path)
+    done = subprocess.run(["bash", str(launcher), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd=tmp_path,
+                          env={**{k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"},
+                               "HOME": str(tmp_path), **_failing_git(tmp_path, str(repo))})
+    assert NOTE in done.stderr and DRIFT not in done.stderr, done.stderr
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("planted", [True, False], ids=["dir-symlink", "none"])
+def test_a_directory_symlink_in_the_copy_warns(tmp_path: Path, planted: bool) -> None:
+    _repo, launcher = _installed_launcher(tmp_path)
+    copy = launcher.parent.parent
+    if planted:
+        (tmp_path / "elsewhere").mkdir()
+        (copy / "scripts" / "linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    done = _run_installed(launcher, tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+    assert (DRIFT in done.stderr) is planted, done.stderr

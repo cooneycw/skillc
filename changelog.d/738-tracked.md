@@ -1,0 +1,2 @@
+- **`make install-skill` and `/skill-gauntlet`'s drift warning use only git-tracked files** (#738). An untracked file in the checkout's skill folder, such as the owner's `GAUNTLET.json` record, is no longer copied to `~/.claude/skills` (and from there into Kyle's images), and it no longer raises a false "installed copy differs" warning.
+  A `git archive` export (Kyle's pinned checkout) is still compared in full. A checkout git cannot read skips the check with one note line. A directory link in the installed copy now counts as drift.

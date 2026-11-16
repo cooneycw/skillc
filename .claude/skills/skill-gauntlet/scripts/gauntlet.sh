@@ -87,33 +87,80 @@ why=${why:-the environment of the checkout does not import skillc}
 # An installed copy that differs from the checkout's skill (a git pull since
 # the install) is WARNED about, never blocked: the verdict and exit code below
 # are the engine's whatever this prints.
+# The CHECKOUT side is its git-TRACKED skill files only (#738), so an untracked
+# file there (the owner's GAUNTLET.json record) is not drift. Three cases:
+#   - a git work tree: `git ls-files`;
+#   - NOT a repository at all (no .git up the tree: Kyle's `git archive`
+#     export): walked in full - an export holds exactly its commit's tracked files;
+#   - a .git is there but git is missing or fails on it (it refuses a repository
+#     another user owns): SKIPPED, said in one note. Never a walk, which would
+#     count untracked files, and never `-c safe.directory`: such a repository's
+#     config can name a program for git to run (core.fsmonitor).
+# The INSTALLED side is walked in full: an extra file there is drift.
 if [ -f "$locator" ]; then
     # Only REGULAR files are opened (lstat first): a FIFO or a link is never read,
     # so the check cannot block the engine; it, or any read error, is a warning.
-    "$python" -P -c 'import os, stat, sys
+    # Exit 0: no drift; 3: not checked (the reason on stdout); anything else: drift.
+    drift_note=$("$python" -P -c 'import os, stat, subprocess, sys
 def oops(exc):
     raise exc
-def files(root):
-    out = {}
-    for d, _, names in os.walk(root, onerror=oops):
-        for n in names:
-            path = os.path.join(d, n)
-            rel = os.path.relpath(path, root)
-            if os.sep not in rel and rel.startswith("."):
-                continue  # top-level dotfiles belong to the installer
-            mode = os.lstat(path).st_mode
-            if not stat.S_ISREG(mode):
-                raise OSError(f"{rel} is not a regular file")
-            with open(path, "rb") as f:
-                out[rel] = (f.read(), bool(mode & 0o100))
+def walk(root):
+    out = []
+    for d, dirs, names in os.walk(root, onerror=oops):
+        for n in dirs:
+            if stat.S_ISLNK(os.lstat(os.path.join(d, n)).st_mode):
+                raise OSError(f"{n} is a directory link")  # os.walk lists it, never enters it
+        out += [os.path.relpath(os.path.join(d, n), root) for n in names]
     return out
+def git(src, *args):
+    # The caller'"'"'s GIT_* variables (GIT_DIR, GIT_WORK_TREE, ...) never steer it.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(["git", "-C", src, *args], capture_output=True, env=env, check=False)
+def tracked(src):
+    """The checkout side: its git-TRACKED files, or None with the reason printed."""
+    try:
+        inside = git(src, "rev-parse", "--is-inside-work-tree")
+        if inside.returncode == 0 and inside.stdout.strip() == b"true":
+            done = git(src, "ls-files", "-z", "--cached", "--", ".")
+            if done.returncode == 0:
+                return [r.decode() for r in done.stdout.split(b"\0") if r]
+            print("git cannot list the checkout'"'"'s tracked files"); sys.exit(3)
+    except FileNotFoundError:
+        missing = True
+    else:
+        missing = False
+    d = os.path.abspath(src)
+    while True:
+        if os.path.lexists(os.path.join(d, ".git")):
+            print("git is not installed" if missing else "git cannot read the checkout'"'"'s repository")
+            sys.exit(3)
+        if os.path.dirname(d) == d:
+            return walk(src)  # an export (`git archive`): exactly its commit'"'"'s tracked files
+        d = os.path.dirname(d)
+def files(root, rels):
+    out = {}
+    for rel in rels:
+        if os.sep not in rel and rel.startswith("."):
+            continue  # top-level dotfiles belong to the installer
+        path = os.path.join(root, rel)
+        mode = os.lstat(path).st_mode
+        if not stat.S_ISREG(mode):
+            raise OSError(f"{rel} is not a regular file")
+        with open(path, "rb") as f:
+            out[rel] = (f.read(), bool(mode & 0o100))
+    return out
+copy, src = sys.argv[1], sys.argv[2]
+listed = tracked(src)
 try:
-    a, b = files(sys.argv[1]), files(sys.argv[2])
+    a, b = files(copy, walk(copy)), files(src, listed)
 except OSError:
     sys.exit(1)
-sys.exit(0 if a == b and "SKILL.md" in a else 1)' "$skill_dir" "$checkout/.claude/skills/skill-gauntlet" \
-        >/dev/null 2>&1 \
-        || echo "SKILL_GAUNTLET: warning: this installed copy differs from the checkout's .claude/skills/skill-gauntlet; re-run make install-skill" >&2
+sys.exit(0 if a == b and "SKILL.md" in a else 1)' "$skill_dir" "$checkout/.claude/skills/skill-gauntlet" 2>/dev/null)
+    case $? in
+        0) ;;
+        3) echo "SKILL_GAUNTLET: note: drift not checked (${drift_note:-no reason given}); the engine still runs" >&2 ;;
+        *) echo "SKILL_GAUNTLET: warning: this installed copy differs from the checkout's .claude/skills/skill-gauntlet; re-run make install-skill" >&2 ;;
+    esac
 fi
 # Invoked explicitly, never a bare `skillc` from PATH. Its output and exit code are the engine's.
 exec "$python" -P -m skillc.cli gauntlet run "$@"

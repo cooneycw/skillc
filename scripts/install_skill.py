@@ -109,7 +109,8 @@ def _say(code: int, message: str) -> int:
 def _source() -> tuple[Path, Path]:
     main = main_checkout(Path(__file__).resolve().parent)
     if main is None:
-        raise Refused(EXIT_USAGE, "not in a git checkout of skillc; install from a source checkout")
+        raise Refused(EXIT_USAGE, "not in a git checkout of skillc: installing from an export (such as `git "
+                                  "archive`, with no .git) is not supported; install from a git checkout")
     source = main / ".claude" / "skills" / NAME
     if not (source / "SKILL.md").is_file():
         raise Refused(EXIT_USAGE, f"no {NAME} skill in the main checkout ({source} has no SKILL.md)")
@@ -141,6 +142,42 @@ def payload(root: Path) -> dict[str, bytes]:
                     files[rel] = path.read_bytes()
                 except OSError as exc:
                     raise Refused(EXIT_REFUSED, f"{rel} in {root} cannot be read ({type(exc).__name__})") from None
+    return files
+
+
+def tracked_payload(source: Path) -> dict[str, bytes]:
+    """The SOURCE skill's files: only what git tracks, by path (#738), read
+    from the working tree, so a tracked edit installs as it is on disk. An
+    untracked file (the owner's GAUNTLET.json record) is never copied. When git
+    cannot list the folder the install is refused: a walk instead would copy
+    exactly what this exists to leave out."""
+    done = subprocess.run(["git", "-C", str(source), "ls-files", "-z", "--cached", "--", "."],
+                          capture_output=True, check=False)
+    if done.returncode != 0:
+        why = done.stderr.decode(errors="replace").strip().splitlines()[-1:] or ["no reason given"]
+        raise Refused(EXIT_REFUSED, f"git cannot list the tracked files of {source} ({why[0]}); refusing rather "
+                                    "than copying files git does not track")
+    files: dict[str, bytes] = {}
+    for raw in sorted(set(done.stdout.split(b"\0")) - {b""}):
+        rel = raw.decode()
+        if rel in INSTALL_FILES:
+            continue
+        path = source / rel
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            raise Refused(EXIT_REFUSED, f"{rel} is tracked but missing from {source}; refusing an incomplete "
+                                        "skill (restore it, or commit its removal)") from None
+        except OSError as exc:  # e.g. a folder above it that cannot be read
+            raise Refused(EXIT_REFUSED, f"{rel} in {source} cannot be read ({type(exc).__name__}); refusing "
+                                        "rather than copying an incomplete skill") from None
+        if not stat.S_ISREG(mode):
+            raise Refused(EXIT_USAGE, f"{rel} in {source} is not a regular file; "
+                                      "the installed copy holds regular files only")
+        try:
+            files[rel] = path.read_bytes()
+        except OSError as exc:
+            raise Refused(EXIT_REFUSED, f"{rel} in {source} cannot be read ({type(exc).__name__})") from None
     return files
 
 
@@ -282,7 +319,7 @@ def install() -> int:
 
 def _install(skills: Path, cache: Path) -> int:
     checkout, source = _source()
-    files = payload(source)
+    files = tracked_payload(source)
     entry = skills / NAME
     state = _ours(entry, source, files)
     _clear_leftovers(cache)  # an earlier install stopped between moves
