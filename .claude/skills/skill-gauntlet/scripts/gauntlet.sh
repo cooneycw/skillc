@@ -16,6 +16,9 @@ set -u
 # honoured, so a caller's PYTHONPATH could import another skillc for the check
 # or the run (or the engine's round subprocesses, which inherit it). Drop it.
 unset PYTHONPATH
+# Never write inside the checkout (#774, Kyle containers): it may be a pinned,
+# READ-ONLY checkout. No bytecode caches; the engine writes only the collection.
+export PYTHONDONTWRITEBYTECODE=1
 
 refuse() {
     echo "SKILL_GAUNTLET: cannot find a usable skillc ($1)" >&2

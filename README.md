@@ -323,10 +323,15 @@ make uninstall-skill   # removes that copy, and only a copy skillc marked as its
   files the repository never has: `.skillc-checkout` (the main checkout, written
   `~/...` under your home so no account name is in it) and `.skillc-install`
   (a marker: kind, schema, digest; no paths).
-- **Kyle containers:** Kyle stages this copy into its session image and provides
-  a skillc checkout and its environment there; it sets `SKILLC_CHECKOUT` to that
-  checkout's absolute path, which the skill reads before its locator. The Kyle
-  side (where the checkout is mounted) is Kyle's, set up by kyle-cli-helper.
+- **Kyle containers** (private containers only): Kyle stages this copy into its
+  session image, with a pinned, READ-ONLY skillc checkout at
+  `/opt/kyle/session-tooling/skillc` and its own runtime outside it. It sets
+  `SKILLC_CHECKOUT` to the checkout (read before the locator) and
+  `UV_PROJECT_ENVIRONMENT` to the runtime's absolute path. That runtime must
+  import the checkout's own `skillc/` (an editable or path install); a
+  non-editable wheel is refused by design (#765). The skill never writes inside
+  the checkout (`PYTHONDONTWRITEBYTECODE=1`); the gauntlet writes only into the
+  collection it reviews. The Kyle side is owned by Kyle's master.
 - **Updating:** a `git pull` does NOT update the copy. Re-run
   `make install-skill`. The skill warns when its copy differs from the
   checkout's (`SKILL_GAUNTLET: warning: ...`) and still runs.

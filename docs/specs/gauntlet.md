@@ -153,11 +153,22 @@ and refuses symlinks (#774). The copy carries a locator, `.skillc-checkout`
 (kind, schema, digest).
 
 **Kyle containers** (owner, 2026-11-16: "make it work in Kyle containers"):
-Kyle stages the copy into its session image. There the host locator may not
-resolve, so the launcher reads `SKILLC_CHECKOUT` FIRST: an absolute path to a
-skillc checkout that Kyle provides with its environment. A relative path, a
-missing directory, or one that fails #765's exact-module check reads
-cannot-find (exit 2, no verdict). The Kyle side is owned by kyle-cli-helper. The skill calls its own launcher, `scripts/gauntlet.sh`,
+Kyle stages the copy into its session image, in private containers only. The
+contract:
+
+- **The checkout:** pinned and READ-ONLY at `/opt/kyle/session-tooling/skillc`,
+  named by `SKILLC_CHECKOUT`. The launcher reads it FIRST, before the locator
+  (which may not resolve in a container). It must be an absolute path to a
+  directory holding a skillc checkout; anything else reads cannot-find (exit 2,
+  no verdict).
+- **The runtime:** outside the checkout, named by an absolute
+  `UV_PROJECT_ENVIRONMENT`. It must import the CHECKOUT's own
+  `skillc/gauntlet.py` and `skillc/cli.py` (an editable or path install): #765's
+  exact-module check refuses a non-editable wheel, by design.
+- **No writes in the checkout:** the launcher sets `PYTHONDONTWRITEBYTECODE=1`,
+  and the engine writes only into the collection it reviews (the record beside
+  the charter, the draft dir under the collection's `.skillc/`).
+- **The Kyle side** (staging the checkout and runtime) is owned by Kyle's master. The skill calls its own launcher, `scripts/gauntlet.sh`,
 which finds skillc through the locator when there is one, and otherwise
 through its own real path (the repository's copy). It then checks that the checkout's environment (`.venv`, or
 `UV_PROJECT_ENVIRONMENT` resolved against the checkout, as uv resolves it)

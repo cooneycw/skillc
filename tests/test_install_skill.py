@@ -768,3 +768,69 @@ def test_skillc_checkout_that_is_not_usable_gives_cannot_find(tmp_path: Path, va
     done = _launch(launcher, tmp_path, {"SKILLC_CHECKOUT": given})
     assert done.returncode == 2 and "SKILL_GAUNTLET: cannot find a usable skillc" in done.stderr, (why, done.stderr)
     assert "ROUND" not in done.stdout + done.stderr
+
+
+# ------------------ #774: the Kyle container contract (orchestrator rev 65)
+# Kyle stages a PINNED, READ-ONLY checkout at /opt/kyle/session-tooling/skillc
+# with its OWN runtime outside it, and sets SKILLC_CHECKOUT and an absolute
+# UV_PROJECT_ENVIRONMENT. Nothing may write inside the checkout.
+
+def _external_env(env_dir: Path, import_root: Path) -> Path:
+    """An environment OUTSIDE the checkout whose python imports `import_root`'s
+    skillc: what an editable (path) install of the checkout amounts to."""
+    import sys
+
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").write_text(f'#!/bin/sh\nPYTHONPATH={str(import_root)!r} exec {sys.executable!r} "$@"\n')
+    (env_dir / "bin" / "python").chmod(0o755)
+    return env_dir
+
+
+def _tree_state(root: Path) -> list[tuple[str, str]]:
+    import hashlib
+
+    return sorted((p.relative_to(root).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else "d")
+                  for p in root.rglob("*"))
+
+
+def _container_run(tmp_path: Path, read_only: bool) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    ck = _checkout_copy(tmp_path)  # no .venv inside: the runtime is external
+    env = _external_env(tmp_path / "frozen-runtime", ck)
+    copy = tmp_path / "skills" / NAME  # the skill as Kyle staged it, with no locator
+    shutil.copytree(ck / ".claude" / "skills" / NAME, copy)
+    coll = _collection(tmp_path)
+    if read_only:
+        subprocess.run(["chmod", "-R", "a-w", str(ck)], check=True)
+    done = subprocess.run(["bash", str(copy / "scripts" / "gauntlet.sh"), str(coll), "skills/alpha", "--offline",
+                           "--issue-states", str(coll / "issue-states.json"), "--repo", "example/gauntlet"],
+                          capture_output=True, text=True, check=False, cwd=tmp_path,
+                          env={**{k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE",)},
+                               "HOME": str(tmp_path), "SKILLC_CHECKOUT": str(ck), "UV_PROJECT_ENVIRONMENT": str(env)})
+    return done, ck, coll
+
+
+def test_a_read_only_checkout_with_an_external_runtime_runs(tmp_path: Path) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root writes through a read-only mode")
+    ck = None
+    try:
+        done, ck, coll = _container_run(tmp_path, read_only=True)
+        assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+        assert (coll / "skills" / "alpha" / "GAUNTLET.json").is_file(), "the engine writes into the COLLECTION"
+    finally:
+        if ck is not None:
+            subprocess.run(["chmod", "-R", "u+w", str(ck)], check=False)
+
+
+def test_the_launcher_never_writes_inside_the_checkout(tmp_path: Path) -> None:
+    """With a WRITABLE checkout, a run must still leave it byte-identical: no
+    __pycache__, no .venv, no record (PYTHONDONTWRITEBYTECODE; the engine writes
+    the collection only)."""
+    ck = _checkout_copy(tmp_path / "pre")
+    before = _tree_state(ck)
+    shutil.rmtree(tmp_path / "pre")
+    done, ck, coll = _container_run(tmp_path, read_only=False)
+    assert done.returncode == 3, done.stdout + done.stderr
+    after = _tree_state(ck)
+    assert after == before, sorted(set(after) ^ set(before))[:5]
+    assert (coll / "skills" / "alpha" / "GAUNTLET.json").is_file()
