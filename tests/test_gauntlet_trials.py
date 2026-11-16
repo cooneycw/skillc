@@ -749,3 +749,25 @@ def test_a_git_directory_inside_the_fixture_is_part_of_the_task(tmp_path: Path) 
     (path.parent / "tasks/a1/fixture/.git").mkdir()
     (path.parent / "tasks/a1/fixture/.git/HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     assert _a1_identity(path) != before
+
+
+def test_many_files_beside_the_agent_inputs_never_exhaust_the_entry_budget(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review pass 2: excluded neighbours are not counted."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    monkeypatch.setattr(source_digest, "MAX_ENTRIES", 3)
+    for n in range(5):
+        (path.parent / f"tasks/a1/note{n}.txt").write_text("n", encoding="utf-8")
+    assert _a1_identity(path) == before
+
+
+def test_too_many_entries_inside_the_fixture_are_still_refused(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review pass 2 twin."""
+    path = _copy(tmp_path)
+    monkeypatch.setattr(source_digest, "MAX_ENTRIES", 3)
+    for n in range(5):
+        (path.parent / f"tasks/a1/fixture/f{n}.txt").write_text("n", encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="not read"):
+        _a1_identity(path)

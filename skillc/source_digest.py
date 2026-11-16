@@ -94,8 +94,8 @@ def tree_entries(root: Path, only: Collection[str] | None = None) -> dict[str, s
     following any symlink, under the entry, depth and byte budgets above.
 
     `only` names the root's children to read (#756): the others are never
-    stat'ed, opened or counted against the byte budget, so a file beside them
-    cannot make the tree unreadable. Omitted, every child is read."""
+    stat'ed, opened, or counted against the entry or byte budget, so a file
+    beside them cannot make the tree unreadable. Omitted, every child is read."""
     entries: dict[str, str] = {}
     listed = [0]
     budget = [0]
@@ -107,6 +107,8 @@ def tree_entries(root: Path, only: Collection[str] | None = None) -> dict[str, s
         try:
             with os.scandir(directory) as listing:
                 for child in listing:
+                    if not rel and only is not None and child.name not in only:
+                        continue  # never counted: only the named children are the population (#756 review)
                     listed[0] += 1
                     if listed[0] > MAX_ENTRIES:
                         raise SourceUnreadable(f"more than {MAX_ENTRIES} directory entries")
