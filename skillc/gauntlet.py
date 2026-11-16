@@ -49,6 +49,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# #783, orchestrator ruling rev 51: the ONLY names the engine takes from a round
+# module - pure, read-only parsers. tests/test_gauntlet.py pins this list.
+from .contracts import expand, load
+
 EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_STOPPED = 3
@@ -105,6 +109,11 @@ class Result:
     inputs: dict[str, str] = field(default_factory=dict)
     cached: bool = False
     lines: list[str] = field(default_factory=list)  # shown, never recorded
+    #: #783: the stop's reason code and the facts the plain report's Found
+    #: line names. Shown, never recorded and never part of the cache key; kept
+    #: beside `lines` in the host-local display cache so a cached round reports too.
+    reason: str = ""
+    facts: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -118,6 +127,7 @@ class Options:
     include: list[str] = field(default_factory=list)  # round 2's inspect subject surface, passed through
     exclude: list[str] = field(default_factory=list)
     maps: list[str] = field(default_factory=list)
+    output: str = "both"  # #783: "both" (plain report, then the machine lines), "plain" or "machine"
 
 
 def _sha(data: bytes) -> str:
@@ -313,20 +323,65 @@ def _usage_inputs(logs: list[Path]) -> dict[str, str]:
 
 # --------------------------------------------------------------------- rounds
 
+def _inside_collection(root: Path, rel: str) -> bool:
+    """A test path backs a promise only as `contracts` reads it: relative, no
+    `..`, inside the collection, and present."""
+    path = Path(rel)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    try:
+        return (root / path).resolve().is_relative_to(root.resolve()) and (root / path).exists()
+    except (OSError, ValueError, RuntimeError):  # RuntimeError: a symlink loop (Python 3.12) backs nothing
+        return False
+
+
+def _charter_facts(charter: Path, root: Path) -> dict[str, object]:
+    """Counts the plain report names (#783): the charter's promises, and how
+    many name a test that exists. A structural read of a file - `contracts.load`
+    and `expand` are pure parsers (orchestrator ruling rev 51) - never a round."""
+    if not charter.is_file():
+        return {}
+    contract = load(charter)
+    if contract.parse_error is not None:
+        return {"parse_error": True}
+    raw_inv, raw_intent = contract.data.get("invariants"), contract.data.get("intent")
+    invariants: dict[str, object] = raw_inv if isinstance(raw_inv, dict) else {}
+    out: dict[str, object] = {"intent_approved": isinstance(raw_intent, dict) and bool(raw_intent.get("approved"))}
+    for kind in ("never", "always"):
+        listed = invariants.get(kind)
+        clauses = [c for c in listed if isinstance(c, dict)] if isinstance(listed, list) else []
+        tested = 0
+        for clause in clauses:
+            # `test` is a path or a LIST of paths (#720), each with one level of {a,b}
+            declared = clause.get("test")
+            tests = declared if isinstance(declared, list) else [declared] if declared else []
+            paths: list[str] = []
+            unreadable = not tests
+            for test in tests:
+                expanded, why = expand(str(test))
+                unreadable |= why is not None  # a declaration `contracts` refuses backs nothing
+                paths += expanded
+            tested += not unreadable and bool(paths) and all(_inside_collection(root, p) for p in paths)
+        out[kind] = {"count": len(clauses), "tested": tested}
+    return out
+
+
+
 def round0(skill: Skill, logs: list[Path]) -> Result:
     inputs = _usage_inputs(logs)
     if not logs:
         return Result("0", "usage", "UNKNOWN", "no usage log found - not a pass; round 1 reads usage as UNKNOWN",
-                      proceed=True, inputs=inputs)
+                      proceed=True, inputs=inputs, reason="no-log")
     unreadable = sum(digest == "unreadable" for digest in inputs.values())
     for log in logs:
         if _skillc(["usage", "report", str(log)], skill.collection).returncode != 0:
             unreadable += 1
     if unreadable:
         return Result("0", "usage", "UNKNOWN", f"{unreadable} of {len(logs)} usage log(s) could not be read - "
-                      "not a pass", proceed=True, inputs=inputs)
+                      "not a pass", proceed=True, inputs=inputs, reason="log-unreadable",
+                      facts={"logs": len(logs), "unreadable": unreadable})
     return Result("0", "usage", "OBSERVED", f"{len(logs)} usage log(s) read by `skillc usage report`; counts "
-                  "stay in the logs", proceed=True, inputs=inputs)
+                  "stay in the logs", proceed=True, inputs=inputs, facts={"logs": len(logs)})
 
 
 def _round1_inputs(skill: Skill, logs: list[Path], tool: bool, options: Options) -> dict[str, str]:
@@ -344,7 +399,7 @@ def round1(skill: Skill, logs: list[Path], options: Options, draft: Path, tool: 
         return _round1_contracts(skill, inputs)
     if not tool:
         return Result("1", "charter", "NOT BUILT", "no CHARTER.md, and this skillc has no `charter draft` (#726)",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs, reason="no-charter-tool")
     if draft.exists() and not draft.is_symlink() and not draft.is_file():
         raise UnsafeRecord(f"{draft.name} is not a regular file - refusing to draft over it")
     draft.unlink(missing_ok=True)  # the engine's own previous draft (a link is removed, never followed);
@@ -359,12 +414,12 @@ def round1(skill: Skill, logs: list[Path], options: Options, draft: Path, tool: 
     done = _skillc(args, skill.collection)
     if done.returncode == 0 and draft.is_file():
         return Result("1", "charter", "STOP", "no CHARTER.md - draft ready for owner confirmation",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs, reason="no-charter-draft", facts=_charter_facts(draft, skill.collection))
     if done.returncode == 3:
         return Result("1", "charter", "UNKNOWN", "no CHARTER.md, and `charter draft` found nothing to draft from",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs, reason="draft-empty")
     return Result("1", "charter", "UNKNOWN", f"no CHARTER.md, and `charter draft` refused (exit {done.returncode})",
-                  proceed=False, inputs=inputs)
+                  proceed=False, inputs=inputs, reason="draft-refused", facts={"exit": done.returncode})
 
 
 def _round1_contracts(skill: Skill, inputs: dict[str, str]) -> Result:
@@ -372,21 +427,26 @@ def _round1_contracts(skill: Skill, inputs: dict[str, str]) -> Result:
     ours = [m for m in _CONTRACT_LINE.finditer(done.stdout) if m.group("path") == skill.charter_rel]
     if not ours:
         return Result("1", "charter", "UNKNOWN", f"`skillc contracts` printed no CONTRACT line for "
-                      f"{skill.charter_rel} (exit {done.returncode})", proceed=False, inputs=inputs)
+                      f"{skill.charter_rel} (exit {done.returncode})", proceed=False, inputs=inputs,
+                      reason="no-contract-line")
     findings = [m for m in _FINDING_LINE.finditer(done.stdout) if m.group("path") == skill.charter_rel]
     errors = sorted({m.group("rule") for m in findings if m.group("severity") == "error"})
     if ours[0].group("state") == "BAD":
+        per_rule = {r: sum(m.group("rule") == r and m.group("severity") == "error" for m in findings) for r in errors}
         return Result("1", "charter", "FAIL", f"contract BAD: {', '.join(errors) or 'error findings'}",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs,
+                      reason="contract-bad:" + (errors[0] if len(errors) == 1 else "several"),
+                      facts={"rules": per_rule, **_charter_facts(skill.charter, skill.collection)})
     if _CROSS_NOT_RUN in done.stdout:
         return Result("1", "charter", "UNKNOWN", "`skillc contracts` says its hand-off rules did NOT run (a "
                       "contract in the collection failed contract-shape), so this contract's hand-offs are unchecked",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs, reason="cross-not-run")
     if any(m.group("rule") == "approval-present" for m in findings):
         return Result("1", "charter", "STOP", "the charter has an intent or authority clause the owner has not "
-                      "approved (approval-present)", proceed=False, inputs=inputs)
+                      "approved (approval-present)", proceed=False, inputs=inputs, reason="unapproved",
+                      facts=_charter_facts(skill.charter, skill.collection))
     return Result("1", "charter", "PASS", f"contract {ours[0].group('name')} GOOD and owner-approved",
-                  proceed=True, inputs=inputs)
+                  proceed=True, inputs=inputs, facts=_charter_facts(skill.charter, skill.collection))
 
 
 def _overlap_inputs(skill: Skill, tool: bool) -> dict[str, str]:
@@ -398,7 +458,7 @@ def round1_overlap(skill: Skill, tool: bool) -> Result:
     inputs = _overlap_inputs(skill, tool)
     if not tool:
         return Result("1-overlap", "overlap", "NOT BUILT", "this skillc has no `charter overlap` (#726 part B) - "
-                      "not a pass", proceed=True, inputs=inputs)
+                      "not a pass", proceed=True, inputs=inputs, reason="not-built")
     done = _skillc(["charter", "overlap", str(skill.collection)], skill.collection)
     if done.returncode == 0:
         return Result("1-overlap", "overlap", "EXAMINED", "overlaps are proposals for the owner, never findings "
@@ -406,9 +466,9 @@ def round1_overlap(skill: Skill, tool: bool) -> Result:
                       lines=[f"  {line}" for line in done.stdout.splitlines() if line.strip()][:20])
     if done.returncode == 3:
         return Result("1-overlap", "overlap", "NOT EXAMINED", "no comparator - the collection was not compared, "
-                      "which is not a pass", proceed=True, inputs=inputs)
+                      "which is not a pass", proceed=True, inputs=inputs, reason="no-comparator")
     return Result("1-overlap", "overlap", "UNKNOWN", f"`charter overlap` refused (exit {done.returncode}) - not a "
-                  "pass", proceed=True, inputs=inputs)
+                  "pass", proceed=True, inputs=inputs, reason="refused")
 
 
 def _round2_args(skill: Skill, options: Options) -> list[str]:
@@ -458,13 +518,13 @@ def round2(skill: Skill, options: Options) -> Result:
     if not member:
         why = "an --exclude drops this skill" if member is False else "inspect could not say whether it is a subject"
         return Result("2", "inspect", "UNKNOWN", f"{why}, so it was not shown inspected", proceed=False,
-                      inputs=inputs)
+                      inputs=inputs, reason="excluded" if member is False else "membership-unknown")
     done = _skillc(_round2_args(skill, options), skill.collection)
     try:
         report = json.loads(done.stdout)
     except json.JSONDecodeError:
         return Result("2", "inspect", "UNKNOWN", f"`skillc inspect` printed no report (exit {done.returncode})",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs, reason="no-report")
     return read_round2(skill, report, inputs)
 
 
@@ -473,7 +533,7 @@ def read_round2(skill: Skill, report: dict, inputs: dict[str, str]) -> Result:
     engine and round 5 (#737, `gauntlet verdict --inspect`) both use it."""
     if report.get("verdict") == "NOTHING-INSPECTED":
         return Result("2", "inspect", "UNKNOWN", "nothing inspected - not a clean result", proceed=False,
-                      inputs=inputs)
+                      inputs=inputs, reason="nothing-inspected")
     rules = report.get("rules", {})
     unexamined = sorted(r for r, v in rules.items() if not v.get("examined", False))
     own = [f for f in report.get("findings", []) if f.get("path") == skill.text_rel]
@@ -494,25 +554,35 @@ def read_round2(skill: Skill, report: dict, inputs: dict[str, str]) -> Result:
     counted = (", ".join(f"{b}={n}" for b, n in buckets.items()) + "; rule statements "
                + ", ".join(f"{b}={n}" for b, n in rule_buckets.items() if n) if own_rules else
                ", ".join(f"{b}={n}" for b, n in buckets.items()))
+    facts: dict[str, object] = {
+        "file": skill.text_rel, "buckets": buckets, "rule_statements": len(own_rules),
+        "errors": [{"line": e.get("line"), "detail": str(e.get("detail") or "")} for e in errors],
+        "unknown": [{"line": u.get("line"), "detail": str(u.get("detail") or "")} for u in own_unknown],
+        "unexamined": unexamined,
+        "removable": [{"line": f.get("line"), "detail": str(f.get("detail") or "")} for f in own
+                      if f.get("bucket") == "D"],
+        # every OTHER finding is the owner's to decide; the report names them (counter-model review)
+        "to_decide": [{"line": f.get("line"), "detail": str(f.get("detail") or "")} for f in own
+                      if f.get("bucket") != "D" and f not in errors]}
     if errors:
         return Result("2", "inspect", "FAIL", f"{len(errors)} error finding(s) on {skill.text_rel} ({counted})",
-                      proceed=False, inputs=inputs, lines=lines)
+                      proceed=False, inputs=inputs, lines=lines, reason="errors", facts=facts)
     if own_unknown or unexamined:
         why = (f"{len(own_unknown)} UNKNOWN on this skill" if own_unknown else
                f"rule(s) not examined: {', '.join(unexamined)}")
         return Result("2", "inspect", "UNKNOWN", f"{why} - not a pass ({counted})", proceed=False, inputs=inputs,
-                      lines=lines)
+                      lines=lines, reason="unknown-on-skill" if own_unknown else "unexamined-rule", facts=facts)
     return Result("2", "inspect", "PASS", f"{len(own)} finding(s) on this skill, sorted {counted}; nothing is "
-                  "trimmed by this run", proceed=True, inputs=inputs, lines=lines)
+                  "trimmed by this run", proceed=True, inputs=inputs, lines=lines, facts=facts)
 
 
 def round3(tool: bool) -> Result:
     inputs = {"tool:round3": "available" if tool else "absent"}
     if tool:
         return Result("3", "trials", "NOT RUN", "round 3 exists but part 1 never runs paid trials (#738)",
-                      proceed=False, inputs=inputs)
+                      proceed=False, inputs=inputs, reason="not-run")
     return Result("3", "trials", "NOT BUILT", "rounds 3-5 are not built (#736, #737)", proceed=False,
-                  inputs=inputs)
+                  inputs=inputs, reason="not-built")
 
 
 # --------------------------------------------------------------------- record
@@ -668,6 +738,10 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
             lines = shown.get("lines")
             if shown.get("inputs") == dict(sorted(inputs.items())) and isinstance(lines, list):
                 hit.lines = [str(line) for line in lines]
+                # #783: what the plain report says, from the same host-local cache
+                hit.reason = str(shown.get("reason") or "")
+                facts = shown.get("facts")
+                hit.facts = {str(k): v for k, v in facts.items()} if isinstance(facts, dict) else {}
             elif hit.verdict in ("PASS", "FAIL", "UNKNOWN") and key == "2":
                 hit.lines = [("  (cached: the finding lines are not on this host; change an input or delete the "
                               "record to list them)")]
@@ -690,6 +764,11 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
          lambda: round3(tools["round3"])),
     ]
 
+    # #783: the machine lines are collected, then printed AFTER the plain
+    # report (or alone, or not at all), byte-identical to what they were.
+    machine: list[str] = []
+    final_out = out
+    out = machine.append
     out(f"GAUNTLET {skill.rel} (collection {skill.collection.name})")
     results: list[Result] = []
     stopped: Result | None = None
@@ -697,6 +776,9 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
         try:
             result = step(key, inputs(), fresh)
         except UnsafeRecord as exc:
+            if options.output != "plain":  # what was printed before #783 is still printed, unless suppressed
+                for line in machine:
+                    final_out(line)
             print(f"skillc: {exc}", file=sys.stderr)
             return EXIT_USAGE
         results.append(result)
@@ -710,14 +792,30 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
     try:
         written = write_record(record, render_record(skill, results, previous))
         if display_path is not None:
-            _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines}
+            _save_display(display_path, {r.round: {"inputs": dict(sorted(r.inputs.items())), "lines": r.lines,
+                                                   "reason": r.reason, "facts": r.facts}
                                          for r in results if not r.cached or r.round in display})
     except UnsafeRecord as exc:
+        if options.output != "plain":
+            for line in machine:
+                final_out(line)
         print(f"skillc: {exc}", file=sys.stderr)
         return EXIT_USAGE
     out(f"RECORD: {record.relative_to(skill.collection) if record.is_relative_to(skill.collection) else record}"
         f" ({'written' if written else 'unchanged'}; the engine never commits it)")
     out(_next_line(skill, stopped, draft))
     out(f"GAUNTLET: stopped at round {stopped.round} ({stopped.verdict}) - {NOT_A_VERDICT}")
+    if options.output in ("both", "plain"):
+        from .gauntlet_report import render  # the plain report's wording lives in one module
+
+        for line in render(skill, results, stopped, draft=draft, charter_create=available(
+                ["charter", "create"], skill.collection), machine_follows=options.output == "both",
+                next_step=_next_line(skill, stopped, draft)).splitlines():
+            final_out(line)
+        if options.output == "both":
+            final_out("")
+    if options.output in ("both", "machine"):
+        for line in machine:
+            final_out(line)
     return EXIT_FAILED if stopped.verdict == "FAIL" else EXIT_STOPPED
 

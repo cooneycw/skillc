@@ -1,0 +1,17 @@
+skill-gauntlet: skills/alpha
+Where it stands: its charter waits on your approval, so the gauntlet stopped at round 1.
+
+Round 0: observed
+  Checked: whether usage logs show this skill being used
+  Found:   1 usage log read
+  Means:   usage is recorded; the counts stay in the logs
+  Do next: nothing for this round
+
+Round 1: stop
+  Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
+  Found:   the charter skills/alpha/CHARTER.md makes no 'never' or 'always' promises yet, but you have not approved its purpose or authority
+  Means:   the gauntlet judges a skill only against a purpose you approved
+  Do next: run `/charter-create <COLL> skills/alpha`: it composes the charter with you and gives every promise a test. Or read the purpose in skills/alpha/CHARTER.md; if it says what you intend, add `approved: <date>` under it (or run `skillc charter confirm`).
+
+No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
+

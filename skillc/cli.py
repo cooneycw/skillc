@@ -2829,7 +2829,8 @@ def cmd_gauntlet_run(args: argparse.Namespace) -> int:
         usage=[Path(p) for p in args.usage or []], aliases=list(args.alias or []), offline=args.offline,
         issue_states=Path(args.issue_states) if args.issue_states else None, repo=args.repo,
         draft_dir=Path(args.draft_dir) if args.draft_dir else None, include=list(args.include or []),
-        exclude=list(args.exclude or []), maps=list(args.map or []))
+        exclude=list(args.exclude or []), maps=list(args.map or []),
+        output="plain" if args.plain_only else "machine" if args.machine_only else "both")
     return gauntlet.run(Path(args.path), args.skill, options)
 
 
@@ -3830,6 +3831,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_gauntlet_run.add_argument("--draft-dir", metavar="DIR",
                                 help="where the draft and record go before a CHARTER.md exists "
                                      "(default: <main checkout>/.skillc/gauntlet/)")
+    shown = p_gauntlet_run.add_mutually_exclusive_group()
+    shown.add_argument("--plain-only", action="store_true",
+                       help="print only the plain-English report (#783), not the machine lines")
+    shown.add_argument("--machine-only", action="store_true",
+                       help="print only the machine lines (ROUND/RECORD/NEXT/GAUNTLET), as before #783")
     p_gauntlet_run.set_defaults(func=cmd_gauntlet_run)
     for name, about in (("round3", "baseline: clause tests, intact vs a named damaged copy; UNKNOWN unless they separate"),
                         ("round4", "challenge: leaner variants on held-out tasks; keep unless one is no worse on every clause")):

@@ -301,17 +301,31 @@ def test_the_engine_never_stages_or_commits_the_record(coll: Path) -> None:
 
 # --------------------------------------------------------- orchestration only
 
+#: The ONLY names the engine may take from a round module (#783, orchestrator
+#: ruling rev 51): pure, read-only parsers, imported BY NAME. A deliberate,
+#: bounded narrowing of this instrument; every other import of a round module
+#: is still refused, and the controls below show it.
+ALLOWED_ROUND_NAMES = {"contracts": {"load", "expand"}, "charter": {"skill_names"}}
+
+
 def _round_imports(source: str) -> set[str]:
+    """Round-module imports the engine may not make: any `import` of one, any
+    `from` import naming one as a module, or any name from one outside
+    ALLOWED_ROUND_NAMES."""
     found: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
-            names = [a.name for a in node.names]
+            found |= {part for a in node.names for part in a.name.split(".") if part in ROUND_MODULES}
         elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            names = [f"{base}.{a.name}" if base else a.name for a in node.names] + [base]
-        else:
-            continue
-        found |= {part for name in names for part in name.split(".") if part in ROUND_MODULES}
+            parts = (node.module or "").split(".")
+            module = parts[-1] if parts[-1] in ROUND_MODULES else None
+            found |= {p for p in parts[:-1] if p in ROUND_MODULES}
+            for a in node.names:
+                if module is not None:
+                    if a.name not in ALLOWED_ROUND_NAMES.get(module, set()):
+                        found.add(f"{module}.{a.name}")
+                elif a.name in ROUND_MODULES:
+                    found.add(a.name)  # `from skillc import contracts`: the whole module
     return found
 
 
@@ -321,7 +335,20 @@ def test_the_engine_imports_no_round_module() -> None:
 
 def test_the_import_check_finds_a_round_import() -> None:
     bad = "from skillc import inspect\nfrom . import contracts\nimport skillc.usage\nfrom .charter import x\n"
-    assert _round_imports(bad) == {"inspect", "contracts", "usage", "charter"}
+    assert _round_imports(bad) == {"inspect", "contracts", "usage", "charter.x"}
+
+
+def test_the_import_check_permits_only_the_three_parsers_by_name() -> None:
+    """The allowed names pass; `import skillc.contracts`, a fourth contracts
+    symbol, and any import of usage, inspect or charter_confirm do not."""
+    ok = "from .contracts import load, expand\nfrom .charter import skill_names\nfrom skillc.contracts import load\n"
+    assert _round_imports(ok) == set()
+    assert _round_imports("import skillc.contracts\n") == {"contracts"}
+    assert _round_imports("from .contracts import load, load_collection\n") == {"contracts.load_collection"}
+    assert _round_imports("from .charter import skill_names, draft\n") == {"charter.draft"}
+    assert _round_imports("from .usage import read\nfrom .inspect import paragraph\n"
+                          "from .charter_confirm import confirm\n") == {"usage.read", "inspect.paragraph",
+                                                                         "charter_confirm.confirm"}
 
 
 def _copied_passages(tmp_path: Path, skill_text: str) -> list[dict[str, Any]]:
