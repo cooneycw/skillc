@@ -5,7 +5,7 @@ ROUND 1-overlap overlap: NOT EXAMINED - no comparator - the collection was not c
 ROUND 2 inspect: PASS - 1 finding(s) on this skill, sorted A=0, B=0, C=0, D=1, UNSORTED=0; rule statements UNSORTED=1; nothing is trimmed by this run
   D skills/alpha/SKILL.md:7 expired-marker - 'until #12' waits on example/gauntlet#12, which is closed
   rule UNSORTED skills/alpha/SKILL.md:5 - no enforcer named; B needs recurrence evidence and C needs the owner
-ROUND 3 trials: NOT BUILT - rounds 3-5 are not built (#736, #737)
+ROUND 3 trials: NOT RUN - round 3 exists but part 1 never runs paid trials (#738)
 RECORD: skills/alpha/GAUNTLET.json (written; the engine never commits it)
 NEXT: act on round 2's findings by hand; rounds 3-5 (#736, #737) give the keep/trim/retire verdict once built (#738)
-GAUNTLET: stopped at round 3 (NOT BUILT) - no trials ran; this is not a keep/trim/retire verdict
+GAUNTLET: stopped at round 3 (NOT RUN) - no trials ran; this is not a keep/trim/retire verdict

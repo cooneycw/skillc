@@ -1,5 +1,5 @@
 skill-gauntlet: skills/alpha
-Where it stands: rounds 0-2 are done; a keep/trim/retire verdict waits on the trial rounds, which are not built yet.
+Where it stands: rounds 0-2 are done; a keep/trim/retire verdict waits on trials you have not run.
 
 Round 0: observed
   Checked: whether usage logs show this skill being used
@@ -25,11 +25,11 @@ Round 2: pass
   Means:   nothing in the text is broken; removable rules and findings are yours to decide, never changed for you
   Do next: remove line 7 of skills/alpha/SKILL.md by hand if you agree
 
-Round 3: not built
+Round 3: not run
   Checked: trial runs that measure whether each part of the skill changes results
-  Found:   the trial rounds are not built in this skillc
-  Means:   a keep/trim/retire verdict needs rounds 3-5 (skillc #736, #737); none can be given yet
-  Do next: nothing more until the trial rounds land (skillc #736); meanwhile round 2's removable rules in skills/alpha/SKILL.md are yours to act on by hand
+  Found:   round 3 exists, but this run never pays for trials
+  Means:   no keep/trim/retire verdict yet
+  Do next: run the trials deliberately with `skillc gauntlet round3 --help` when you choose to
 
 No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
 
