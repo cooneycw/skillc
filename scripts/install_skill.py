@@ -65,15 +65,8 @@ from pathlib import Path
 NAME = "skill-gauntlet"
 SKILLS_ENV = "SKILLC_SKILLS_DIR"
 LOCATOR, MARKER = ".skillc-checkout", ".skillc-install"
-#: Kyle's deploy-staging opt-out (owner, 2026-11-15: this host-only skill stays
-#: out of Kyle's containers). The name is Kyle's convention, kyle#2518: its
-#: stage_operator_skills skips, and logs, a skill directory holding this file.
-#: ONE constant. It must start with "." (the launcher's drift check skips the
-#: copy's top-level dotfiles).
-KYLE_EXCLUDE = ".kyle-exclude"
-KYLE_EXCLUDE_TEXT = "host-only: written by skillc make install-skill (skillc#774); Kyle skips it (kyle#2518)\n"
 #: Files the installer writes into the copy; never part of the skill's payload.
-INSTALL_FILES = (LOCATOR, MARKER, KYLE_EXCLUDE)
+INSTALL_FILES = (LOCATOR, MARKER)
 MARKER_KIND, MARKER_SCHEMA = "skillc-skill-install", "1"
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
 LOCK_WAIT_ENV, LOCK_WAIT = "SKILLC_INSTALL_LOCK_WAIT", 30.0
@@ -256,7 +249,6 @@ def _build(cache: Path, source: Path, files: dict[str, bytes], checkout: Path) -
         os.chmod(build / rel, (source / rel).stat().st_mode & 0o777)  # the launcher stays executable
     (build / LOCATOR).write_text(locator_text(checkout))
     (build / MARKER).write_text(f"kind {MARKER_KIND}\nschema {MARKER_SCHEMA}\ndigest {digest(files)}\n")
-    (build / KYLE_EXCLUDE).write_text(KYLE_EXCLUDE_TEXT)
     return build
 
 
@@ -300,7 +292,6 @@ def _install(skills: Path, cache: Path) -> int:
             located = (entry / LOCATOR).read_text()
         except OSError:
             located = ""
-        excluded = (entry / KYLE_EXCLUDE).is_file()
         # skillc's OWN copy (its marker) is REPAIRED whatever state its files
         # are in: a copy this installer cannot even compare (a link, a FIFO, an
         # unreadable directory inside it) needs a refresh, never a refusal -
@@ -310,7 +301,7 @@ def _install(skills: Path, cache: Path) -> int:
             intact = payload(entry) == files and exec_bits(entry, files) == exec_bits(source, files)
         except (Refused, OSError):
             intact = False
-        if current.get("digest") == digest(files) and located == locator_text(checkout) and excluded and intact:
+        if current.get("digest") == digest(files) and located == locator_text(checkout) and intact:
             return _say(EXIT_OK, f"already installed: {entry} is a current copy of {source}")
     skills.mkdir(parents=True, exist_ok=True)
     _same_device(cache, skills)

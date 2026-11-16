@@ -143,10 +143,15 @@ in digest order. The log stays local (#718 decision 2).
 `.claude/skills/skill-gauntlet` to `~/.claude/skills/skill-gauntlet`
 (`scripts/install_skill.py`), never a link: Kyle's deploy stages that directory
 and refuses symlinks (#774). The copy carries a locator, `.skillc-checkout`
-(the main checkout, `~/`-relative under $HOME), a marker, `.skillc-install`
-(kind, schema, digest), and `.kyle-exclude`: its reader is Kyle's
-`stage_operator_skills` (kyle#2518), which skips and logs a skill directory
-holding it, so this host-only skill never reaches a Kyle container. The skill calls its own launcher, `scripts/gauntlet.sh`,
+(the main checkout, `~/`-relative under $HOME) and a marker, `.skillc-install`
+(kind, schema, digest).
+
+**Kyle containers** (owner, 2026-11-16: "make it work in Kyle containers"):
+Kyle stages the copy into its session image. There the host locator may not
+resolve, so the launcher reads `SKILLC_CHECKOUT` FIRST: an absolute path to a
+skillc checkout that Kyle provides with its environment. A relative path, a
+missing directory, or one that fails #765's exact-module check reads
+cannot-find (exit 2, no verdict). The Kyle side is owned by kyle-cli-helper. The skill calls its own launcher, `scripts/gauntlet.sh`,
 which finds skillc through the locator when there is one, and otherwise
 through its own real path (the repository's copy). It then checks that the checkout's environment (`.venv`, or
 `UV_PROJECT_ENVIRONMENT` resolved against the checkout, as uv resolves it)

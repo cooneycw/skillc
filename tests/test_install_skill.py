@@ -640,47 +640,7 @@ def test_a_cache_inside_what_kyle_reads_is_refused_before_anything_is_created(
     assert list(skills.iterdir()) == [] and not (home / ".claude" / "cache").exists()
 
 
-def test_the_installed_copy_carries_kyles_exclusion_marker(checkout: Path, tmp_path: Path) -> None:
-    """Owner, 2026-11-15: keep the host-only skill out of Kyle's deploy staging
-    and public build. The name is ONE constant, Kyle's convention."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("install_skill_kx", INSTALLER)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    skills = tmp_path / "skills"
-    assert _installer(checkout, skills, "install").returncode == 0
-    assert (skills / NAME / mod.KYLE_EXCLUDE).read_text() == mod.KYLE_EXCLUDE_TEXT
-    assert not (ROOT / ".claude" / "skills" / NAME / mod.KYLE_EXCLUDE).exists(), "never committed in the repo"
-    assert mod.KYLE_EXCLUDE.startswith("."), "the launcher's drift check skips top-level dotfiles only"
-    assert not [p for p in (ROOT / ".claude" / "skills" / NAME).iterdir() if p.name.startswith(".")], \
-        "the repository's skill has no top-level dotfile, so skipping them hides nothing of the skill"
-    (skills / NAME / mod.KYLE_EXCLUDE).unlink()
-    again = _installer(checkout, skills, "install")
-    assert again.returncode == 0 and "refreshed" in again.stdout and (skills / NAME / mod.KYLE_EXCLUDE).is_file()
-
-
 # ----------------------------------------------- #774: counter-model pass 2
-
-KYLE_CONVENTION = ".kyle-exclude"  # kyle#2518, written here INDEPENDENTLY of the installer's constant
-
-
-def _kyle_stages(skills: Path) -> list[str]:
-    """Kyle's stage_operator_skills as kyle#2518 states it: every directory
-    under skills/ is staged unless it holds the exclusion file."""
-    return sorted(e.name for e in skills.iterdir() if e.is_dir() and not (e / KYLE_CONVENTION).exists())
-
-
-def test_kyle_skips_the_installed_copy_by_its_own_convention(checkout: Path, tmp_path: Path) -> None:
-    """The consumer contract: Kyle's name, not the installer's. Removing or
-    renaming the marker makes Kyle stage the copy again."""
-    skills = tmp_path / "skills"
-    assert _installer(checkout, skills, "install").returncode == 0
-    assert _kyle_stages(skills) == [], "the installed copy is skipped by Kyle's convention"
-    (skills / NAME / KYLE_CONVENTION).rename(skills / NAME / ".unrecognized-marker")
-    assert _kyle_stages(skills) == [NAME], "a wrong name would be staged: the contract can fail"
-
 
 def test_reinstall_restores_a_launcher_that_lost_its_executable_bit(checkout: Path, tmp_path: Path) -> None:
     skills = tmp_path / "skills"
@@ -757,3 +717,54 @@ def test_a_damaged_foreign_directory_is_still_refused(checkout: Path, tmp_path: 
     os.mkfifo(skills / NAME / "scripts" / "planted")
     done = _installer(checkout, skills, "install")
     assert done.returncode == 1 and "refusing" in done.stderr and (skills / NAME / "scripts" / "planted").exists()
+
+
+# ------------- #774 owner reversal (2026-11-16): "make it work in Kyle containers"
+
+def test_the_installed_copy_carries_no_kyle_exclusion_marker(checkout: Path, tmp_path: Path) -> None:
+    """The owner reversed the opt-out: the skill should reach Kyle containers,
+    so no `.kyle-exclude` is written, and an old copy's marker is removed."""
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    assert not (skills / NAME / ".kyle-exclude").exists()
+    (skills / NAME / ".kyle-exclude").write_text("from an earlier install\n")
+    again = _installer(checkout, skills, "install")
+    assert again.returncode == 0 and "refreshed" in again.stdout
+    assert not (skills / NAME / ".kyle-exclude").exists(), "a reinstall drops the old marker"
+    assert ".kyle-exclude" not in INSTALLER.read_text(), "the installer no longer names the marker"
+
+
+def _launch(launcher: Path, tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    coll = _collection(tmp_path)
+    base = {k: v for k, v in os.environ.items() if k not in ("UV_PROJECT_ENVIRONMENT", "SKILLC_CHECKOUT")}
+    return subprocess.run(["bash", str(launcher), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd=tmp_path, env={**base, "HOME": str(tmp_path), **env})
+
+
+@pytest.mark.parametrize("locator", ["missing-checkout", "no-locator"])
+def test_skillc_checkout_overrides_a_bad_or_missing_locator(tmp_path: Path, locator: str) -> None:
+    """Kyle containers: Kyle provides the checkout and sets SKILLC_CHECKOUT,
+    read before the locator."""
+    repo, launcher = _installed_launcher(tmp_path)
+    loc = launcher.parent.parent / ".skillc-checkout"
+    if locator == "missing-checkout":
+        loc.write_text("~/no-such-checkout\n")
+    else:
+        loc.unlink()
+    done = _launch(launcher, tmp_path, {"SKILLC_CHECKOUT": str(repo)})
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("value,why", [("not-skillc", "a directory that is not a skillc checkout"),
+                                       ("relative", "a relative path")])
+def test_skillc_checkout_that_is_not_usable_gives_cannot_find(tmp_path: Path, value: str, why: str) -> None:
+    _repo, launcher = _installed_launcher(tmp_path)
+    if value == "not-skillc":
+        (tmp_path / "plain").mkdir()
+        given = str(tmp_path / "plain")
+    else:
+        given = "skillc"
+    done = _launch(launcher, tmp_path, {"SKILLC_CHECKOUT": given})
+    assert done.returncode == 2 and "SKILL_GAUNTLET: cannot find a usable skillc" in done.stderr, (why, done.stderr)
+    assert "ROUND" not in done.stdout + done.stderr

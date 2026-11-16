@@ -25,7 +25,13 @@ refuse() {
 self=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null) || refuse "the launcher's own path cannot be resolved"
 skill_dir=$(cd -- "$(dirname -- "$self")/.." 2>/dev/null && pwd -P) || refuse "the skill directory cannot be resolved"
 locator="$skill_dir/.skillc-checkout"
-if [ -f "$locator" ]; then
+if [ -n "${SKILLC_CHECKOUT:-}" ]; then
+    # Kyle containers (#774, owner 2026-11-16): Kyle provides the checkout and
+    # names it here, read BEFORE the locator. An absolute path only; the exact
+    # module check below still decides whether it is usable.
+    case "$SKILLC_CHECKOUT" in /*) ;; *) refuse "SKILLC_CHECKOUT must be an absolute path" ;; esac
+    checkout=$(cd -- "$SKILLC_CHECKOUT" 2>/dev/null && pwd -P) || refuse "SKILLC_CHECKOUT names a missing directory"
+elif [ -f "$locator" ]; then
     # An installed copy: the locator names the main checkout, HOME-relative.
     IFS= read -r located < "$locator" || refuse "the locator .skillc-checkout cannot be read; re-run make install-skill"
     case "$located" in "~/"*) located="$HOME/${located#\~/}" ;; esac
