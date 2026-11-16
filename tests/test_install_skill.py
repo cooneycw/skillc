@@ -793,7 +793,8 @@ def _tree_state(root: Path) -> list[tuple[str, str]]:
                   for p in root.rglob("*"))
 
 
-def _container_run(tmp_path: Path, read_only: bool) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+def _container_run(tmp_path: Path, read_only: bool,
+                   override: bool = True) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     ck = _checkout_copy(tmp_path)  # no .venv inside: the runtime is external
     env = _external_env(tmp_path / "frozen-runtime", ck)
     copy = tmp_path / "skills" / NAME  # the skill as Kyle staged it, with no locator
@@ -805,7 +806,8 @@ def _container_run(tmp_path: Path, read_only: bool) -> tuple[subprocess.Complete
                            "--issue-states", str(coll / "issue-states.json"), "--repo", "example/gauntlet"],
                           capture_output=True, text=True, check=False, cwd=tmp_path,
                           env={**{k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE",)},
-                               "HOME": str(tmp_path), "SKILLC_CHECKOUT": str(ck), "UV_PROJECT_ENVIRONMENT": str(env)})
+                               "HOME": str(tmp_path), "UV_PROJECT_ENVIRONMENT": str(env),
+                               **({"SKILLC_CHECKOUT": str(ck)} if override else {})})
     return done, ck, coll
 
 
@@ -834,3 +836,23 @@ def test_the_launcher_never_writes_inside_the_checkout(tmp_path: Path) -> None:
     after = _tree_state(ck)
     assert after == before, sorted(set(after) ^ set(before))[:5]
     assert (coll / "skills" / "alpha" / "GAUNTLET.json").is_file()
+
+
+@pytest.mark.parametrize("override", [True, False], ids=["with-SKILLC_CHECKOUT", "without"])
+def test_a_read_only_checkout_is_found_only_through_skillc_checkout(tmp_path: Path, override: bool) -> None:
+    """Kyle #2533's contract test: the staged copy has NO locator and the checkout
+    is read-only and elsewhere, so ONLY the override finds it. Without it, the
+    launcher reports cannot-find and gives no verdict."""
+    if os.geteuid() == 0:
+        pytest.skip("root writes through a read-only mode")
+    ck = None
+    try:
+        done, ck, _coll = _container_run(tmp_path, read_only=True, override=override)
+        if override:
+            assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+        else:
+            assert done.returncode == 2 and "SKILL_GAUNTLET: cannot find a usable skillc" in done.stderr
+            assert "ROUND" not in done.stdout + done.stderr
+    finally:
+        if ck is not None:
+            subprocess.run(["chmod", "-R", "u+w", str(ck)], check=False)
