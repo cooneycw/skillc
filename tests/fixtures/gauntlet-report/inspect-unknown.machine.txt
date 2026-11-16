@@ -1,0 +1,9 @@
+GAUNTLET skills/alpha (collection coll)
+ROUND 0 usage: OBSERVED - 1 usage log(s) read by `skillc usage report`; counts stay in the logs
+ROUND 1 charter: PASS - contract alpha GOOD and owner-approved
+ROUND 1-overlap overlap: NOT EXAMINED - no comparator - the collection was not compared, which is not a pass
+ROUND 2 inspect: UNKNOWN - 1 UNKNOWN on this skill - not a pass (A=0, B=0, C=0, D=0, UNSORTED=0; rule statements UNSORTED=1)
+  rule UNSORTED skills/alpha/SKILL.md:5 - no enforcer named; B needs recurrence evidence and C needs the owner
+RECORD: skills/alpha/GAUNTLET.json (written; the engine never commits it)
+NEXT: supply what round 2 could not read (issue states, or drop --offline), then re-run
+GAUNTLET: stopped at round 2 (UNKNOWN) - no trials ran; this is not a keep/trim/retire verdict

@@ -1,0 +1,6 @@
+GAUNTLET skills/beta (collection coll)
+ROUND 0 usage: OBSERVED - 1 usage log(s) read by `skillc usage report`; counts stay in the logs
+ROUND 1 charter: STOP - no CHARTER.md - draft ready for owner confirmation
+RECORD: .skillc/gauntlet/skills__beta/GAUNTLET.json (written; the engine never commits it)
+NEXT: owner reviews the draft <COLL>/.skillc/gauntlet/skills__beta/CHARTER.draft.md clause by clause, runs `skillc charter confirm <COLL>/.skillc/gauntlet/skills__beta/CHARTER.draft.md --answers <answers> --out skills/beta/CHARTER.md`, commits the charter, then re-runs the gauntlet
+GAUNTLET: stopped at round 1 (STOP) - no trials ran; this is not a keep/trim/retire verdict

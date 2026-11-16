@@ -1,0 +1,11 @@
+GAUNTLET skills/alpha (collection coll)
+ROUND 0 usage: OBSERVED - 1 usage log(s) read by `skillc usage report`; counts stay in the logs
+ROUND 1 charter: PASS - contract alpha GOOD and owner-approved
+ROUND 1-overlap overlap: NOT EXAMINED - no comparator - the collection was not compared, which is not a pass
+ROUND 2 inspect: FAIL - 1 error finding(s) on skills/alpha/SKILL.md (A=0, B=0, C=0, D=1, UNSORTED=0; rule statements UNSORTED=1)
+  ERROR skills/alpha/SKILL.md:2 dangling-reference - names scripts/deleted-helper.sh, which does not exist in the collection
+  D skills/alpha/SKILL.md:8 expired-marker - 'until #12' waits on example/gauntlet#12, which is closed
+  rule UNSORTED skills/alpha/SKILL.md:6 - no enforcer named; B needs recurrence evidence and C needs the owner
+RECORD: skills/alpha/GAUNTLET.json (written; the engine never commits it)
+NEXT: fix the error findings `skillc inspect` reports on skills/alpha/SKILL.md, then re-run
+GAUNTLET: stopped at round 2 (FAIL) - no trials ran; this is not a keep/trim/retire verdict
