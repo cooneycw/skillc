@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# The /skill-gauntlet launcher (#763): runs `skillc gauntlet run` from any
-# working directory. It finds skillc through its own real path, so it works
-# when the skill is reached through the ~/.claude/skills/skill-gauntlet link
-# that `make install-skill` creates. No path is written here: every path is
-# derived at run time.
+# The /skill-gauntlet launcher (#763, #774): runs `skillc gauntlet run` from
+# any working directory. In the COPY `make install-skill` writes to
+# ~/.claude/skills/skill-gauntlet it finds skillc through the copy's locator,
+# `.skillc-checkout` (written at install time, `~/` expanded here, never
+# committed). In the repository, with no locator, it uses its own real path.
+# No path is written in this file: every path is derived at run time.
 #
 # When skillc cannot be used it prints one `SKILL_GAUNTLET: cannot find a
 # usable skillc (...)` line and exits 2 - never a ROUND line, so never a
@@ -15,6 +16,9 @@ set -u
 # honoured, so a caller's PYTHONPATH could import another skillc for the check
 # or the run (or the engine's round subprocesses, which inherit it). Drop it.
 unset PYTHONPATH
+# Never write inside the checkout (#774, Kyle containers): it may be a pinned,
+# READ-ONLY checkout. No bytecode caches; the engine writes only the collection.
+export PYTHONDONTWRITEBYTECODE=1
 
 refuse() {
     echo "SKILL_GAUNTLET: cannot find a usable skillc ($1)" >&2
@@ -22,14 +26,38 @@ refuse() {
 }
 
 self=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null) || refuse "the launcher's own path cannot be resolved"
-# <checkout>/.claude/skills/skill-gauntlet/scripts/gauntlet.sh
-checkout=$(cd -- "$(dirname -- "$self")/../../../.." 2>/dev/null && pwd -P) || refuse "the checkout above the skill is missing"
+skill_dir=$(cd -- "$(dirname -- "$self")/.." 2>/dev/null && pwd -P) || refuse "the skill directory cannot be resolved"
+locator="$skill_dir/.skillc-checkout"
+if [ -n "${SKILLC_CHECKOUT:-}" ]; then
+    # Kyle containers (#774, owner 2026-11-16): Kyle provides the checkout and
+    # names it here, read BEFORE the locator. An absolute path only; the exact
+    # module check below still decides whether it is usable.
+    case "$SKILLC_CHECKOUT" in /*) ;; *) refuse "SKILLC_CHECKOUT must be an absolute path" ;; esac
+    checkout=$(cd -- "$SKILLC_CHECKOUT" 2>/dev/null && pwd -P) || refuse "SKILLC_CHECKOUT names a missing directory"
+elif [ -f "$locator" ]; then
+    # An installed copy: the locator names the main checkout, HOME-relative.
+    IFS= read -r located < "$locator" || refuse "the locator .skillc-checkout cannot be read; re-run make install-skill"
+    case "$located" in "~/"*) located="$HOME/${located#\~/}" ;; esac
+    checkout=$(cd -- "$located" 2>/dev/null && pwd -P) \
+        || refuse "the checkout the locator names is missing; re-run make install-skill from the skillc checkout"
+else
+    # <checkout>/.claude/skills/skill-gauntlet/scripts/gauntlet.sh
+    checkout=$(cd -- "$skill_dir/../../.." 2>/dev/null && pwd -P) || refuse "the checkout above the skill is missing"
+fi
 [ -f "$checkout/pyproject.toml" ] && [ -f "$checkout/skillc/gauntlet.py" ] \
     || refuse "no skillc checkout with the gauntlet engine at the skill's location; reinstall with make install-skill"
-# The checkout's own environment (uv's default, or UV_PROJECT_ENVIRONMENT, which
-# uv resolves against the project root - so a relative one is resolved there too).
-env_dir="${UV_PROJECT_ENVIRONMENT:-.venv}"
-case "$env_dir" in /*) ;; *) env_dir="$checkout/$env_dir" ;; esac
+# The runtime (#774, Kyle's contract): SKILLC_RUNTIME when set (an ABSOLUTE
+# path), else the checkout's own .venv - Kyle stages its frozen runtime there.
+# The caller's UV_PROJECT_ENVIRONMENT is IGNORED and never passed on: uv applies
+# it to every project, so a session-wide one points at the worker's project,
+# never at this checkout.
+unset UV_PROJECT_ENVIRONMENT
+if [ -n "${SKILLC_RUNTIME:-}" ]; then
+    case "$SKILLC_RUNTIME" in /*) ;; *) refuse "SKILLC_RUNTIME must be an absolute path" ;; esac
+    env_dir="$SKILLC_RUNTIME"
+else
+    env_dir="$checkout/.venv"
+fi
 python="$env_dir/bin/python"
 [ -x "$python" ] || refuse "the checkout has no synced environment; run uv sync in the skillc checkout"
 # A runnable python is not a usable skillc: ask THIS environment to import THIS
@@ -56,5 +84,36 @@ if bad:
     print("; ".join(bad)); sys.exit(1)' "$checkout" 2>/dev/null) || bad_import=1
 why=${why:-the environment of the checkout does not import skillc}
 [ -z "$bad_import" ] || refuse "$why; run uv sync in the skillc checkout (an editable install)"
+# An installed copy that differs from the checkout's skill (a git pull since
+# the install) is WARNED about, never blocked: the verdict and exit code below
+# are the engine's whatever this prints.
+if [ -f "$locator" ]; then
+    # Only REGULAR files are opened (lstat first): a FIFO or a link is never read,
+    # so the check cannot block the engine; it, or any read error, is a warning.
+    "$python" -P -c 'import os, stat, sys
+def oops(exc):
+    raise exc
+def files(root):
+    out = {}
+    for d, _, names in os.walk(root, onerror=oops):
+        for n in names:
+            path = os.path.join(d, n)
+            rel = os.path.relpath(path, root)
+            if os.sep not in rel and rel.startswith("."):
+                continue  # top-level dotfiles belong to the installer
+            mode = os.lstat(path).st_mode
+            if not stat.S_ISREG(mode):
+                raise OSError(f"{rel} is not a regular file")
+            with open(path, "rb") as f:
+                out[rel] = (f.read(), bool(mode & 0o100))
+    return out
+try:
+    a, b = files(sys.argv[1]), files(sys.argv[2])
+except OSError:
+    sys.exit(1)
+sys.exit(0 if a == b and "SKILL.md" in a else 1)' "$skill_dir" "$checkout/.claude/skills/skill-gauntlet" \
+        >/dev/null 2>&1 \
+        || echo "SKILL_GAUNTLET: warning: this installed copy differs from the checkout's .claude/skills/skill-gauntlet; re-run make install-skill" >&2
+fi
 # Invoked explicitly, never a bare `skillc` from PATH. Its output and exit code are the engine's.
 exec "$python" -P -m skillc.cli gauntlet run "$@"
