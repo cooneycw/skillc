@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "skill": "skill",
+  "skill_digest": "sha256:30c0aad51fd661a1470543a2e5d68e91f0706f78b78ed79283a5f040f74d56e1",
+  "client": {"name": "claude", "version": "scripted", "model": "scripted"},
+  "attempt_cap": 60,
+  "replicates": 3,
+  "seed": "736",
+  "min_tasks_per_clause": 2,
+  "min_heldout": 2,
+  "discrimination_rule": {"rule_id": "gauntlet-control", "alpha": 0.05, "tolerance": 4,
+                          "citation_url": "https://github.com/cooneycw/skillc/issues/736"},
+  "clauses": {
+    "planner.never-edit-before-approval": ["tasks/a1", "tasks/a2", "tasks/a3"],
+    "planner.always-report-lanes": ["tasks/b1", "tasks/b2", "tasks/b3"]
+  },
+  "damaged": [
+    {"arm": "damaged-gate", "file": "SKILL.md", "clause": "planner.never-edit-before-approval",
+     "remove": "You MUST stop at the approval gate before editing anything.\n"}
+  ],
+  "variants": [
+    {"arm": "lean-repeat", "file": "SKILL.md", "clause": "round 2: copied-passage (class D)",
+     "remove": "As said above, stop at the approval gate and wait; never edit before the owner approves.\n"},
+    {"arm": "lean-lanes", "file": "SKILL.md", "clause": "round 1: shadowed duty",
+     "remove": "ALWAYS report every lane the project lists.\n"}
+  ]
+}

@@ -34,6 +34,7 @@ from . import (
     configuration_compare,
     contracts,
     exposure,
+    gauntlet_trials,
     leak,
     materialize,
     overlap,
@@ -2677,6 +2678,39 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+#: `gauntlet round3|round4` exit codes (docs/specs/gauntlet-rounds-3-4.md).
+GAUNTLET_EXIT_OK, GAUNTLET_EXIT_REFUSED, GAUNTLET_EXIT_USAGE, GAUNTLET_EXIT_UNDECIDED = 0, 1, 2, 3
+
+
+def cmd_gauntlet_round(args: argparse.Namespace) -> int:
+    """`skillc gauntlet round3|round4 <declaration> [--plan]` (#736 PR 1).
+    PR 1 ships no real attempt runner: `--plan` prints the declared attempt
+    count and spends nothing; a real run is refused until #736 PR 3."""
+    try:
+        declaration = gauntlet_trials.load(Path(args.declaration).resolve())
+    except gauntlet_trials.DeclarationError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    try:
+        ledger = gauntlet_trials.Ledger(Path(args.ledger) if args.ledger
+                                        else declaration.path.parent / ".gauntlet-ledger.jsonl")
+    except (gauntlet_trials.LedgerError, OSError) as exc:
+        print(f"skillc: ledger not trusted: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    play = gauntlet_trials.round3 if args.gauntlet_command == "round3" else gauntlet_trials.round4
+    try:
+        report = play(declaration, ledger, None, plan_only=args.plan)
+    except gauntlet_trials.DeclarationError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    sys.stdout.write(gauntlet_trials.to_json(report) if args.json else gauntlet_trials.render(report))
+    if report.verdict in (gauntlet_trials.COMPLETE, gauntlet_trials.PLANNED):
+        return GAUNTLET_EXIT_OK
+    if report.verdict == gauntlet_trials.REFUSED:
+        return GAUNTLET_EXIT_REFUSED
+    return GAUNTLET_EXIT_UNDECIDED  # UNKNOWN or INCOMPLETE: never a pass
+
+
 #: `charter draft` exit codes (docs/specs/charter-round1.md). 3 matches
 #: `contracts`' "none declared": nothing to work from is never a clean result.
 CHARTER_EXIT_OK, CHARTER_EXIT_REFUSED, CHARTER_EXIT_USAGE, CHARTER_EXIT_NOTHING = 0, 1, 2, 3
@@ -3803,6 +3837,15 @@ def build_parser() -> argparse.ArgumentParser:
     shown.add_argument("--machine-only", action="store_true",
                        help="print only the machine lines (ROUND/RECORD/NEXT/GAUNTLET), as before #783")
     p_gauntlet_run.set_defaults(func=cmd_gauntlet_run)
+    for name, about in (("round3", "baseline: clause tests, intact vs a named damaged copy; UNKNOWN unless they separate"),
+                        ("round4", "challenge: leaner variants on held-out tasks; keep unless one is no worse on every clause")):
+        p_round = gauntlet_sub.add_parser(name, help=about)
+        p_round.add_argument("declaration", help="the round declaration (JSON; docs/specs/gauntlet-rounds-3-4.md)")
+        p_round.add_argument("--plan", action="store_true", help="print the declared attempt count; spend nothing")
+        p_round.add_argument("--ledger", metavar="FILE", help="the attempt ledger (default: beside the declaration)")
+        p_round.add_argument("--json", action="store_true",
+                             help="print the report as JSON (dataclasses.asdict of the RoundReport; read by #737)")
+        p_round.set_defaults(func=cmd_gauntlet_round)
     p_gauntlet_verdict = gauntlet_sub.add_parser(
         "verdict", help="round 5 (#737): one keep/trim/retire proposal, or UNKNOWN naming the round; drafts only"
     )

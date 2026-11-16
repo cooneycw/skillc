@@ -49,6 +49,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/gauntlet.py` - `skillc gauntlet run` (#754): the skill-gauntlet engine. Runs the round commands
   (usage, charter, contracts, inspect) as subprocesses and reads only their verdicts; imports no round module;
   writes `GAUNTLET.json` beside the charter only on change and never commits it - see [docs/specs/gauntlet.md](docs/specs/gauntlet.md)
+- `skillc/gauntlet_trials.py` - `skillc gauntlet round3|round4` (#736): baseline and challenge trials from a declaration;
+  a declared attempt cap (decision 4), a seeded train/test split, UNKNOWN unless a named damaged copy separates,
+  strict no-worse variants, and a ledger keyed by skill, task, grader, client and model. PR 1 runs offline only. Spec: [docs/specs/gauntlet-rounds-3-4.md](docs/specs/gauntlet-rounds-3-4.md)
 - `skillc/gauntlet_verdict.py` - `skillc gauntlet verdict` / `rule` (#737): round 5. A pure function from the record,
   round 3/4 JSON, the declaration, inspect and overlap reports to ONE keep/trim/retire proposal or UNKNOWN; drafts a
   patch and PR text, never edits the skill; the owner's dated ruling goes into the record - see [docs/specs/gauntlet-verdict.md](docs/specs/gauntlet-verdict.md)
