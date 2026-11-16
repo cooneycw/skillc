@@ -325,11 +325,13 @@ make uninstall-skill   # removes that copy, and only a copy skillc marked as its
   (a marker: kind, schema, digest; no paths).
 - **Kyle containers** (private containers only): Kyle stages this copy into its
   session image, with a pinned, READ-ONLY skillc checkout at
-  `/opt/kyle/session-tooling/skillc` and its own runtime outside it. It sets
-  `SKILLC_CHECKOUT` to the checkout (read before the locator) and
-  `UV_PROJECT_ENVIRONMENT` to the runtime's absolute path. That runtime must
-  import the checkout's own `skillc/` (an editable or path install); a
-  non-editable wheel is refused by design (#765). The skill never writes inside
+  `/opt/kyle/session-tooling/skillc` and its frozen runtime at
+  `<checkout>/.venv`. Kyle sets ONLY `SKILLC_CHECKOUT` (read before the locator).
+  The launcher takes its runtime from an absolute `SKILLC_RUNTIME` if set, else
+  `<checkout>/.venv`, and IGNORES the caller's `UV_PROJECT_ENVIRONMENT` (uv
+  applies that to every project, so a session-wide one names the worker's).
+  The runtime must import the checkout's own `skillc/` (an editable or path
+  install); a non-editable wheel is refused by design (#765). The skill never writes inside
   the checkout (`PYTHONDONTWRITEBYTECODE=1`); the gauntlet writes only into the
   collection it reviews. The Kyle side is owned by Kyle's master.
 - **Updating:** a `git pull` does NOT update the copy. Re-run

@@ -95,7 +95,7 @@ def test_the_launcher_runs_the_engine_from_an_unrelated_directory(tmp_path: Path
     coll = _collection(tmp_path)
     done = subprocess.run(["bash", str(LAUNCHER), str(coll), "skills/alpha", "--offline", "--issue-states",
                            str(coll / "issue-states.json"), "--repo", "example/gauntlet"],
-                          capture_output=True, text=True, check=False, cwd=elsewhere)
+                          capture_output=True, text=True, check=False, cwd=elsewhere, env=_real_launcher_env())
     assert done.returncode == 3, done.stdout + done.stderr
     assert "ROUND 1 charter: PASS" in done.stdout and "no trials ran" in done.stdout
 
@@ -109,7 +109,7 @@ def test_the_launcher_through_an_installed_link_finds_skillc(tmp_path: Path) -> 
     coll = _collection(tmp_path)
     done = subprocess.run(["bash", str(skills / NAME / "scripts" / "gauntlet.sh"), str(coll), "skills/alpha",
                            "--offline", "--issue-states", str(coll / "issue-states.json"), "--repo", "example/gauntlet"],
-                          capture_output=True, text=True, check=False, cwd=tmp_path)
+                          capture_output=True, text=True, check=False, cwd=tmp_path, env=_real_launcher_env())
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
 
 
@@ -146,14 +146,49 @@ def _real_env() -> Path:
     return Path(env) if env else ROOT / ".venv"
 
 
-def test_a_relative_project_environment_resolves_against_the_checkout(tmp_path: Path) -> None:
-    if os.environ.get("UV_PROJECT_ENVIRONMENT"):
-        pytest.skip("UV_PROJECT_ENVIRONMENT is set for this run; the relative case needs the in-tree .venv")
+def _real_launcher_env(**extra: str) -> dict[str, str]:
+    """This checkout's real runtime for its own launcher: the launcher ignores
+    UV_PROJECT_ENVIRONMENT (#774), so CI's external venv is named as SKILLC_RUNTIME."""
+    base = {k: v for k, v in os.environ.items() if k not in ("UV_PROJECT_ENVIRONMENT", "SKILLC_CHECKOUT")}
+    return {**base, "SKILLC_RUNTIME": str(_real_env()), **extra}
+
+
+def test_a_callers_uv_project_environment_never_redirects_the_runtime(tmp_path: Path) -> None:
+    """Kyle's required test (#774): a session-wide UV_PROJECT_ENVIRONMENT points at
+    the worker's project; the launcher ignores it and uses its own runtime."""
     coll = _collection(tmp_path)
+    decoy = tmp_path / "decoy-venv"
+    (decoy / "bin").mkdir(parents=True)
+    marker = tmp_path / "decoy-ran"
+    (decoy / "bin" / "python").write_text(f"#!/bin/sh\ntouch {str(marker)!r}\nexit 7\n")
+    (decoy / "bin" / "python").chmod(0o755)
     done = subprocess.run(["bash", str(LAUNCHER), str(coll), "skills/alpha", "--offline", "--issue-states",
                            str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
-                          text=True, check=False, cwd="/", env={**os.environ, "UV_PROJECT_ENVIRONMENT": ".venv"})
+                          text=True, check=False, cwd="/",
+                          env=_real_launcher_env(UV_PROJECT_ENVIRONMENT=str(decoy)))
+    assert not marker.exists(), "the caller's UV_PROJECT_ENVIRONMENT was used"
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+def test_a_relative_skillc_runtime_is_refused(tmp_path: Path) -> None:
+    coll = _collection(tmp_path)
+    done = subprocess.run(["bash", str(LAUNCHER), str(coll), "skills/alpha"], capture_output=True, text=True,
+                          check=False, cwd=tmp_path, env=_real_launcher_env(SKILLC_RUNTIME=".venv"))
+    assert done.returncode == 2 and "SKILLC_RUNTIME must be an absolute path" in done.stderr
+    assert "ROUND" not in done.stdout + done.stderr
+
+
+def test_the_launcher_leaves_the_callers_environment_unchanged(tmp_path: Path) -> None:
+    """It runs as a child process, unsets UV_PROJECT_ENVIRONMENT only for itself
+    and its own children, and exports nothing back."""
+    coll = _collection(tmp_path)
+    script = (f'export UV_PROJECT_ENVIRONMENT=/somewhere/else\nbefore=$(env | sort)\n'
+              f'bash {str(LAUNCHER)!r} {str(coll)!r} skills/alpha --offline --issue-states '
+              f'{str(coll / "issue-states.json")!r} --repo example/gauntlet >/dev/null 2>&1\n'
+              'after=$(env | sort)\n[ "$before" = "$after" ] && echo SAME || echo CHANGED\n')
+    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False,
+                          env=_real_launcher_env())
+    assert done.stdout.strip() == "SAME", done.stdout + done.stderr
 
 
 def test_an_environment_without_skillc_is_reported_not_run(tmp_path: Path) -> None:
@@ -201,7 +236,7 @@ def test_a_callers_pythonpath_never_picks_another_skillc(tmp_path: Path) -> None
     coll = _collection(tmp_path)
     done = subprocess.run(["bash", str(LAUNCHER), str(coll), "skills/alpha", "--offline", "--issue-states",
                            str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
-                          text=True, check=False, cwd=impostor, env={**os.environ, "PYTHONPATH": "."})
+                          text=True, check=False, cwd=impostor, env=_real_launcher_env(PYTHONPATH="."))
     assert not marker.exists(), "the caller's skillc package was imported"
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
 
@@ -772,8 +807,8 @@ def test_skillc_checkout_that_is_not_usable_gives_cannot_find(tmp_path: Path, va
 
 # ------------------ #774: the Kyle container contract (orchestrator rev 65)
 # Kyle stages a PINNED, READ-ONLY checkout at /opt/kyle/session-tooling/skillc
-# with its OWN runtime outside it, and sets SKILLC_CHECKOUT and an absolute
-# UV_PROJECT_ENVIRONMENT. Nothing may write inside the checkout.
+# with its frozen runtime at <checkout>/.venv (or an absolute SKILLC_RUNTIME),
+# and sets ONLY SKILLC_CHECKOUT session-wide. Nothing may write inside the checkout.
 
 def _external_env(env_dir: Path, import_root: Path) -> Path:
     """An environment OUTSIDE the checkout whose python imports `import_root`'s
@@ -806,7 +841,7 @@ def _container_run(tmp_path: Path, read_only: bool,
                            "--issue-states", str(coll / "issue-states.json"), "--repo", "example/gauntlet"],
                           capture_output=True, text=True, check=False, cwd=tmp_path,
                           env={**{k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE",)},
-                               "HOME": str(tmp_path), "UV_PROJECT_ENVIRONMENT": str(env),
+                               "HOME": str(tmp_path), "SKILLC_RUNTIME": str(env),
                                **({"SKILLC_CHECKOUT": str(ck)} if override else {})})
     return done, ck, coll
 
@@ -856,3 +891,27 @@ def test_a_read_only_checkout_is_found_only_through_skillc_checkout(tmp_path: Pa
     finally:
         if ck is not None:
             subprocess.run(["chmod", "-R", "u+w", str(ck)], check=False)
+
+
+def test_the_default_runtime_is_the_checkouts_own_venv_even_read_only(tmp_path: Path) -> None:
+    """Kyle stages its frozen runtime at <checkout>/.venv: with only
+    SKILLC_CHECKOUT set, a READ-ONLY checkout runs on its own .venv."""
+    if os.geteuid() == 0:
+        pytest.skip("root writes through a read-only mode")
+    ck = _checkout_copy(tmp_path)
+    _environment(ck, ck)  # <checkout>/.venv/bin/python, importing the checkout's skillc
+    copy = tmp_path / "skills" / NAME
+    shutil.copytree(ck / ".claude" / "skills" / NAME, copy)
+    coll = _collection(tmp_path)
+    subprocess.run(["chmod", "-R", "a-w", str(ck)], check=True)
+    try:
+        done = subprocess.run(["bash", str(copy / "scripts" / "gauntlet.sh"), str(coll), "skills/alpha", "--offline",
+                               "--issue-states", str(coll / "issue-states.json"), "--repo", "example/gauntlet"],
+                              capture_output=True, text=True, check=False, cwd=tmp_path,
+                              env={**{k: v for k, v in os.environ.items()
+                                      if k not in ("UV_PROJECT_ENVIRONMENT", "SKILLC_RUNTIME")},
+                                   "HOME": str(tmp_path), "SKILLC_CHECKOUT": str(ck),
+                                   "UV_PROJECT_ENVIRONMENT": str(tmp_path / "workers-own-project-venv")})
+        assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+    finally:
+        subprocess.run(["chmod", "-R", "u+w", str(ck)], check=False)

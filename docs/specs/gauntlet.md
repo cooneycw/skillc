@@ -161,10 +161,14 @@ contract:
   (which may not resolve in a container). It must be an absolute path to a
   directory holding a skillc checkout; anything else reads cannot-find (exit 2,
   no verdict).
-- **The runtime:** outside the checkout, named by an absolute
-  `UV_PROJECT_ENVIRONMENT`. It must import the CHECKOUT's own
-  `skillc/gauntlet.py` and `skillc/cli.py` (an editable or path install): #765's
-  exact-module check refuses a non-editable wheel, by design.
+- **The runtime:** `$SKILLC_RUNTIME` if set (an ABSOLUTE path, else
+  cannot-find), otherwise `<checkout>/.venv`, where Kyle stages its frozen
+  runtime. The caller's `UV_PROJECT_ENVIRONMENT` is ignored and never passed on:
+  uv applies it to every project, so a session-wide value names the worker's
+  project, never this checkout. Kyle sets ONLY `SKILLC_CHECKOUT` session-wide.
+  The runtime must import the CHECKOUT's own `skillc/gauntlet.py` and
+  `skillc/cli.py` (an editable or path install): #765's exact-module check
+  refuses a non-editable wheel, by design.
 - **No writes in the checkout:** the launcher sets `PYTHONDONTWRITEBYTECODE=1`,
   and the engine writes only into the collection it reviews (the record beside
   the charter, the draft dir under the collection's `.skillc/`).

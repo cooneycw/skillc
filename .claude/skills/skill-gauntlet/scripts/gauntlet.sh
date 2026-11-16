@@ -46,10 +46,18 @@ else
 fi
 [ -f "$checkout/pyproject.toml" ] && [ -f "$checkout/skillc/gauntlet.py" ] \
     || refuse "no skillc checkout with the gauntlet engine at the skill's location; reinstall with make install-skill"
-# The checkout's own environment (uv's default, or UV_PROJECT_ENVIRONMENT, which
-# uv resolves against the project root - so a relative one is resolved there too).
-env_dir="${UV_PROJECT_ENVIRONMENT:-.venv}"
-case "$env_dir" in /*) ;; *) env_dir="$checkout/$env_dir" ;; esac
+# The runtime (#774, Kyle's contract): SKILLC_RUNTIME when set (an ABSOLUTE
+# path), else the checkout's own .venv - Kyle stages its frozen runtime there.
+# The caller's UV_PROJECT_ENVIRONMENT is IGNORED and never passed on: uv applies
+# it to every project, so a session-wide one points at the worker's project,
+# never at this checkout.
+unset UV_PROJECT_ENVIRONMENT
+if [ -n "${SKILLC_RUNTIME:-}" ]; then
+    case "$SKILLC_RUNTIME" in /*) ;; *) refuse "SKILLC_RUNTIME must be an absolute path" ;; esac
+    env_dir="$SKILLC_RUNTIME"
+else
+    env_dir="$checkout/.venv"
+fi
 python="$env_dir/bin/python"
 [ -x "$python" ] || refuse "the checkout has no synced environment; run uv sync in the skillc checkout"
 # A runnable python is not a usable skillc: ask THIS environment to import THIS
