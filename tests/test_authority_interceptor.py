@@ -534,12 +534,16 @@ def test_a_clean_run_with_the_write_back_held_open_is_never_flagged(
     write = result.observations_write
     assert write is not None and result.observations_capture == "written"
     if seeded or mode != "remove":  # fresh+remove: nothing exists to remove, so nothing to see
-        # The held state WAS observed: a poll that ran entirely inside the
-        # window recorded the transition into it. Without this the control
-        # could pass with the bug intact, on polls that saw nothing.
-        inside = [t for t in interceptor._artifact_history.get("observations", [])
-                  if write.started <= t.poll_started and t.poll_ended <= write.ended]
-        assert inside, "no poll observed the held write-back"
+        # The held state WAS observed: a poll that OVERLAPPED the window
+        # recorded a transition into a value that is not the completed write's.
+        # (Under load the first such poll can straddle the window's start, and
+        # the polls fully inside then see no CHANGE, so "fully inside" was the
+        # wrong property: it went red on CI with the behaviour correct.)
+        # Without this the control could pass with the bug intact, on polls
+        # that saw nothing.
+        held = [t for t in interceptor._artifact_history.get("observations", [])
+                if t.poll_ended >= write.started and t.poll_started <= write.ended and t.after != write.digest]
+        assert held, "no poll observed the held write-back"
     assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == []
     backend.destroy(handle)
 
