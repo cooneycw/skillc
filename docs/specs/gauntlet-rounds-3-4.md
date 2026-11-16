@@ -29,18 +29,32 @@ runner over `calibration_run`'s path, under its own gate.
 | `discrimination_rule` | the `reliability.TwoArmRule` for round 3's separation test |
 
 A passage must occur **exactly once** in its file, and the file must be a
-regular file **inside the skill** (no absolute path, no `..`, no symlink).
+regular file **inside the skill** (no absolute path, no `..`, no symlink, and
+no path that resolves outside the skill through a linked directory).
 Otherwise the arm would not be the one its name says, or would leave the skill
 undamaged. `partial` must be a JSON boolean.
+
+An arm's changes are keyed by the file's **canonical path inside the skill**
+(#756), so `./SKILL.md` and `SKILL.md` are one arm with one digest, and its
+cached attempts are reused. Canonicalising happens only after the inside check,
+so it is never a way out of the skill.
 
 ## Tasks and the split
 
 **A task is identified by what the agent sees.**
 - Its task digest covers `goal.md` and `fixture/`, which are both required: a
   task missing either is refused.
+- The digest is git's view of those entries (`source_digest.tree_entries`,
+  #756): each file's mode and blob, so the **execute bit** counts; a
+  **symlink** counts as its link text and is never followed, so retargeting
+  one is a new task; a FIFO, socket or device is recorded as not-a-file and
+  never opened. **Empty directories are invisible**, as they are to git: a
+  fixture that needs one must hold a file in it.
 - The task digest alone decides the minimums and the split. Directories with
   the same goal and fixture are one task, whatever their graders. If such
-  directories declare different graders, the declaration is refused.
+  directories declare different graders, **in the same clause or in two
+  clauses**, the declaration is refused before anything is planned (#756), so
+  no attempt is spent on both.
 - Its grader digest is `verify.GraderDef.digest()`: the definition, plus the
   probe, inputs and judge it names. It is part of the ledger key. Editing a
   README beside the grader changes nothing.
@@ -48,7 +62,10 @@ undamaged. `partial` must be a JSON boolean.
 **One global split** covers every distinct task, so a task shared by two
 clauses can never train one and be held out for the other.
 - Clauses are walked in a fixed order.
-- Each clause's not-yet-placed tasks are shuffled with the seed, and enough are
+- Each clause's not-yet-placed tasks are ordered by task digest, never by
+  directory name, then shuffled with the seed (#756): renaming a task's
+  directory never moves it between train and held-out. Changing a task's
+  CONTENT can, since it is then a different task. Enough are
   held out to give that clause a third of its tasks (at least one) held out.
 - The same seed always gives the same split.
 - A clause left without a train task, or (for round 4) a held-out task, reads
@@ -126,7 +143,9 @@ A mutation check shows each guard can fail:
 - turning off the separation check fails 2 tests;
 - turning off the over-cap refusal fails 1;
 - dropping the grader from the ledger key fails 1;
-- loosening the no-worse rule fails 1.
+- loosening the no-worse rule fails 1;
+- removing the resolve-inside check fails the linked-directory escape case
+  (the `..` cases are refused by the `..` rule as well).
 
 ## What this does not examine
 

@@ -7,12 +7,13 @@ makes the machinery report the OTHER verdict (AGENTS.md, negative control).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
 import pytest
 
-from skillc import cli
+from skillc import cli, source_digest
 from skillc import gauntlet_trials as g
 from skillc.source_digest import digest_tree
 
@@ -536,3 +537,237 @@ def test_the_record_name_matches_the_engines() -> None:
     from skillc import gauntlet
 
     assert g.ENGINE_RECORD == gauntlet.RECORD_NAME
+
+
+# ---------------------------------------------------------------- #756: the deferred pass-3 findings
+
+
+def _a1_identity(path: Path) -> str:
+    """The ledger key carries `task_digest` (`attempt_key`), so a new identity
+    is exactly "no cached grade for this task is reused"."""
+    task = g.read_task((path.parent / "tasks/a1").resolve())
+    return task.identity
+
+
+def _script(path: Path, mode: int) -> None:
+    script = path.parent / "tasks/a1/fixture/run.sh"
+    script.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    script.chmod(mode)
+
+
+def test_an_execute_bit_change_in_a_fixture_is_a_new_task(tmp_path: Path) -> None:
+    """#756 (1): the agent sees whether run.sh is executable."""
+    path = _copy(tmp_path)
+    _script(path, 0o644)
+    before = _a1_identity(path)
+    _script(path, 0o755)
+    assert _a1_identity(path) != before
+
+
+def test_an_unchanged_fixture_mode_is_the_same_task_and_reuses_everything(tmp_path: Path) -> None:
+    """#756 (1) twin: rewriting the same bytes and mode is not a change."""
+    path = _copy(tmp_path)
+    _script(path, 0o755)
+    before = _a1_identity(path)
+    declaration, ledger = _round3_complete(path)
+    _script(path, 0o755)
+    again = _runner(declaration, {})
+    report = g.round3(_decl(path), g.Ledger(ledger.path), again)
+    assert _a1_identity(path) == before and again.calls == 0 == report.new
+
+
+def _linked_fixture(path: Path, target: str) -> None:
+    task = path.parent / "tasks/a1"
+    for name, text in (("alt1", "one\n"), ("alt2", "two\n")):
+        (task / name).mkdir(exist_ok=True)
+        (task / name / "data.txt").write_text(text, encoding="utf-8")
+    link = task / "fixture/data"
+    if link.is_symlink():
+        link.unlink()
+    link.symlink_to(target, target_is_directory=True)
+
+
+def test_retargeting_a_fixture_directory_symlink_is_a_new_task(tmp_path: Path) -> None:
+    """#756 (1): a directory symlink is part of what the agent sees, and is never followed."""
+    path = _copy(tmp_path)
+    _linked_fixture(path, "../alt1")
+    before = _a1_identity(path)
+    _linked_fixture(path, "../alt2")
+    assert _a1_identity(path) != before
+
+
+def test_relinking_a_fixture_symlink_to_the_same_target_is_the_same_task(tmp_path: Path) -> None:
+    """#756 (1) twin."""
+    path = _copy(tmp_path)
+    _linked_fixture(path, "../alt1")
+    before = _a1_identity(path)
+    _linked_fixture(path, "../alt1")
+    assert _a1_identity(path) == before
+
+
+def test_a_fifo_in_a_fixture_is_recorded_never_opened(tmp_path: Path) -> None:
+    """#756 (1): a special file is part of the task as not-a-file (never read, so never a hang)."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    os.mkfifo(path.parent / "tasks/a1/fixture/pipe")
+    assert _a1_identity(path) != before
+
+
+def _held(declaration: g.Declaration) -> set[str]:
+    placed = g.assignments(declaration)
+    return {identity for identity, side in placed.items() if side == "held"}
+
+
+def _rename_a1(path: Path, new: str) -> None:
+    (path.parent / "tasks/a1").rename(path.parent / "tasks" / new)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["clauses"][GATE] = [t.replace("tasks/a1", f"tasks/{new}") for t in data["clauses"][GATE]]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_renaming_a_task_directory_keeps_every_assignment(tmp_path: Path) -> None:
+    """#756 (2): the split is by content, so a rename never moves a task."""
+    path = _copy(tmp_path)
+    before = g.assignments(_decl(path))
+    _rename_a1(path, "z1")
+    assert g.assignments(_decl(path)) == before
+
+
+def test_the_split_still_moves_with_the_seed(tmp_path: Path) -> None:
+    """#756 (2) twin: the comparison above can see a different split."""
+    path = _copy(tmp_path)
+    base = _held(_decl(path))
+    moved = []
+    for seed in range(40):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["seed"] = f"other-{seed}"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        moved.append(_held(_decl(path)) != base)
+    assert any(moved)
+
+
+def _copy_agent_inputs(path: Path, source: str, target: str, *, grader: bool) -> None:
+    tasks = path.parent / "tasks"
+    shutil.rmtree(tasks / target)
+    shutil.copytree(tasks / source, tasks / target)
+    if not grader:
+        grader_file = tasks / target / "grader.json"
+        grader_file.write_text(grader_file.read_text(encoding="utf-8").replace(source, target), encoding="utf-8")
+
+
+def test_one_task_with_different_graders_in_two_clauses_is_refused_before_any_attempt(tmp_path: Path) -> None:
+    """#756 (3): the reviewer's reproduction spent 24 attempts before UNKNOWN."""
+    path = _copy(tmp_path)
+    _copy_agent_inputs(path, "a1", "b1", grader=False)
+    with pytest.raises(g.DeclarationError, match="same task with different graders"):
+        _decl(path)
+
+
+def test_one_task_with_the_same_grader_in_two_clauses_is_accepted(tmp_path: Path) -> None:
+    """#756 (3) twin: sharing a task across clauses is allowed; only a conflict is refused."""
+    path = _copy(tmp_path)
+    _copy_agent_inputs(path, "a1", "b1", grader=True)
+    declaration = _decl(path)
+    assert {t.identity for t in declaration.clauses[GATE]} & {t.identity for t in declaration.clauses[LANES]}
+
+
+def _rerun_round3(path: Path, ledger: g.Ledger) -> tuple[g.RoundReport, g.ScriptedRunner]:
+    declaration = _decl(path)
+    runner = _runner(declaration, _fail_all("damaged-gate", GATE_TASKS))
+    return g.round3(declaration, g.Ledger(ledger.path), runner), runner
+
+
+def _respell_damaged(path: Path, **fields: str) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["damaged"][0].update(fields)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_an_equivalent_passage_path_spelling_reuses_every_attempt(tmp_path: Path) -> None:
+    """#756 (4): ./SKILL.md is SKILL.md."""
+    path = _copy(tmp_path)
+    _declaration, ledger = _round3_complete(path)
+    _respell_damaged(path, file="./SKILL.md")
+    report, runner = _rerun_round3(path, ledger)
+    assert runner.calls == 0 == report.new and report.verdict == g.COMPLETE
+
+
+def test_a_different_passage_is_still_a_different_arm(tmp_path: Path) -> None:
+    """#756 (4) twin: canonical paths never merge two different damaged copies."""
+    path = _copy(tmp_path)
+    _declaration, ledger = _round3_complete(path)
+    _respell_damaged(path, file="./SKILL.md", remove="ALWAYS report every lane the project lists.\n")
+    report, runner = _rerun_round3(path, ledger)
+    assert report.new == runner.calls > 0
+
+
+@pytest.mark.parametrize("file", ["./../tasks/a1/goal.md", "sub/../../tasks/a1/goal.md", "out/goal.md"])
+def test_a_canonicalised_passage_path_outside_the_skill_is_still_refused(tmp_path: Path, file: str) -> None:
+    """#756 (4), gate condition: canonicalising is never an escape (`out` links outside the skill)."""
+    path = _copy(tmp_path)
+    (path.parent / "skill/out").symlink_to("../tasks/a1", target_is_directory=True)
+    _respell_damaged(path, file=file)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["skill_digest"] = digest_tree((path.parent / "skill").resolve())
+    path.write_text(json.dumps(data), encoding="utf-8")
+    declaration = _decl(path)
+    with pytest.raises(g.DeclarationError, match="not a regular file inside the skill"):
+        g.round3(declaration, g.Ledger(tmp_path / "l.jsonl"), _runner(declaration, {}))
+
+
+def test_an_unreadable_or_oversized_file_beside_the_agent_inputs_changes_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review: only goal.md and fixture/ are walked, never the grader's neighbours."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    monkeypatch.setattr(source_digest, "MAX_FILE_BYTES", 64)
+    task = path.parent / "tasks/a1"
+    (task / "notes.txt").write_text("x" * 200, encoding="utf-8")
+    (task / "private").mkdir()
+    (task / "private/secret.txt").write_text("s", encoding="utf-8")
+    (task / "private").chmod(0o000)
+    try:
+        assert _a1_identity(path) == before
+    finally:
+        (task / "private").chmod(0o755)
+
+
+def test_an_oversized_file_inside_the_fixture_is_still_refused(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review twin: the agent's own inputs stay under the byte budget."""
+    path = _copy(tmp_path)
+    monkeypatch.setattr(source_digest, "MAX_FILE_BYTES", 64)
+    (path.parent / "tasks/a1/fixture/big.txt").write_text("x" * 200, encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="not read"):
+        _a1_identity(path)
+
+
+def test_a_git_directory_inside_the_fixture_is_part_of_the_task(tmp_path: Path) -> None:
+    """#756 review control: only the TASK root's .git is not content; the agent sees fixture/.git."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    (path.parent / "tasks/a1/fixture/.git").mkdir()
+    (path.parent / "tasks/a1/fixture/.git/HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    assert _a1_identity(path) != before
+
+
+def test_many_files_beside_the_agent_inputs_never_exhaust_the_entry_budget(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review pass 2: excluded neighbours are not counted."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    monkeypatch.setattr(source_digest, "MAX_ENTRIES", 3)
+    for n in range(5):
+        (path.parent / f"tasks/a1/note{n}.txt").write_text("n", encoding="utf-8")
+    assert _a1_identity(path) == before
+
+
+def test_too_many_entries_inside_the_fixture_are_still_refused(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review pass 2 twin."""
+    path = _copy(tmp_path)
+    monkeypatch.setattr(source_digest, "MAX_ENTRIES", 3)
+    for n in range(5):
+        (path.parent / f"tasks/a1/fixture/f{n}.txt").write_text("n", encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="not read"):
+        _a1_identity(path)

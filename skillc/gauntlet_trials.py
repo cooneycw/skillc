@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .reliability import DISCRIMINATION_VERDICTS, TwoArmRule, evaluate_discrimination
-from .source_digest import digest_entries, tree_entries
+from .source_digest import SourceUnreadable, digest_entries, tree_entries
 
 #: The engine's record (#754, `skillc.gauntlet.RECORD_NAME`), written beside a
 #: native skill's CHARTER.md on every run. It is never part of the skill, so it
@@ -190,15 +190,20 @@ def load(path: Path) -> Declaration:
     raw_clauses = _need(data, "clauses", dict, "declaration")
     assert isinstance(raw_clauses, dict)
     clauses: dict[str, tuple[Task, ...]] = {}
+    # #756 (3): one agent-visible task has ONE grader across the whole
+    # declaration, checked before planning, so no attempt is spent on both.
+    everywhere: dict[str, tuple[str, Task]] = {}
     for clause_id, tasks in raw_clauses.items():
         if not isinstance(tasks, list) or not all(isinstance(t, str) for t in tasks):
             raise DeclarationError(f"clause {clause_id!r}: tasks must be a list of task directories")
         distinct: dict[str, Task] = {}
         for task in (read_task((base / t).resolve()) for t in sorted(set(tasks))):
             seen = distinct.setdefault(task.identity, task)  # identical copies are ONE task
-            if seen.grader_digest != task.grader_digest:
-                raise DeclarationError(f"clause {clause_id!r}: {seen.path} and {task.path} are the same task "
-                                       f"with different graders; declare one")
+            first_clause, first = everywhere.setdefault(task.identity, (str(clause_id), task))
+            for other_clause, other in ((str(clause_id), seen), (first_clause, first)):
+                if other.grader_digest != task.grader_digest:
+                    raise DeclarationError(f"clauses {other_clause!r} and {clause_id!r}: {other.path} and {task.path} "
+                                           f"are the same task with different graders; declare one")
         clauses[str(clause_id)] = tuple(sorted(distinct.values(), key=lambda t: t.path))
     if not clauses:
         raise DeclarationError("no clause is declared")
@@ -251,7 +256,11 @@ def arm_text(declaration: Declaration, passage: Passage | None) -> dict[str, str
     count = text.count(passage.remove)
     if count != 1:
         raise DeclarationError(f"arm {passage.arm!r}: the passage occurs {count} times in {passage.file}; it must occur once")
-    return {passage.file: text.replace(passage.remove, "", 1)}
+    # #756 (4): the key is the canonical path inside the skill, so `./SKILL.md`
+    # and `SKILL.md` are one arm. `inside` above already refused any target
+    # that resolves outside the skill, so canonicalising is never an escape.
+    canonical = target.resolve().relative_to(declaration.skill.resolve()).as_posix()
+    return {canonical: text.replace(passage.remove, "", 1)}
 
 
 def arm_digest(declaration: Declaration, passage: Passage | None) -> str:
@@ -261,11 +270,22 @@ def arm_digest(declaration: Declaration, passage: Passage | None) -> str:
     return _sha(json.dumps({"base": declaration.skill_digest, "changes": changes}, sort_keys=True).encode())
 
 
-def _digest_files(root: Path, files: Iterable[Path]) -> str:
-    h = hashlib.sha256()
-    for p in sorted(files):
-        h.update(p.relative_to(root).as_posix().encode() + b"\0" + p.read_bytes() + b"\0")
-    return h.hexdigest()
+#: What the agent sees of a task: its goal and its fixture (#756 (1)).
+AGENT_INPUTS = ("goal.md", "fixture")
+
+
+def task_digest(path: Path) -> str:
+    """The agent-visible task's identity: git's mode and blob for goal.md and
+    every entry under fixture/ (#756 (1)). The execute bit counts, a symlink
+    counts as its link text and is never followed, and a FIFO or device reads
+    as not-a-file. Empty directories are invisible, as they are to git."""
+    try:
+        # Only the agent's inputs are walked (counter-model review): a grader
+        # file or a note beside them can never make the task unreadable.
+        entries = tree_entries(path, only=AGENT_INPUTS)
+    except SourceUnreadable as exc:
+        raise DeclarationError(f"task {path}: not read: {exc}") from None
+    return digest_entries(entries)
 
 
 @dataclass(frozen=True)
@@ -293,12 +313,11 @@ def read_task(path: Path) -> Task:
     goal, fixture = path / "goal.md", path / "fixture"
     if not goal.is_file() or goal.is_symlink() or not fixture.is_dir() or fixture.is_symlink():
         raise DeclarationError(f"task {path}: needs a goal.md file and a fixture/ directory (the agent's inputs)")
-    seen = [goal, *sorted(p for p in fixture.rglob("*") if p.is_file())]
     try:
         grader = GraderDef.load(path).digest()
     except (Refused, OSError, ValueError) as exc:
         raise DeclarationError(f"task {path}: grader not read: {exc}") from None
-    return Task(path, _digest_files(path, [p for p in seen if p.is_file()]), grader)
+    return Task(path, task_digest(path), grader)
 
 
 # ---------------------------------------------------------------- the split
@@ -316,7 +335,8 @@ def assignments(declaration: Declaration) -> dict[str, str]:
         tasks = declaration.clauses[clause]
         want = max(1, len(tasks) // 3)
         have = sum(placed.get(t.identity) == "held" for t in tasks)
-        fresh = [t for t in tasks if t.identity not in placed]
+        # #756 (2): ordered by content, never by path, so a rename moves nothing.
+        fresh = sorted((t for t in tasks if t.identity not in placed), key=lambda t: t.identity)
         random.Random(f"{declaration.seed}:{clause}").shuffle(fresh)
         for task in fresh:
             if have < want:
