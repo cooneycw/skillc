@@ -40,6 +40,7 @@ part 1.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -51,7 +52,9 @@ from pathlib import Path
 
 # #783, orchestrator ruling rev 51: the ONLY names the engine takes from a round
 # module - pure, read-only parsers. tests/test_gauntlet.py pins this list.
+from .charter import skill_names
 from .contracts import expand, load
+from .spec import FrontmatterError, parse_frontmatter
 
 EXIT_FAILED = 1
 EXIT_USAGE = 2
@@ -72,6 +75,16 @@ _FINDING_LINE = re.compile(r"^(?P<severity>error|warn)\s+(?P<rule>\S+)\s+(?P<pat
 #: `contracts` says so when its collection-wide rules could not run (docs/specs/contracts.md).
 _CROSS_NOT_RUN = "did NOT run"
 COMMAND_TIMEOUT = 1800
+#: #760: the most directory entries round 2's key lists under the skipped
+#: directories (.venv, node_modules, .skillc, __pycache__) before it reads UNKNOWN
+#: rather than scanning on (orchestrator ruling rev 37).
+SKIPPED_WALK_CAP = 20000
+#: The most entries round 1's charter walk lists: it covers the WHOLE collection,
+#: as `contracts` discovers charters everywhere (a real collection is ~13,000).
+CHARTER_WALK_CAP = 200000
+#: `usage report`'s per-skill block (skillc/usage.py), the lines round 0 counts.
+_USAGE_HEADING = "by skill and digest:"
+_USAGE_ROW = re.compile(r"^  (?P<skill>\S+)\s+(?P<digest>\S+)\s+(?P<count>\d+)$")
 
 
 class UsageError(Exception):
@@ -314,11 +327,15 @@ def discover_usage(skill: Skill, options: Options) -> list[Path]:
     return unique
 
 
-def _usage_inputs(logs: list[Path]) -> dict[str, str]:
+def _usage_inputs(logs: list[Path], aliases: list[str] | None = None) -> dict[str, str]:
     """Logs by digest only, numbered in digest order, so neither a path nor the
-    order they were named in reaches the record."""
+    order they were named in reaches the record. Round 0 counts this skill's
+    own names, so its aliases are an input too (#760)."""
     digests = sorted(_file_digest(p) for p in logs)
-    return {f"usage-{i}": d for i, d in enumerate(digests, 1)} or {"usage": "none"}
+    out = {f"usage-{i}": d for i, d in enumerate(digests, 1)} or {"usage": "none"}
+    if aliases:
+        out["aliases"] = _sha(json.dumps(sorted(aliases)).encode())
+    return out
 
 
 # --------------------------------------------------------------------- rounds
@@ -333,6 +350,77 @@ def _inside_collection(root: Path, rel: str) -> bool:
         return (root / path).resolve().is_relative_to(root.resolve()) and (root / path).exists()
     except (OSError, ValueError, RuntimeError):  # RuntimeError: a symlink loop (Python 3.12) backs nothing
         return False
+
+
+def _literal_brackets(pattern: str) -> str:
+    """inspect reads `[` literally; fnmatch reads it as a character class."""
+    return pattern.replace("[", "[[]")
+
+
+def _glob_variants(pattern: str) -> list[str]:
+    """`fnmatch` patterns matching at least what inspect's glob matches: `**/`
+    may stand for ZERO directories there, so each `**/` is also tried removed.
+    A superset is the safe direction: it can only re-run round 2 more often."""
+    variants, frontier = {pattern}, [pattern]
+    while frontier:
+        v = frontier.pop()
+        for k in range(len(v)):
+            if v.startswith("**/", k) and (new := v[:k] + v[k + 3:]) not in variants:
+                variants.add(new)
+                frontier.append(new)
+    return sorted(variants)
+
+
+def _test_digest(collection: Path, rel: str) -> str:
+    """A declared test path by content, only when `contracts` would read it:
+    relative, no `..`, inside the collection, never through an escaping link."""
+    path = Path(rel)
+    if path.is_absolute() or ".." in path.parts:
+        return "outside"  # a stable sentinel; never read (a declared `/` would walk the disk)
+    target = collection / path
+    try:
+        resolved = target.resolve()
+        if not resolved.is_relative_to(collection.resolve()):
+            return "outside"
+        link = "symlink:" + os.readlink(target) + ":" if target.is_symlink() else ""
+        # a link counts by its text AND what it reaches: deleting the target unbacks the test
+        return link + (_tree_digest(resolved) if resolved.is_dir() else _file_digest(resolved))
+    except (OSError, RuntimeError, ValueError, UnicodeError):
+        return "unusable"  # NUL, an unencodable name, a loop: contracts reads it unbacked; never a crash
+
+
+def _declared_tests(collection: Path) -> str:
+    """Every charter `contracts` would discover - the whole collection, under
+    .skillc/ and .venv/ too - by content, and every test path each declares by
+    content ("absent" when missing): both change round 1's verdict (#760).
+    Past CHARTER_WALK_CAP entries it answers "over-cap": round 1 then reads
+    UNKNOWN rather than scanning on."""
+    entries: list[tuple[str, str]] = []
+    listed = 0
+    for top, dirs, files in os.walk(collection):
+        dirs[:] = sorted(dirs)  # the SAME population contracts discovers: nothing is pruned (counter-model review)
+        listed += len(dirs) + len(files)
+        if listed > CHARTER_WALK_CAP:
+            return "over-cap"
+        if "CHARTER.md" not in files:
+            continue
+        charter = Path(top, "CHARTER.md")
+        entries.append((charter.relative_to(collection).as_posix(), _file_digest(charter)))
+        contract = load(charter)
+        sections = [contract.data.get(k) for k in ("requires", "provides", "authority", "failure")]
+        invariants = contract.data.get("invariants")
+        if isinstance(invariants, dict):
+            sections += [invariants.get("always"), invariants.get("never")]
+        for section in sections:
+            for clause in section if isinstance(section, list) else []:
+                declared = clause.get("test") if isinstance(clause, dict) else None
+                for test in declared if isinstance(declared, list) else [declared] if declared else []:
+                    paths, why = expand(str(test))
+                    if why is not None:
+                        entries.append((str(test), "unexpandable"))
+                    for rel in paths:
+                        entries.append((rel, _test_digest(collection, rel)))
+    return _sha(json.dumps(sorted(set(entries))).encode())
 
 
 def _charter_facts(charter: Path, root: Path) -> dict[str, object]:
@@ -367,21 +455,71 @@ def _charter_facts(charter: Path, root: Path) -> dict[str, object]:
 
 
 
-def round0(skill: Skill, logs: list[Path]) -> Result:
-    inputs = _usage_inputs(logs)
+def _invocations(text: str, names: set[str]) -> int | None:
+    """This skill's count from `usage report`'s "by skill and digest:" block, or
+    None when the report does not have that shape (never read as OBSERVED)."""
+    lines = text.splitlines()
+    if _USAGE_HEADING not in lines:
+        return None
+    total = 0
+    for line in lines[lines.index(_USAGE_HEADING) + 1:]:
+        if not line.strip():
+            break
+        row = _USAGE_ROW.match(line)
+        if row is None:
+            return None
+        if row.group("skill") in names:
+            total += int(row.group("count"))
+    return total
+
+
+def _names(skill: Skill, aliases: list[str]) -> set[str]:
+    try:
+        front, _body = parse_frontmatter(skill.text.read_text())
+    except (OSError, UnicodeError, FrontmatterError):
+        front = {}  # unreadable text keeps the names its path gives (directory, command)
+    return skill_names(skill.text, front, aliases)
+
+
+def _round0_inputs(skill: Skill, logs: list[Path], aliases: list[str]) -> dict[str, str]:
+    """The logs, the aliases, and the RESOLVED name set: renaming the skill in
+    its frontmatter changes which records are its own (counter-model review)."""
+    return {**_usage_inputs(logs, aliases), "names": _sha(json.dumps(sorted(_names(skill, aliases))).encode())}
+
+
+def round0(skill: Skill, logs: list[Path], aliases: list[str] | None = None) -> Result:
+    inputs = _round0_inputs(skill, logs, aliases or [])
     if not logs:
         return Result("0", "usage", "UNKNOWN", "no usage log found - not a pass; round 1 reads usage as UNKNOWN",
                       proceed=True, inputs=inputs, reason="no-log")
     unreadable = sum(digest == "unreadable" for digest in inputs.values())
+    names = _names(skill, aliases or [])
+    invocations, shapeless = 0, 0
     for log in logs:
-        if _skillc(["usage", "report", str(log)], skill.collection).returncode != 0:
+        done = _skillc(["usage", "report", str(log)], skill.collection)
+        if done.returncode != 0:
             unreadable += 1
+            continue
+        count = _invocations(done.stdout, names)
+        if count is None:
+            shapeless += 1
+        else:
+            invocations += count
     if unreadable:
         return Result("0", "usage", "UNKNOWN", f"{unreadable} of {len(logs)} usage log(s) could not be read - "
                       "not a pass", proceed=True, inputs=inputs, reason="log-unreadable",
                       facts={"logs": len(logs), "unreadable": unreadable})
+    if shapeless:
+        return Result("0", "usage", "UNKNOWN", f"{shapeless} of {len(logs)} usage report(s) had no "
+                      f"'{_USAGE_HEADING}' block this engine can read - not a pass", proceed=True, inputs=inputs,
+                      reason="report-unreadable", facts={"logs": len(logs), "unreadable": shapeless})
+    if invocations == 0:
+        return Result("0", "usage", "UNKNOWN", f"{len(logs)} usage log(s) hold no invocation of "
+                      f"{', '.join(sorted(names))} - not a pass; pass --alias if the skill runs under another name",
+                      proceed=True, inputs=inputs, reason="skill-not-in-log",
+                      facts={"logs": len(logs), "names": sorted(names)})
     return Result("0", "usage", "OBSERVED", f"{len(logs)} usage log(s) read by `skillc usage report`; counts "
-                  "stay in the logs", proceed=True, inputs=inputs, facts={"logs": len(logs)})
+                  "stay in the logs", proceed=True, inputs=inputs, facts={"logs": len(logs), "invocations": invocations})
 
 
 def _round1_inputs(skill: Skill, logs: list[Path], tool: bool, options: Options) -> dict[str, str]:
@@ -390,11 +528,16 @@ def _round1_inputs(skill: Skill, logs: list[Path], tool: bool, options: Options)
     return {"skill": _file_digest(skill.text), "charter": _file_digest(skill.charter),
             "collection": _tree_digest(skill.collection),
             "aliases": _sha(json.dumps(sorted(options.aliases)).encode()),
+            "declared-tests": _declared_tests(skill.collection),
             "tool:charter": "available" if tool else "absent", **_usage_inputs(logs)}
 
 
 def round1(skill: Skill, logs: list[Path], options: Options, draft: Path, tool: bool) -> Result:
     inputs = _round1_inputs(skill, logs, tool, options)
+    if inputs["declared-tests"] == "over-cap":
+        return Result("1", "charter", "UNKNOWN", f"the collection holds more than {CHARTER_WALK_CAP} entries, so "
+                      "the charters `contracts` reads were not fingerprinted - not a pass", proceed=False,
+                      inputs=inputs, reason="charter-walk-cap")
     if skill.charter.is_file():
         return _round1_contracts(skill, inputs)
     if not tool:
@@ -504,8 +647,50 @@ def _inspected(skill: Skill, options: Options) -> bool | None:
     return subjects == 1 if isinstance(subjects, int) else None
 
 
+def _origin(collection: Path) -> str:
+    """The RAW `origin` URL, or "none": inspect infers its repository from it
+    (orchestrator ruling rev 57: the raw URL, no copied parser; a cosmetic URL
+    change only costs a free re-run)."""
+    try:
+        done = subprocess.run(["git", "-C", str(collection), "remote", "get-url", "origin"], capture_output=True,
+                              text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return "unreadable"
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else "none"
+
+
+def _skipped_subjects(skill: Skill, options: Options) -> str:
+    """Files inspect could add from the directories the collection digest
+    skips: their names are LISTED, and only include-glob matches are hashed.
+    Past SKIPPED_WALK_CAP entries it answers "over-cap", which round 2 reads as
+    UNKNOWN rather than scanning on."""
+    patterns = list(options.include) or ["**/SKILL.md"]
+    listed, matches = 0, []
+    for top, dirs, _files in os.walk(skill.collection):
+        dirs[:] = sorted(d for d in dirs if d != ".git")
+        for name in [d for d in dirs if d in _SKIP_DIRS]:
+            dirs.remove(name)
+            base = Path(top, name)
+            for sub_top, sub_dirs, sub_files in os.walk(base):
+                rel_top = Path(sub_top).relative_to(skill.collection).as_posix()
+                if rel_top == ".skillc/gauntlet" or rel_top.startswith(".skillc/gauntlet/"):
+                    sub_dirs[:] = []  # the engine's own state
+                    continue
+                listed += len(sub_dirs) + len(sub_files)
+                if listed > SKIPPED_WALK_CAP:
+                    return "over-cap"
+                for f in sub_files:
+                    rel = f"{rel_top}/{f}"
+                    if any(fnmatch.fnmatch(rel, v) for pat in patterns for v in _glob_variants(_literal_brackets(pat))):
+                        matches.append((rel, _file_digest(Path(sub_top, f))))
+    return _sha(json.dumps(sorted(matches)).encode())
+
+
 def _round2_inputs(skill: Skill, options: Options) -> dict[str, str]:
     return {"skill": _file_digest(skill.text), "collection": _tree_digest(skill.collection),
+            # digests, never the URL itself: the record holds no host detail, and a URL can carry a credential
+            "origin": _sha(_origin(skill.collection).encode()),
+            "skipped-subjects": _skipped_subjects(skill, options),
             "issue-states": _file_digest(options.issue_states) if options.issue_states else "none",
             "options": _sha(json.dumps({"offline": options.offline, "repo": options.repo or "",
                                         "include": options.include, "exclude": options.exclude,
@@ -514,6 +699,10 @@ def _round2_inputs(skill: Skill, options: Options) -> dict[str, str]:
 
 def round2(skill: Skill, options: Options) -> Result:
     inputs = _round2_inputs(skill, options)
+    if inputs["skipped-subjects"] == "over-cap":
+        return Result("2", "inspect", "UNKNOWN", f"the skipped directories (.venv, node_modules, .skillc) hold more "
+                      f"than {SKIPPED_WALK_CAP} entries, so what inspect could include from them was not fingerprinted"
+                      " - not a pass", proceed=False, inputs=inputs, reason="skipped-cap")
     member = _inspected(skill, options) if options.exclude else True
     if not member:
         why = "an --exclude drops this skill" if member is False else "inspect could not say whether it is a subject"
@@ -754,7 +943,7 @@ def run(collection: Path, skill_arg: str, options: Options, out=print) -> int:
              (("charter", ["charter", "draft"]), ("overlap", ["charter", "overlap"]),
               ("round3", ["gauntlet", "round3"]))}
     plan = [
-        ("0", lambda: _usage_inputs(logs), lambda: round0(skill, logs)),
+        ("0", lambda: _round0_inputs(skill, logs, options.aliases), lambda: round0(skill, logs, options.aliases)),
         ("1", lambda: _round1_inputs(skill, logs, tools["charter"], options),
          lambda: round1(skill, logs, options, draft, tools["charter"])),
         ("1-overlap", lambda: _overlap_inputs(skill, tools["overlap"]),

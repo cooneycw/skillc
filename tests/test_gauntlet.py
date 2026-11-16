@@ -667,3 +667,186 @@ def test_state_files_are_never_written_through_a_link(coll: Path, tmp_path: Path
     (drafts / "skills__beta" / "display.json").symlink_to(victim)
     code, _ = _run(coll, "skills/beta", draft_dir=drafts)
     assert victim.read_text() == "keep me\n" and code == gauntlet.EXIT_USAGE
+
+
+# ------------------------- #760: each round's key covers what it reads; round 0's population
+
+def _alpha_declares(coll: Path, test: str) -> None:
+    charter = coll / "skills" / "alpha" / "CHARTER.md"
+    charter.write_text(charter.read_text().replace(
+        "owner: owner\n", f"owner: owner\ninvariants:\n  always:\n    - id: alpha.always-x\n      test: {test}\n"
+                          "  never: []\n", 1))
+
+
+def test_deleting_a_declared_test_under_skillc_reruns_round_1(coll: Path) -> None:
+    (coll / ".skillc").mkdir()
+    (coll / ".skillc" / "check.py").write_text("print('check')\n")
+    _alpha_declares(coll, ".skillc/check.py")
+    _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["1"].endswith("(cached)"), "the control: unchanged inputs are cached"
+    (coll / ".skillc" / "check.py").unlink()
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)"), "a deleted declared test must re-run round 1"
+
+
+def test_changing_origin_reruns_round_2(coll: Path) -> None:
+    _git(coll, "remote", "add", "origin", "https://github.com/example/gauntlet.git")
+    _run(coll, "skills/alpha", repo=None)
+    _, again = _run(coll, "skills/alpha", repo=None)
+    assert _rounds(again)["2"].endswith("(cached)"), "the control: an unchanged origin is cached"
+    _git(coll, "remote", "set-url", "origin", "https://github.com/example/other.git")
+    _, after = _run(coll, "skills/alpha", repo=None)
+    assert not _rounds(after)["2"].endswith("(cached)"), "a changed origin must re-run round 2"
+
+
+def test_a_new_skill_under_venv_reruns_round_2(coll: Path) -> None:
+    _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["2"].endswith("(cached)")
+    (coll / ".venv" / "x").mkdir(parents=True)
+    (coll / ".venv" / "x" / "SKILL.md").write_text("---\nname: x\ndescription: Use when x.\n---\nDo x.\n")
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["2"].endswith("(cached)"), "inspect could include it, so round 2 re-runs"
+
+
+def test_the_skipped_directory_walk_has_a_cap(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gauntlet, "SKIPPED_WALK_CAP", 3)
+    for i in range(5):
+        (coll / ".venv" / f"d{i}").mkdir(parents=True)
+    code, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["2"].startswith("UNKNOWN") and "more than 3 entries" in _rounds(lines)["2"]
+    assert code == gauntlet.EXIT_STOPPED
+
+
+def _beta_only_log(tmp: Path) -> Path:
+    log = tmp / "beta-only" / "usage.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("".join(line + "\n" for line in (FIXTURES / "usage" / "usage.jsonl").read_text().splitlines()
+                           if '"skill": "beta"' in line))
+    return log
+
+
+def test_a_log_without_this_skill_reads_unknown_and_an_alias_finds_it(coll: Path, tmp_path: Path) -> None:
+    log = _beta_only_log(tmp_path)
+    _, lines = _run(coll, "skills/alpha", usage=[log])
+    assert _rounds(lines)["0"].startswith("UNKNOWN") and "alpha" in _rounds(lines)["0"]
+    _, aliased = _run(coll, "skills/alpha", usage=[log], aliases=["beta"])
+    assert _rounds(aliased)["0"].startswith("OBSERVED"), "an alias names the skill's other usage name"
+
+
+def test_alphas_own_records_read_observed(coll: Path) -> None:
+    """The control: the fixture log holds alpha's own invocation."""
+    _, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["0"].startswith("OBSERVED")
+
+
+def test_a_usage_report_whose_shape_changed_reads_unknown(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = gauntlet._skillc
+
+    def renamed(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        done = real(args, cwd)
+        if args[:2] == ["usage", "report"]:
+            return subprocess.CompletedProcess(done.args, 0, done.stdout.replace("by skill and digest:", "per skill:"),
+                                               done.stderr)
+        return done
+    monkeypatch.setattr(gauntlet, "_skillc", renamed)
+    _, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["0"].startswith("UNKNOWN"), "an unreadable report shape is never OBSERVED"
+
+
+# ----------------------------------------- #760 counter-model pass 1
+
+def test_a_declared_root_path_is_never_walked(coll: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`test: /` must not hash the filesystem: an outside path is a sentinel."""
+    seen: list[Path] = []
+    real = gauntlet._tree_digest
+
+    def spy(root: Path, **kw: Any) -> str:
+        seen.append(root)
+        return real(root, **kw)
+    monkeypatch.setattr(gauntlet, "_tree_digest", spy)
+    _alpha_declares(coll, "/")
+    gauntlet._declared_tests(coll)
+    assert Path("/") not in seen and all(p.resolve().is_relative_to(coll.resolve()) for p in seen)
+
+
+def test_renaming_the_skill_in_its_frontmatter_reruns_round_0(coll: Path) -> None:
+    _run(coll, "skills/alpha")
+    _, again = _run(coll, "skills/alpha")
+    assert _rounds(again)["0"].endswith("(cached)")
+    skill_md = coll / "skills" / "alpha" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text().replace("name: alpha", "name: gamma", 1))
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["0"].endswith("(cached)"), "the name set is round 0's input"
+
+
+def test_a_double_star_include_matching_zero_directories_reruns_round_2(coll: Path) -> None:
+    """inspect's `**/` matches zero directories: `.venv/**/SKILL.md` covers `.venv/SKILL.md`."""
+    _run(coll, "skills/alpha", include=[".venv/**/SKILL.md"])
+    (coll / ".venv").mkdir()
+    (coll / ".venv" / "SKILL.md").write_text("---\nname: v\ndescription: Use when v.\n---\nDo v.\n")
+    _, after = _run(coll, "skills/alpha", include=[".venv/**/SKILL.md"])
+    assert not _rounds(after)["2"].endswith("(cached)")
+
+
+def test_a_charter_under_a_skipped_directory_reruns_round_1(coll: Path) -> None:
+    """contracts discovers charters under .venv too; round 1's key covers them."""
+    _run(coll, "skills/alpha")
+    (coll / ".venv" / "neighbor").mkdir(parents=True)
+    (coll / ".venv" / "neighbor" / "CHARTER.md").write_text("---\ncontract: neighbor\nnot_a_field: 1\n---\n")
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)")
+
+
+# ----------------------------------------- #760 counter-model pass 2
+
+def test_a_declared_symlink_whose_target_is_deleted_reruns_round_1(coll: Path) -> None:
+    (coll / ".skillc").mkdir()
+    (coll / ".skillc" / "check.py").write_text("print('check')\n")
+    (coll / ".skillc" / "alias.py").symlink_to("check.py")
+    _alpha_declares(coll, ".skillc/alias.py")
+    _run(coll, "skills/alpha")
+    (coll / ".skillc" / "check.py").unlink()
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)"), "a dangling link no longer backs the test"
+
+
+def test_a_literal_bracket_include_is_fingerprinted(coll: Path) -> None:
+    _run(coll, "skills/alpha", include=[".venv/[x]/SKILL.md"])
+    (coll / ".venv" / "[x]").mkdir(parents=True)
+    (coll / ".venv" / "[x]" / "SKILL.md").write_text("---\nname: b\ndescription: Use when b.\n---\nDo b.\n")
+    _, after = _run(coll, "skills/alpha", include=[".venv/[x]/SKILL.md"])
+    assert not _rounds(after)["2"].endswith("(cached)")
+
+
+@pytest.mark.parametrize("bad", ["a\\x00b", "\\ud800"])
+def test_an_unusable_declared_path_never_crashes(coll: Path, bad: str) -> None:
+    assert gauntlet._test_digest(coll, bad.encode().decode("unicode_escape", "surrogatepass")
+                                 if "\\" in bad else bad) == "unusable"
+
+
+@pytest.mark.parametrize("where", [".git", ".skillc/gauntlet"])
+def test_a_charter_contracts_discovers_anywhere_reruns_round_1(coll: Path, where: str) -> None:
+    _run(coll, "skills/alpha")
+    (coll / where / "neighbor").mkdir(parents=True, exist_ok=True)
+    (coll / where / "neighbor" / "CHARTER.md").write_text("---\ncontract: neighbor\nnot_a_field: 1\n---\n")
+    _, after = _run(coll, "skills/alpha")
+    assert not _rounds(after)["1"].endswith("(cached)")
+
+
+def test_invalid_utf8_skill_text_never_crashes_round_0(coll: Path) -> None:
+    (coll / "skills" / "alpha" / "SKILL.md").write_bytes(b"---\nname: alpha\n---\n\xff\xfe broken\n")
+    code, lines = _run(coll, "skills/alpha")
+    assert "0" in _rounds(lines) and code in (gauntlet.EXIT_STOPPED, gauntlet.EXIT_FAILED)
+
+
+@pytest.mark.parametrize("cap,unknown", [(5, True), (200000, False)])
+def test_the_charter_walk_cap_reads_unknown_without_running_contracts(
+    coll: Path, monkeypatch: pytest.MonkeyPatch, cap: int, unknown: bool,
+) -> None:
+    monkeypatch.setattr(gauntlet, "CHARTER_WALK_CAP", cap)
+    calls = _spy(monkeypatch)
+    _, lines = _run(coll, "skills/alpha")
+    assert _rounds(lines)["1"].startswith("UNKNOWN") is unknown, _rounds(lines)["1"]
+    assert any(c[:1] == ["contracts"] for c in calls) is not unknown, "over the cap, contracts never runs"
