@@ -1116,3 +1116,37 @@ def test_a_stalled_git_skips_the_drift_check_and_the_engine_runs(tmp_path: Path)
                                "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}"})
     assert NOTE in done.stderr and DRIFT not in done.stderr, done.stderr
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+# ------------------- #738: counter-model pass 2
+
+def test_a_callers_git_dir_never_redirects_the_installer(checkout: Path, tmp_path: Path) -> None:
+    """GIT_DIR naming another repository must not pick another checkout: run
+    from an export (no .git), the installer still refuses."""
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    export = _archive(checkout, tmp_path / "export")
+    skills = tmp_path / "skills"
+    env = {**os.environ, "SKILLC_SKILLS_DIR": str(skills), "HOME": str(tmp_path / "home"),
+           "XDG_CACHE_HOME": str(tmp_path / "cache"), "GIT_DIR": str(checkout / ".git")}
+    done = subprocess.run(["python3", str(export / "scripts" / "install_skill.py"), "install"], capture_output=True,
+                          text=True, check=False, cwd=export, env=env)
+    assert done.returncode == 2 and "export" in done.stderr, done.stdout + done.stderr
+    assert not (skills / NAME).exists()
+
+
+def test_a_directory_link_in_the_checkout_skill_is_drift(tmp_path: Path) -> None:
+    """The checkout's `scripts/` replaced by a link to identical files: the
+    tracked paths still resolve, but through a link - drift, as the installer
+    would refuse it."""
+    repo, launcher = _installed_launcher(tmp_path)
+    skill = repo / ".claude" / "skills" / NAME
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(skill / "scripts", elsewhere)
+    shutil.rmtree(skill / "scripts")
+    (skill / "scripts").symlink_to(elsewhere, target_is_directory=True)
+    done = _run_installed(launcher, tmp_path)
+    assert DRIFT in done.stderr and NOTE not in done.stderr, done.stderr
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+

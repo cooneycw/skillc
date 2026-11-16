@@ -83,9 +83,16 @@ def _step(name: str) -> None:
     """A seam the crash controls patch to stop the install between moves."""
 
 
+def _git_env() -> dict[str, str]:
+    """The environment for every installer git call: the caller's GIT_*
+    variables (GIT_DIR, GIT_INDEX_FILE, ...) never pick the checkout or its
+    tracked files (#738, counter-model review)."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def main_checkout(start: Path) -> Path | None:
     done = subprocess.run(["git", "-C", str(start), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                          capture_output=True, text=True, check=False)
+                          capture_output=True, text=True, check=False, env=_git_env())
     if done.returncode != 0 or not done.stdout.strip():
         return None
     common = Path(done.stdout.strip())
@@ -152,12 +159,9 @@ def tracked_payload(source: Path) -> dict[str, bytes]:
     untracked file (the owner's GAUNTLET.json record) is never copied. When git
     cannot list the folder the install is refused: a walk instead would copy
     exactly what this exists to leave out."""
-    # The caller's GIT_* variables (GIT_INDEX_FILE, GIT_DIR, ...) never pick the
-    # population: the checkout's own index decides (counter-model review).
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         done = subprocess.run(["git", "-C", str(source), "ls-files", "-z", "--cached", "--", "."],
-                              capture_output=True, check=False, env=env, timeout=GIT_TIMEOUT)
+                              capture_output=True, check=False, env=_git_env(), timeout=GIT_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Refused(EXIT_REFUSED, f"git cannot list the tracked files of {source} ({type(exc).__name__}); "
                                     "refusing rather than copying files git does not track") from None

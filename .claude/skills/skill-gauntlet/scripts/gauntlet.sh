@@ -130,6 +130,8 @@ def tracked(src):
         print("git did not answer within 10 seconds"); sys.exit(3)
     except FileNotFoundError:
         missing = True
+    except OSError as exc:  # git is there but cannot be run: no comparison happened
+        print(f"git cannot be run ({type(exc).__name__})"); sys.exit(3)
     else:
         missing = False
     d = os.path.abspath(src)
@@ -145,6 +147,10 @@ def files(root, rels):
     for rel in rels:
         if os.sep not in rel and rel.startswith("."):
             continue  # top-level dotfiles belong to the installer
+        parts = rel.split(os.sep)
+        for depth in range(1, len(parts)):
+            if os.path.islink(os.path.join(root, *parts[:depth])):
+                raise OSError(f"{rel} is reached through a directory link")
         path = os.path.join(root, rel)
         mode = os.lstat(path).st_mode
         if not stat.S_ISREG(mode):
