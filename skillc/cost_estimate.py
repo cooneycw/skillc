@@ -68,6 +68,25 @@ SUBSCRIPTION_LOGIN_RULING_SCOPE = (
     "which use provider API keys and stay dollar-metered"
 )
 
+#: #718 decision 4, the owner's own words (2026-11-15, recorded on #736). It
+#: replaces a calibration (#747, closed as not planned).
+GAUNTLET_BUDGET_RULING = (
+    "i'm fine to not measure the cost. i'll know intuitively. i'm not worried "
+    "about a 1% usage move. it's a 10% move that will alarm me."
+)
+
+#: What that ruling means here, restated (NOT the owner's words). Gauntlet
+#: trials on the subscription login are capped by a DECLARED ATTEMPT COUNT,
+#: not dollars or weekly percent: skillc cannot read the weekly gauge (#624
+#: rules out client counters, and `/usage` is the owner's). Each run declares
+#: its attempts, refuses to start above `attempt_cap`, stops at the cap, and
+#: reads INCOMPLETE if stopped (`skillc/gauntlet_trials.py`). This module's
+#: $5 `CEILING_USD` still refuses any API-key (metered) path.
+GAUNTLET_BUDGET_SCOPE = (
+    "subscription-login gauntlet trials are capped by a declared attempt count "
+    "(skillc/gauntlet_trials.py); the $5 CEILING_USD still governs any metered API-key path"
+)
+
 
 class SpendNotAuthorized(Exception):
     """No live run may start: refused, not silently skipped or approximated

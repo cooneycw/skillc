@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 import pytest
 
 from skillc import docker_wave as wave
-from skillc.backend import BackendUnavailable, Confirmation, ExecuteResult
+from skillc.backend import BackendUnavailable, Confirmation, ExecuteResult, ObservationsWrite
 from skillc.wave_attachment import WAVE_ROOT, WaveAttachment
 
 CONTROLS = Path(__file__).resolve().parents[1] / "controls/docker-wave/cases.json"
@@ -124,6 +124,9 @@ class ModelBackend:
         header = f"OpenAI Codex v0.157.1\n--------\nsession id: {sid}\n--------\n".encode()
         if mode == "missing-header":
             header = b"agent says session id: forged\n"
+        if mode == "declared-write":  # #761: a populated, byte-bearing write-back
+            return ExecuteResult("exited", 0, stdout=b"actor done", stderr=header,
+                                 observations_write=ObservationsWrite(1.0, 2.0, "0" * 64, b"actor done"))
         return ExecuteResult("exited", 0, stdout=b"actor done", stderr=header)
 
     def end_attempt(self, handle: object) -> None:
@@ -311,6 +314,17 @@ def test_session_identity_cannot_be_supplied_by_an_agent_artifact(runtime: Any) 
     assert len(controller.states["worker-a"].executions) == 1
     assert (controller.root / "report.json").is_file()
     assert all(any(k == "destroy" for k, _ in s.backend.calls) for s in controller.states.values())
+
+
+def test_a_turn_record_never_carries_the_declared_write_back(runtime: Any) -> None:
+    """#761: `ExecuteResult.observations_write` holds raw bytes; the persisted
+    turn record leaves it out with stdout/stderr, so the record still
+    serializes and its shape is what it was before the field existed."""
+    controller, _ = runtime
+    ModelBackend.result_modes = {"test-wave-worker-a": "declared-write"}
+    controller.run_scripted()
+    record = json.loads((controller.root / "worker-a" / "turn-0.json").read_text())
+    assert "observations_write" not in record and "stdout" not in record and record["exit_code"] == 0
 
 
 def test_cleanup_unreachable_is_unknown_and_prevents_completion(runtime: Any, monkeypatch: Any) -> None:

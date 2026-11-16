@@ -100,6 +100,7 @@ skillc usage report <usage.jsonl> # #719: skill-usage counts by skill and digest
 skillc contracts <collection>  # #720: check every CHARTER.md contract together; exit 0 clean, 1 findings, 2 usage, 3 none declared (docs/specs/contracts.md)
 skillc charter draft <skill> [--usage LOG] [--subject PATH] [--out FILE]  # #726 round 1: a draft CHARTER.md from the skill's text and usage records; approves nothing; exit 3 nothing to draft from (docs/specs/charter-round1.md)
 skillc charter confirm <draft> --answers FILE --out FILE  # #726: apply the owner's answers; refuses without them; stamps approved only on intent and authority
+skillc gauntlet round3|round4 <declaration> [--plan]  # #736: skill-gauntlet baseline and challenge trials; a declared attempt cap; UNKNOWN unless a named damaged copy separates; --plan spends nothing (real runs: #736 PR 3)
 skillc charter overlap <collection> [--verdicts FILE]  # #726: shared, shadowed and orphan duties across charters, by meaning; proposals only; exit 3 not examined without a comparator
 skillc charter evidence <collection> <skill> [--ref REF]... [--search] [--doc P] [--usage LOG] --out FILE  # #778: every existing piece of the skill's charter (discussions, issues and PRs, read-only; the charter and its history; skill text; usage; tests) as cited suggestions; every source reports examined, none found or not examined (docs/specs/charter-create.md)
 skillc charter create <collection> <skill> --evidence FILE --answers FILE [--replace-draft]  # #778: the owner's answers become a CHARTER.md with a trap-task stub per clause at evals/trap-tasks/; refuses (exit 1, nothing written) on an unanswered suggestion, a never or authority rule with no shortcut, or an approval without the owner's yes and date; never commits
@@ -306,30 +307,52 @@ uv sync --extra dev
 uv run skillc selftest
 ```
 
-### `/skill-gauntlet` in every Claude Code session (#763)
+### `/skill-gauntlet` in every Claude Code session (#763, #774)
 
 Claude Code loads a repository's own skills only in sessions opened in that
 repository. To use `/skill-gauntlet` from any session (CPP, Kyle, anywhere):
 
 ```bash
-make install-skill     # links ~/.claude/skills/skill-gauntlet to this checkout's skill
-make uninstall-skill   # removes that link, and only that link
+make install-skill     # copies this checkout's skill to ~/.claude/skills/skill-gauntlet
+make uninstall-skill   # removes that copy, and only a copy skillc marked as its own
 ```
 
-- **Updating:** it is a link, so a `git pull` here updates the skill everywhere.
-- **Safety:** it refuses to replace a real `~/.claude/skills/skill-gauntlet`, or
-  a link pointing somewhere else, and names it. It links the main checkout even
-  when run from a linked worktree. `SKILLC_SKILLS_DIR` overrides the directory.
-- **If the checkout moves:** the link dangles, so the skill simply disappears
-  from the list. The installer will not replace a link pointing somewhere
-  else, so check `ls -l ~/.claude/skills/skill-gauntlet`, remove that stale
-  link yourself (`rm ~/.claude/skills/skill-gauntlet`), then run
-  `make install-skill` from the new place.
+- **A real copy, never a link (#774).** Kyle's deploy stages every entry under
+  `~/.claude/skills` into its session image and fails on a symlink, or on a
+  directory without SKILL.md. The copy holds regular files only, plus two small
+  files the repository never has: `.skillc-checkout` (the main checkout, written
+  `~/...` under your home so no account name is in it) and `.skillc-install`
+  (a marker: kind, schema, digest; no paths).
+- **Kyle containers** (private containers only): Kyle stages this copy into its
+  session image, with a pinned, READ-ONLY skillc checkout at
+  `/opt/kyle/session-tooling/skillc` and its frozen runtime at
+  `<checkout>/.venv`. Kyle sets ONLY `SKILLC_CHECKOUT` (read before the locator).
+  The launcher takes its runtime from an absolute `SKILLC_RUNTIME` if set, else
+  `<checkout>/.venv`, and IGNORES the caller's `UV_PROJECT_ENVIRONMENT` (uv
+  applies that to every project, so a session-wide one names the worker's).
+  The runtime must import the checkout's own `skillc/` (an editable or path
+  install); a non-editable wheel is refused by design (#765). The skill never writes inside
+  the checkout (`PYTHONDONTWRITEBYTECODE=1`); the gauntlet writes only into the
+  collection it reviews. The Kyle side is owned by Kyle's master.
+- **Updating:** a `git pull` does NOT update the copy. Re-run
+  `make install-skill`. The skill warns when its copy differs from the
+  checkout's (`SKILL_GAUNTLET: warning: ...`) and still runs.
+- **Safety:** nothing temporary ever appears under `~/.claude/skills`. The new
+  copy is built in `${XDG_CACHE_HOME:-~/.cache}/skillc/install-tmp/` (it must
+  be on the same device, or the install is refused), the old copy is moved out
+  there, then the new one is moved in. Between those two moves the skill is
+  briefly absent. It refuses, and names, any entry that is not its own: a
+  foreign directory, a link elsewhere, or an unmarked copy that differs. It
+  adopts an unmarked copy that is byte-identical to the checkout's skill, and
+  migrates #763's old link. `SKILLC_SKILLS_DIR` overrides the directory.
+- **If the checkout moves:** the copy's locator names a missing checkout, so the
+  skill prints `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no
+  verdict. Run `make install-skill` from the new place.
 - **If skillc is present but cannot run** (never `uv sync`ed, or its environment
-  does not import this checkout's engine): the skill prints
-  `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no verdict. The
-  skill runs the checkout's own environment directly, so `uv` itself is needed
-  only to sync it.
+  does not import exactly this checkout's `skillc/gauntlet.py` and
+  `skillc/cli.py`, #765): the same cannot-find line, and no verdict. The skill
+  runs the checkout's own environment directly, so `uv` itself is needed only to
+  sync it.
 
 ## Contributing
 

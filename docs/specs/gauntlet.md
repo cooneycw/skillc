@@ -188,12 +188,38 @@ It never opens a log. It hands the paths to `usage report` and
 `charter draft --usage`, and the record keeps only each log's sha256, numbered
 in digest order. The log stays local (#718 decision 2).
 
-## From any session (#763)
+## From any session (#763, #774)
 
-`make install-skill` links `~/.claude/skills/skill-gauntlet` to the main
-checkout's `.claude/skills/skill-gauntlet` (`scripts/install_skill.py`). The skill
-calls its own launcher, `scripts/gauntlet.sh`, which finds skillc through its
-own real path. It then checks that the checkout's environment (`.venv`, or
+`make install-skill` writes a REAL COPY of the main checkout's
+`.claude/skills/skill-gauntlet` to `~/.claude/skills/skill-gauntlet`
+(`scripts/install_skill.py`), never a link: Kyle's deploy stages that directory
+and refuses symlinks (#774). The copy carries a locator, `.skillc-checkout`
+(the main checkout, `~/`-relative under $HOME) and a marker, `.skillc-install`
+(kind, schema, digest).
+
+**Kyle containers** (owner, 2026-11-16: "make it work in Kyle containers"):
+Kyle stages the copy into its session image, in private containers only. The
+contract:
+
+- **The checkout:** pinned and READ-ONLY at `/opt/kyle/session-tooling/skillc`,
+  named by `SKILLC_CHECKOUT`. The launcher reads it FIRST, before the locator
+  (which may not resolve in a container). It must be an absolute path to a
+  directory holding a skillc checkout; anything else reads cannot-find (exit 2,
+  no verdict).
+- **The runtime:** `$SKILLC_RUNTIME` if set (an ABSOLUTE path, else
+  cannot-find), otherwise `<checkout>/.venv`, where Kyle stages its frozen
+  runtime. The caller's `UV_PROJECT_ENVIRONMENT` is ignored and never passed on:
+  uv applies it to every project, so a session-wide value names the worker's
+  project, never this checkout. Kyle sets ONLY `SKILLC_CHECKOUT` session-wide.
+  The runtime must import the CHECKOUT's own `skillc/gauntlet.py` and
+  `skillc/cli.py` (an editable or path install): #765's exact-module check
+  refuses a non-editable wheel, by design.
+- **No writes in the checkout:** the launcher sets `PYTHONDONTWRITEBYTECODE=1`,
+  and the engine writes only into the collection it reviews (the record beside
+  the charter, the draft dir under the collection's `.skillc/`).
+- **The Kyle side** (staging the checkout and runtime) is owned by Kyle's master. The skill calls its own launcher, `scripts/gauntlet.sh`,
+which finds skillc through the locator when there is one, and otherwise
+through its own real path (the repository's copy). It then checks that the checkout's environment (`.venv`, or
 `UV_PROJECT_ENVIRONMENT` resolved against the checkout, as uv resolves it)
 imports THIS checkout's gauntlet engine, and runs it directly:
 `<env>/bin/python -P -m skillc.cli gauntlet run`. It drops a caller's
@@ -203,9 +229,12 @@ derived at run time.
 
 Two failure cases, ruled on #763:
 
-- **The checkout moved or was deleted.** The link dangles, so Claude Code lists
-  no `/skill-gauntlet` and nothing can run. No verdict is possible.
-  (`test_a_dangling_link_lists_no_skill_and_gives_no_verdict`.)
+- **The checkout moved or was deleted.** The locator names a missing
+  checkout, so the launcher prints the cannot-find line, exit 2, with no ROUND
+  line. (`test_a_wrong_or_missing_locator_gives_cannot_find_and_no_verdict`.)
+- **The copy is stale** (a `git pull` since the install): one
+  `SKILL_GAUNTLET: warning: ...` line on stderr; the verdict and exit code are
+  the engine's, unchanged. Refresh with `make install-skill`.
 - **The checkout is present but skillc cannot run** (no gauntlet engine, no
   synced environment, or an environment that does not import this checkout's
   engine). The launcher prints `SKILL_GAUNTLET: cannot find

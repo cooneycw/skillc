@@ -66,11 +66,12 @@ def _prepared(backend: d.DockerBackend, attempt_id: str) -> object:
     return handle
 
 
-def _run_and_stop(backend: d.DockerBackend, handle: object, script: str, timeout: float = 10) -> None:
+def _run_and_stop(backend: d.DockerBackend, handle: object, script: str, timeout: float = 10) -> Any:
     result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=timeout))
     assert result.reason == "exited", result.error
     assert result.exit_code == 0
     assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+    return result
 
 
 NOOP = "pass"
@@ -294,8 +295,8 @@ def test_a_clean_run_never_flags_the_backends_own_observations_write(base: Path,
     interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.05)
     interceptor.start()
     script = "import time; time.sleep(0.2)\nprint('the subject completed cleanly')\n"
-    _run_and_stop(backend, handle, script)
-    trusted = interceptor.stop_and_finalize()
+    result = _run_and_stop(backend, handle, script)
+    trusted = interceptor.stop_and_finalize(write_back=result.observations_write)
     assert trusted is not None
     assert json.loads(trusted)["entries"] == []
     backend.destroy(handle)
@@ -320,8 +321,8 @@ def test_a_subject_created_observations_that_differs_from_the_backends_is_still_
         "import time; time.sleep(0.2)\n"
         "print('real stdout, overwrites observations at execute() end')\n"
     )
-    _run_and_stop(backend, handle, script)
-    trusted = interceptor.stop_and_finalize()
+    result = _run_and_stop(backend, handle, script)
+    trusted = interceptor.stop_and_finalize(write_back=result.observations_write)
     assert trusted is not None
     entries = json.loads(trusted)["entries"]
     assert entries == [{"action": "create", "path": "observations", "in_scope": False, "category": "filesystem"}]
@@ -426,4 +427,270 @@ def test_double_finalize_is_refused(base: Path, docker_state: Path) -> None:
     interceptor.stop_and_finalize()
     with pytest.raises(RuntimeError, match="already been finalized"):
         interceptor.stop_and_finalize()
+    backend.destroy(handle)
+
+
+# ------------------------------------------------ #761: the declared write-back
+
+def _wait_for(predicate: Any, what: str, timeout: float = 20.0) -> None:
+    """Event-driven waits only: these tests hold a window open and release it
+    on an observed condition, never on elapsed time."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, f"timed out waiting for {what}"
+        time.sleep(0.005)  # timing: cadence - polls predicate() until it holds; the deadline above (timeout, 20 s) is the bound
+
+
+def _polls(interceptor: AuthorityInterceptor) -> int:
+    """SUCCESSFUL recording polls only: a failed export observed nothing, so
+    it must never count toward "the held state was seen" (counter-model
+    review, pass 2)."""
+    with interceptor._lock:
+        return interceptor._polls_attempted - interceptor._polls_failed
+
+
+def _release_after_polls(interceptor: AuthorityInterceptor, marker: Path, release: Path) -> Any:
+    """Once `marker` exists, let TWO further recording polls complete - so at
+    least one ran entirely while the state behind `marker` held - then
+    create `release`."""
+    import threading
+
+    def run() -> None:
+        _wait_for(marker.exists, str(marker))
+        start = _polls(interceptor)
+        _wait_for(lambda: _polls(interceptor) >= start + 2, "two polls inside the held window")
+        release.touch()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread
+
+
+def _held_run(backend: d.DockerBackend, handle: object, script: str, docker_state: Path, tmp_path: Path,
+              interceptor: AuthorityInterceptor, mode: str | None) -> Any:
+    """Run `script` with the backend's write-back held open in `mode` (or not
+    held, for None); return the ExecuteResult."""
+    threads = []
+    if mode is not None:
+        hold = tmp_path / f"hold-{mode}"
+        hold.mkdir()
+        (docker_state / "cp-hold.json").write_text(json.dumps({"dir": str(hold), "mode": mode}))
+        threads.append(_release_after_polls(interceptor, hold / "held", hold / "release"))
+    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=30))
+    assert result.reason == "exited", result.error
+    assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+    for thread in threads:
+        thread.join(timeout=30)
+    (docker_state / "cp-hold.json").unlink(missing_ok=True)
+    return result
+
+
+def _subject_acts(tmp_path: Path, action: str) -> str:
+    """A subject that does `action` in its workspace, then waits - for the
+    test to see two polls of that state - before printing and exiting."""
+    acted, release = tmp_path / "acted", tmp_path / "subject-release"
+    return (
+        "import pathlib, time\n"
+        f"{action}\n"
+        f"pathlib.Path({str(acted)!r}).touch()\n"
+        f"while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the subject polls for the release file the test writes after two polls; Limits(timeout=30) bounds the run
+        "print('the subject finished')\n"
+    )
+
+
+def _subject_release(interceptor: AuthorityInterceptor, tmp_path: Path) -> Any:
+    return _release_after_polls(interceptor, tmp_path / "acted", tmp_path / "subject-release")
+
+
+def _entries(trusted: bytes | None) -> list[dict[str, Any]]:
+    assert trusted is not None
+    return json.loads(trusted)["entries"]
+
+
+OBS = {"path": "observations", "in_scope": False, "category": "filesystem"}
+
+
+@pytest.mark.parametrize("mode", ["truncate", "remove", "partial"])
+@pytest.mark.parametrize("seeded", [False, True], ids=["fresh", "replacing"])
+def test_a_clean_run_with_the_write_back_held_open_is_never_flagged(
+    base: Path, docker_state: Path, tmp_path: Path, mode: str, seeded: bool,
+) -> None:
+    """#761's false positive, held open deterministically: a poll that lands
+    mid-write sees an empty, absent or partly written `observations`. The
+    declared write-back explains it, so a clean subject records nothing.
+    `replacing` seeds an `observations` the write-back replaces (as a second
+    execute() on one handle does) - the case where `remove` passes through
+    ABSENT, which today's rule records at once as a delete."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000761")
+    if seeded:
+        backend.install(handle, {"observations": b"an earlier execute's capture\n"})
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+    interceptor.start()
+    result = _held_run(backend, handle, "print('the subject completed cleanly, ' * 20)", docker_state,
+                       tmp_path, interceptor, mode)
+    write = result.observations_write
+    assert write is not None and result.observations_capture == "written"
+    if seeded or mode != "remove":  # fresh+remove: nothing exists to remove, so nothing to see
+        # The held state WAS observed: a poll that OVERLAPPED the window
+        # recorded a transition into a value that is not the completed write's.
+        # (Under load the first such poll can straddle the window's start, and
+        # the polls fully inside then see no CHANGE, so "fully inside" was the
+        # wrong property: it went red on CI with the behaviour correct.)
+        # Without this the control could pass with the bug intact, on polls
+        # that saw nothing.
+        held = [t for t in interceptor._artifact_history.get("observations", [])
+                if t.poll_ended >= write.started and t.poll_started <= write.ended and t.after != write.digest]
+        assert held, "no poll observed the held write-back"
+    assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == []
+    backend.destroy(handle)
+
+
+@pytest.mark.parametrize("action,expected", [
+    ("open('observations', 'w').write('subject-forged-content')", [{"action": "create", **OBS}]),
+    ("open('observations', 'w').close()", [{"action": "create", **OBS}]),
+])
+def test_a_subject_that_creates_observations_is_still_caught_with_the_window_held(
+    base: Path, docker_state: Path, tmp_path: Path, action: str, expected: list[dict[str, Any]],
+) -> None:
+    """Different content, and an EMPTY file: empty is a prefix of anything,
+    so only the window (the subject's poll ended before the write began)
+    keeps the prefix rule from hiding it."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000762")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+    interceptor.start()
+    subject = _subject_release(interceptor, tmp_path)
+    result = _held_run(backend, handle, _subject_acts(tmp_path, action), docker_state, tmp_path,
+                       interceptor, "truncate")
+    subject.join(timeout=30)
+    assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == expected
+    backend.destroy(handle)
+
+
+def test_a_subject_that_deletes_observations_is_still_caught(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000763")
+    backend.install(handle, {"observations": b"seeded before the attempt\n"})
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+    interceptor.start()
+    subject = _subject_release(interceptor, tmp_path)
+    result = _held_run(backend, handle, _subject_acts(tmp_path, "pathlib.Path('observations').unlink()"),
+                       docker_state, tmp_path, interceptor, "remove")
+    subject.join(timeout=30)
+    assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == [
+        {"action": "delete", **OBS}]
+    backend.destroy(handle)
+
+
+def test_an_orphan_that_overwrites_observations_after_the_write_back_is_flagged(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """`execute()` returns on the main process's exit; a child it left running
+    can still write. The settled value is then not the backend's, and the
+    overwrite is flagged - never the backend's own completed write."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000764")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+    interceptor.start()
+    go, done = tmp_path / "orphan-go", tmp_path / "orphan-done"
+    orphan = (
+        "import pathlib, time\n"
+        f"while not pathlib.Path({str(go)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the orphan polls for the go file the test writes; _wait_for's 20 s deadline bounds the test
+        "pathlib.Path('observations').write_text('orphan-overwrite')\n"
+        f"pathlib.Path({str(done)!r}).touch()\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {orphan!r}], start_new_session=True)\n"
+        "print('the main process exits; its child does not')\n"
+    )
+    result = _held_run(backend, handle, script, docker_state, tmp_path, interceptor, None)
+    start = _polls(interceptor)
+    _wait_for(lambda: _polls(interceptor) >= start + 1, "a poll of the completed write-back")
+    go.touch()
+    _wait_for(done.exists, "the orphan's overwrite")
+    assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == [
+        {"action": "modify", **OBS}]
+    backend.destroy(handle)
+
+
+def test_without_a_declared_write_back_todays_rule_is_unchanged(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """The tolerance is confined to a DECLARED write: the same held-open
+    truncate, finalized without `write_back`, still reads the empty file as
+    the subject's (today's settled-value rule, pinned)."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000765")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+    interceptor.start()
+    _held_run(backend, handle, "print('clean')", docker_state, tmp_path, interceptor, "truncate")
+    assert _entries(interceptor.stop_and_finalize()) == [{"action": "create", **OBS}]
+    backend.destroy(handle)
+
+
+def test_an_oversized_partial_write_keeps_no_bytes_and_is_kept(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """The memory bound: a polled `observations` larger than the bound keeps
+    no bytes, so its partial state cannot be proven the write-back's - it is
+    KEPT (a conservative flag), never held in memory without limit."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000766")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01,  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+                                       artifact_bytes_max=8)
+    interceptor.start()
+    result = _held_run(backend, handle, "print('x' * 64)", docker_state, tmp_path, interceptor, "partial")
+    assert all(t.data is None for t in interceptor._artifact_history["observations"] if t.action == "create")
+    assert _entries(interceptor.stop_and_finalize(write_back=result.observations_write)) == [
+        {"action": "create", **OBS}]
+    backend.destroy(handle)
+
+
+def test_a_partial_value_seen_after_the_write_back_window_is_kept(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """After the window, only the write's own COMPLETED value is attributed to
+    it (orchestrator ruling rev 33). A left-running child that writes a PREFIX
+    of the written bytes after the write-back, then restores the full content,
+    leaves the settled value equal to the write's digest; the prefix is still
+    a state the write-back cannot explain at that time, and is kept."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000767")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.01)  # timing: cadence - the interceptor's poll period; each test waits on a poll COUNT (_wait_for, 20 s deadline), never a time
+    interceptor.start()
+    line = "the subject's one line of output"
+    go1, d1, go2, d2 = (tmp_path / n for n in ("go1", "d1", "go2", "d2"))
+    orphan = (
+        "import pathlib, time\n"
+        f"full = {line!r} + '\\n'\n"
+        f"while not pathlib.Path({str(go1)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the orphan polls for go1, written after a poll; _wait_for's 20 s deadline bounds the test
+        "pathlib.Path('observations').write_text(full[: len(full) // 2])\n"
+        f"pathlib.Path({str(d1)!r}).touch()\n"
+        f"while not pathlib.Path({str(go2)!r}).exists(): time.sleep(0.005)\n"  # timing: cadence - the orphan polls for go2, written after two polls; _wait_for's 20 s deadline bounds the test
+        "pathlib.Path('observations').write_text(full)\n"
+        f"pathlib.Path({str(d2)!r}).touch()\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {orphan!r}], start_new_session=True)\n"
+        f"print({line!r})\n"
+    )
+    result = _held_run(backend, handle, script, docker_state, tmp_path, interceptor, None)
+    assert result.observations_write is not None and result.observations_write.data == (line + "\n").encode()
+    start = _polls(interceptor)
+    _wait_for(lambda: _polls(interceptor) >= start + 1, "a poll of the completed write-back")
+    go1.touch()
+    _wait_for(d1.exists, "the orphan's partial write")
+    start = _polls(interceptor)
+    _wait_for(lambda: _polls(interceptor) >= start + 2, "two polls of the partial value")
+    go2.touch()
+    _wait_for(d2.exists, "the orphan's restore")
+    entries = _entries(interceptor.stop_and_finalize(write_back=result.observations_write))
+    assert entries == [{"action": "modify", **OBS}]
     backend.destroy(handle)

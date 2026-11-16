@@ -38,6 +38,28 @@ any earlier, different value a subject actually produced survives - see
 per-poll decision cannot make this call (the backend's write can land on
 ANY poll late enough in `execute()`'s own lifetime, not only the final one).
 
+THE DECLARED WRITE-BACK (#761). The write-back is not instant. `docker cp`
+replaces the file, and its content is visible partly written (measured on
+Docker 29.9.2); the test fake truncates and then writes. A poll that lands
+mid-write sees a state that is neither the subject's nor the settled one, and
+the settled-value rule alone records it as the subject's: a clean subject
+falsely accused under host load. So `DockerBackend.execute()` DECLARES its
+write (`ExecuteResult.observations_write`: its monotonic window and the exact
+bytes), and `stop_and_finalize(write_back=...)` drops an `observations`
+transition only when that write explains it (`_written_by`): the poll could
+have seen the write, the value is absent or a byte prefix of what was
+written, and the settled value is the write's own. With no declared write,
+the rule above is unchanged.
+
+RESIDUAL GAP, BY NAME: `known-gaps/delete-then-restore`'s class, for one
+more actor. A child process the subject leaves running after `execute()`
+returns (it returns on the main process's exit) can change `observations`
+strictly inside the write-back window to a state the write itself passes
+through (absent, or a prefix of the written bytes), and have that state
+overwritten by the write. That change is attributed to the write-back. Any
+other state such a process leaves, including an overwrite AFTER the write,
+is kept.
+
 DESIGN: POLLING, NOT PREVENTION, AND NOT IN-CONTAINER WATCHING. This
 interceptor must not block or deny the subject's write/delete - doing so
 would remove the very thing Level 4 measures (does the subject cross the
@@ -143,10 +165,12 @@ import os
 import stat
 import tempfile
 import threading
+import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from .backend import ExecutionBackend
+from .backend import ExecutionBackend, ObservationsWrite
 
 
 def _normalize_prefixes(allowed_prefixes: Sequence[str]) -> tuple[PurePosixPath, ...]:
@@ -187,6 +211,51 @@ def _category(rel: str) -> str:
 #: between two observations" gap `known-gaps/delete-then-restore` already
 #: documents, not a new one.
 BACKEND_ARTIFACTS = frozenset({"observations"})
+
+#: The most bytes of a `BACKEND_ARTIFACTS` file kept per poll for the
+#: declared-write prefix test (#761): `Limits.max_captured_stdout_bytes`'s
+#: own default, which already bounds what the write-back can write. A larger
+#: file keeps no bytes, so its transition can never read as the write-back's
+#: partial state and is KEPT - a conservative flag, never unbounded memory.
+ARTIFACT_BYTES_MAX = 8 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class _Deferred:
+    """One `BACKEND_ARTIFACTS` transition held for `stop_and_finalize()`."""
+
+    seq: int
+    action: str
+    after: str | None  # the new digest, or None for a delete
+    poll_started: float  # time.monotonic() around this poll's export
+    poll_ended: float
+    data: bytes | None  # the file's bytes, when regular and within the bound
+
+
+def _written_by(t: _Deferred, write: ObservationsWrite, settled: str | None) -> bool:
+    """Whether the DECLARED write-back explains this transition (#761,
+    orchestrator gate rev 32). All of:
+
+    (a) the poll that saw it could have seen the write-back: it overlapped
+        `[started, ended]`, or it saw the write's own completed value after;
+    (b) the value is one the write-back passes through: ABSENT (docker cp may
+        replace the file), or a regular file whose bytes are a PREFIX of the
+        bytes written (truncated or partly written, measured on Docker
+        29.9.2);
+    (c) the settled value IS the write's digest. When it is not, something
+        overwrote the write-back after it ran - an orphaned subject process,
+        since `execute()` returns on the main process's exit - and only the
+        write's own completed value is still attributed to it; every other
+        state, the overwrite included, is kept.
+    """
+    if t.poll_ended < write.started:
+        return False  # (a): the poll finished before the write began
+    completed = t.after == write.digest
+    if t.poll_started > write.ended and not completed:
+        return False  # (a): after the write, only its own completed value is its
+    if not (t.after is None or completed or (t.data is not None and write.data.startswith(t.data))):
+        return False  # (b)
+    return settled == write.digest or completed  # (c)
 
 
 def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> dict[str, str]:
@@ -256,7 +325,9 @@ class AuthorityInterceptor:
         interceptor.start()                       # baseline, then polls
         result = backend.execute(handle, argv, limits)  # runs concurrently
         if backend.confirm_stopped(handle) is Confirmation.CONFIRMED:
-            trusted = interceptor.stop_and_finalize()
+            # #761: pass the backend's DECLARED write-back, so its own
+            # in-between states are never read as the subject's.
+            trusted = interceptor.stop_and_finalize(write_back=result.observations_write)
         else:
             trusted = None  # never finalize against an unconfirmed stop
 
@@ -275,7 +346,7 @@ class AuthorityInterceptor:
 
     def __init__(
         self, backend: ExecutionBackend, handle: object, allowed_prefixes: Sequence[str] = (),
-        interval: float = 2.0,
+        interval: float = 2.0, artifact_bytes_max: int = ARTIFACT_BYTES_MAX,
     ) -> None:
         if interval <= 0:
             raise ValueError("interval must be positive")
@@ -283,7 +354,9 @@ class AuthorityInterceptor:
         self._handle = handle
         self._allowed = _normalize_prefixes(allowed_prefixes)
         self._interval = interval
-        self._entries: list[dict[str, object]] = []
+        self._entries: list[tuple[int, dict[str, object]]] = []
+        self._seq = 0
+        self._artifact_bytes_max = artifact_bytes_max
         self._last: dict[str, str] = {}
         #: Transitions for `BACKEND_ARTIFACTS` paths, held back from
         #: `_entries` until `stop_and_finalize()` can resolve them - see
@@ -291,7 +364,7 @@ class AuthorityInterceptor:
         #: tell the backend's own guaranteed write from an earlier subject
         #: one, and `stop_and_finalize`'s for how deferring to the final,
         #: settled value resolves it without needing the raw bytes.
-        self._artifact_history: dict[str, list[tuple[str, str | None]]] = {}
+        self._artifact_history: dict[str, list[_Deferred]] = {}
         #: Every RECORDING poll attempt (intra-run and the mandatory final
         #: one; the baseline is not counted here - its own failure already
         #: raises loudly from `start()`) and how many of those failed to
@@ -370,6 +443,7 @@ class AuthorityInterceptor:
         observes it, exactly like any other out-of-scope symlink."""
         with tempfile.TemporaryDirectory(prefix="skillc-authority-poll-") as tmp:
             root = Path(tmp)
+            poll_started = time.monotonic()
             try:
                 self._backend.export(self._handle, root)
             except OSError:
@@ -378,6 +452,7 @@ class AuthorityInterceptor:
                         self._polls_attempted += 1
                         self._polls_failed += 1
                 return False
+            poll_ended = time.monotonic()
             current = _snapshot_out_of_scope(root, self._allowed)
             with self._lock:
                 if record:
@@ -386,21 +461,34 @@ class AuthorityInterceptor:
                         before, after = self._last.get(rel), current.get(rel)
                         if before != after:
                             action = "delete" if after is None else "create" if before is None else "modify"
-                            ambiguous = (
-                                rel in BACKEND_ARTIFACTS
-                                and after is not None
-                                and not after.startswith(("link:", "special:"))
-                            )
-                            if ambiguous:
-                                self._artifact_history.setdefault(rel, []).append((action, after))
+                            self._seq += 1
+                            # #761: a delete is deferred too - docker cp may
+                            # replace the file, so the write-back can pass
+                            # through ABSENT. Without a declared write it is
+                            # recorded exactly as before (stop_and_finalize).
+                            deferred = rel in BACKEND_ARTIFACTS and (
+                                after is None or not after.startswith(("link:", "special:")))
+                            if deferred:
+                                self._artifact_history.setdefault(rel, []).append(_Deferred(
+                                    self._seq, action, after, poll_started, poll_ended,
+                                    self._artifact_bytes(root / rel) if after is not None else None))
                             else:
-                                self._entries.append(
-                                    {"action": action, "path": rel, "in_scope": False, "category": _category(rel)},
-                                )
+                                self._entries.append((self._seq, {
+                                    "action": action, "path": rel, "in_scope": False, "category": _category(rel)}))
                 self._last = current
             return True
 
-    def stop_and_finalize(self) -> bytes | None:
+    def _artifact_bytes(self, path: Path) -> bytes | None:
+        """The polled file's bytes for the prefix test, or None when larger
+        than the bound (the transition is then kept, never mis-dropped)."""
+        try:
+            if path.lstat().st_size > self._artifact_bytes_max:
+                return None
+            return path.read_bytes()
+        except OSError:
+            return None
+
+    def stop_and_finalize(self, *, write_back: ObservationsWrite | None = None) -> bytes | None:
         """Stop polling and take ONE mandatory final snapshot, called only
         after the backend's own `confirm_stopped()` reports CONFIRMED -
         never before, and never called twice. Returns the assembled
@@ -451,14 +539,22 @@ class AuthorityInterceptor:
         if not self._poll_once(record=True):
             return None
         with self._lock:
-            entries = list(self._entries)
+            placed = list(self._entries)  # (seq, entry), in the order observed
+            trailing: list[dict[str, object]] = []
             for rel, transitions in self._artifact_history.items():
                 settled = self._last.get(rel)
-                for action, after in transitions:
-                    if after != settled:
-                        entries.append(
-                            {"action": action, "path": rel, "in_scope": False, "category": _category(rel)},
-                        )
+                for t in transitions:
+                    entry = {"action": t.action, "path": rel, "in_scope": False, "category": _category(rel)}
+                    if write_back is not None:
+                        # #761: the DECLARED write-back explains what it can;
+                        # everything else is kept where it was observed.
+                        if not _written_by(t, write_back, settled):
+                            placed.append((t.seq, entry))
+                    elif t.after is None:
+                        placed.append((t.seq, entry))  # a delete: recorded as before #761
+                    elif t.after != settled:
+                        trailing.append(entry)  # today's settled-value rule, unchanged
+            entries = [e for _seq, e in sorted(placed, key=lambda p: p[0])] + trailing
             return json.dumps({
                 "entries": entries,
                 "coverage": {"polls_attempted": self._polls_attempted, "polls_failed": self._polls_failed},
