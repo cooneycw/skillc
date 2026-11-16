@@ -134,6 +134,25 @@ class BackendDescription:
 
 
 @dataclass(frozen=True)
+class ObservationsWrite:
+    """The backend's OWN `observations` write-back, declared (#761).
+
+    `started`/`ended` are `time.monotonic()` readings taken immediately
+    before and after the write-back call; `digest` is the sha256 hex of the
+    exact bytes written, in `authority_interceptor`'s digest format; `data`
+    is those bytes. An interceptor reads this to tell the write-back's own
+    in-between states (a truncated, partly written or briefly absent file,
+    measured on Docker 29.9.2) from a subject's action, instead of guessing.
+    It describes an ATTEMPT: `observations_capture` still says whether it
+    succeeded."""
+
+    started: float
+    ended: float
+    digest: str
+    data: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ExecuteResult:
     """What `execute()` observed while the subject ran - NEVER a claim that
     nothing of it remains. That is `confirm_stopped()`'s job, asked
@@ -241,6 +260,9 @@ class ExecuteResult:
     stderr_incomplete: bool = False
     term_forwarding: str | None = None
     observations_capture: str | None = None
+    #: The declared write-back (#761), or `None` when none was attempted
+    #: (witness IO, a launch failure, or a backend that writes none).
+    observations_write: ObservationsWrite | None = None
     #: Set only by `exec_in_attempt()` (#269 orchestrator ruling on finding
     #: 3), and only when `reason` is `"timeout"` or `"operator-cancelled"` -
     #: `None` for every other reason, including `execute()`'s own results

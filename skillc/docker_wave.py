@@ -280,8 +280,10 @@ class DockerWave:
                 state.session_id = turns.session_id_from_header(result.stderr)
             elif index and turns.session_id_from_header(result.stderr) != state.session_id:
                 state.unknown.append("resume-header-disagrees")
+            # Raw bytes never go into the JSON record: the streams are written
+            # beside it, and the declared write-back (#761) is the interceptor's.
             self._write(f"{role}/turn-{index}.json", {k: v for k, v in asdict(result).items()
-                                                    if k not in ("stdout", "stderr")})
+                                                    if k not in ("stdout", "stderr", "observations_write")})
             for stream in ("stdout", "stderr"):
                 payload = getattr(result, stream)
                 if payload is not None:

@@ -22,9 +22,13 @@ a NEW literal below 1 s in tests/ must either be in the committed baseline
 (ci/timing-baseline.txt, the family as it stood) or carry, on its own line,
 
     # timing: must-fire - <why the bound is the property>
+    # timing: cadence - <the condition it polls, and the deadline that bounds it>
 
-An annotation with an empty reason, or any role word other than must-fire,
-fails: a must-beat bound has no business being a sub-second literal. A
+`cadence` (#761, orchestrator ruling) is a poll interval or sleep inside a loop
+that waits on a CONDITION with its own deadline: not a bound, and load only
+slows it, never flips the verdict. These two kinds are the whole vocabulary.
+An annotation with an empty reason, or any other kind, fails: a must-beat
+bound has no business being a sub-second literal. A
 baseline entry with no matching literal also fails, so the baseline shrinks
 truthfully as members are fixed and a freed slot is not silently reused.
 
@@ -92,6 +96,8 @@ STR_PATTERNS = (
     ("str-deadline", re.compile(r"monotonic\(\)\s*\+\s*" + _NUM)),
     ("str-timeout-cli", re.compile(r"\btimeout\s+" + _NUM + r"s?\b")),
 )
+#: The ONLY annotation kinds (#758 must-fire; #761 cadence, orchestrator ruling).
+KINDS = ("must-fire", "cadence")
 ANNOTATION = re.compile(r"#\s*timing:\s*(?P<role>[A-Za-z-]*)\s*(?:-\s*(?P<why>.*))?$")
 
 
@@ -300,11 +306,11 @@ def ratchet_candidates(root: Path) -> tuple[list[Hit], list[Hit], list[str]]:
             unannotated.append(hit)
             continue
         role, why = note
-        if role != "must-fire":
-            errors.append(f"{hit.path}:{hit.line}: `# timing: {role}` - only must-fire may annotate a sub-second "
-                          f"literal; a must-beat bound uses TEST_SETUP_BOUND")
+        if role not in KINDS:
+            errors.append(f"{hit.path}:{hit.line}: `# timing: {role}` - only {' or '.join(KINDS)} may annotate a "
+                          f"sub-second literal; a must-beat bound uses TEST_SETUP_BOUND")
         elif not why:
-            errors.append(f"{hit.path}:{hit.line}: `# timing: must-fire` needs a reason after ` - `")
+            errors.append(f"{hit.path}:{hit.line}: `# timing: {role}` needs a reason after ` - `")
         else:
             annotated.append(hit)
     return unannotated, annotated, errors
@@ -325,7 +331,7 @@ def check(root: Path, baseline_path: Path) -> tuple[bool, list[str]]:
     stale = baseline - current
     lines = [
         (f"TIMING_SCANNED: {len(unannotated) + len(annotated)} sub-second literal(s) in tests/ "
-         f"({len(unannotated)} baselined or new, {len(annotated)} annotated must-fire)"),
+         f"({len(unannotated)} baselined or new, {len(annotated)} annotated must-fire or cadence)"),
         f"TIMING_BASELINE: {sum(baseline.values())} entr(ies)",
     ]
     by_key: dict[str, list[Hit]] = {}
@@ -340,7 +346,8 @@ def check(root: Path, baseline_path: Path) -> tuple[bool, list[str]]:
     ok = not new and not stale and not errors
     if not ok:
         lines.append("Fix: give a must-beat bound TEST_SETUP_BOUND; annotate a genuine must-fire literal on its own "
-                     "line with `# timing: must-fire - <why>`; drop fixed entries from the baseline.")
+                     "line with `# timing: must-fire - <why>`, or a condition-wait poll with `# timing: cadence - "
+                     "<condition and deadline>`; drop fixed entries from the baseline.")
     lines.append(f"TIMING_CHECK: {'ok' if ok else 'fail'}")
     return ok, lines
 
