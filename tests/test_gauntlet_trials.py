@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from skillc import cli
+from skillc import cli, source_digest
 from skillc import gauntlet_trials as g
 from skillc.source_digest import digest_tree
 
@@ -713,3 +713,39 @@ def test_a_canonicalised_passage_path_outside_the_skill_is_still_refused(tmp_pat
     declaration = _decl(path)
     with pytest.raises(g.DeclarationError, match="not a regular file inside the skill"):
         g.round3(declaration, g.Ledger(tmp_path / "l.jsonl"), _runner(declaration, {}))
+
+
+def test_an_unreadable_or_oversized_file_beside_the_agent_inputs_changes_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review: only goal.md and fixture/ are walked, never the grader's neighbours."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    monkeypatch.setattr(source_digest, "MAX_FILE_BYTES", 64)
+    task = path.parent / "tasks/a1"
+    (task / "notes.txt").write_text("x" * 200, encoding="utf-8")
+    (task / "private").mkdir()
+    (task / "private/secret.txt").write_text("s", encoding="utf-8")
+    (task / "private").chmod(0o000)
+    try:
+        assert _a1_identity(path) == before
+    finally:
+        (task / "private").chmod(0o755)
+
+
+def test_an_oversized_file_inside_the_fixture_is_still_refused(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#756 review twin: the agent's own inputs stay under the byte budget."""
+    path = _copy(tmp_path)
+    monkeypatch.setattr(source_digest, "MAX_FILE_BYTES", 64)
+    (path.parent / "tasks/a1/fixture/big.txt").write_text("x" * 200, encoding="utf-8")
+    with pytest.raises(g.DeclarationError, match="not read"):
+        _a1_identity(path)
+
+
+def test_a_git_directory_inside_the_fixture_is_part_of_the_task(tmp_path: Path) -> None:
+    """#756 review control: only the TASK root's .git is not content; the agent sees fixture/.git."""
+    path = _copy(tmp_path)
+    before = _a1_identity(path)
+    (path.parent / "tasks/a1/fixture/.git").mkdir()
+    (path.parent / "tasks/a1/fixture/.git/HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    assert _a1_identity(path) != before

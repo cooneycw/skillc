@@ -271,7 +271,7 @@ def arm_digest(declaration: Declaration, passage: Passage | None) -> str:
 
 
 #: What the agent sees of a task: its goal and its fixture (#756 (1)).
-AGENT_INPUTS = ("goal.md", "fixture/")
+AGENT_INPUTS = ("goal.md", "fixture")
 
 
 def task_digest(path: Path) -> str:
@@ -280,11 +280,12 @@ def task_digest(path: Path) -> str:
     counts as its link text and is never followed, and a FIFO or device reads
     as not-a-file. Empty directories are invisible, as they are to git."""
     try:
-        entries = tree_entries(path)
+        # Only the agent's inputs are walked (counter-model review): a grader
+        # file or a note beside them can never make the task unreadable.
+        entries = tree_entries(path, only=AGENT_INPUTS)
     except SourceUnreadable as exc:
         raise DeclarationError(f"task {path}: not read: {exc}") from None
-    return digest_entries({p: v for p, v in entries.items()
-                           if p == AGENT_INPUTS[0] or p.startswith(AGENT_INPUTS[1])})
+    return digest_entries(entries)
 
 
 @dataclass(frozen=True)
