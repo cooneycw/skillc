@@ -337,6 +337,11 @@ make uninstall-skill   # removes that copy, and only a copy skillc marked as its
 - **Updating:** a `git pull` does NOT update the copy. Re-run
   `make install-skill`. The skill warns when its copy differs from the
   checkout's (`SKILL_GAUNTLET: warning: ...`) and still runs.
+- **Only git-tracked files** (#738), tracked by path and read from the working
+  tree: an untracked file in the checkout's skill folder (such as a
+  `GAUNTLET.json` record) is never installed and is not drift. The installer
+  refuses when git cannot list the folder, or when the checkout is an export
+  with no `.git`.
 - **Safety:** nothing temporary ever appears under `~/.claude/skills`. The new
   copy is built in `${XDG_CACHE_HOME:-~/.cache}/skillc/install-tmp/` (it must
   be on the same device, or the install is refused), the old copy is moved out

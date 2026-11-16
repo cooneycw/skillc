@@ -219,8 +219,8 @@ contract:
   the charter, the draft dir under the collection's `.skillc/`).
 - **The Kyle side** (staging the checkout and runtime) is owned by Kyle's master. The skill calls its own launcher, `scripts/gauntlet.sh`,
 which finds skillc through the locator when there is one, and otherwise
-through its own real path (the repository's copy). It then checks that the checkout's environment (`.venv`, or
-`UV_PROJECT_ENVIRONMENT` resolved against the checkout, as uv resolves it)
+through its own real path (the repository's copy). It then checks that the runtime (`SKILLC_RUNTIME`, else
+`<checkout>/.venv`; never the caller's `UV_PROJECT_ENVIRONMENT`, see above)
 imports THIS checkout's gauntlet engine, and runs it directly:
 `<env>/bin/python -P -m skillc.cli gauntlet run`. It drops a caller's
 `PYTHONPATH`, never uses a `skillc` from PATH, and needs no `uv` at run time, so
@@ -235,6 +235,28 @@ Two failure cases, ruled on #763:
 - **The copy is stale** (a `git pull` since the install): one
   `SKILL_GAUNTLET: warning: ...` line on stderr; the verdict and exit code are
   the engine's, unchanged. Refresh with `make install-skill`.
+
+**Only git-tracked files (#738).** The installer and the drift check read the
+checkout's skill as its git-TRACKED files, by path, from the working tree, so an
+untracked file there (the owner's `GAUNTLET.json` record) is never installed and
+is never drift. The INSTALLED copy is always read in full: an extra file there
+is drift, and a directory link in it is drift too. For the checkout side the
+drift check has three cases:
+
+1. **A git work tree:** `git ls-files`.
+2. **Not a repository at all** (no `.git` anywhere up the tree; Kyle stages its
+   pinned checkout with `git archive`): walked in full. This is not a fallback:
+   an export holds exactly its commit's tracked files.
+3. **A `.git` is there, but git is missing or fails on it** (for example it
+   refuses a repository another user owns): the check is SKIPPED with one line,
+   `SKILL_GAUNTLET: note: drift not checked (<reason>)`, and the engine runs.
+   It never walks instead, and never passes `-c safe.directory`: such a
+   repository's config can name a program for git to run (`core.fsmonitor`).
+
+The caller's `GIT_*` variables never steer these git calls. The installer
+accepts case 1 only. It refuses an export (installing from one is not
+supported), and it refuses when git cannot list the folder or a tracked file is
+missing from disk.
 - **The checkout is present but skillc cannot run** (no gauntlet engine, no
   synced environment, or an environment that does not import this checkout's
   engine). The launcher prints `SKILL_GAUNTLET: cannot find
