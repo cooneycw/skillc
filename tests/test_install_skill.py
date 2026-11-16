@@ -1050,3 +1050,69 @@ def test_a_directory_symlink_in_the_copy_warns(tmp_path: Path, planted: bool) ->
     done = _run_installed(launcher, tmp_path)
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
     assert (DRIFT in done.stderr) is planted, done.stderr
+
+
+# ------------------- #738: counter-model pass 1
+
+def test_a_skill_md_dropped_from_the_index_is_refused(checkout: Path, tmp_path: Path) -> None:
+    """On disk but untracked: the tracked payload has no SKILL.md, so installing
+    it would replace a working copy with one Kyle cannot stage."""
+    skills = tmp_path / "skills"
+    assert _installer(checkout, skills, "install").returncode == 0
+    before = (skills / NAME / "SKILL.md").read_bytes()
+    _git(checkout, "rm", "-q", "--cached", f".claude/skills/{NAME}/SKILL.md")
+    done = _installer(checkout, skills, "install")
+    assert done.returncode != 0 and "SKILL.md" in done.stderr, done.stdout + done.stderr
+    assert (skills / NAME / "SKILL.md").read_bytes() == before
+
+
+def test_a_callers_git_index_never_changes_what_is_installed(checkout: Path, tmp_path: Path) -> None:
+    """GIT_INDEX_FILE naming another index (here one that also tracks the
+    record) must not change the population: the checkout's own index decides."""
+    skill = checkout / ".claude" / "skills" / NAME
+    (skill / "GAUNTLET.json").write_text("{}\n")
+    other = tmp_path / "other-index"
+    shutil.copy(checkout / ".git" / "index", other)
+    subprocess.run(["git", "-C", str(checkout), "add", f".claude/skills/{NAME}/GAUNTLET.json"], check=True,
+                   env={**os.environ, "GIT_INDEX_FILE": str(other)})
+    skills = tmp_path / "skills"
+    env = {**os.environ, "SKILLC_SKILLS_DIR": str(skills), "HOME": str(tmp_path / "home"),
+           "XDG_CACHE_HOME": str(tmp_path / "cache"), "GIT_INDEX_FILE": str(other)}
+    done = subprocess.run(["python3", str(checkout / "scripts" / "install_skill.py"), "install"], capture_output=True,
+                          text=True, check=False, cwd=checkout, env=env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert not (skills / NAME / "GAUNTLET.json").exists()
+
+
+def test_a_tracked_path_through_a_directory_link_is_refused(checkout: Path, tmp_path: Path) -> None:
+    """`scripts/` replaced by a link to a directory holding a gauntlet.sh: the
+    leaf is a regular file, but the path leaves the skill."""
+    skill = checkout / ".claude" / "skills" / NAME
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(skill / "scripts", elsewhere)
+    shutil.rmtree(skill / "scripts")
+    (skill / "scripts").symlink_to(elsewhere, target_is_directory=True)
+    skills = tmp_path / "skills"
+    done = _installer(checkout, skills, "install")
+    assert done.returncode != 0 and "scripts" in done.stderr, done.stdout + done.stderr
+    assert not (skills / NAME).exists()
+
+
+def test_a_stalled_git_skips_the_drift_check_and_the_engine_runs(tmp_path: Path) -> None:
+    """A git that never returns (a stalled core.fsmonitor) must not hold the
+    engine: the check is bounded, then skipped with the note."""
+    repo, launcher = _installed_launcher(tmp_path)
+    real = shutil.which("git")
+    assert real
+    bin_dir = tmp_path / "slow-git-bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text(f'#!/bin/sh\ncase "$*" in *{repo}*) sleep 300 ;; esac\nexec {real!r} "$@"\n')
+    (bin_dir / "git").chmod(0o755)
+    coll = _collection(tmp_path)
+    done = subprocess.run(["bash", str(launcher), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd=tmp_path, timeout=120,
+                          env={**{k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"},
+                               "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+    assert NOTE in done.stderr and DRIFT not in done.stderr, done.stderr
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr

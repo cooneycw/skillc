@@ -113,9 +113,10 @@ def walk(root):
         out += [os.path.relpath(os.path.join(d, n), root) for n in names]
     return out
 def git(src, *args):
-    # The caller'"'"'s GIT_* variables (GIT_DIR, GIT_WORK_TREE, ...) never steer it.
+    # GIT_* variables from the caller (GIT_DIR, GIT_INDEX_FILE, ...) never steer it,
+    # and a stalled git (a slow core.fsmonitor) is cut off: the check is advice.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    return subprocess.run(["git", "-C", src, *args], capture_output=True, env=env, check=False)
+    return subprocess.run(["git", "-C", src, *args], capture_output=True, env=env, check=False, timeout=10)
 def tracked(src):
     """The checkout side: its git-TRACKED files, or None with the reason printed."""
     try:
@@ -124,7 +125,9 @@ def tracked(src):
             done = git(src, "ls-files", "-z", "--cached", "--", ".")
             if done.returncode == 0:
                 return [r.decode() for r in done.stdout.split(b"\0") if r]
-            print("git cannot list the checkout'"'"'s tracked files"); sys.exit(3)
+            print("git cannot list the tracked files of the checkout"); sys.exit(3)
+    except subprocess.TimeoutExpired:
+        print("git did not answer within 10 seconds"); sys.exit(3)
     except FileNotFoundError:
         missing = True
     else:
@@ -132,10 +135,10 @@ def tracked(src):
     d = os.path.abspath(src)
     while True:
         if os.path.lexists(os.path.join(d, ".git")):
-            print("git is not installed" if missing else "git cannot read the checkout'"'"'s repository")
+            print("git is not installed" if missing else "git cannot read the repository of the checkout")
             sys.exit(3)
         if os.path.dirname(d) == d:
-            return walk(src)  # an export (`git archive`): exactly its commit'"'"'s tracked files
+            return walk(src)  # an export (`git archive`): exactly the tracked files of its commit
         d = os.path.dirname(d)
 def files(root, rels):
     out = {}

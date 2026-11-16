@@ -69,6 +69,7 @@ LOCATOR, MARKER = ".skillc-checkout", ".skillc-install"
 INSTALL_FILES = (LOCATOR, MARKER)
 MARKER_KIND, MARKER_SCHEMA = "skillc-skill-install", "1"
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
+GIT_TIMEOUT = 60  # seconds for `git ls-files`: a stalled git refuses, never hangs the install
 LOCK_WAIT_ENV, LOCK_WAIT = "SKILLC_INSTALL_LOCK_WAIT", 30.0
 
 
@@ -151,8 +152,15 @@ def tracked_payload(source: Path) -> dict[str, bytes]:
     untracked file (the owner's GAUNTLET.json record) is never copied. When git
     cannot list the folder the install is refused: a walk instead would copy
     exactly what this exists to leave out."""
-    done = subprocess.run(["git", "-C", str(source), "ls-files", "-z", "--cached", "--", "."],
-                          capture_output=True, check=False)
+    # The caller's GIT_* variables (GIT_INDEX_FILE, GIT_DIR, ...) never pick the
+    # population: the checkout's own index decides (counter-model review).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        done = subprocess.run(["git", "-C", str(source), "ls-files", "-z", "--cached", "--", "."],
+                              capture_output=True, check=False, env=env, timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Refused(EXIT_REFUSED, f"git cannot list the tracked files of {source} ({type(exc).__name__}); "
+                                    "refusing rather than copying files git does not track") from None
     if done.returncode != 0:
         why = done.stderr.decode(errors="replace").strip().splitlines()[-1:] or ["no reason given"]
         raise Refused(EXIT_REFUSED, f"git cannot list the tracked files of {source} ({why[0]}); refusing rather "
@@ -163,6 +171,12 @@ def tracked_payload(source: Path) -> dict[str, bytes]:
         if rel in INSTALL_FILES:
             continue
         path = source / rel
+        parts = Path(rel).parts
+        for depth in range(1, len(parts)):
+            above = source.joinpath(*parts[:depth])
+            if above.is_symlink():  # the leaf's lstat cannot see a link ABOVE it (counter-model review)
+                raise Refused(EXIT_USAGE, f"{Path(*parts[:depth]).as_posix()} in {source} is a link; "
+                                          "the installed copy holds regular files only")
         try:
             mode = path.lstat().st_mode
         except FileNotFoundError:
@@ -178,6 +192,9 @@ def tracked_payload(source: Path) -> dict[str, bytes]:
             files[rel] = path.read_bytes()
         except OSError as exc:
             raise Refused(EXIT_REFUSED, f"{rel} in {source} cannot be read ({type(exc).__name__})") from None
+    if "SKILL.md" not in files:
+        raise Refused(EXIT_REFUSED, f"git does not track SKILL.md in {source}; refusing to install a skill "
+                                    "without it (track it, or restore it)")
     return files
 
 
