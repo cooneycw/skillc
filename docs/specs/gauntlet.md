@@ -194,12 +194,19 @@ in digest order. The log stays local (#718 decision 2).
 `.claude/skills/skill-gauntlet` to `~/.claude/skills/skill-gauntlet`
 (`scripts/install_skill.py`), never a link: Kyle's deploy stages that directory
 and refuses symlinks (#774). The copy carries a locator, `.skillc-checkout`
-(the main checkout, `~/`-relative under $HOME) and a marker, `.skillc-install`
-(kind, schema, digest).
+(the main checkout, `~/`-relative under $HOME), a marker, `.skillc-install`
+(kind, schema, digest), and an empty `.kyle-exclude`.
 
-**Kyle containers** (owner, 2026-11-16: "make it work in Kyle containers"):
-Kyle stages the copy into its session image, in private containers only. The
-contract:
+**Kyle containers EXCLUDE skillc** (owner ruling, 2026-11-16, which supersedes
+the same day's "make it work in Kyle containers"). Kyle's deploy skips a skill
+folder holding `.kyle-exclude` (kyle #2518). The installer writes it on every
+install, adopt and refresh. A marked copy without it, or with anything but a
+regular file there, is not "already installed" and is refreshed. It is one of
+the installer's files: outside the marker's digest, outside the adopt
+comparison, and skipped by the launcher's drift check (a top-level dotfile).
+
+**The container launcher contract**, kept for the owner to revisit, though
+Kyle no longer stages it:
 
 - **The checkout:** pinned and READ-ONLY at `/opt/kyle/session-tooling/skillc`,
   named by `SKILLC_CHECKOUT`. The launcher reads it FIRST, before the locator

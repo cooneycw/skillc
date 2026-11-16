@@ -8,7 +8,7 @@ writes a symlink: Kyle's deploy stages every entry directly under
 symlink, or on a directory without SKILL.md (kyle `deploy/operator_config.py`,
 lines 396-408). That is why #763's link was replaced (#774).
 
-The copy holds two files the repository never has:
+The copy holds three files the repository never has:
 
 - `.skillc-checkout`, the LOCATOR: the MAIN checkout's path (git
   --git-common-dir, so an install from a linked worktree does not tie sessions
@@ -17,6 +17,10 @@ The copy holds two files the repository never has:
   written as an absolute path. The launcher reads it to find skillc.
 - `.skillc-install`, the MARKER: kind, schema and the digest of the copied
   files. No path, no host name. It is how this installer knows a copy is its own.
+- `.kyle-exclude`, empty: Kyle's deploy skips a skill folder holding it (kyle
+  #2518). The owner ruled on 2026-11-16 that ALL of skillc stays out of Kyle
+  containers, so every install, adopt and refresh writes it. It is outside the
+  marker's digest, so a copy with a hand-made one hashes the same.
 
 A `git pull` does NOT update the copy; re-run `make install-skill`. The
 launcher warns when the copy differs from the checkout's skill.
@@ -65,8 +69,10 @@ from pathlib import Path
 NAME = "skill-gauntlet"
 SKILLS_ENV = "SKILLC_SKILLS_DIR"
 LOCATOR, MARKER = ".skillc-checkout", ".skillc-install"
+#: Kyle's opt-out marker (kyle #2518): the owner keeps skillc out of Kyle containers (2026-11-16).
+KYLE_EXCLUDE = ".kyle-exclude"
 #: Files the installer writes into the copy; never part of the skill's payload.
-INSTALL_FILES = (LOCATOR, MARKER)
+INSTALL_FILES = (LOCATOR, MARKER, KYLE_EXCLUDE)
 MARKER_KIND, MARKER_SCHEMA = "skillc-skill-install", "1"
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
 GIT_TIMEOUT = 60  # seconds for `git ls-files`: a stalled git refuses, never hangs the install
@@ -307,6 +313,7 @@ def _build(cache: Path, source: Path, files: dict[str, bytes], checkout: Path) -
         os.chmod(build / rel, (source / rel).stat().st_mode & 0o777)  # the launcher stays executable
     (build / LOCATOR).write_text(locator_text(checkout))
     (build / MARKER).write_text(f"kind {MARKER_KIND}\nschema {MARKER_SCHEMA}\ndigest {digest(files)}\n")
+    (build / KYLE_EXCLUDE).write_text("")
     return build
 
 
@@ -356,7 +363,8 @@ def _install(skills: Path, cache: Path) -> int:
         # the launcher's drift warning tells the owner to re-run exactly this
         # (orchestrator ruling rev 47, #776 item 2). Foreign entries stay refused.
         try:
-            intact = payload(entry) == files and exec_bits(entry, files) == exec_bits(source, files)
+            intact = (payload(entry) == files and exec_bits(entry, files) == exec_bits(source, files)
+                      and stat.S_ISREG((entry / KYLE_EXCLUDE).lstat().st_mode))  # a copy missing it is refreshed
         except (Refused, OSError):
             intact = False
         if current.get("digest") == digest(files) and located == locator_text(checkout) and intact:

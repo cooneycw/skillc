@@ -319,21 +319,25 @@ make uninstall-skill   # removes that copy, and only a copy skillc marked as its
 
 - **A real copy, never a link (#774).** Kyle's deploy stages every entry under
   `~/.claude/skills` into its session image and fails on a symlink, or on a
-  directory without SKILL.md. The copy holds regular files only, plus two small
+  directory without SKILL.md. The copy holds regular files only, plus three small
   files the repository never has: `.skillc-checkout` (the main checkout, written
-  `~/...` under your home so no account name is in it) and `.skillc-install`
-  (a marker: kind, schema, digest; no paths).
-- **Kyle containers** (private containers only): Kyle stages this copy into its
-  session image, with a pinned, READ-ONLY skillc checkout at
+  `~/...` under your home so no account name is in it), `.skillc-install`
+  (a marker: kind, schema, digest; no paths) and an empty `.kyle-exclude`.
+- **Kyle containers EXCLUDE skillc** (owner ruling, 2026-11-16). Every install,
+  adopt and refresh writes `.kyle-exclude`, and Kyle's deploy skips a skill
+  folder holding it (kyle #2518), so `/skill-gauntlet` is host-only. A copy
+  that lacks the file is refreshed. The file is outside the marker's digest.
+- **The container launcher contract** is kept, for the owner to revisit, but
+  Kyle no longer stages it. It was: a pinned, READ-ONLY skillc checkout at
   `/opt/kyle/session-tooling/skillc` and its frozen runtime at
-  `<checkout>/.venv`. Kyle sets ONLY `SKILLC_CHECKOUT` (read before the locator).
+  `<checkout>/.venv`, named only by `SKILLC_CHECKOUT` (read before the locator).
   The launcher takes its runtime from an absolute `SKILLC_RUNTIME` if set, else
   `<checkout>/.venv`, and IGNORES the caller's `UV_PROJECT_ENVIRONMENT` (uv
   applies that to every project, so a session-wide one names the worker's).
   The runtime must import the checkout's own `skillc/` (an editable or path
   install); a non-editable wheel is refused by design (#765). The skill never writes inside
   the checkout (`PYTHONDONTWRITEBYTECODE=1`); the gauntlet writes only into the
-  collection it reviews. The Kyle side is owned by Kyle's master.
+  collection it reviews.
 - **Updating:** a `git pull` does NOT update the copy. Re-run
   `make install-skill`. The skill warns when its copy differs from the
   checkout's (`SKILL_GAUNTLET: warning: ...`) and still runs.
