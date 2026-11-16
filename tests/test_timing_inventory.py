@@ -134,6 +134,15 @@ def test_check_is_red_on_a_new_unannotated_literal(tmp_path: Path) -> None:
     assert ti.main(["check", "--root", str(root)]) == 1
 
 
+def test_check_is_green_on_an_annotated_cadence_literal(tmp_path: Path) -> None:
+    """The second kind (orchestrator ruling rev 59): a poll interval inside a loop
+    that waits on a condition with its own deadline. Not a bound; load only slows it."""
+    root = _tree(tmp_path, {"tests/test_x.py": _literal_test(
+        _j("  # tim", "ing: cadence - polls until the file exists; the 20 s deadline is the bound"))})
+    ok, lines = ti.check(root, root / "ci" / "timing-baseline.txt")
+    assert ok, lines
+
+
 def test_check_is_green_on_an_annotated_must_fire_literal(tmp_path: Path) -> None:
     root = _tree(tmp_path, {"tests/test_x.py": _literal_test(_j("  # tim", "ing: must-fire - the fake blocks"))})
     ok, lines = ti.check(root, root / "ci" / "timing-baseline.txt")
@@ -144,6 +153,9 @@ def test_check_is_green_on_an_annotated_must_fire_literal(tmp_path: Path) -> Non
     _j("  # tim", "ing: must-fire"),          # no reason at all
     _j("  # tim", "ing: must-fire - "),       # an empty reason
     _j("  # tim", "ing: must-beat - setup"),  # must-beat has no sub-second literal
+    _j("  # tim", "ing: cadence"),            # a cadence with no reason
+    _j("  # tim", "ing: cadence - "),         # a cadence with an empty reason
+    _j("  # tim", "ing: whatever - x"),       # an unknown kind
 ])
 def test_check_is_red_on_a_bad_annotation(tmp_path: Path, note: str) -> None:
     root = _tree(tmp_path, {"tests/test_x.py": _literal_test(note)})
