@@ -36,7 +36,7 @@ import hashlib
 import json
 import os
 import stat
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 #: Paths at the repository root that are never part of the population.
@@ -89,9 +89,13 @@ def _file_blob(path: str, size: int, budget: list[int]) -> str:
     return digest.hexdigest()
 
 
-def tree_entries(root: Path) -> dict[str, str]:
+def tree_entries(root: Path, only: Collection[str] | None = None) -> dict[str, str]:
     """`{path: "MODE BLOB"}` for the population under `root`, read without
-    following any symlink, under the entry, depth and byte budgets above."""
+    following any symlink, under the entry, depth and byte budgets above.
+
+    `only` names the root's children to read (#756): the others are never
+    stat'ed, opened, or counted against the entry or byte budget, so a file
+    beside them cannot make the tree unreadable. Omitted, every child is read."""
     entries: dict[str, str] = {}
     listed = [0]
     budget = [0]
@@ -103,6 +107,8 @@ def tree_entries(root: Path) -> dict[str, str]:
         try:
             with os.scandir(directory) as listing:
                 for child in listing:
+                    if not rel and only is not None and child.name not in only:
+                        continue  # never counted: only the named children are the population (#756 review)
                     listed[0] += 1
                     if listed[0] > MAX_ENTRIES:
                         raise SourceUnreadable(f"more than {MAX_ENTRIES} directory entries")
@@ -111,7 +117,7 @@ def tree_entries(root: Path) -> dict[str, str]:
             raise SourceUnreadable(f"{rel or '.'}: cannot list ({type(exc).__name__})") from exc
         for child in sorted(children, key=lambda e: e.name):
             path = f"{rel}/{child.name}" if rel else child.name
-            if not rel and child.name == ".git":
+            if not rel and (child.name == ".git" or only is not None and child.name not in only):
                 continue
             try:
                 info = child.stat(follow_symlinks=False)
