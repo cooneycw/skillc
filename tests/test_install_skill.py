@@ -252,3 +252,98 @@ def test_a_callers_pythonpath_never_picks_another_skillc(tmp_path: Path) -> None
                           text=True, check=False, cwd=impostor, env={**os.environ, "PYTHONPATH": "."})
     assert not marker.exists(), "the caller's skillc package was imported"
     assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+# ------------------------------------- #765: exactly this checkout's modules
+
+def _checkout_copy(tmp_path: Path) -> Path:
+    """A skillc checkout to point the launcher at: its own source and skill."""
+    ck = tmp_path / "ck"
+    shutil.copytree(ROOT / "skillc", ck / "skillc", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(ROOT / "pyproject.toml", ck / "pyproject.toml")
+    shutil.copytree(LAUNCHER.parent.parent, ck / ".claude" / "skills" / NAME)
+    return ck
+
+
+def _environment(ck: Path, import_root: Path) -> None:
+    """`<ck>/.venv/bin/python`: the real interpreter (which has skillc's
+    dependencies) with `import_root` first on its path. An `import_root` inside
+    `.venv/.../site-packages` is a NON-editable install's layout; `ck` itself is
+    an editable one. The launcher unsets PYTHONPATH, so this sets its own."""
+    import sys
+
+    bin_dir = ck / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "python").write_text(f'#!/bin/sh\nPYTHONPATH={str(import_root)!r} exec {sys.executable!r} "$@"\n')
+    (bin_dir / "python").chmod(0o755)
+
+
+def _site_packages(ck: Path) -> Path:
+    return ck / ".venv" / "lib" / "python3.12" / "site-packages"
+
+
+def _run_launcher(launcher: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    coll = _collection(tmp_path)
+    return subprocess.run(["bash", str(launcher), str(coll), "skills/alpha", "--offline", "--issue-states",
+                           str(coll / "issue-states.json"), "--repo", "example/gauntlet"], capture_output=True,
+                          text=True, check=False, cwd=tmp_path,
+                          env={k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"})
+
+
+def test_a_non_editable_skillc_inside_the_checkouts_venv_is_refused(tmp_path: Path) -> None:
+    """The #765 red: a built wheel's copy under the checkout's own .venv is
+    "under the checkout", but a git pull never updates it."""
+    ck = _checkout_copy(tmp_path)
+    shutil.copytree(ck / "skillc", _site_packages(ck) / "skillc")
+    _environment(ck, _site_packages(ck))
+    done = _run_launcher(ck / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
+    assert done.returncode == 2 and "SKILL_GAUNTLET: cannot find a usable skillc" in done.stderr, done.stderr
+    assert "skillc.gauntlet is .venv/lib/python3.12/site-packages/skillc/gauntlet.py" in done.stderr
+    assert "ROUND" not in done.stdout + done.stderr and str(tmp_path) not in done.stderr
+
+
+def test_a_cli_module_from_elsewhere_is_refused_even_when_the_engine_matches(tmp_path: Path) -> None:
+    """Only skillc.cli is foreign: the engine file is the checkout's own (a
+    symlink to it), but the command that runs it is not."""
+    ck = _checkout_copy(tmp_path)
+    pkg = _site_packages(ck) / "skillc"
+    shutil.copytree(ck / "skillc", pkg)
+    (pkg / "gauntlet.py").unlink()
+    (pkg / "gauntlet.py").symlink_to(ck / "skillc" / "gauntlet.py")
+    _environment(ck, _site_packages(ck))
+    done = _run_launcher(ck / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
+    assert done.returncode == 2 and "skillc.cli is .venv/lib/python3.12/site-packages/skillc/cli.py" in done.stderr
+    assert "skillc.gauntlet is" not in done.stderr and "ROUND" not in done.stdout
+
+
+def test_an_editable_skillc_in_the_checkout_runs(tmp_path: Path) -> None:
+    """The negative control: the checkout's own source on the path runs."""
+    ck = _checkout_copy(tmp_path)
+    _environment(ck, ck)
+    done = _run_launcher(ck / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+def test_a_checkout_reached_through_a_symlinked_path_still_runs(tmp_path: Path) -> None:
+    """realpath on both sides: the import path goes through a link to the
+    checkout, the launcher derives the checkout with `pwd -P`, and they agree."""
+    ck = _checkout_copy(tmp_path)
+    link = tmp_path / "via-link"
+    link.symlink_to(ck, target_is_directory=True)
+    _environment(ck, link)
+    done = _run_launcher(link / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr
+
+
+def test_the_real_editable_install_runs_through_a_symlinked_checkout_path(tmp_path: Path) -> None:
+    """Counter-model pass 1: the stand-in controls above inject a source path;
+    this one is the REAL editable install (this checkout's own synced .venv)
+    reached through a link to the checkout, with no stand-in at all."""
+    if os.environ.get("UV_PROJECT_ENVIRONMENT"):
+        pytest.skip("UV_PROJECT_ENVIRONMENT is set for this run; the case needs the in-tree editable .venv")
+    if not (ROOT / ".venv" / "bin" / "python").is_file():
+        pytest.skip("no in-tree .venv: this checkout's editable install is not synced here")
+    link = tmp_path / "checkout-link"
+    link.symlink_to(ROOT, target_is_directory=True)
+    done = _run_launcher(link / ".claude" / "skills" / NAME / "scripts" / "gauntlet.sh", tmp_path)
+    assert done.returncode == 3 and "ROUND 0 usage:" in done.stdout, done.stdout + done.stderr

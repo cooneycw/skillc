@@ -34,9 +34,27 @@ python="$env_dir/bin/python"
 [ -x "$python" ] || refuse "the checkout has no synced environment; run uv sync in the skillc checkout"
 # A runnable python is not a usable skillc: ask THIS environment to import THIS
 # checkout's engine (-P: never from the caller's directory).
-# ... and the engine it imports must be THIS checkout's, not some other skillc.
-(cd / && "$python" -P -c 'import sys, skillc.cli, skillc.gauntlet as g
-sys.exit(0 if g.__file__.startswith(sys.argv[1] + "/") else 1)' "$checkout" >/dev/null 2>&1) \
-    || refuse "the checkout's environment does not import this checkout's gauntlet engine; run uv sync in the skillc checkout"
+# ... and the modules it imports must be EXACTLY this checkout's files (#765).
+# "Somewhere under the checkout" also matches a non-editable install in the
+# checkout's own .venv (site-packages/skillc/), which a git pull never updates.
+# realpath on both sides; the checkout itself was derived with `pwd -P`.
+# The reason names each module relative to the checkout, never an account path.
+bad_import=
+why=$(cd / && "$python" -P -c 'import os, sys
+root = os.path.realpath(sys.argv[1])
+try:
+    import skillc.cli as c, skillc.gauntlet as g
+except Exception as exc:
+    print(f"the environment of the checkout cannot import skillc ({type(exc).__name__})"); sys.exit(1)
+bad = []
+for mod, rel in ((g, "skillc/gauntlet.py"), (c, "skillc/cli.py")):
+    got = os.path.realpath(mod.__file__ or "")
+    if got != os.path.join(root, rel):
+        where = os.path.relpath(got, root) if got.startswith(root + os.sep) else "outside the checkout"
+        bad.append(f"{mod.__name__} is {where}, not {rel}")
+if bad:
+    print("; ".join(bad)); sys.exit(1)' "$checkout" 2>/dev/null) || bad_import=1
+why=${why:-the environment of the checkout does not import skillc}
+[ -z "$bad_import" ] || refuse "$why; run uv sync in the skillc checkout (an editable install)"
 # Invoked explicitly, never a bare `skillc` from PATH. Its output and exit code are the engine's.
 exec "$python" -P -m skillc.cli gauntlet run "$@"
