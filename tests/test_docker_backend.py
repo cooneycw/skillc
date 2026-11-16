@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT, TEST_SETUP_BOUND
 
 from skillc import docker_backend as d
 from skillc import lifecycle as lc
@@ -2196,18 +2196,61 @@ def test_a_token_event_before_the_probe_still_vetoes(
     backend.destroy(handle)
 
 
-def test_a_stalled_events_client_cannot_outlive_the_daemon_deadline(base: Path, docker_state: Path) -> None:
+def test_a_stalled_events_client_cannot_outlive_the_daemon_deadline(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Counter-model case: an events client that keeps stdout open past the
     deadline is killed, and the answer is "unknown". The bound IS the property
-    here: `daemon_timeout` 0.2s against a 3s stall."""
-    backend = _backend(base, docker_state, daemon_timeout=0.2)
+    here: `daemon_timeout` 0.2s against a stall that never ends in time.
+
+    Only the events call runs under that 0.2s (#758, the #462 diagnosis of
+    2026-10-28): `prepare()` is setup, not the property, so it gets the
+    generous fake budget (pipelines 1202, 1477).
+
+    The deadline itself is asserted DETERMINISTICALLY, not by wall clock
+    (#758, fixing #766 item 1). Every bounded wait the query makes - the
+    reader join and the process wait - must be given at most `daemon_timeout`,
+    and the kill must come from that deadline path. A host that is slow
+    changes how long those waits take, never what bound they were given, so a
+    3s deadline regression is red on any host. The elapsed check below is
+    only an outer safety bound."""
+    backend = _backend(base, docker_state)  # must-beat: setup under FAKE_DOCKER_DAEMON_TIMEOUT
     handle = backend.prepare("a-lc-000000000186")
     assert isinstance(handle, d._Handle)
     docker_state.mkdir(parents=True, exist_ok=True)
-    (docker_state / ".delay-events").write_text("3")
+    (docker_state / ".delay-events").write_text("60")
+    bounded = dataclasses.replace(backend, daemon_timeout=0.2)  # timing: must-fire - against a 60 s events stall
+
+    waits: list[float] = []
+    kills: list[int] = []
+    real_join, real_wait, real_killpg = d.threading.Thread.join, d.subprocess.Popen.wait, d.os.killpg
+
+    def join(self: threading.Thread, timeout: float | None = None) -> None:
+        if timeout is not None:
+            waits.append(timeout)
+        real_join(self, timeout)
+
+    def wait(self: subprocess.Popen[bytes], timeout: float | None = None) -> int:
+        if timeout is not None:
+            waits.append(timeout)
+        return real_wait(self, timeout)
+
+    def killpg(pgid: int, sig: int) -> None:
+        kills.append(pgid)
+        real_killpg(pgid, sig)
+
+    monkeypatch.setattr(d.threading.Thread, "join", join)
+    monkeypatch.setattr(d.subprocess.Popen, "wait", wait)
+    monkeypatch.setattr(d.os, "killpg", killpg)
     started = time.monotonic()
-    assert backend._exec_events(handle, 0) is None
-    assert time.monotonic() - started < 2.0
+    answer = bounded._exec_events(handle, 0)
+    elapsed = time.monotonic() - started
+    monkeypatch.undo()
+
+    assert answer is None
+    assert kills, "the stalled client was not killed on the deadline path"
+    assert waits and max(waits) <= 0.2, f"a bounded wait exceeded daemon_timeout: {waits}"  # timing: must-fire - the property
+    assert elapsed < TEST_SETUP_BOUND  # outer safety only; the 60 s stall was not waited out
     (docker_state / ".delay-events").unlink()
     backend.destroy(handle)
 

@@ -192,7 +192,12 @@ PARAGRAPH_CAP = 12
 
 
 def paragraph(lines: Sequence[str], index: int, cap: int = PARAGRAPH_CAP) -> str:
-    """The rule statement an emphasised line belongs to: its paragraph (the
+    lo, hi = paragraph_span(lines, index, cap)
+    return "\n".join(lines[lo:hi + 1])
+
+
+def paragraph_span(lines: Sequence[str], index: int, cap: int = PARAGRAPH_CAP) -> tuple[int, int]:
+    """The first and last index of the rule statement an emphasised line belongs to: its paragraph (the
     contiguous non-blank lines around it, a fence line ending it), at most
     `cap` lines either side. CPP's rules seldom name their enforcer on the
     emphasised line itself - "NEVER use git stash" sits one line above the
@@ -205,7 +210,7 @@ def paragraph(lines: Sequence[str], index: int, cap: int = PARAGRAPH_CAP) -> str
     hi = index
     while hi + 1 < len(lines) and hi - index < cap and not stop(hi + 1):
         hi += 1
-    return "\n".join(lines[lo:hi + 1])
+    return lo, hi
 
 
 def sort_rule_line(line: str, subject: decay.Subject, coll: decay.Collection) -> tuple[str, str, dict[str, object]]:

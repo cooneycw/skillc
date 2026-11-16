@@ -1,0 +1,10 @@
+{
+  "variants": [
+    {
+      "arm": "lean-1",
+      "file": "SKILL.md",
+      "remove": "You MUST report what you found, then stop.",
+      "clause": "round 2 class D"
+    }
+  ]
+}

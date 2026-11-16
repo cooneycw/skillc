@@ -28,12 +28,16 @@ from . import (
     __version__,
     charter,
     charter_confirm,
+    charter_create,
+    charter_evidence,
     checks,
     configuration_compare,
     contracts,
     exposure,
+    gauntlet_trials,
     leak,
     materialize,
+    overlap,
     profile,
     records,
     usage,
@@ -2674,6 +2678,39 @@ def cmd_configuration_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+#: `gauntlet round3|round4` exit codes (docs/specs/gauntlet-rounds-3-4.md).
+GAUNTLET_EXIT_OK, GAUNTLET_EXIT_REFUSED, GAUNTLET_EXIT_USAGE, GAUNTLET_EXIT_UNDECIDED = 0, 1, 2, 3
+
+
+def cmd_gauntlet_round(args: argparse.Namespace) -> int:
+    """`skillc gauntlet round3|round4 <declaration> [--plan]` (#736 PR 1).
+    PR 1 ships no real attempt runner: `--plan` prints the declared attempt
+    count and spends nothing; a real run is refused until #736 PR 3."""
+    try:
+        declaration = gauntlet_trials.load(Path(args.declaration).resolve())
+    except gauntlet_trials.DeclarationError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    try:
+        ledger = gauntlet_trials.Ledger(Path(args.ledger) if args.ledger
+                                        else declaration.path.parent / ".gauntlet-ledger.jsonl")
+    except (gauntlet_trials.LedgerError, OSError) as exc:
+        print(f"skillc: ledger not trusted: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    play = gauntlet_trials.round3 if args.gauntlet_command == "round3" else gauntlet_trials.round4
+    try:
+        report = play(declaration, ledger, None, plan_only=args.plan)
+    except gauntlet_trials.DeclarationError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return GAUNTLET_EXIT_USAGE
+    sys.stdout.write(gauntlet_trials.to_json(report) if args.json else gauntlet_trials.render(report))
+    if report.verdict in (gauntlet_trials.COMPLETE, gauntlet_trials.PLANNED):
+        return GAUNTLET_EXIT_OK
+    if report.verdict == gauntlet_trials.REFUSED:
+        return GAUNTLET_EXIT_REFUSED
+    return GAUNTLET_EXIT_UNDECIDED  # UNKNOWN or INCOMPLETE: never a pass
+
+
 #: `charter draft` exit codes (docs/specs/charter-round1.md). 3 matches
 #: `contracts`' "none declared": nothing to work from is never a clean result.
 CHARTER_EXIT_OK, CHARTER_EXIT_REFUSED, CHARTER_EXIT_USAGE, CHARTER_EXIT_NOTHING = 0, 1, 2, 3
@@ -2721,6 +2758,66 @@ def cmd_charter_confirm(args: argparse.Namespace) -> int:
         return CHARTER_EXIT_REFUSED
     print(f"skillc: confirmed charter written to {args.out}")
     return CHARTER_EXIT_OK
+
+
+def cmd_charter_create(args: argparse.Namespace) -> int:
+    """`skillc charter create <collection> <skill> --evidence FILE --answers FILE`
+    (#778): the owner's answers become a CHARTER.md plus a trap-task stub per
+    clause, checked by the real contracts rules; any failure keeps nothing."""
+    from .gauntlet import UsageError
+
+    try:
+        made = charter_create.create(Path(args.collection), args.skill, Path(args.evidence), Path(args.answers),
+                                     replace_draft=args.replace_draft)
+    except UsageError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    except charter_create.CreateRefused as exc:
+        print(f"skillc: charter create refused: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_REFUSED
+    print(f"skillc: charter written to {made.charter}")
+    for stub in made.stubs:
+        print(f"skillc: trap-task stub {stub}/{{bad,good}} (a stub: no grader until #736 PR 2 fills it)")
+    for warning in made.warnings:
+        print(f"skillc: warn: {warning} (the owner withheld this approval)")
+    print("skillc: nothing was committed; committing the charter and its stubs is the owner's act")
+    return CHARTER_EXIT_OK
+
+
+def cmd_charter_evidence(args: argparse.Namespace) -> int:
+    """`skillc charter evidence <collection> <skill> --out FILE` (#778): every
+    piece of existing evidence of the skill's charter, as suggestions for the
+    owner. Every source reports a status; none is ever silently empty."""
+    from .gauntlet import UsageError
+    from .repo_reader import GhReader
+
+    out = Path(args.out)
+    if out.exists() or out.is_symlink():
+        print(f"skillc: {out} exists; charter evidence never overwrites", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    collection = Path(args.collection)
+    repo = args.repo or charter_evidence.default_repo(collection)
+    try:
+        found = charter_evidence.gather(
+            collection, args.skill, reader=GhReader(), refs=args.ref or [], repo=repo, search=args.search,
+            docs=[Path(d) for d in args.doc or []], usage_paths=[Path(u) for u in args.usage or []],
+            aliases=args.alias or [], drafts=[Path(d) for d in args.draft or []],
+        )
+    except UsageError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        charter_confirm.write_new(out, found.to_json())
+    except charter_confirm.ConfirmRefused:
+        print(f"skillc: {out} appeared while gathering; charter evidence never overwrites", file=sys.stderr)
+        return CHARTER_EXIT_USAGE
+    for s in found.sources:
+        where = f" [{s.ref}]" if s.ref else ""
+        print(f"SOURCE {s.source}{where}: {s.status}" + (f" - {s.detail}" if s.detail else ""))
+    print(f"skillc: {len(found.suggestions)} suggestion(s) written to {out}; each is for the owner to accept, "
+          "edit or drop")
+    return CHARTER_EXIT_OK
 def cmd_gauntlet_run(args: argparse.Namespace) -> int:
     """`skillc gauntlet run <collection> <skill>` (#754): the skill-gauntlet engine
     for the free rounds 0-2. It runs the round commands and reads their verdicts;
@@ -2734,6 +2831,68 @@ def cmd_gauntlet_run(args: argparse.Namespace) -> int:
         draft_dir=Path(args.draft_dir) if args.draft_dir else None, include=list(args.include or []),
         exclude=list(args.exclude or []), maps=list(args.map or []))
     return gauntlet.run(Path(args.path), args.skill, options)
+
+
+def cmd_gauntlet_verdict(args: argparse.Namespace) -> int:
+    """`skillc gauntlet verdict` (#737): round 5, one keep/trim/retire proposal or
+    UNKNOWN, drafted into the draft location; nothing is applied
+    (docs/specs/gauntlet-verdict.md)."""
+    from . import gauntlet, gauntlet_verdict
+
+    options = gauntlet.Options(draft_dir=Path(args.draft_dir) if args.draft_dir else None)
+    opt = {k: Path(v) if v else None for k, v in (("round3", args.round3), ("round4", args.round4),
+                                                  ("declaration", args.declaration), ("inspect", args.inspect),
+                                                  ("overlap", args.overlap))}
+    return gauntlet_verdict.verdict(Path(args.path), args.skill, options, **opt)
+
+
+def cmd_gauntlet_rule(args: argparse.Namespace) -> int:
+    """`skillc gauntlet rule` (#737): the owner's ruling on a drafted verdict,
+    recorded with a date in GAUNTLET.json."""
+    from . import gauntlet, gauntlet_verdict
+
+    options = gauntlet.Options(draft_dir=Path(args.draft_dir) if args.draft_dir else None)
+    return gauntlet_verdict.rule(Path(args.path), args.skill, options, args.ruling, args.verdict_digest, args.date,
+                                 args.note)
+
+
+def cmd_charter_overlap(args: argparse.Namespace) -> int:
+    """`skillc charter overlap <collection>` (#726, PR B). With no comparator
+    it exits 3, "not examined"; overlaps are proposals and never fail it."""
+    root = Path(args.path)
+    if not root.is_dir():
+        print(f"skillc: no such collection directory: {root}", file=sys.stderr)
+        return overlap.EXIT_USAGE
+    if args.replicates < 1:
+        print(f"skillc: --replicates must be at least 1, not {args.replicates}", file=sys.stderr)
+        return overlap.EXIT_USAGE
+    collection = contracts.load_collection(root.resolve())
+    if not collection.contracts:
+        print(f"skillc: no CHARTER.md under {root} - nothing to compare", file=sys.stderr)
+        return overlap.EXIT_NOT_EXAMINED
+    comparator = None
+    if args.verdicts:
+        try:
+            comparator = overlap.load_verdicts(Path(args.verdicts))
+        except (OSError, UnicodeDecodeError, overlap.VerdictsError) as exc:
+            print(f"skillc: verdicts not read: {exc}", file=sys.stderr)
+            return overlap.EXIT_USAGE
+    report = overlap.compare(collection, comparator, replicates=args.replicates)
+    text = overlap.to_json(report) if args.json else overlap.render(report)
+    if args.out:
+        try:
+            charter_confirm.write_new(Path(args.out), text)
+        except charter_confirm.ConfirmRefused:
+            print(f"skillc: {args.out} exists; overlap never overwrites a report", file=sys.stderr)
+            return overlap.EXIT_USAGE
+    else:
+        sys.stdout.write(text)
+    if report.examined:
+        counts = ", ".join(f"{k} {v}" for k, v in report.counts().items())
+        print(f"skillc: overlap examined ({report.source}): {counts}", file=sys.stderr)
+    else:
+        print("skillc: overlap NOT examined - no pair was judged; no count is reported", file=sys.stderr)
+    return overlap.EXIT_REPORTED if report.examined else overlap.EXIT_NOT_EXAMINED
 
 
 def cmd_contracts(args: argparse.Namespace) -> int:
@@ -3614,6 +3773,37 @@ def build_parser() -> argparse.ArgumentParser:
     p_charter_confirm.add_argument("--answers", metavar="FILE", help="the owner's answers (docs/specs/charter-round1.md)")
     p_charter_confirm.add_argument("--out", required=True, metavar="FILE", help="the confirmed charter; never overwrites")
     p_charter_confirm.set_defaults(func=cmd_charter_confirm)
+    p_charter_evidence = charter_sub.add_parser(
+        "evidence", help="gather every existing piece of a skill's charter as cited suggestions (#778); no model call"
+    )
+    p_charter_evidence.add_argument("collection", help="the collection root")
+    p_charter_evidence.add_argument("skill", help="a skill directory holding SKILL.md, or a command .md file, "
+                                    "relative to the collection")
+    p_charter_evidence.add_argument("--ref", action="append", metavar="REF",
+                                    help="a discussion, issue or PR: [discussion:|issue:|pr:][owner/name]#N; repeatable")
+    p_charter_evidence.add_argument("--repo", metavar="OWNER/NAME",
+                                    help="the repository a bare ref names (default: the collection's origin remote)")
+    p_charter_evidence.add_argument("--search", action="store_true",
+                                    help="also search the repository for the skill's name (off by default)")
+    p_charter_evidence.add_argument("--doc", action="append", metavar="PATH", help="a spec document to read; repeatable")
+    p_charter_evidence.add_argument("--usage", action="append", metavar="PATH",
+                                    help="a usage log, or a directory searched for them; repeatable")
+    p_charter_evidence.add_argument("--alias", action="append", metavar="NAME", help="another name usage records carry")
+    p_charter_evidence.add_argument("--draft", action="append", metavar="FILE",
+                                    help="a CHARTER.draft.md somewhere else to read too; repeatable")
+    p_charter_evidence.add_argument("--out", required=True, metavar="FILE", help="the evidence file; never overwrites")
+    p_charter_evidence.set_defaults(func=cmd_charter_evidence)
+    p_charter_create = charter_sub.add_parser(
+        "create", help="the owner's answers become a CHARTER.md with a trap-task stub per clause (#778); no model call"
+    )
+    p_charter_create.add_argument("collection", help="the collection root")
+    p_charter_create.add_argument("skill", help="the skill, relative to the collection, as `charter evidence` took it")
+    p_charter_create.add_argument("--evidence", required=True, metavar="FILE", help="the `charter evidence` output")
+    p_charter_create.add_argument("--answers", required=True, metavar="FILE",
+                                  help="the owner's answers (docs/specs/charter-create.md)")
+    p_charter_create.add_argument("--replace-draft", action="store_true",
+                                  help="replace an existing CHARTER.md whose every clause is still a draft")
+    p_charter_create.set_defaults(func=cmd_charter_create)
     p_gauntlet = sub.add_parser("gauntlet", help="skill-gauntlet trials (rounds 3-4 and the engine)")
     gauntlet_sub = p_gauntlet.add_subparsers(dest="gauntlet_command", required=True)
     p_gauntlet_run = gauntlet_sub.add_parser(
@@ -3641,6 +3831,54 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="where the draft and record go before a CHARTER.md exists "
                                      "(default: <main checkout>/.skillc/gauntlet/)")
     p_gauntlet_run.set_defaults(func=cmd_gauntlet_run)
+    for name, about in (("round3", "baseline: clause tests, intact vs a named damaged copy; UNKNOWN unless they separate"),
+                        ("round4", "challenge: leaner variants on held-out tasks; keep unless one is no worse on every clause")):
+        p_round = gauntlet_sub.add_parser(name, help=about)
+        p_round.add_argument("declaration", help="the round declaration (JSON; docs/specs/gauntlet-rounds-3-4.md)")
+        p_round.add_argument("--plan", action="store_true", help="print the declared attempt count; spend nothing")
+        p_round.add_argument("--ledger", metavar="FILE", help="the attempt ledger (default: beside the declaration)")
+        p_round.add_argument("--json", action="store_true",
+                             help="print the report as JSON (dataclasses.asdict of the RoundReport; read by #737)")
+        p_round.set_defaults(func=cmd_gauntlet_round)
+    p_gauntlet_verdict = gauntlet_sub.add_parser(
+        "verdict", help="round 5 (#737): one keep/trim/retire proposal, or UNKNOWN naming the round; drafts only"
+    )
+    p_gauntlet_verdict.add_argument("path", help="the collection root")
+    p_gauntlet_verdict.add_argument("skill", help="the skill, as for `gauntlet run`")
+    p_gauntlet_verdict.add_argument("--round3", metavar="JSON", help="`gauntlet round3 --json` report")
+    p_gauntlet_verdict.add_argument("--round4", metavar="JSON", help="`gauntlet round4 --json` report")
+    p_gauntlet_verdict.add_argument("--declaration", metavar="JSON", help="the round 3/4 declaration (variants)")
+    p_gauntlet_verdict.add_argument("--inspect", metavar="JSON", help="`inspect --json` report (round 2 findings)")
+    p_gauntlet_verdict.add_argument("--overlap", metavar="JSON",
+                                    help="round 1 overlap report; without it retire is NOT EXAMINED -> UNKNOWN")
+    p_gauntlet_verdict.add_argument("--draft-dir", metavar="DIR", help="as for `gauntlet run`")
+    p_gauntlet_verdict.set_defaults(func=cmd_gauntlet_verdict)
+    p_gauntlet_rule = gauntlet_sub.add_parser(
+        "rule", help="the owner's ruling on the drafted verdict, recorded with a date in GAUNTLET.json (#737)"
+    )
+    p_gauntlet_rule.add_argument("path", help="the collection root")
+    p_gauntlet_rule.add_argument("skill", help="the skill, as for `gauntlet run`")
+    p_gauntlet_rule.add_argument("ruling", choices=["accept", "reject", "amend"])
+    p_gauntlet_rule.add_argument("--verdict-digest", required=True, metavar="SHA",
+                                 help="the VERDICT_DIGEST `gauntlet verdict` printed; a stale one is refused")
+    p_gauntlet_rule.add_argument("--date", metavar="YYYY-MM-DD", help="the ruling's date (default: today, UTC)")
+    p_gauntlet_rule.add_argument("--note", help="the owner's words, e.g. what an amend changes")
+    p_gauntlet_rule.add_argument("--draft-dir", metavar="DIR", help="as for `gauntlet run`")
+    p_gauntlet_rule.set_defaults(func=cmd_gauntlet_rule)
+
+    p_charter_overlap = charter_sub.add_parser(
+        "overlap", help="shared, shadowed and orphan duties across a collection's charters; proposals only"
+    )
+    p_charter_overlap.add_argument("path", help="the collection root")
+    p_charter_overlap.add_argument("--verdicts", metavar="FILE",
+                                   help="recorded verdicts, '<clause-id> <clause-id>: same|different|UNKNOWN' "
+                                        "one replicate per line; without it nothing is compared (exit 3)")
+    p_charter_overlap.add_argument("--replicates", type=int, default=3, help="judgements per pair (default 3)")
+    p_charter_overlap.add_argument("--out", metavar="FILE", help="write the report here; never overwrites")
+    p_charter_overlap.add_argument("--json", action="store_true",
+                                   help="print the report as JSON (overlap.to_data; read by #737); "
+                                        "examined is false when nothing was compared")
+    p_charter_overlap.set_defaults(func=cmd_charter_overlap)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

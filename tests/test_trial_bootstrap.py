@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import stat
 import subprocess
 from pathlib import Path, PurePosixPath
 
 import pytest
+from conftest import TEST_SETUP_BOUND
 
 from skillc import trial_bootstrap as tb
 
@@ -87,13 +89,19 @@ with open(log, "a") as fh:
     fh.write(json.dumps(argv) + "\\n")
 if argv[0] == "rm":
     if mode == "sleep-rmhang":
-        time.sleep(30)
+        time.sleep(3600)  # blocks until the probe's bound kills it (role F, #758)
+    if mode.startswith("sleep-rmslow:"):
+        time.sleep(float(mode.split(":", 1)[1]))  # an rm slowed as a loaded host slows it (#758 review)
     sys.exit(1 if mode == "sleep-rmfail" else 0)
 if mode == "badbytes":
     sys.stdout.buffer.write(b"codex-cli \\xff\\xfe\\n")
     sys.exit(0)
 if mode == "late":
-    time.sleep(1)
+    # Blocks on a FIFO that the TEST opens only after the probe's first wait
+    # has timed out (#758 review): "answers after the bound" by construction,
+    # never by a finite sleep a descheduled parent could miss.
+    with open(log + ".release"):
+        pass
     sys.exit(0)
 if mode in ("signal", "late-signal"):
     import os, signal
@@ -108,7 +116,7 @@ if mode == "nonzero":
     sys.stderr.write("Unable to find image locally\\n")
     sys.exit(125)
 if mode.startswith("sleep"):
-    time.sleep(30)
+    time.sleep(3600)  # blocks until killed: the 0.3 s timeout is the property (role F, #758)
 sys.stdout.write(outputs[mode])
 '''
 
@@ -157,41 +165,140 @@ def test_548_probe_keeps_build_metadata_so_a_custom_build_is_not_the_declared_on
     assert tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex").version == "0.157.1+custom"
 
 
-def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path):
-    docker_bin, log = _probe_docker(tmp_path, "sleep")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.3)
+def _generous_rm(monkeypatch):
+    """`settle` also bounds `docker rm -f`. Where the test needs that removal
+    to SUCCEED (must-beat), widen only the rm call (#758)."""
+    real_remove = tb._remove_probe_container
+    monkeypatch.setattr(tb, "_remove_probe_container",
+                        lambda docker_bin, name, _timeout: real_remove(docker_bin, name, TEST_SETUP_BOUND))
+
+
+def _release_after_the_first_timeout(monkeypatch, fifo, parent_delay=0.0):
+    """Wrap `Popen.communicate`: optionally delay the parent before its first
+    call (a descheduled parent), and open the "late" fake's FIFO only once a
+    wait has raised TimeoutExpired, so the CLI answers strictly after the bound."""
+    import subprocess as sp
+    import threading
+    import time
+    real_communicate = sp.Popen.communicate
+    state = {"delayed": False, "released": False}
+
+    def wrapped(self, *args, **kwargs):
+        if parent_delay and not state["delayed"]:
+            state["delayed"] = True
+            time.sleep(parent_delay)
+        try:
+            return real_communicate(self, *args, **kwargs)
+        except sp.TimeoutExpired:
+            if not state["released"]:
+                state["released"] = True
+                # Opening a FIFO's write end blocks until the fake opens its
+                # read end. Bound that wait, so a fake that never opens it
+                # fails clearly here instead of hanging until pytest-timeout.
+                opener = threading.Thread(target=lambda: open(fifo, "w").close(), daemon=True)
+                opener.start()
+                opener.join(TEST_SETUP_BOUND)
+                assert not opener.is_alive(), "the late fake never opened its release FIFO"
+            raise
+
+    monkeypatch.setattr(sp.Popen, "communicate", wrapped)
+    return state
+
+
+@pytest.mark.parametrize("mode", ["sleep", "sleep-rmslow:0.8"])
+def test_548_probe_timeout_is_unknown_and_removes_its_container(tmp_path, monkeypatch, mode):
+    """`sleep-rmslow:0.8` is the reviewer's input (#758 pass 2): an rm 0.8 s
+    slow read as a cleanup timeout while settle (0.3 s) also bounded it."""
+    _generous_rm(monkeypatch)
+    docker_bin, log = _probe_docker(tmp_path, mode)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
+                                       settle=0.3)  # timing: must-fire - the blocked create never settles
     assert probe.version is None and "did not answer within 0.3s" in probe.reason
     assert "removal is unconfirmed" in probe.reason  # the create never settled
     run, rm = _calls(log)
     assert rm == ["rm", "-f", run[run.index("--name") + 1]]
 
 
-def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path):
+@pytest.mark.parametrize("parent_delay", [0, 1.2])
+def test_548_probe_removes_a_late_create_only_after_it_settles(tmp_path, monkeypatch, parent_delay):
     """#540's race: the CLI answers after the bound. Removal waits for it, so
-    the cleanup is confirmed rather than racing a create still landing."""
+    the cleanup is confirmed rather than racing a create still landing.
+    `parent_delay=1.2` is the reviewer's input (#758 pass 2): with a finite
+    1 s sleep, a descheduled parent missed the timeout entirely."""
     docker_bin, log = _probe_docker(tmp_path, "late")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=5)
+    os.mkfifo(str(log) + ".release")
+    state = _release_after_the_first_timeout(monkeypatch, str(log) + ".release", parent_delay)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the CLI blocks until released after it fires
+                                       settle=TEST_SETUP_BOUND)  # must-beat (#758): the released CLI settles, then rm -f
+    assert state["released"]
     assert probe.version is None and probe.reason == "`codex --version` did not answer within 0.3s"
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 
 
-@pytest.mark.parametrize("timeout", [5, 0.3])
+@pytest.mark.parametrize("timeout", [TEST_SETUP_BOUND, 0.3])  # timing: must-fire - 0.3 fires before late-signal's 1 s
 def test_548_probe_removes_and_never_confirms_after_a_signalled_cli(tmp_path, timeout):
     """A CLI killed by a signal - at once, or inside the settle window - never
     heard the daemon's answer: remove the container, and say removal is
     unconfirmed even when `rm -f` finds nothing."""
-    docker_bin, log = _probe_docker(tmp_path, "signal" if timeout == 5 else "late-signal")
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=timeout, settle=5)
+    docker_bin, log = _probe_docker(tmp_path, "signal" if timeout == TEST_SETUP_BOUND else "late-signal")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=timeout,
+                                       settle=TEST_SETUP_BOUND)  # must-beat (#758): rm -f answers at once
     assert probe.version is None and "unconfirmed" in probe.reason
     assert [call[0] for call in _calls(log)] == ["run", "rm"]
 
 
-@pytest.mark.parametrize(("mode", "reason"), [("sleep-rmfail", "exited 1"), ("sleep-rmhang", "failed")])
-def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, mode, reason):
+@pytest.mark.parametrize(("mode", "reason", "rm_bound"), [
+    # rm -f EXITS 1 at once: its own call must be BEATEN, so it gets the shared
+    # bound, or a slow host reads "timed out" where the property is "exited 1"
+    # (#758, pipeline 1475).
+    ("sleep-rmfail", "exited 1", TEST_SETUP_BOUND),
+    # rm -f HANGS until killed: its bound is the property, so it fires at settle.
+    ("sleep-rmhang", "failed", None),
+])
+def test_548_probe_reports_a_cleanup_it_could_not_confirm(tmp_path, monkeypatch, mode, reason, rm_bound):
+    """The probe gives its CLI `timeout`, then `settle` both to settle and to
+    `docker rm -f`. The "sleep" CLI BLOCKS until killed, so the timeout and the
+    settle wait are must-fire: load can only delay the CLI further past them.
+    Only the rm-fail call is work to beat, so only it is widened (#758 review:
+    a CLI that answered "late" could still beat a descheduled parent)."""
+    if rm_bound is not None:
+        real_remove = tb._remove_probe_container
+        monkeypatch.setattr(tb, "_remove_probe_container",
+                            lambda docker_bin, name, _timeout: real_remove(docker_bin, name, rm_bound))
     docker_bin, _log = _probe_docker(tmp_path, mode)
-    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex", timeout=0.3, settle=0.5)
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
+                                       settle=0.5)  # timing: must-fire - the blocked create never settles
     assert probe.version is None and "cleanup 'docker rm -f skillc-client-probe-" in probe.reason
     assert reason in probe.reason
+
+
+def test_548_a_descheduled_parent_still_reports_the_failed_cleanup(tmp_path, monkeypatch):
+    """Reviewer's red case (#758): delay the parent 1.2 s before its first
+    `communicate()`, as a loaded host can. The blocking CLI still has not
+    answered, so the timeout still fires and the rm-fail is still reported."""
+    import subprocess as sp
+    import time
+    real_communicate = sp.Popen.communicate
+    delayed: list[bool] = []
+
+    def late_parent(self, *args, **kwargs):
+        if not delayed:
+            delayed.append(True)
+            time.sleep(1.2)  # timing: must-fire - simulates the descheduled parent
+        return real_communicate(self, *args, **kwargs)
+
+    monkeypatch.setattr(sp.Popen, "communicate", late_parent)
+    real_remove = tb._remove_probe_container
+    monkeypatch.setattr(tb, "_remove_probe_container",
+                        lambda docker_bin, name, _timeout: real_remove(docker_bin, name, TEST_SETUP_BOUND))
+    docker_bin, _log = _probe_docker(tmp_path, "sleep-rmfail")
+    probe = tb.probe_image_cli_version(docker_bin, "sha256:" + "a" * 64, "codex",
+                                       timeout=0.3,  # timing: must-fire - the "sleep" CLI blocks until killed
+                                       settle=0.5)  # timing: must-fire - the blocked create never settles
+    assert delayed and probe.version is None and "exited 1" in probe.reason
 
 
 def test_548_probe_refuses_an_unknown_client_without_running_anything(tmp_path):
