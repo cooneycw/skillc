@@ -191,7 +191,7 @@ def test_explicit_wave_critical_path_and_all_overhead_are_not_role_time_sum() ->
         plan(raw)
 
 
-def test_uncapped_measurement_does_not_install_a_token_stopper_and_capped_stays_held() -> None:
+def test_client_counter_diagnostics_can_exceed_projection_without_sizing_or_accounting_acceptance() -> None:
     raw = fixture('plan')
     expected = planning.report(plan(raw))
     data = fixture('complete')
@@ -199,6 +199,9 @@ def test_uncapped_measurement_does_not_install_a_token_stopper_and_capped_stays_
         role['turns'][-1]['samples'] = [1000, 2000]
     observed_usage = observed(data)
     assert observed_usage['status'] == 'COMPLETE' and observed_usage['tokens'] == 6000
+    assert observed_usage['sizing_basis_accepted'] is False
+    assert observed_usage['accounting_basis_accepted'] is False
+    assert observed_usage['scope'] == 'client-counter-diagnostics-only'
     assert observed_usage['tokens'] > expected['input_tokens'] + expected['output_tokens']
     assert expected['mode'] == 'uncapped' and expected['token_enforcement'] == 'unavailable'
     mode = nhl_limits.require_for_execution(raw)

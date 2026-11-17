@@ -5,7 +5,8 @@
   "select": [
     "project-init",
     "flow-wave",
-    "flow-auto"
+    "flow-auto",
+    "flow-register"
   ],
   "treatment_question": "product",
   "allowed_destinations": [
@@ -640,19 +641,15 @@
     },
     {
       "reference": "gh api user",
-      "reason": "Network/authentication/native client procedure unsupported in this offline cold helper proof; never invoked. The flow-register procedure is not selected; bundled helper availability is a separate claim."
+      "reason": "Network/authentication/native client execution unsupported in this offline cold helper proof; never invoked."
     },
     {
       "reference": "gh repo create --push",
-      "reason": "Network/authentication/native client procedure unsupported in this offline cold helper proof; never invoked. The flow-register procedure is not selected; bundled helper availability is a separate claim."
+      "reason": "Network/authentication/native client execution unsupported in this offline cold helper proof; never invoked."
     },
     {
       "reference": "gh auth",
-      "reason": "Network/authentication/native client procedure unsupported in this offline cold helper proof; never invoked. The flow-register procedure is not selected; bundled helper availability is a separate claim."
-    },
-    {
-      "reference": "/flow-register",
-      "reason": "Network/authentication/native client procedure unsupported in this offline cold helper proof; never invoked. The flow-register procedure is not selected; bundled helper availability is a separate claim."
+      "reason": "Network/authentication/native client execution unsupported in this offline cold helper proof; never invoked."
     },
     {
       "reference": "vendor fetch",
@@ -665,6 +662,22 @@
     {
       "reference": "vendor revendor",
       "reason": "External vendor operations never invoked; proof only imports the pinned module at the helper-owned route."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-registry.sh",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-mailbox.sh",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-wave-lexicon.sh",
+      "reason": "Other-client plugin fallback; the selected Codex skill uses only its bundled or disposable-home installed helper copies."
+    },
+    {
+      "reference": "/home/user/Projects/claude-power-pack",
+      "reason": "Generic upstream example project path; unsupported and never used by the cold proof."
     }
   ],
   "declared_empty_kinds": [
@@ -773,7 +786,7 @@
       "source": ".claude/commands/flow/auto.md"
     }
   ],
-  "notes": "Offline cold-install/helper proof only; network, authentication, native client execution and flow-register procedure unsupported. All state is inside the disposable home.",
+  "notes": "Offline cold-install/helper proof only; network, authentication and native client execution unsupported. All state is inside the disposable home.",
   "bundled_gate_entrypoints": [
     ".codex/skills/flow-auto/scripts/flow-finish-gate.sh"
   ],

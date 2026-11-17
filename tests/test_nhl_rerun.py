@@ -126,7 +126,7 @@ def test_docker_lifecycle_internal_network_custody_and_failures(tmp_path: Path, 
         rc = int((failed == 'exec' and args[1] == 'exec' and '/bin/sh' in args)
                  or (failed == 'copy' and args[1] == 'cp' and args[2].endswith('/exports/.'))
                  or (failed == 'cleanup' and args[1] == 'rm'))
-        return subprocess.CompletedProcess(args, rc, 'true' if args[1] == 'inspect' else '', '')
+        return subprocess.CompletedProcess(args, rc, json.dumps({'Status': 'running', 'Running': True, 'OOMKilled': False, 'ExitCode': 0, 'Error': '', 'Dead': False, 'Restarting': False}) if args[1] == 'inspect' else '', '')
     result = nhl_rerun.DockerReplay(IMAGE, IMAGE, run=run).execute(
         tmp_path / 'project', adapter, cases[0], tmp_path / 'evidence')
     assert result['status'] == {'none': 'PASS', 'exec': 'FAIL', 'copy': 'UNKNOWN', 'cleanup': 'UNKNOWN'}[failed]
@@ -224,11 +224,12 @@ def test_entrypoint_timeout_vs_unknown_execution(tmp_path: Path, cases: list[dic
         if args[1] == 'exec' and '/bin/sh' in args:
             raise subprocess.TimeoutExpired(args, timeout)
         if args[1] == 'inspect':
-            return subprocess.CompletedProcess(args, 0 if confirmed else 1, 'true' if confirmed else '', '')
+            return subprocess.CompletedProcess(args, 0 if confirmed else 1, json.dumps({'Status': 'running', 'Running': True, 'OOMKilled': False, 'ExitCode': 0, 'Error': '', 'Dead': False, 'Restarting': False}) if confirmed else '', '')
         return subprocess.CompletedProcess(args, 0, '', '')
     result = nhl_rerun.DockerReplay(IMAGE, IMAGE, run=run).execute(
         tmp_path / 'project', adapter, cases[0], tmp_path / 'evidence')
-    assert result['status'] == ('FAIL' if confirmed else 'UNKNOWN')
+    assert result['status'] == 'UNKNOWN'
+    assert ('harness wall-time limit' if confirmed else 'runtime state unconfirmed') in result['reasons'][0]
     assert (tmp_path / 'evidence/execution.json').is_file()
 
 

@@ -26,6 +26,28 @@ unpushed file, or local bytes different from the delivered blob, cannot acquire
 delivered status through this mechanism. Independent Git, coordination and
 shared-state inventories remain required.
 
+**How a delivered file is matched, and what that cannot see (#727).** A
+workspace file matches its delivered blob when it has **the same bytes and the
+same owner-execute bit** (`S_IXUSR`, 0o100), which is the one permission fact
+git records: 100755 when that bit is set, 100644 otherwise. So:
+
+- **Accepted as delivered:** a regular file whose other permission bits (0o677)
+  are anything at all. That includes **group- or world-writable** files
+  (0o664, 0o666, 0o777). Git cannot record those bits; they come from the umask
+  that created the file. This is a deliberate blind spot: the census cannot tell
+  a delivered file someone made world-writable from one the umask made so.
+- **Still clutter:** different bytes; an execute bit that differs from git's,
+  in either direction; and any setuid, setgid or sticky bit (0o7000). Git
+  cannot deliver those bits, so a file carrying one differs from what was
+  delivered.
+- **Unchanged:** symlinks and directories match exactly. Captures keep the raw
+  mode, so preservation still reports a mode change on a file that existed
+  before, and nothing outside delivery matching tolerates a mode.
+
+`tests/test_clutter_umask.py` runs every case under umask 022, 0002 and 077.
+Matching costs at most 256 candidate digests per added delivered file, the
+0o777 modes whose `S_IXUSR` agrees, and a test pins that.
+
 Delivery uses two distinct controller phases. First call `Session.capture_after()`
 while every required namespace remains live, after controller completion and the
 declared settle delay. The session retains canonical before/after bytes; returned

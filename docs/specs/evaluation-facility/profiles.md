@@ -545,7 +545,8 @@ alone does not change existing approval authorization.
 
 `evals/subjects/cpp-codex-project-wave-auto-87ecb097/` is a separate profile at
 CPP `87ecb0970f70aace9e0323feee00c9ca57dda133`. Its exact selection is
-`project-init`, `flow-wave`, `flow-auto`. Existing profiles are unchanged;
+`project-init`, `flow-wave`, `flow-auto`, `flow-register` (the fourth selection
+was added by the owner-approved #625 follow-up). Existing profiles are unchanged;
 `preserved-profiles.json` records all eleven existing profile hashes. The
 committed `inventory.json` is the existing closure walk's output, checked against
 a fresh walk. The fixture combines the existing immutable CPP snapshot and ten
@@ -556,13 +557,14 @@ The bounded proof installs into a fresh disposable home. Native client session
 discovery, other-client instruction paths, example project paths, authentication,
 network operations and native client procedures are explicitly unsupported.
 Installed fallback helpers resolve only inside that home. Neither real home
-files nor host session directories are read, copied or mounted. The unselected
-`flow-register` procedure and optional `flow-eli5` procedure remain declared gaps;
-their helper availability does not establish native procedure execution.
+files nor host session directories are read, copied or mounted. The wave procedure's `flow-register` lookup resolves to its installed SKILL.md and all six bundled
+helpers receive the same interpreter, syntax and dependency tiers. Only the
+optional unselected `flow-eli5` procedure remains a declared procedure gap.
+Installed procedure/helper availability does not establish native session execution.
 
 `tests/test_profile_project_wave_cold_live.py` is declared in the real-Docker
-floor. In its cold container it compares all 149 installed files against the
-inventory, probes all 68 helper installations by name, resolves each shebang,
+floor. In its cold container it compares all 159 installed files against the
+inventory, probes all 74 helper installations by name, resolves each shebang,
 checks shell/Python syntax and statically discovers import and sibling routes.
 Python lazy import statements are included without running helper main; isolated
 interpreters exclude controller paths, ambient PYTHONPATH and site packages.
@@ -604,3 +606,21 @@ floor entry. Separate authored negative executions fail for missing helper,
 wrong mode, broken syntax, lazy missing import, absent shell sibling, wrong
 library route and omitted probe. The exact upstream-source lint exception is
 qualified with the committed UP017 sibling input; no local helper is exempted.
+
+The live combined `profile.json`, `subject.json` and `inventory.json` are updated
+in place for the fourth selection. The preceding three-skill version remains
+reproducible at immutable skillc commit `3f8355f113b1cc2010ba3e1237d678affaebc76b`;
+no duplicate historical profile is added. The eleven profiles that predate #699
+and their hash-pin data/checks remain unchanged. A new snapshot must match a
+fresh closure walk; the fourth selection adds exactly ten installed files and
+six helpers under `.codex/skills/flow-register/`, with no changes to any prior
+installed file bytes or modes. Other-client plugin fallback paths and the
+upstream generic example path stay explicitly unsupported.
+
+The existing cold-proof floor file also tests the procedure itself: after its
+positive result, removing the installed `flow-register/SKILL.md` must fail the
+same probe with a named `flow-register SKILL.md` error. The file is restored
+before the existing missing-helper control. No new floor file or floor entry is
+added. A three-selection cold probe accepted that absent procedure before the
+follow-up; the unchanged existing-API control fails there with DID NOT RAISE,
+then passes with the required procedure check. No live model turn is introduced.

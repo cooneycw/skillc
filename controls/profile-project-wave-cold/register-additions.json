@@ -1,0 +1,23 @@
+{
+  "baseline_commit": "3f8355f113b1cc2010ba3e1237d678affaebc76b",
+  "added_files": [
+    ".codex/skills/flow-register/PROVENANCE.md",
+    ".codex/skills/flow-register/SKILL.md",
+    ".codex/skills/flow-register/reference.md",
+    ".codex/skills/flow-register/scripts/SHA256SUMS",
+    ".codex/skills/flow-register/scripts/flow-driver-capability.sh",
+    ".codex/skills/flow-register/scripts/flow-vantage.sh",
+    ".codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+    ".codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+    ".codex/skills/flow-register/scripts/flow-wave-registry.sh",
+    ".codex/skills/flow-register/scripts/toolchain-provenance.sh"
+  ],
+  "added_helpers": [
+    ".codex/skills/flow-register/scripts/flow-driver-capability.sh",
+    ".codex/skills/flow-register/scripts/flow-vantage.sh",
+    ".codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+    ".codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+    ".codex/skills/flow-register/scripts/flow-wave-registry.sh",
+    ".codex/skills/flow-register/scripts/toolchain-provenance.sh"
+  ]
+}

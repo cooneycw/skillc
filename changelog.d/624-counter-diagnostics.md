@@ -1,0 +1,1 @@
+- Label all client-counter reports as diagnostic-only and explicitly unaccepted for sizing/accounting, recording the owner's uncapped-usage ruling without changing calculations or existing report keys.

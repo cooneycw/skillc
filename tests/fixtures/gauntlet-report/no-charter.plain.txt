@@ -1,0 +1,17 @@
+skill-gauntlet: skills/beta
+Where it stands: it has no charter yet, so the gauntlet stopped at the first real question: what should this skill promise?
+
+Round 0: observed
+  Checked: whether usage logs show this skill being used
+  Found:   1 usage log read; 1 recorded run of this skill
+  Means:   usage is recorded; the counts stay in the logs
+  Do next: nothing for this round
+
+Round 1: stop
+  Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
+  Found:   no charter yet; a draft is ready (1 'never' promise (0 with a test), 1 'always' promise (0 with a test))
+  Means:   no keep/trim/retire is possible until you settle what the skill promises; normal for a new skill
+  Do next: run `/charter-create <COLL> skills/beta`: it composes the charter with you and gives every promise a test. Or read the draft .skillc/gauntlet/skills__beta/CHARTER.draft.md and run `skillc charter confirm` on it, as the NEXT line below shows.
+
+No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
+

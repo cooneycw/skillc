@@ -1,0 +1,183 @@
+{
+  "fields": [
+    {
+      "field": "Running",
+      "invalid": [
+        null,
+        0,
+        1,
+        "false",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "OOMKilled",
+      "invalid": [
+        null,
+        0,
+        1,
+        "false",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "Dead",
+      "invalid": [
+        null,
+        0,
+        1,
+        "false",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "Restarting",
+      "invalid": [
+        null,
+        0,
+        1,
+        "false",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "Status",
+      "invalid": [
+        null,
+        false,
+        0,
+        [],
+        {},
+        "dead",
+        "paused",
+        "restarting"
+      ]
+    },
+    {
+      "field": "ExitCode",
+      "invalid": [
+        null,
+        false,
+        true,
+        -1,
+        256,
+        1.5,
+        "7",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "Error",
+      "invalid": [
+        null,
+        false,
+        0,
+        [],
+        {},
+        "daemon failure"
+      ]
+    }
+  ],
+  "root_invalid": [
+    null,
+    false,
+    0,
+    [],
+    "true"
+  ],
+  "meaningful_cases": [
+    "self-exit",
+    "oom",
+    "harness-timeout",
+    "timeout-self-exit",
+    "forged-prose",
+    "inspect-failure",
+    "running-command-failure",
+    "controller-sigkill-137",
+    "positive-no-signal-137",
+    "missing-proof",
+    "changed-proof",
+    "journal-fsync-error",
+    "attribution-fsync-error"
+  ],
+  "proof_fields": [
+    {
+      "field": "candidate",
+      "invalid": [
+        null,
+        false,
+        0,
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "entrypoint",
+      "invalid": [
+        null,
+        false,
+        0,
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "signal_tracking_complete",
+      "invalid": [
+        null,
+        false,
+        0,
+        1,
+        "true",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "signals_sent",
+      "invalid": [
+        null,
+        false,
+        0,
+        "none",
+        {},
+        [
+          null
+        ],
+        [
+          0
+        ],
+        [
+          []
+        ]
+      ]
+    },
+    {
+      "field": "harness_timed_out",
+      "invalid": [
+        null,
+        0,
+        1,
+        "false",
+        [],
+        {}
+      ]
+    },
+    {
+      "field": "runtime_sha256",
+      "invalid": [
+        null,
+        false,
+        0,
+        [],
+        {},
+        "wrong-hash"
+      ]
+    }
+  ]
+}

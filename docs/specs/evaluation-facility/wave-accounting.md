@@ -1,11 +1,18 @@
-# Bounded wave accounting and sizing (Refs #624, PR-N1)
+# Client-counter diagnostics and declared wave projections (Refs #624, PR-N1)
 
-This slice supplies pure readers/projections over authored or retained numeric
-captures. It reads no client home, raw transcript, credential or host resource,
+This slice supplies a diagnostic reader for client-reported numeric captures
+and separate projections from owner-declared planning assumptions. It reads no
+client home, raw transcript, credential or host resource,
 launches no work and enforces no model-token limit. The native usage collector,
 actual subscription concurrency and final study sizing remain separate work.
 
 ## Capture contract
+
+Owner ruling, 2026-11-10, verbatim: "624: no". Client-reported cumulative token
+usage, including Codex's final `total_token_usage` even when sealed, is not
+accepted as sufficient for sizing or accounting under the uncapped treatment.
+These counters are diagnostics only, not the sizing or accounting basis. An
+acceptable usage source remains unresolved; custody cannot supply that acceptance.
 
 `wave_usage.Context` binds the wave, whole declaration digest, original deadline
 digest/duration, common clock domain, pinned client version and exact ordered
@@ -38,16 +45,17 @@ Counters are bounded nonboolean integers. Repeated cumulative values are allowed
 only the final validated counter per continuous session contributes. Samples
 are never summed. A decrease/reset or ambiguous/missing turn makes that role
 UNKNOWN. The caller must not invent reset epochs or treat overlapping transcript
-copies as distinct sessions. Tokens from different roles are summed once only
-with complete coverage. Otherwise `tokens` is null, and a known subtotal plus
-known/planned role counts retains partial information. No observed roles means
+copies as distinct sessions. Client-reported counters from different roles are
+summed once only with complete counter coverage. Otherwise `tokens` is null,
+and a reported subtotal plus known/planned role counts retains partial diagnostic
+information. No observed roles means
 subtotal null, not an invented zero. Population order, duplicate roles/turns,
 changed sessions, unknown fields, malformed/duplicate/deep JSON and custody loss
 cannot yield complete coverage.
 
 Even when bytes, receipt or their hash are unavailable, a valid independently
 held context supplies the full planned denominator, role/session rows and each
-role's planned turn count. Their measured counters, times and observed turn
+role's planned turn count. Their reported counters, times and observed turn
 counts stay null. An invalid context cannot supply trusted metadata. No placeholder
 session UUID or measured zero is invented for a nonstart.
 
@@ -55,7 +63,7 @@ Role active seconds sum all its turn intervals, including resumes. Session
 elapsed spans its first start through last end. Whole-wave wall seconds comes
 from the original common-clock completion observation, including cleanup, not
 the sum of parallel role durations. Missing completion remains null even when
-all token counters are known. Late completion is reported against the original
+all client counters are present. Late completion is reported against the original
 deadline, never used to extend it. Times are finite nonboolean nonnegative values;
 role intervals cannot overlap or run backwards, and completion cannot precede a
 known turn end. Missing role evidence is conservatively unavailable for both its
@@ -67,6 +75,11 @@ not selected study budgets. The three-role fixtures are synthetic. Reports alway
 carry `admission_authority: false` and `enforcement_authority: false` and label
 usage `client-reported-not-provider-attested`. Integrity authenticates custody,
 not the truth of participant-writable client counters or provider billing.
+Every report, including UNKNOWN, carries `scope: client-counter-diagnostics-only`,
+`sizing_basis_accepted: false` and `accounting_basis_accepted: false`. Existing
+`status: COMPLETE` and `tokens_complete` describe only diagnostic input coverage;
+`tokens`, `known_tokens_subtotal` and role `tokens` remain client-reported values,
+not accepted accounting. These additive fields preserve the existing report keys.
 
 ## Additive planning APIs
 
@@ -87,6 +100,10 @@ are finite. Initial estimates are positive; resume estimates may be zero only
 when no resumed turn is planned. Expected turn counts are assumptions, not actual
 usage, authorization to poke or token caps. If capped metadata is retained, its
 sizing digest must match the wave sizing source.
+The `wave_accounting` declaration field is a planning object, not a usage capture.
+Its values and source identity are supplied separately by the caller; this API
+does not derive them from client counters or establish acceptable measurement
+provenance. A matching digest cannot make client-reported usage an accepted basis.
 
 The owner-sized critical path must cover every individual role's active allowance;
 setup/capture/cleanup add to its wall allowance. That is a consistency floor, not
@@ -103,7 +120,8 @@ cost estimator once per planned wave. Judge tiers remain per wave, not per role.
 The existing subscription usage/quota-versus-paid-judge distinction and dollar
 authorization remain unchanged. Estimates are not measurements or enforcement.
 
-Uncapped measurements may exceed projections and remain observations; no token
+Client-reported diagnostics may exceed projections without becoming accepted
+sizing or accounting evidence; no token
 stopper is installed. Capped metadata may be projected, but the unchanged
 `nhl_limits.require_for_execution` still refuses capped dispatch until separately
 approved sizing and actual aggregate enforcement exist. No missing owner mode,
@@ -119,9 +137,11 @@ and flat-single-role-cost variants must lose their committed witnesses. These
 qualify NEW instruments; absent APIs on old main are not regression reds.
 
 No physical usage, VM headroom or credential-window observation is claimed.
-The owner clarification about accepting client-reported usage for uncapped
-sizing remains separate; this code never upgrades that source to provider truth.
-CPU/memory declaration inputs follow in PR-N2. Credential/steward/container-auth
+The owner rejected client-reported usage as sufficient uncapped sizing/accounting
+evidence; this code neither selects an acceptable replacement nor upgrades that
+source to provider truth.
+CPU/memory declaration inputs are documented in [wave-resources.md](wave-resources.md).
+Credential/steward/container-auth
 wiring is deferred to a separate SECRET-PATH PR after the unapproved #630 contracts
 exist. Its text-only design is retained on #624. The native three-session probe
 remains folded into #639's separately approved sizing run.

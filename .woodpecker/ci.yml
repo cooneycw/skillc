@@ -160,6 +160,20 @@ steps:
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
 
+  # Load-timing ratchet (#758, under #462): a NEW sub-second time-ish literal
+  # in tests/ fails unless it is in ci/timing-baseline.txt or annotated on its
+  # own line `# timing: must-fire - <why>`. Its red cases are committed in
+  # tests/test_timing_inventory.py, which the gate step runs.
+  - name: timing-check
+    image: python:3.12-slim
+    depends_on: []
+    commands:
+      - pip install uv
+      - uv sync --locked
+      - uv run --no-sync python3 ci/timing_inventory.py check
+    environment:
+      UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
+
   # Built wheel in a fresh venv, then sabotage each committed control (#72).
   - name: clean-install
     image: python:3.12-slim

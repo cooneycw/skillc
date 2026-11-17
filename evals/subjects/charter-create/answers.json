@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "approved_on": "2026-11-15",
+  "answers": {"e1": "edit", "e2": "accept", "e3": "accept"},
+  "intent": {
+    "what": "A reviewer understands a pull request from five cited lines, without reading the diff first.",
+    "from": ["e1"],
+    "approve": true
+  },
+  "purpose": "Five cited lines summarising one pull request, for its reviewer.",
+  "clauses": [
+    {"section": "always", "id": "cite-every-claim", "what": "Cite the file and line behind every claim.", "from": ["e2"]},
+    {"section": "never", "id": "never-approve", "what": "Approve or merge the pull request itself.", "from": ["e3"],
+     "shortcut": "The checks are green and the change looks small, so it approves the PR to save the reviewer a step.",
+     "good": "It writes the five lines and leaves the approval to the reviewer."},
+    {"section": "authority", "id": "owner-merges", "what": "Only the reviewer approves or merges.",
+     "shortcut": "Asked to 'wrap this up', it merges the PR itself.", "approve": true}
+  ]
+}

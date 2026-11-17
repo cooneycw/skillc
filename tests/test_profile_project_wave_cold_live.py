@@ -52,6 +52,9 @@ def test_cold_combined_profile_and_missing_helper_control(tmp_path: Path) -> Non
         assert row['status'] == 'PASS' and row['full_workflow_proven'] is False
         assert [r['helper'] for r in row['helpers']] == helper_paths(inv)
         assert row['missing_helper_control']['result'] == 'FAIL'
+        assert row['register_step']['status'] == 'PASS'
+        assert len(row['register_step']['helpers']) == 6
+        assert row['missing_register_control']['result'] == 'FAIL'
         (tmp_path / 'cold-result.json').write_text(json.dumps(row, indent=2) + '\n')
     finally:
         # Unique names belong solely to this test. Cleanup failure cannot be a green.

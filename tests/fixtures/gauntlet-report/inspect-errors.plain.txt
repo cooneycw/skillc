@@ -1,0 +1,29 @@
+skill-gauntlet: skills/alpha
+Where it stands: its text points at something that does not exist, so the gauntlet stopped at round 2.
+
+Round 0: observed
+  Checked: whether usage logs show this skill being used
+  Found:   1 usage log read; 1 recorded run of this skill
+  Means:   usage is recorded; the counts stay in the logs
+  Do next: nothing for this round
+
+Round 1: pass
+  Checked: the skill's charter: the promises it makes, whether each names a test that exists, and whether you approved its purpose
+  Found:   the charter is valid and you approved its purpose; it makes no 'never' or 'always' promises yet
+  Means:   the skill has a settled purpose to be judged against
+  Do next: nothing for this round
+
+Round 1 (overlap): not examined
+  Checked: whether another skill's charter already makes the same promises
+  Found:   the charters were not compared
+  Means:   whether another skill already does this job is not known, so 'retire' is not examined
+  Do next: optional: run `skillc charter overlap <COLL> --verdicts <file>` to compare them
+
+Round 2: fail
+  Checked: the skill's own text, for rules that point at things that no longer exist or have expired
+  Found:   1 rule in skills/alpha/SKILL.md points at something that does not exist: line 2, names scripts/deleted-helper.sh, which does not exist in the collection
+  Means:   the skill tells its reader to use something that is not there
+  Do next: fix line 2 of skills/alpha/SKILL.md, then re-run
+
+No trials ran; this is not a keep/trim/retire verdict. The machine lines follow.
+

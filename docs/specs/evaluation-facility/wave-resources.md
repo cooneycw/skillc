@@ -11,9 +11,11 @@ bytes/inodes; a storage PASS cannot substitute for this input.
 
 The version-1 resources object has exactly `version`, `sizing_report_digest`,
 `concurrency`, `roles`, `auxiliaries`, `reservations`, `max_age_seconds` and
-`max_collection_seconds`. Its digest must match the accounting sizing source.
+`max_collection_seconds`. Its digest must match the owner-declared planning source,
+not a client-counter receipt or an accepted client usage basis. This join cannot
+establish acceptable measurement provenance.
 `concurrency` is `all-roles-simultaneous`; its three ordered role names must match
-the accounting plan exactly. Each role supplies positive nonboolean integer
+the declared planning population exactly. Each role supplies positive nonboolean integer
 `cpu_millicores` and `memory_bytes` for one role container. This format covers one
 simultaneous three-role wave, not an unaccounted overlap of multiple waves.
 

@@ -27,8 +27,8 @@ from skillc import profile
 def test_computed_inventory_is_exact_and_preserves_every_existing_profile() -> None:
     inv, _ = inventory()
     assert inv == json.loads((DECL / 'inventory.json').read_text())
-    assert inv['selection'] == ['flow-auto', 'flow-wave', 'project-init']
-    assert len(helper_paths(inv)) == 68
+    assert inv['selection'] == ['flow-auto', 'flow-register', 'flow-wave', 'project-init']
+    assert len(helper_paths(inv)) == 74
     pins = json.loads((DECL / 'preserved-profiles.json').read_text())
     assert len(pins) == 11
     for path, digest in pins.items():
@@ -40,9 +40,13 @@ def test_boundary_records_every_unsupported_route_without_claiming_full_workflow
     refs = {r['reference']: r['reason'] for r in raw['unsupported']}
     for key in ['~/.claude/sessions', '$HOME/.claude/sessions', '~/Projects/my-awesome-app',
                 '$CPP_DIR/.claude/commands', '$CPP_DIR/.claude/skills', 'gh api user',
-                'gh repo create --push', 'gh auth', '/flow-register', 'vendor fetch', 'vendor revendor']:
+                'gh repo create --push', 'gh auth', 'vendor fetch', 'vendor revendor']:
         assert refs[key]
-    assert 'flow-register' not in raw['select'] and 'flow-eli5' not in raw['select']
+    assert 'flow-register' in raw['select'] and '/flow-register' not in refs
+    assert 'flow-eli5' not in raw['select']
+    for name in ['flow-wave-registry.sh', 'flow-wave-mailbox.sh', 'flow-wave-lexicon.sh']:
+        assert '${CLAUDE_PLUGIN_ROOT}/scripts/' + name in refs
+    assert '/home/user/Projects/claude-power-pack' in refs
     with pytest.raises(Unsupported):
         dispatch('gh api user', ['must-never-be-executed'])
 
@@ -60,6 +64,8 @@ def test_every_named_helper_resolves_in_the_intact_offline_install(tmp_path: Pat
     result = probe(home, inv)
     assert result['status'] == 'PASS'
     assert result['full_workflow_executable'] is False
+    assert result['register_step']['status'] == 'PASS'
+    assert len(result['register_step']['helpers']) == 6
     assert [r['helper'] for r in result['helpers']] == helper_paths(inv)
 
 
@@ -205,3 +211,32 @@ def test_mypy_extra_snapshot_exception_does_not_hide_siblings(tmp_path: Path, mo
     import test_profile_flow_auto_87ecb097 as existing
     monkeypatch.setattr(existing, 'SOURCE', EXTRA)
     existing.test_mypy_snapshot_exemption_is_exact(tmp_path)
+
+
+def test_flow_register_skill_entrypoint_is_required_by_name(tmp_path: Path) -> None:
+    inv, home = installed(tmp_path)
+    target = home / '.codex/skills/flow-register/SKILL.md'
+    if target.exists():
+        target.unlink()
+    with pytest.raises(AssertionError, match='flow-register.*SKILL.md'):
+        probe(home, inv)
+
+
+def test_committed_fourth_selection_wrong_type_sweep() -> None:
+    assert len(CASES['register_selection_invalid']) == 7
+    for value in CASES['register_selection_invalid']:
+        raw = json.loads((DECL / 'profile.json').read_text())
+        raw['select'][3] = value
+        with pytest.raises(profile.Refused):
+            candidate = profile.Profile.from_dict(raw, DECL)
+            profile.validate(candidate, Source())
+
+
+def test_fourth_skill_additions_match_the_computed_inventory() -> None:
+    inv, _ = inventory()
+    added = json.loads((ROOT / 'controls/profile-project-wave-cold/register-additions.json').read_text())
+    files = sorted(row['destination'] for row in profile._install_records(inv)
+                   if row['destination'].startswith('.codex/skills/flow-register/'))
+    helpers = [path for path in helper_paths(inv) if path.startswith('.codex/skills/flow-register/')]
+    assert len(files) == 10 and files == added['added_files']
+    assert len(helpers) == 6 and helpers == added['added_helpers']
