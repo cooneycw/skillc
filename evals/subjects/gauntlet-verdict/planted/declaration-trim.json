@@ -1,0 +1,10 @@
+{
+  "variants": [
+    {
+      "arm": "lean-1",
+      "file": "SKILL.md",
+      "remove": "You MUST also restate every rule twice for emphasis, even though saying it once is enough.",
+      "clause": "round 2 class D"
+    }
+  ]
+}

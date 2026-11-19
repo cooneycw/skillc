@@ -1,0 +1,70 @@
+{
+  "branch": "issue-726-overlap-view-skill-gauntlet-round-1-part-b",
+  "counts": {
+    "accepted": 6,
+    "deferred": 5,
+    "rejected": 0
+  },
+  "extra_passes_reason": "the wave orchestrator skillc-orch set a 3-pass ceiling per PR for #726 (gate rev 16, reaffirmed rev 19; orchestrator-only, owner-delegated); passes 1 and 2 found 3 MEDIUM defects each, all fixed; pass-3 findings deferred to #750 (MEDIUM) and Nit Store #20 (LOW)",
+  "head": "2da29597bda2d00434b7a4d39146ae91e9aeec37",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "4442f745-f19b-4ef8-bdb6-71fc92ee505a",
+    "sources": [
+      {
+        "bytes": 12622842,
+        "path": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl",
+        "sha256": "3ef1ac09aff7901a4cb42d395ae85231e5c60ae23a924baf13ff306f261006bb"
+      }
+    ],
+    "transcript": "-home-user-Projects/4442f745-f19b-4ef8-bdb6-71fc92ee505a.jsonl"
+  },
+  "issue": "726",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-11-15T11:29:43Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 8
+  },
+  "reviewed_artifact": {
+    "base_sha": "9dc1a7de3be7f8c2a42f0aa402195dd33e0dc20a",
+    "merge_base": "9dc1a7de3be7f8c2a42f0aa402195dd33e0dc20a",
+    "method": "runtime-head",
+    "patch_sha256": "fd9183115effc1c5b59653e215ac1e6353700e30df5e2394815880c6eec76009",
+    "report_record": 81,
+    "target_head": "2da29597bda2d00434b7a4d39146ae91e9aeec37"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.21p2jR",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/15/rollout-2026-11-15T06-26-45-01a1def5-af09-7db2-8f34-85ed150ce4ed.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 143629,
+        "path": "codex-review-stream.21p2jR",
+        "sha256": "90db689afaacc8097026759d4671625e844940c92c5595919e8d4c7121b976d7"
+      },
+      {
+        "bytes": 717198,
+        "path": "2026/11/15/rollout-2026-11-15T06-26-45-01a1def5-af09-7db2-8f34-85ed150ce4ed.jsonl",
+        "sha256": "12df48e15168e8254ad4e722e4e8aacaddcb6145158d2ddef61106223abe48e4"
+      }
+    ],
+    "thread_id": "01a1def5-af09-7db2-8f34-85ed150ce4ed"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}

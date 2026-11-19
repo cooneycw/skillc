@@ -96,10 +96,21 @@ remaining obligation and evidence limit.
 skillc check ./skills         # check a collection after validating the rules
 skillc selftest                # prove every rule can still report the other verdict
 skillc check-records <path>    # refuse evaluation records the contract rejects
+skillc usage report <usage.jsonl> # #719: skill-usage counts by skill and digest, outcome mix, UNKNOWN rate (`usage hook`/`usage end` write them; see docs/skill-usage-hook.md)
+skillc contracts <collection>  # #720: check every CHARTER.md contract together; exit 0 clean, 1 findings, 2 usage, 3 none declared (docs/specs/contracts.md)
+skillc charter draft <skill> [--usage LOG] [--subject PATH] [--out FILE]  # #726 round 1: a draft CHARTER.md from the skill's text and usage records; approves nothing; exit 3 nothing to draft from (docs/specs/charter-round1.md)
+skillc charter confirm <draft> --answers FILE --out FILE  # #726: apply the owner's answers; refuses without them; stamps approved only on intent and authority
+skillc gauntlet round3|round4 <declaration> [--plan]  # #736: skill-gauntlet baseline and challenge trials; a declared attempt cap; UNKNOWN unless a named damaged copy separates; --plan spends nothing (real runs: #736 PR 3)
+skillc charter overlap <collection> [--verdicts FILE]  # #726: shared, shadowed and orphan duties across charters, by meaning; proposals only; exit 3 not examined without a comparator
+skillc charter evidence <collection> <skill> [--ref REF]... [--search] [--doc P] [--usage LOG] --out FILE  # #778: every existing piece of the skill's charter (discussions, issues and PRs, read-only; the charter and its history; skill text; usage; tests) as cited suggestions; every source reports examined, none found or not examined (docs/specs/charter-create.md)
+skillc charter create <collection> <skill> --evidence FILE --answers FILE [--replace-draft]  # #778: the owner's answers become a CHARTER.md with a trap-task stub per clause at evals/trap-tasks/; refuses (exit 1, nothing written) on an unanswered suggestion, a never or authority rule with no shortcut, or an approval without the owner's yes and date; never commits
 skillc retained-export --reproduce <export> # #556: reproduce a retained historical report without a paid run
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
 skillc profile validate <profile> # #265: close a workflow's transitive dependency inventory at the pinned source; installs nothing
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
+skillc inspect <collection>    # #725: skill-gauntlet round 2 - decay rules, findings sorted A/B/C/D; never edits
+skillc gauntlet verdict <collection> <skill> --round3 F --round4 F --declaration F --inspect F --overlap F # #737: round 5 - one keep/trim/retire proposal or UNKNOWN naming the round; drafts only, the owner rules with `gauntlet rule` (docs/specs/gauntlet-verdict.md)
+skillc gauntlet run <collection> <skill> # #754: the skill-gauntlet engine - rounds 0-2 in order, one verdict per round, one NEXT: line; rounds 3-5 read NOT BUILT, so it never exits 0 yet; a plain-English report comes first (#783; --plain-only, --machine-only) (docs/specs/gauntlet.md)
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)
@@ -171,7 +182,7 @@ ok       frontmatter           red on bad (3), green on good (2)
 ok       record-envelope       red on bad (7), green on good (2)
 ...
 
-skillc selftest: 31/31 rule(s) discriminate
+skillc selftest: 48/48 rule(s) discriminate
 ```
 
 Six verdicts fail the run:
@@ -253,6 +264,20 @@ reported as checked alone, not against a ledger. See the
 [records spec](docs/specs/evaluation-facility/records.md).) An unknown `--rule` is refused with exit 2 before
 anything is scanned; a selector that matched nothing used to read as a clean run.
 
+**Decay rules (`skillc inspect`, #725).** `dangling-reference`,
+`expired-marker`, `copied-passage` and `emphasis-density` read the prose of a
+whole collection, not one SKILL.md's shape: a reference to a deleted helper, an
+`until #N` rule whose issue has closed, a passage copied word for word between
+two documents, emphasis piled up until nothing stands out. They are in
+`skillc rules` and `skillc selftest` like every other rule, but run under
+`skillc inspect`, which sorts each finding into the four groups of
+[claude-power-pack discussion #1830](https://github.com/cooneycw/claude-power-pack/discussions/1830)
+(A enforced by a check shown to fail, B propose a check, C keep, D move to a
+reference) or `UNSORTED` with a reason - never a guess. `UNKNOWN` (an issue
+state it could not read) is never fine, an empty collection is "nothing
+inspected", and `inspect` never edits a skill. Charter, populations and blind
+spots: [docs/specs/inspect.md](docs/specs/inspect.md).
+
 `error` means the checker rejects it under its format rules. `warn` flags a
 heuristic concern; it does not prove poorer agent performance. `--strict` makes
 warnings fail too. The [project assessment](docs/README.md) records known
@@ -281,6 +306,62 @@ cd skillc
 uv sync --extra dev
 uv run skillc selftest
 ```
+
+### `/skill-gauntlet` in every Claude Code session (#763, #774)
+
+Claude Code loads a repository's own skills only in sessions opened in that
+repository. To use `/skill-gauntlet` from any session (CPP, Kyle, anywhere):
+
+```bash
+make install-skill     # copies this checkout's skill to ~/.claude/skills/skill-gauntlet
+make uninstall-skill   # removes that copy, and only a copy skillc marked as its own
+```
+
+- **A real copy, never a link (#774).** Kyle's deploy stages every entry under
+  `~/.claude/skills` into its session image and fails on a symlink, or on a
+  directory without SKILL.md. The copy holds regular files only, plus three small
+  files the repository never has: `.skillc-checkout` (the main checkout, written
+  `~/...` under your home so no account name is in it), `.skillc-install`
+  (a marker: kind, schema, digest; no paths) and an empty `.kyle-exclude`.
+- **Kyle containers EXCLUDE skillc** (owner ruling, 2026-11-16). Every install,
+  adopt and refresh writes `.kyle-exclude`, and Kyle's deploy skips a skill
+  folder holding it (kyle #2518), so `/skill-gauntlet` is host-only. A copy
+  that lacks the file is refreshed. The file is outside the marker's digest.
+- **The container launcher contract** is kept, for the owner to revisit, but
+  Kyle no longer stages it. It was: a pinned, READ-ONLY skillc checkout at
+  `/opt/kyle/session-tooling/skillc` and its frozen runtime at
+  `<checkout>/.venv`, named only by `SKILLC_CHECKOUT` (read before the locator).
+  The launcher takes its runtime from an absolute `SKILLC_RUNTIME` if set, else
+  `<checkout>/.venv`, and IGNORES the caller's `UV_PROJECT_ENVIRONMENT` (uv
+  applies that to every project, so a session-wide one names the worker's).
+  The runtime must import the checkout's own `skillc/` (an editable or path
+  install); a non-editable wheel is refused by design (#765). The skill never writes inside
+  the checkout (`PYTHONDONTWRITEBYTECODE=1`); the gauntlet writes only into the
+  collection it reviews.
+- **Updating:** a `git pull` does NOT update the copy. Re-run
+  `make install-skill`. The skill warns when its copy differs from the
+  checkout's (`SKILL_GAUNTLET: warning: ...`) and still runs.
+- **Only git-tracked files** (#738), tracked by path and read from the working
+  tree: an untracked file in the checkout's skill folder (such as a
+  `GAUNTLET.json` record) is never installed and is not drift. The installer
+  refuses when git cannot list the folder, or when the checkout is an export
+  with no `.git`.
+- **Safety:** nothing temporary ever appears under `~/.claude/skills`. The new
+  copy is built in `${XDG_CACHE_HOME:-~/.cache}/skillc/install-tmp/` (it must
+  be on the same device, or the install is refused), the old copy is moved out
+  there, then the new one is moved in. Between those two moves the skill is
+  briefly absent. It refuses, and names, any entry that is not its own: a
+  foreign directory, a link elsewhere, or an unmarked copy that differs. It
+  adopts an unmarked copy that is byte-identical to the checkout's skill, and
+  migrates #763's old link. `SKILLC_SKILLS_DIR` overrides the directory.
+- **If the checkout moves:** the copy's locator names a missing checkout, so the
+  skill prints `SKILL_GAUNTLET: cannot find a usable skillc (...)` and gives no
+  verdict. Run `make install-skill` from the new place.
+- **If skillc is present but cannot run** (never `uv sync`ed, or its environment
+  does not import exactly this checkout's `skillc/gauntlet.py` and
+  `skillc/cli.py`, #765): the same cannot-find line, and no verdict. The skill
+  runs the checkout's own environment directly, so `uv` itself is needed only to
+  sync it.
 
 ## Contributing
 

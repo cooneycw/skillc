@@ -10,6 +10,7 @@ import hashlib
 import re
 import stat
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 from . import git_snapshot as gs
@@ -63,7 +64,39 @@ def capture_commit(role: str, remote: gs.GitDir, commit: str, *,
     return {**packet, 'capture_digest': digest(packet)}
 
 
-def selectors(record: object, role: str, checkout: str) -> tuple[dict[str, str], dict[str, str]]:
+#: Git records one permission fact for a regular file: 100755 when the
+#: owner-execute bit (S_IXUSR) is set, else 100644 (#727). Every other
+#: permission bit comes from the umask that created the file, so a delivered
+#: file matches on its bytes and that one bit. setuid, setgid and sticky are
+#: never accepted: git cannot deliver them, so a file carrying one differs.
+GIT_PERMISSION_BITS = 0o777
+#: One candidate mode per combination of the 8 bits git does not record.
+CANDIDATES_PER_FILE = 256
+_MODES = {executable: tuple(m for m in range(GIT_PERMISSION_BITS + 1) if bool(m & stat.S_IXUSR) is executable)
+          for executable in (False, True)}
+if any(len(modes) != CANDIDATES_PER_FILE for modes in _MODES.values()):  # pragma: no cover - a constant
+    raise RuntimeError("the git permission candidate set is not 256 modes per execute state")
+
+
+@dataclass(frozen=True)
+class Expected:
+    """What a delivered key must look like on disk. A regular file is matched
+    by its bytes and git's execute bit; anything else by its exact digest."""
+
+    kind: str  # "file" or "exact"
+    executable: bool
+    content: str  # sha256 of the delivered bytes (files)
+    exact: str  # the item digest (directories, symlinks)
+
+
+def accepts(expected: Expected, observed: str) -> bool:
+    """Whether a census item digest is the delivered item, as git sees it."""
+    if expected.kind != 'file':
+        return observed == expected.exact
+    return any(digest({'mode': mode, 'digest': expected.content}) == observed for mode in _MODES[expected.executable])
+
+
+def selectors(record: object, role: str, checkout: str) -> tuple[dict[str, Expected], dict[str, str]]:
     """Re-derive selectors from retained, hash-checked raw objects on recovery."""
     if (not isinstance(record, dict) or not {'role', 'commit', 'tree', 'objects', 'capture_digest'} <= set(record) <= {
                 'role', 'commit', 'tree', 'objects', 'capture_digest', 'binding'}
@@ -80,19 +113,18 @@ def selectors(record: object, role: str, checkout: str) -> tuple[dict[str, str],
     tree = replay.tree_of(record['commit'])
     if tree != record['tree']:
         raise Refused('delivered tree disagrees with captured commit')
-    items: dict[str, str] = {}
+    items: dict[str, Expected] = {}
     for path, (mode, data) in replay.commit_files(record['commit']).items():
         absolute = checkout + '/' + path
         if mode == '120000':
-            value = {'target': data.decode('utf-8'), 'mode': 0o777}
-            key = 'symlink:' + absolute
+            exact = digest({'target': data.decode('utf-8'), 'mode': 0o777})
+            items['symlink:' + absolute] = Expected('exact', False, '', exact)
         else:
-            value = {'mode': stat.S_IMODE(int(mode, 8)), 'digest': hashlib.sha256(data).hexdigest()}
-            key = 'file:' + absolute
-        items[key] = digest(value)
+            executable = bool(int(mode, 8) & stat.S_IXUSR)
+            items['file:' + absolute] = Expected('file', executable, hashlib.sha256(data).hexdigest(), '')
         parts = path.split('/')[:-1]
         for index in range(1, len(parts) + 1):
-            items['directory:' + checkout + '/' + '/'.join(parts[:index])] = digest('directory')
+            items['directory:' + checkout + '/' + '/'.join(parts[:index])] = Expected('exact', False, '', digest('directory'))
     return items, {key: record[key] for key in ('commit', 'tree', 'capture_digest')}
 
 

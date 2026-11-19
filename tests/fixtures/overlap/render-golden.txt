@@ -1,0 +1,30 @@
+# Overlap view (skill-gauntlet round 1, #726)
+
+Every overlap here is a **proposal for the owner**, never a finding against a skill: some duplication protects a boundary or helps a skill be found.
+
+- Duties: 4 in 2 charter(s)
+- Comparator: fake (tests only); 3 replicate(s) per pair
+- Pairs judged: 4; skipped as the same clause id (see duty-single-owner): 0
+- Counts: shared 1, shadowed 0, co-observed 0, orphan 0, unknown pairs 0, unknown orphans 0
+
+```mermaid
+graph LR
+  alpha -- shared --- beta
+```
+
+## shared (1)
+
+| Duty | Charter | Text | Replicates |
+|---|---|---|---|
+| `alpha.always-1` | alpha | Before any file is edited, show the owner a plain-language summary of the plan and wait for approval. | same, same, same |
+| `beta.always-1` | beta | Pause for the reviewer's sign-off on a simple-English description of the intended changes prior to modifying code. | same, same, same |
+=====NO COMPARATOR=====
+# Overlap view (skill-gauntlet round 1, #726)
+
+Every overlap here is a **proposal for the owner**, never a finding against a skill: some duplication protects a boundary or helps a skill be found.
+
+- Duties: 4 in 2 charter(s)
+- Comparator: none - not examined; 3 replicate(s) per pair
+- Pairs judged: 0; skipped as the same clause id (see duty-single-owner): 0
+- Counts: none - no pair was judged, so a zero here would claim a comparison nobody made
+- overlap not examined: no comparator configured (model calls are sized, not run; #747)

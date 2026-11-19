@@ -1,0 +1,2 @@
+- **`make install-skill` keeps `/skill-gauntlet` out of Kyle containers** (#738, owner ruling 2026-11-16). Every install, adopt and refresh writes an empty `.kyle-exclude` into `~/.claude/skills/skill-gauntlet`, which Kyle's deploy skips (kyle #2518). A refresh used to drop the file.
+  A current copy missing the file is refreshed, never left alone as "already installed". An unmarked copy with a hand-made `.kyle-exclude` is still adopted. The `SKILLC_CHECKOUT`/`SKILLC_RUNTIME` launcher contract is kept, but Kyle no longer stages it.

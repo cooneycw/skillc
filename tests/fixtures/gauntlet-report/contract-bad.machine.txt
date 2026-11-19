@@ -1,0 +1,6 @@
+GAUNTLET skills/alpha (collection coll)
+ROUND 0 usage: OBSERVED - 1 usage log(s) read by `skillc usage report`; counts stay in the logs
+ROUND 1 charter: FAIL - contract BAD: contract-shape
+RECORD: skills/alpha/GAUNTLET.json (written; the engine never commits it)
+NEXT: fix the findings `skillc contracts <COLL>` lists for skills/alpha/CHARTER.md
+GAUNTLET: stopped at round 1 (FAIL) - no trials ran; this is not a keep/trim/retire verdict

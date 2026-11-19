@@ -303,9 +303,14 @@ MAX_DEPTH = 32
 
 
 class _Parser:
-    def __init__(self, lines: list[str], first_lineno: int) -> None:
+    def __init__(self, lines: list[str], first_lineno: int, contracts: bool = False) -> None:
         self.lines = [line.rstrip("\r") for line in lines]
         self.first = first_lineno
+        #: #720: the CHARTER.md contract block needs two shapes SKILL.md frontmatter
+        #: deliberately refuses - a list of mappings and a one-line flow list of
+        #: scalars. OPT-IN only (`parse_contract_block`), so every SKILL.md keeps
+        #: exactly the subset docs/frontmatter.md documents.
+        self.contracts = contracts
 
     def no(self, i: int) -> int:
         return self.first + i
@@ -356,6 +361,8 @@ class _Parser:
         header = _BLOCK_HEADER_RE.match(text) if text[:1] in {"|", ">"} else None
         if header:
             return self.block_scalar(i, indent, header, lineno)
+        if self.contracts and text[:1] == "[":
+            return _flow_sequence(text, lineno), i
         if _strip_comment(text):
             return _scalar(text, lineno), i
         # An empty value: a nested mapping, a list, or null.
@@ -364,7 +371,7 @@ class _Parser:
             child = self.lines[j]
             child_indent = _indent(child, self.no(j))
             if _is_item(child.strip()) and child_indent >= indent:
-                return self.sequence(j, child_indent)
+                return self.sequence(j, child_indent, depth + 1)
             if child_indent > indent:
                 return self.mapping(j, child_indent, depth + 1)
         return None, i
@@ -420,7 +427,9 @@ class _Parser:
             return text + "\n" * breaks, i
         return text + ("\n" if breaks else ""), i
 
-    def sequence(self, i: int, indent: int) -> tuple[list[object], int]:
+    def sequence(self, i: int, indent: int, depth: int = 0) -> tuple[list[object], int]:
+        if depth > MAX_DEPTH:
+            raise _unsupported(self.no(i), f"nesting deeper than {MAX_DEPTH} levels")
         items: list[object] = []
         while True:
             i = self.next_significant(i)
@@ -439,13 +448,104 @@ class _Parser:
             if value[:1] in {"|", ">"}:
                 raise _unsupported(lineno, "block text inside a list")
             if value[:1] not in {'"', "'"} and _key_split(_strip_comment(value)):
-                raise _unsupported(lineno, "a list of mappings")
+                if not self.contracts:
+                    raise _unsupported(lineno, "a list of mappings")
+                # #720: `- key: value` opens a mapping whose keys sit two columns
+                # right of the dash. Re-indent this one line in place and read the
+                # mapping at that column; it ends at the next item or a dedent.
+                self.lines[i] = " " * (ind + 2) + value
+                # The depth carries through (counter-model review): restarting it
+                # let alternating list/mapping nesting pass MAX_DEPTH and recurse
+                # until RecursionError aborted the whole scan.
+                item, i = self.mapping(i, ind + 2, depth + 1)
+                items.append(item)
+                continue
+            if self.contracts and value[:1] == "[":
+                raise _unsupported(lineno, "a flow list inside a list")
             items.append(_scalar(value, lineno) if value else None)
             i += 1
 
 
-def _parse_mapping_document(lines: list[str], first_lineno: int) -> dict[str, object]:
-    parser = _Parser(lines, first_lineno=first_lineno)
+def _flow_items(text: str, lineno: int) -> tuple[list[str], str]:
+    """Split a one-line flow list into raw items, honouring quotes. Returns
+    (items, tail): `tail` is whatever follows the closing `]`. A `#` starts a
+    comment only OUTSIDE quotes and after whitespace, as in YAML; inside the
+    brackets it is refused rather than allowed to eat the closing `]`."""
+    items: list[str] = []
+    current: list[str] = []
+    quote = ""
+    i = 1  # text[0] is '['
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                if quote == "'" and text[i + 1: i + 2] == "'":
+                    current.append("'")
+                    i += 2
+                    continue
+                quote = ""
+            elif quote == '"' and ch == "\\":
+                current.append(text[i + 1: i + 2])
+                i += 2
+                continue
+            i += 1
+            continue
+        if ch in {'"', "'"}:
+            if "".join(current).strip():
+                raise _invalid(lineno, "a quote in the middle of a flow-list item")
+            quote = ch
+            current.append(ch)
+        elif ch == "#" and (not current or current[-1] in {" ", "\t"}):
+            raise _unsupported(lineno, "a comment inside a flow list")
+        elif ch in "[{}":
+            raise _unsupported(lineno, "a nested flow collection")
+        elif ch == ",":
+            items.append("".join(current))
+            current = []
+        elif ch == "]":
+            items.append("".join(current))
+            return items, text[i + 1:]
+        else:
+            current.append(ch)
+        i += 1
+    if quote:
+        raise _invalid(lineno, "an unterminated quote in a flow list")
+    raise _unsupported(lineno, "a flow list continued onto the next line, or with no closing ']'")
+
+
+def _flow_sequence(text: str, lineno: int) -> list[object]:
+    """#720: a ONE-LINE flow list of scalars, `[a, b, "c"]`. Nothing nests. A
+    quoted item must be the whole item - `"owner"#x` or `"a" b` is refused, never
+    read as `"owner"` (counter-model review: a YAML loader rejects both)."""
+    raw_items, tail = _flow_items(text, lineno)
+    tail = tail.strip()
+    if tail and not (tail.startswith("#") and text[len(text) - len(tail) - 1: len(text) - len(tail)] in {" ", "\t", "]"}):
+        raise _unsupported(lineno, "text after a flow list's closing ']'")
+    if tail.startswith("#") and not text[: len(text) - len(tail)].rstrip().endswith("]"):
+        raise _unsupported(lineno, "text after a flow list's closing ']'")
+    if len(raw_items) == 1 and not raw_items[0].strip():
+        return []
+    items: list[object] = []
+    for part in raw_items:
+        part = part.strip()
+        if not part:
+            raise _invalid(lineno, "an empty item in a flow list")
+        if part[0] in {'"', "'"}:
+            if len(part) < 2 or part[-1] != part[0]:
+                raise _invalid(lineno, "text after a closing quote in a flow list")
+            items.append(_quoted(part, lineno))
+        else:
+            if any(q in part for q in "\"'"):
+                raise _invalid(lineno, "a quote inside an unquoted flow-list item")
+            items.append(_scalar(part, lineno))
+    return items
+
+
+def _parse_mapping_document(
+    lines: list[str], first_lineno: int, contracts: bool = False,
+) -> dict[str, object]:
+    parser = _Parser(lines, first_lineno=first_lineno, contracts=contracts)
     root, end = parser.mapping(0, 0)
     if end < len(parser.lines):  # pragma: no cover - mapping(…, 0) consumes all
         raise _invalid(parser.no(end), "unexpected content")
@@ -465,6 +565,19 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     if not match:
         raise FrontmatterError("no YAML frontmatter block")
     root = _parse_mapping_document(match.group(1).split("\n"), first_lineno=2)
+    return root, text[match.end():]
+
+
+def parse_contract_block(text: str) -> tuple[dict[str, object], str]:
+    """Parse the YAML block at the top of a `CHARTER.md` (#720,
+    docs/specs/contracts.md): the frontmatter subset PLUS lists of mappings and
+    one-line flow lists of scalars. Everything else is refused under the same
+    rules as `parse_frontmatter` - including a plain scalar wrapped onto an
+    indented next line, which must use a `>` block. Raises `FrontmatterError`."""
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        raise FrontmatterError("no YAML block at the top of the file (expected '---' delimiters)")
+    root = _parse_mapping_document(match.group(1).split("\n"), first_lineno=2, contracts=True)
     return root, text[match.end():]
 
 

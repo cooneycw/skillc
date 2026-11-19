@@ -1,0 +1,15 @@
+{
+  "duties": [
+    {
+      "contract": "lean",
+      "id": "lean.report"
+    },
+    {
+      "contract": "trimmable",
+      "id": "trimmable.report"
+    }
+  ],
+  "examined": true,
+  "incomplete": [],
+  "overlaps": []
+}
