@@ -237,6 +237,9 @@ def test_the_arms_differ_only_in_the_install_and_selection_is_counted_and_tested
         case, _arm = arm_of[str(call["attempt_id"])].split("__")
         want = goal if case == "near-miss" else f"{goal.rstrip()}\n\nBefore finishing, run this project's quality checks.\n"
         assert call["prompt"] == want
+        # #555: the unified task surface (#267), executable metadata included,
+        # never the retired src-only walk.
+        assert call["surface"] == cc.surface_mapping(cc.task_surface(TASK / "fixture"))
     report = us.build_report(experiment, us.reconcile(experiment, outcomes), declaration)
     cells = report["cells"]
     assert cells["intended-use"]["rewritten"] == {"scheduled": 3, "observed": 3, "selected": 3}  # type: ignore[index]

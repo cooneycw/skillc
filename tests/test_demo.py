@@ -884,6 +884,27 @@ def test_cmd_demo_paste_back_refusal_never_prints_the_finding_text(
     assert seeded_identity not in captured.err
 
 
+def test_paste_back_refusal_message_names_categories_never_the_value() -> None:
+    """#555: five CLI sites print `str(exc)` for this exception; its message
+    used to list each finding as `<line>: <category>: <value>`, so the value
+    the block was withheld for reached stderr anyway. The message itself is
+    now safe to print. Negative control in the same test: the planted value
+    is still REFUSED - the refusal did not get blind to make the message clean."""
+    seeded_identity = "/home/" + "exampleuser" + "/leaked"
+    with pytest.raises(demo.PasteBackRefused) as caught:
+        demo.print_paste_back(f"planted: {seeded_identity}\n")
+    assert seeded_identity not in str(caught.value)
+    assert "exampleuser" not in str(caught.value)
+    assert caught.value.count == 1
+    assert caught.value.categories
+    assert all(c in str(caught.value) for c in caught.value.categories)
+
+
+def test_a_clean_paste_back_block_prints(capsys: pytest.CaptureFixture[str]) -> None:
+    demo.print_paste_back("nothing private here\n")
+    assert capsys.readouterr().out == "nothing private here\n\n"
+
+
 # --------------- item 2: no fixed scratch path
 
 

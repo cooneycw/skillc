@@ -2254,7 +2254,9 @@ def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[st
         summary = arms.setdefault(arm, {"scheduled": 0, "primary": {}, "model_ineligible": 0,
                                         "opened": 0, "observed": 0})
         summary["scheduled"] = int(str(summary["scheduled"])) + 1
-        if entry.get("skill_opened") in (True, False):
+        # A bool, never an int standing in for one (#555): `1 in (True,
+        # False)` is True, and a recovered report is decoded JSON.
+        if isinstance(entry.get("skill_opened"), bool):
             summary["observed"] = int(str(summary["observed"])) + 1
             summary["opened"] = int(str(summary["opened"])) + (entry.get("skill_opened") is True)
         if "named_skill_opened" in entry:

@@ -844,6 +844,17 @@ def test_an_unobserved_attempt_is_neither_opened_nor_not_opened() -> None:
     assert (summary["opened"], summary["observed"], summary["scheduled"]) == (1, 2, 3)
 
 
+def test_an_integer_standing_in_for_a_bool_is_not_an_observation() -> None:
+    """#555: `1 in (True, False)` is True, so a recovered (JSON-decoded)
+    report entry with `skill_opened: 1` was counted observed but not opened -
+    an attempt that shrank the uptake rate without being a recorded 'no'."""
+    summary = cr.summarize_arms([
+        {"arm": "n", "skill_opened": 1}, {"arm": "n", "skill_opened": 0},
+        {"arm": "n", "skill_opened": True},
+    ])["n"]
+    assert (summary["opened"], summary["observed"], summary["scheduled"]) == (1, 1, 3)
+
+
 
 # ----------------------------------------------- expanded-instruction lane (#274)
 

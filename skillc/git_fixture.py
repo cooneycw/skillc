@@ -122,6 +122,14 @@ def build(declaration: dict[str, Any], root: Path) -> BuildResult:
     _git(['stash', 'push', '-m', 'fixture-stash'], repo,
          {'GIT_AUTHOR_DATE': d['commits'][-1]['date'],
           'GIT_COMMITTER_DATE': d['commits'][-1]['date']})
+    try:
+        # `git stash push` with nothing to save exits 0 and creates no
+        # refs/stash (#555): an empty stash, or one identical to HEAD, is a
+        # declaration this builder cannot honour - a clean refusal, never a
+        # raw CalledProcessError from the refs/stash read below.
+        stash_ref = _git(['rev-parse', '--verify', '--quiet', 'refs/stash'], repo).stdout.decode().strip()
+    except subprocess.CalledProcessError:
+        raise Refused('empty-stash') from None
     _write(repo, d['staged'])
     for path in d['staged']:
         _git(['add', '--', path], repo)
@@ -140,7 +148,7 @@ def build(declaration: dict[str, Any], root: Path) -> BuildResult:
         ignore_bytes = ''.join('/' + p + '\n' for p in d['ignored']).encode()
         expected['files']['untracked']['.gitignore'] = {
             'hex': ignore_bytes.hex(), 'executable': False}
-    expected['refs']['refs/stash'] = _git(['rev-parse', 'refs/stash'], repo).stdout.decode().strip()
+    expected['refs']['refs/stash'] = stash_ref
     return BuildResult(root, repo, worktree, d, tuple(commits), expected)
 
 

@@ -449,6 +449,44 @@ def test_no_manifest_rewrite_when_the_subject_declares_no_manifest_or_the_operat
     assert (degraded.source.surface_dir / "flow-auto" / "scripts" / "SHA256SUMS").read_bytes() == b"# operator-owned\n"
 
 
+def test_a_removal_of_a_manifest_listed_file_is_refused_at_degrade_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#555: before the fix this deletion was accepted (receipt written) and
+    the tree was refused only later, at preparation, with "checksum lists a
+    missing file" - a degraded arm that could never launch."""
+    subject = _subject(checksum_manifest="scripts/SHA256SUMS")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    mutation = degrade.Mutation(edits=(degrade.FileEdit(skill="flow-auto", path="scripts/gh-pr-merge.sh"),))
+
+    with pytest.raises(degrade.DegradationRefused, match="scripts/SHA256SUMS lists"):
+        degrade.acquire_degraded("whatever", tmp_path / "base", mutation, checkout=_checksummed_collection(tmp_path))
+    assert not any((tmp_path / "base").iterdir())  # the refused staging is gone
+
+
+def test_a_removal_the_manifest_does_not_list_or_the_operator_owns_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control for the #555 refusal: an unlisted file still deletes,
+    and an operator who also edits the manifest owns the reconciliation."""
+    subject = _subject(checksum_manifest="scripts/SHA256SUMS")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    unlisted = degrade.Mutation(edits=(degrade.FileEdit(skill="flow-auto", path="reference.md"),))
+    degraded = degrade.acquire_degraded(
+        "whatever", tmp_path / "a" / "base", unlisted, checkout=_checksummed_collection(tmp_path / "a"),
+    )
+    assert [e.checksums for e in materialize.inventory(subject, degraded.source)] == ["verified"]
+
+    own = degrade.Mutation(edits=(
+        degrade.FileEdit(skill="flow-auto", path="scripts/gh-pr-merge.sh"),
+        degrade.FileEdit(skill="flow-auto", path="scripts/SHA256SUMS", content=b"# operator-owned\n"),
+    ))
+    degraded = degrade.acquire_degraded(
+        "whatever", tmp_path / "b" / "base", own, checkout=_checksummed_collection(tmp_path / "b"),
+    )
+    assert not (degraded.source.surface_dir / "flow-auto" / "scripts" / "gh-pr-merge.sh").exists()
+
+
 def test_receipt_with_no_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
     subject = _subject()
@@ -514,6 +552,30 @@ def test_cli_supports_repeatable_remove_skill_remove_file_and_override_file(
     assert payload["mutation"]["locations"] == [
         "a (whole skill removed)", "c/scripts/x.sh (removed)", "b/reference.md (overridden (4 bytes))",
     ]
+
+
+def test_cli_writes_no_receipt_when_persisting_the_tree_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#555: the receipt was written BEFORE `persist_skills`, so a failure
+    there left `out/receipt.json` describing a tree that was never written.
+    Now `out/` is left as empty as the pre-check found it."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    out = tmp_path / "out"
+
+    def half_persist(degraded: degrade.DegradedSource, target: Path) -> Path:
+        (target / "skills").mkdir()
+        raise OSError("disk full")
+
+    monkeypatch.setattr(degrade, "persist_skills", half_persist)
+    with pytest.raises(OSError, match="disk full"):
+        cli.main([
+            "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+            "--out", str(out), "--base", str(tmp_path / "base"),
+        ])
+    assert not (out / "receipt.json").exists()
+    assert list(out.iterdir()) == []
 
 
 def test_cli_exits_two_on_a_malformed_remove_file_spec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

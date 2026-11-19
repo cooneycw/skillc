@@ -1371,13 +1371,9 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
     try:
         demo.print_paste_back(demo.redact_known_host_paths("\n".join(lines), base=run_root))
     except demo.PasteBackRefused as exc:
-        # Categories only: each finding reads "<line>: <category>: <value>",
-        # and the value is exactly what must not be shown (#26 re-review).
-        categories = sorted({
-            parts[1] for parts in (line.split(": ", 2) for line in str(exc).splitlines()[1:]) if len(parts) == 3
-        })
+        # Categories only (#26 re-review); the exception carries no value (#555).
         print(f"skillc: the selection-probe output failed its own leak check and was NOT printed "
-              f"({', '.join(categories) or 'unclassified'}); the verdict was {'ok' if ok else 'NOT ok'}",
+              f"({', '.join(exc.categories) or 'unclassified'}); the verdict was {'ok' if ok else 'NOT ok'}",
               file=sys.stderr)
         return 2
     return 0 if ok else 1
@@ -3092,11 +3088,26 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     # run against the same --base never finds this run's staging behind it.
     import shutil
 
+    # The receipt is written LAST, by rename, and only once `skills/` is
+    # persisted (#555): a receipt describing a tree that was never written
+    # would be a false statement about `out/`. A failure removes whatever
+    # this call wrote, leaving `out/` as empty as the pre-check found it.
+    receipt_path = out / "receipt.json"
     try:
         payload = degrade.receipt(degraded, pinned_revision=subject.revision)
         out.mkdir(parents=True, exist_ok=True)
-        (out / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
         skills_dir = degrade.persist_skills(degraded, out)
+        partial = out / ".receipt.json.partial"
+        partial.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+        partial.replace(receipt_path)
+    except BaseException:
+        if out.is_dir():
+            for leftover in out.iterdir():
+                if leftover.is_dir() and not leftover.is_symlink():
+                    shutil.rmtree(leftover, ignore_errors=True)
+                else:
+                    leftover.unlink(missing_ok=True)
+        raise
     finally:
         shutil.rmtree(degraded.staging, ignore_errors=True)
 
