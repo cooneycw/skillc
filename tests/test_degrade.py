@@ -574,8 +574,35 @@ def test_cli_writes_no_receipt_when_persisting_the_tree_fails(
             "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
             "--out", str(out), "--base", str(tmp_path / "base"),
         ])
-    assert not (out / "receipt.json").exists()
-    assert list(out.iterdir()) == []
+    assert not out.exists()
+    assert not list(tmp_path.glob(".out.partial-*"))  # this call's build directory is gone too
+
+
+def test_cli_never_overwrites_or_deletes_an_out_populated_by_another_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review of #555: two runs can both pass the emptiness
+    pre-check. The one that publishes second must refuse, leaving the first
+    writer's output exactly as it was - never cleaning it up as its own."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    out = tmp_path / "out"
+    real = degrade.persist_skills
+
+    def racing_persist(degraded: degrade.DegradedSource, target: Path) -> Path:
+        out.mkdir()
+        (out / "receipt.json").write_text("the other writer's\n", encoding="utf-8")
+        return real(degraded, target)
+
+    monkeypatch.setattr(degrade, "persist_skills", racing_persist)
+    code = cli.main([
+        "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+        "--out", str(out), "--base", str(tmp_path / "base"),
+    ])
+    assert code == 2
+    assert [p.name for p in out.iterdir()] == ["receipt.json"]
+    assert (out / "receipt.json").read_text(encoding="utf-8") == "the other writer's\n"
+    assert not list(tmp_path.glob(".out.partial-*"))
 
 
 def test_cli_exits_two_on_a_malformed_remove_file_spec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

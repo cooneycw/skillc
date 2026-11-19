@@ -111,7 +111,9 @@ def build(declaration: dict[str, Any], root: Path) -> BuildResult:
              {'GIT_AUTHOR_DATE': commit['date'], 'GIT_COMMITTER_DATE': commit['date']})
         commits.append(_git(['rev-parse', 'HEAD'], repo).stdout.decode().strip())
     for ref, index in d['refs'].items():
-        if not ref.startswith('refs/'):
+        if not ref.startswith('refs/') or ref == 'refs/stash':
+            # refs/stash is the builder's own (#555 review): a declared one
+            # would satisfy the empty-stash check with an ordinary commit.
             raise Refused('ref-name')
         _git(['check-ref-format', ref], repo)
         _git(['update-ref', ref, commits[index]], repo)

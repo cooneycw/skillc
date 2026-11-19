@@ -270,6 +270,17 @@ def test_a_stash_that_saves_nothing_is_refused_cleanly(tmp_path: Path, stash: di
         g.build(bad, tmp_path)
 
 
+def test_a_declared_refs_stash_is_refused(tmp_path: Path) -> None:
+    """Counter-model review of #555: `refs={'refs/stash': 0}` with an empty
+    stash created refs/stash before the push, so the empty-stash check saw a
+    stash that was really an ordinary commit."""
+    bad = declaration()
+    bad['stash'] = {'staged': {}, 'unstaged': {}}
+    bad['refs'] = {'refs/stash': 0}
+    with pytest.raises(g.Refused, match='ref-name'):
+        g.build(bad, tmp_path)
+
+
 def test_pointer_shape_and_repository_shape(setup: tuple[g.BuildResult, trial.Experiment, str]) -> None:
     result = setup[0]
     pointer = result.worktree / '.git'

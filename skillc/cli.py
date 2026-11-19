@@ -3088,27 +3088,31 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     # run against the same --base never finds this run's staging behind it.
     import shutil
 
-    # The receipt is written LAST, by rename, and only once `skills/` is
-    # persisted (#555): a receipt describing a tree that was never written
-    # would be a false statement about `out/`. A failure removes whatever
-    # this call wrote, leaving `out/` as empty as the pre-check found it.
-    receipt_path = out / "receipt.json"
+    # Built in a directory this call alone owns, then published by ONE
+    # rename (#555): a receipt is never visible without the `skills/` tree it
+    # describes, a failure removes only this call's own build directory, and
+    # the rename refuses a target another writer populated meanwhile
+    # (counter-model review) - it never overwrites or deletes their output.
+    build: Path | None = None
     try:
         payload = degrade.receipt(degraded, pinned_revision=subject.revision)
-        out.mkdir(parents=True, exist_ok=True)
-        skills_dir = degrade.persist_skills(degraded, out)
-        partial = out / ".receipt.json.partial"
-        partial.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
-        partial.replace(receipt_path)
-    except BaseException:
-        if out.is_dir():
-            for leftover in out.iterdir():
-                if leftover.is_dir() and not leftover.is_symlink():
-                    shutil.rmtree(leftover, ignore_errors=True)
-                else:
-                    leftover.unlink(missing_ok=True)
-        raise
+        out.parent.mkdir(parents=True, exist_ok=True)
+        build = Path(tempfile.mkdtemp(prefix=f".{out.name}.partial-", dir=out.parent))
+        umask = os.umask(0)
+        os.umask(umask)
+        build.chmod(0o777 & ~umask)  # what `out.mkdir()` used to create, not mkdtemp's 0700
+        degrade.persist_skills(degraded, build)
+        (build / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+        try:
+            os.rename(build, out)  # POSIX: replaces only an EMPTY directory
+        except OSError:
+            print(f"skillc: {out} was populated while this run built; refusing to write into it", file=sys.stderr)
+            return 2
+        build = None
+        skills_dir = out / "skills"
     finally:
+        if build is not None:
+            shutil.rmtree(build, ignore_errors=True)
         shutil.rmtree(degraded.staging, ignore_errors=True)
 
     locations = mutation.locations() if mutation is not None else ()
