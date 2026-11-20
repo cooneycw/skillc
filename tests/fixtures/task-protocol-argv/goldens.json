@@ -90,7 +90,7 @@
     "container_user": "10001:10001",
     "disk_limit": "10G",
     "trigger_socket_host_path": "/var/lib/skillc/trigger/abc.sock",
-    "dns": "10.0.0.53"
+    "dns": "192.0.2.53"
    },
    "argv": [
     "docker",
@@ -106,7 +106,7 @@
     "--network",
     "skillc-egress-net",
     "--dns",
-    "10.0.0.53",
+    "192.0.2.53",
     "--user",
     "10001:10001",
     "--hostname",
