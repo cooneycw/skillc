@@ -42,12 +42,17 @@ mi=/proc/self/mountinfo
 # Exit 4 means exactly "a declared surface is missing or not writable", so the
 # fault arm can prove it reached this check rather than failing elsewhere.
 for s in $DECLARED; do
-    awk -v m="$s" "\$5 == m { f = 1 } END { exit f ? 0 : 1 }" "$mi" || exit 4
+    r=$(awk -v m="$s" "\$5 == m { f = 1 } END { if (NR < 1) exit 1; print f ? \"FOUND\" : \"ABSENT\" }" "$mi") || exit 3
+    case $r in
+        FOUND) ;;
+        ABSENT) printf "MISSING-SURFACE\n"; exit 4 ;;
+        *) exit 3 ;;
+    esac
     w="$s/.skillc-dev-probe-write"
-    printf "x\n" > "$w" || exit 4
-    rm "$w" || exit 4
+    printf "x\n" > "$w" || exit 3
+    rm "$w" || exit 3
 done
-mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 2) bad = 1; else print \$(s + 1), \$5 } END { exit bad ? 1 : 0 }" "$mi") || exit 3
+mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 3) bad = 1; else print \$(s + 1), \$5 } END { exit bad ? 1 : 0 }" "$mi") || exit 3
 [ -n "$mounts" ] || exit 3
 case $mounts in *\\*) exit 3 ;; esac
 dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
@@ -90,6 +95,7 @@ observe() {
     require_runner_idle
     require_image
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
+    scratch_private
     user=${PROBE_USER:-1000:1000}
     for t in home tmp vartmp shm; do
         mount_tmpfs "$PROBE_SCRATCH/$t"
@@ -116,17 +122,19 @@ observe() {
         create_container --read-only --network none --ipc private --log-driver none \
             --user "$user" $_m -e "DECLARED=$DECLARED" \
             -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
-        if out=$(docker start -a "$cid" 2>/dev/null); then
+        _rc=0
+        out=$(docker start -a "$cid" 2>/dev/null) || _rc=$?
+        if [ "$_arm" = fault ]; then
+            # The fault arm must fail exactly at the declared-surface check:
+            # exit 4 with the MISSING-SURFACE token, after a good table read.
+            if [ "$_rc" -ne 4 ] || [ "$out" != MISSING-SURFACE ]; then probe_die 'fault-arm-not-exercised'; fi
+            set --
+        elif [ "$_rc" -eq 0 ]; then
             # shellcheck disable=SC2086  # four space-separated numbers
             set -- $out
         else
-            _rc=$?
             set --
-            # The fault arm must fail at the declared-surface check (exit 4),
-            # not anywhere else, or it has not exercised what it claims.
-            if [ "$_arm" = fault ] && [ "$_rc" -ne 4 ]; then probe_die 'fault-arm-not-exercised'; fi
         fi
-        if [ "$_arm" = fault ] && [ "$#" -ne 0 ]; then probe_die 'fault-arm-not-exercised'; fi
         if [ "$#" -eq 4 ]; then
             record "$_arm" extra_dirs "$1"
             record "$_arm" extra_files "$2"

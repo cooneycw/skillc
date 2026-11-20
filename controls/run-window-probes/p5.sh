@@ -36,6 +36,7 @@ observe() {
     require_image
     require_overlay2
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
+    scratch_private
     home="$PROBE_SCRATCH/home"
     mount_tmpfs "$home"
     chown "${PROBE_USER:-1000:1000}" "$home" || probe_die 'chown-failed'

@@ -4,18 +4,21 @@ clean socket_binds 0
 clean planted_binds 0
 clean socket_fds 0
 clean visible_sockets 0
+clean visible_planted 0
 sockbind shared_ns 0
 sockbind shared_net 0
 sockbind socket_binds 2
 sockbind planted_binds 1
 sockbind socket_fds 0
 sockbind visible_sockets 2
+sockbind visible_planted 2
 hostnet shared_ns 1
 hostnet shared_net 1
 hostnet socket_binds 0
 hostnet planted_binds 0
 hostnet socket_fds 0
 hostnet visible_sockets 0
+hostnet visible_planted 0
 zerobyte inq 0
 zerobyte fd_received 1
 fault shared_ns ERR
@@ -24,3 +27,4 @@ fault socket_binds ERR
 fault planted_binds ERR
 fault socket_fds ERR
 fault visible_sockets ERR
+fault visible_planted ERR

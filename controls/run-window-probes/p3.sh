@@ -31,6 +31,18 @@ print(0 if r == 0 else ctypes.get_errno())
 ' "$1" "$2" 2>/dev/null || printf 'ERR\n'
 }
 
+# listed ROOT NAME: 0 when a fresh listing of ROOT still shows NAME, 1 when it
+# does not, 2 when ROOT cannot be listed.
+listed() {
+    _l=$(ls -1A -- "$1" 2>/dev/null) || return 2
+    case "
+$_l
+" in *"
+$2
+"*) return 0 ;; esac
+    return 1
+}
+
 # sb_listed ROOT MAJMIN: prints "LISTED UNREADABLE SCANNED" over every pid's
 # mountinfo; fails if any per-table count could not be computed.
 sb_listed() {
@@ -38,7 +50,10 @@ sb_listed() {
     unreadable=0
     scanned=0
     for p in "$1"/[0-9]*; do
-        [ -d "$p" ] || continue
+        if [ ! -d "$p" ]; then
+            if listed "$1" "${p##*/}"; then unreadable=$((unreadable + 1)); else [ $? -eq 1 ] || unreadable=$((unreadable + 1)); fi
+            continue
+        fi
         if t=$(cat -- "$p/mountinfo" 2>/dev/null); then
             # Usable only if nonempty and every line has the " - " separator
             # after at least six fields; otherwise the table is unreadable.
@@ -47,7 +62,7 @@ sb_listed() {
                 {
                     r++; sep = 0
                     for (i = 7; i <= NF; i++) if ($i == "-") { sep = i; break }
-                    if (!sep || NF < sep + 2) bad = 1
+                    if (!sep || NF < sep + 3) bad = 1
                     if ($1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+:[0-9]+$/) bad = 1
                     if ($4 !~ /^\// || $5 !~ /^\//) bad = 1
                 }
@@ -58,7 +73,7 @@ sb_listed() {
             else
                 unreadable=$((unreadable + 1))
             fi
-        elif [ -d "$p" ]; then
+        elif listed "$1" "${p##*/}" || [ $? -ne 1 ]; then
             unreadable=$((unreadable + 1))
         fi
     done
@@ -91,6 +106,7 @@ fresh_tmpfs() {
 observe() {
     require_root
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
+    scratch_private
     m="$PROBE_SCRATCH/m"
 
     fresh_tmpfs "$m"

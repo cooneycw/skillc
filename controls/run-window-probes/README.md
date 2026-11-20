@@ -51,6 +51,10 @@ login, spend or host action beyond the probe itself.
 - P8 checks binds from the host side (a socket, or a directory containing
   one) **and** the socket files the container itself can see outside `/proc`
   and `/sys`. It does not model mount propagation beyond those two readings.
+- Root probes make their scratch directory a private mountpoint before
+  mounting anything under it, so probe mounts do not propagate to peer mount
+  namespaces. The scratch self-bind itself is created on the (usually shared)
+  parent and is unmounted at cleanup.
 - P2 identifies each planted holder by pid plus start time. Other pids
   are enumerated from one listing of `/proc`; a pid that exits mid-census is
   skipped, not counted as unreadable.
@@ -103,3 +107,4 @@ the files supplied on stdin) before any run.
 | 3 | `461e96d1` | REQUEST-CHANGES (5 open, 1 new blocker) | the probes PR, unit identity and propagation were accepted as stated limits; pre-registered names; zombies; multi-line `core_pattern`; planted-path flags; `find \| wc` status. Addressed in `4f3ce389` |
 | 4 | `4f3ce389` | REQUEST-CHANGES (4 of 5 fixed, plus residual false-verdict and cleanup paths) | P8 inspect status, pid revalidation and arm-specific signals; P7 four-reading consistency; P3 unusable tables; volume tracking; mount-read failure vs absence. Addressed in the commit that adds this record |
 | 5 | `11c952d2` | REQUEST-CHANGES (7 of 9 fixed, plus residual paths) | P8 planted-bind and net-namespace specificity and mount-JSON validation; P3 strict row validation; P7 unusable rows, inaccessible mountpoints and a fault arm that must reach its own check (exit 4); P2 re-listing before skipping an entry; scratch absence checked by listing its parent. Addressed in the commit that adds this row |
+| 6 | `b997cfd2` | REQUEST-CHANGES (9 of 12 fixed, plus residual paths) | mandatory mountinfo fields after the separator (P3, P7); P7 fault arm proven by an exit-4 `MISSING-SURFACE` token after a good table read; P8 mount-type validation, `shared_net`/`planted_binds` read and cross-checked on every arm, per-destination visibility; pid-lookup errors are not absence (P2, P3); an untracked new volume makes cleanup unverified (reported, never removed). Plus orchestrator hardening: scratch is a private self-bind before any probe mount (no propagation to peer namespaces), and scratch removal uses `--one-file-system`. Addressed in the commit that adds this row |

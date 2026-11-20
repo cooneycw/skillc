@@ -39,6 +39,8 @@ def fail(err):
 for m in mounts:
     if not isinstance(m, dict) or not all(isinstance(m.get(k), str) for k in ("Type", "Source", "Destination")):
         sys.exit(1)
+    if m["Type"] not in ("bind", "volume", "tmpfs", "npipe", "cluster", "image"):
+        sys.exit(1)
     if m["Type"] != "bind":
         continue
     src, dst = m["Source"], m["Destination"]
@@ -100,12 +102,23 @@ isolation() {
     # `set -e` plus a plain assignment: a find(1) that fails, or is missing,
     # fails the whole scan rather than counting zero.
     # shellcheck disable=SC2016
+    # Prints the total and how many of the two planted destinations show a
+    # socket (the file bind itself; anything beneath the directory bind).
     if v=$(docker exec "$2" sh -c 'set -e
 o=$(find / \( -path /proc -o -path /sys \) -prune -o -type s -print)
-printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }"' 2>/dev/null) && is_uint "$v"; then
-        record "$1" visible_sockets "$v"
+n=$(printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }")
+p=0
+if [ -S /probe-host.sock ]; then p=$((p + 1)); fi
+if [ -d /probe-sockdir ]; then
+    d=$(find /probe-sockdir -type s -print)
+    if [ -n "$d" ]; then p=$((p + 1)); fi
+fi
+printf "%s %s\n" "$n" "$p"' 2>/dev/null) && is_uint "${v% *}" && is_uint "${v#* }"; then
+        record "$1" visible_sockets "${v% *}"
+        record "$1" visible_planted "${v#* }"
     else
         record "$1" visible_sockets ERR
+        record "$1" visible_planted ERR
     fi
     # One listing; entry names in /proc/<pid>/fd never contain whitespace.
     if names=$(ls -1A -- "/proc/$pid/fd" 2>/dev/null) && [ -n "$names" ]; then
@@ -195,11 +208,19 @@ print(inq, 1 if ok else 0)
     recheck_runner
 }
 
+# v_iso ARM: every reading valid and mutually consistent (a shared netns is
+# one of the shared namespaces; planted counts never exceed their totals).
 v_iso() {
     s=$(rd_uint "$1" shared_ns) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    n=$(rd_bool "$1" shared_net) || { printf '%s\n' "$PROBE_FAIL"; return; }
     b=$(rd_uint "$1" socket_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    pb=$(rd_uint "$1" planted_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
     f=$(rd_uint "$1" socket_fds) || { printf '%s\n' "$PROBE_FAIL"; return; }
     v=$(rd_uint "$1" visible_sockets) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    vp=$(rd_uint "$1" visible_planted) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$n" -gt "$s" ] || [ "$pb" -gt "$b" ] || [ "$pb" -gt 2 ] || [ "$vp" -gt "$v" ] || [ "$vp" -gt 2 ]; then
+        printf '%s\n' "$PROBE_FAIL"; return
+    fi
     if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ] && [ "$v" -eq 0 ]; then
         printf '%s\n' "$PROBE_NEG"
     else
@@ -212,8 +233,8 @@ v_sockbind() {
     base=$(v_iso sockbind)
     [ "$base" != "$PROBE_FAIL" ] || { printf '%s\n' "$PROBE_FAIL"; return; }
     p=$(rd_uint sockbind planted_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    v=$(rd_uint sockbind visible_sockets) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$p" -eq 2 ] && [ "$v" -ge 2 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
+    v=$(rd_uint sockbind visible_planted) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$p" -eq 2 ] && [ "$v" -eq 2 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
 }
 
 # v_hostnet: the survivor must be the shared namespace itself.

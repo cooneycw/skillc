@@ -242,6 +242,20 @@ probe_cleanup() {
         fi
     done
     PROBE_VOLUMES=$_left
+    # A volume that appeared during the probe and was not tracked is possible
+    # residue. It is never removed here (it may not be ours); its presence makes
+    # cleanup unverified, and its name is reported for the operator.
+    if [ -n "${PROBE_VOLS_BEFORE:-}" ]; then
+        if _now=$(docker volume ls -q); then
+            for _v in $_now; do
+                case " $PROBE_VOLS_BEFORE " in *" $_v "*) continue ;; esac
+                printf 'INFO untracked-volume %s\n' "$_v"
+                _ok=1
+            done
+        else
+            _ok=1
+        fi
+    fi
     _left=
     for _m in $PROBE_MOUNTS; do
         if is_mounted "$_m"; then umount "$_m" 2>/dev/null || true; fi
@@ -254,7 +268,8 @@ probe_cleanup() {
     # inspection for the rest of the run, including the EXIT trap's retry.
     if [ "$_ok" != 0 ]; then PROBE_KEEP=1; fi
     if [ "$PROBE_KEEP" = 0 ] && [ -n "$PROBE_SCRATCH" ]; then
-        rm -rf -- "$PROBE_SCRATCH" 2>/dev/null || true
+        # --one-file-system: never descend into a mount cleanup failed to see.
+        rm -rf --one-file-system -- "$PROBE_SCRATCH" 2>/dev/null || true
         if path_absent "$PROBE_SCRATCH"; then PROBE_SCRATCH=; else _ok=1; PROBE_KEEP=1; fi
     fi
     return "$_ok"
@@ -298,6 +313,17 @@ require_overlay2() {
     [ "$_driver" = overlay2 ] || probe_die 'driver-not-overlay2'
 }
 
+# scratch_private: make the scratch directory its own PRIVATE mountpoint
+# before anything is mounted under it, so no probe mount propagates into peer
+# mount namespaces (/ and /run are usually shared on systemd hosts). Making a
+# mount private after mounting it would be too late: the mount event has
+# already propagated by then.
+scratch_private() {
+    mount --bind "$PROBE_SCRATCH" "$PROBE_SCRATCH" || probe_die 'scratch-bind-failed'
+    track_mount "$PROBE_SCRATCH"
+    mount --make-private "$PROBE_SCRATCH" || probe_die 'scratch-private-failed'
+}
+
 # mount_tmpfs PATH: mount a 1 MiB 0700 tmpfs at PATH and track it.
 mount_tmpfs() {
     mkdir -p "$1"
@@ -308,6 +334,10 @@ mount_tmpfs() {
 # create_container ARGS...: `docker create`, then track the returned full ID in
 # $cid. Cleanup removes only IDs this probe created, never a name match.
 create_container() {
+    if [ -z "${PROBE_VOLS_BEFORE:-}" ]; then
+        _before=$(docker volume ls -q) || probe_die 'volume-list-failed'
+        PROBE_VOLS_BEFORE=" $(printf '%s\n' "$_before" | tr '\n' ' ')"
+    fi
     _name="skillc-dev-probe-$PROBE_NAME-$(probe_uuid)"
     track_name "$_name"
     cid=$(docker create --name "$_name" "$@") || probe_die 'create-failed'

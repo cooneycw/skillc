@@ -20,6 +20,18 @@ PROBE_NAME=p2
 . "${PROBE_LIB:-$(dirname -- "$0")/lib.sh}"
 parse_common "$@"
 
+# listed ROOT NAME: 0 when a fresh listing of ROOT still shows NAME, 1 when it
+# does not, 2 when ROOT cannot be listed.
+listed() {
+    _l=$(ls -1A -- "$1" 2>/dev/null) || return 2
+    case "
+$_l
+" in *"
+$2
+"*) return 0 ;; esac
+    return 1
+}
+
 # census ROOT IDENTITY: prints "FD_HITS MAP_HITS UNREADABLE SCANNED", where
 # IDENTITY is a kernel dev:ino. Each directory is listed exactly once; entry
 # names in /proc fd and map_files never contain whitespace.
@@ -31,12 +43,16 @@ census() {
     unreadable=0
     scanned=0
     for p in "$1"/[0-9]*; do
-        [ -d "$p" ] || continue
+        if [ ! -d "$p" ]; then
+            # Skip only a pid a fresh listing proves gone; a lookup error is not absence.
+            if listed "$1" "${p##*/}"; then unreadable=$((unreadable + 1)); else [ $? -eq 1 ] || unreadable=$((unreadable + 1)); fi
+            continue
+        fi
         scanned=$((scanned + 1))
         for sub in fd map_files; do
             if ! names=$(ls -1A -- "$p/$sub" 2>/dev/null); then
                 # A pid that exited mid-census is not unreadable; a live one is.
-                if [ -d "$p" ]; then unreadable=$((unreadable + 1)); fi
+                if listed "$1" "${p##*/}"; then unreadable=$((unreadable + 1)); else [ $? -eq 1 ] || unreadable=$((unreadable + 1)); fi
                 continue
             fi
             for n in $names; do
@@ -51,7 +67,7 @@ census() {
                     fi
                 elif again=$(ls -1A -- "$p/$sub" 2>/dev/null); then
                     case "$nl$again$nl" in *"$nl$n$nl"*) unreadable=$((unreadable + 1)) ;; esac
-                elif [ -d "$p" ]; then
+                elif listed "$1" "${p##*/}" || [ $? -ne 1 ]; then
                     unreadable=$((unreadable + 1))
                 fi
             done
