@@ -577,7 +577,7 @@ def wait_ready(path: Path) -> None:
     for _ in range(100):
         if path.exists():
             return
-        time.sleep(0.05)
+        time.sleep(0.05)  # timing: cadence - polls for the holder's ready file; 100 polls then AssertionError bound the wait
     raise AssertionError('holder not ready')
 
 
@@ -854,7 +854,7 @@ def test_real_predicate_tells_a_chrooted_task_from_a_namespace_root(tmp_path: Pa
         for _ in range(100):
             if (jail / 'ready').exists() or (jail / 'denied').exists():
                 break
-            time.sleep(0.05)
+            time.sleep(0.05)  # timing: cadence - polls for the child's ready/denied file; 100 polls then wait_ready bound it
         if (jail / 'denied').exists():
             pytest.skip('this root runner lacks CAP_SYS_CHROOT')
         wait_ready(jail / 'ready')
