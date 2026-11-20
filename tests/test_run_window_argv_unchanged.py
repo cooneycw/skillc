@@ -18,10 +18,10 @@ import pytest
 from skillc import docker_backend as db
 
 IMAGE = 'sha256:' + 'b' * 64
-ARGS: dict[str, Any] = dict(docker_bin=['docker'], image=IMAGE, name='skillc-attempt-x',
-                            attempt_id='x', subject_argv=['true'], env={'A': '1'}, network='none',
-                            memory='1g', pids_limit='64', cpus='1', shm_size='64m', container_user='1000:1000',
-                            disk_limit=None)
+ARGS: dict[str, Any] = {'docker_bin': ['docker'], 'image': IMAGE, 'name': 'skillc-attempt-x',
+                        'attempt_id': 'x', 'subject_argv': ['true'], 'env': {'A': '1'},
+                        'network': 'none', 'memory': '1g', 'pids_limit': '64', 'cpus': '1',
+                        'shm_size': '64m', 'container_user': '1000:1000', 'disk_limit': None}
 #: Reviewed by hand against compose_run_argv at the A-2 base. Update only with
 #: a reviewed C12 change.
 BASELINE = ['docker', 'run', '--rm', '-i', '--name', 'skillc-attempt-x',
@@ -33,8 +33,9 @@ BASELINE = ['docker', 'run', '--rm', '-i', '--name', 'skillc-attempt-x',
 
 def test_compose_run_argv_matches_the_reviewed_baseline_with_capture() -> None:
     assert db.compose_run_argv(**ARGS) == BASELINE
-    from skillc import run_window_teardown as rt
     from test_run_window_teardown import FakeDocker, container_proc
+
+    from skillc import run_window_teardown as rt
 
     ident = rt.capture_launch_identity('skillc-attempt-x', generation=object(), docker=FakeDocker(),
                                        proc=container_proc())
