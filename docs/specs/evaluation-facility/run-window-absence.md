@@ -310,3 +310,50 @@ oracle.
 
 The physical facts are P2 as root, P3 and P8 from #803. A MISMATCH blocks
 **use**, not merge.
+
+## A-3a: per-surface verdicts and the release predicate (`run_window_compose`)
+
+This part is pure. It reads no file, holds no descriptor and touches no host.
+A-3b supplies the declaration and the close sequence that gather the evidence,
+and lifts the absence blocker.
+
+- **`removed_surface_verdict(**inputs)`** takes exactly the keywords of the
+  A-2 guards' `SUFFICIENT`. Its outcomes:
+  - **PRESENT** whenever fact 4 asked for a rescan. The caller scans the path
+    and it is never released.
+  - **UNKNOWN** in all of these cases:
+    - any fact is not CONFIRMED_NEGATIVE, which covers both the domain veto
+      and the holder veto;
+    - the census is incomplete;
+    - an input has the wrong type (nothing is coerced);
+    - 2b is not CONFIRMED_NEGATIVE with `scope == 'lifetime'`.
+  - **ABSENT_UNLINKED** when every fact holds on a non-tmpfs root. That never
+    releases (Q1).
+  - **ABSENT** otherwise.
+
+  A `launch-only` 2b, which is all A-2 can produce, therefore always gives
+  UNKNOWN.
+- **`present_surface_verdict(scan)`** gives NOT_CLEAN on a match, otherwise
+  UNKNOWN.
+- **`retained_surface_verdict(scan)`** gives CLEAN only for that surface's own
+  CLEAN `ScanResult`. A public dictionary is not evidence.
+- **`window_verdict`** is the total allowlist.
+  - NOT_CLEAN on any match.
+  - CLEAN only when all of these hold:
+    - the verdicts cover exactly the declared surfaces;
+    - each retained surface is CLEAN;
+    - each removed surface is ABSENT;
+    - Contract B's capture is sealed;
+    - the preconditions held.
+  - UNKNOWN otherwise, with fixed reason tokens. Its `public()` is an exact
+    allowlist with no surface name.
+
+The four A-2 guards now import this module unconditionally, so they run, and
+must pass. `tests/test_run_window_compose.py` adds every verdict path, each
+fact vetoing one at a time, the window allowlist cases, and blind twins:
+- a predicate that ignores the domain veto;
+- one that accepts `launch-only`;
+- one that releases `ABSENT_UNLINKED`;
+- one that reads a class aggregate.
+
+These are new instruments.
