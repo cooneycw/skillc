@@ -18,6 +18,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import controller_turns, live_wave, wave_capture, wave_export, wave_wake_capture
+from . import task_protocol_adapter as adapter
+from . import task_protocol_journal as tj
 from .git_snapshot import SafeTree, Unreadable
 
 MAX_METADATA = 4 * 1024 * 1024
@@ -161,9 +163,32 @@ def _plan(raw: object) -> live_wave.WavePlan:
                               _number(row['deadline'], positive=True))
 
 
+#: Wave-row keys per contract version. Version 2 (#620 PR-B, B6) adds the
+#: controller journal and forbids authored per-role protocol bytes; version 1
+#: is unchanged.
+_ROW_KEYS = {1: {'plan', 'budget_digest', 'clock', 'grader_digest', 'observation', 'roles', 'wake', 'final'}}
+_ROW_KEYS[2] = _ROW_KEYS[1] | {'protocol_v2'}
+_PROTOCOL_V2_KEYS = {'root', 'reference', 'context', 'inventory', 'deadline_ns', 'clock_join'}
+
+
+def _protocol_v2(value: object, plan: live_wave.WavePlan) -> dict[str, Any]:
+    """Shape and self-consistency of a version-2 journal binding. Whether the
+    journal verifies, and joins this plan, is the adapter's, at assembly."""
+    row = _object(value, _PROTOCOL_V2_KEYS)
+    _path(row['root'])
+    reference = tj.parse_reference(row['reference'])
+    context = tj.parse_context(row['context'])
+    _require(reference.context_digest == context.digest, 'journal reference names another context')
+    adapter.parse_inventory(row['inventory'])
+    adapter.parse_clock_join(row['clock_join'])
+    _integer(row['deadline_ns'])
+    _require(context.attempt_id == plan.wave_id, 'journal belongs to another wave')
+    return row
+
+
 def _contract(value: object, exported: wave_export.FrozenExport) -> dict[str, Any]:
     raw = _object(value, {'version', 'declaration_digest', 'waves'})
-    _require(type(raw['version']) is int and raw['version'] == 1, 'assembly version required')
+    _require(type(raw['version']) is int and raw['version'] in _ROW_KEYS, 'assembly version required')
     _require(_digest(raw['declaration_digest']) == exported.declaration_digest, 'export declaration differs')
     expected_plan = _object(_json(exported.plan), {'version', 'waves'})
     _require(type(expected_plan['version']) is int and expected_plan['version'] == 1, 'retained export version required')
@@ -171,8 +196,12 @@ def _contract(value: object, exported: wave_export.FrozenExport) -> dict[str, An
     rows = _population(raw['waves'])
     ids = []
     for row in rows:
-        _object(row, {'plan', 'budget_digest', 'clock', 'grader_digest', 'observation', 'roles', 'wake', 'final'})
+        _object(row, _ROW_KEYS[raw['version']])
         plan = _plan(row['plan'])
+        if raw['version'] == 2:
+            _protocol_v2(row['protocol_v2'], plan)
+            _require(all(type(r) is dict and r.get('protocol') is None for r in _population(row['roles'])),
+                     'version 2 carries no authored protocol bytes')
         ids.append(plan.wave_id)
         _digest(row['budget_digest'])
         _digest(row['grader_digest'])
@@ -259,7 +288,7 @@ def freeze(value: object, exported: object, planned: object) -> Expected:
         assert isinstance(planned, Planned)
         original = freeze_plan(_json(planned.data))
         raw = _contract(value, exported)
-        projection = {'version': raw['version'], 'declaration_digest': raw['declaration_digest'],
+        projection = {'version': 1, 'declaration_digest': raw['declaration_digest'],
                       'waves': [{k: row[k] for k in ('plan', 'budget_digest', 'clock', 'grader_digest')}
                                 for row in raw['waves']]}
         _require(_canonical(projection) == original.data, 'capture expectations changed the original plan')
@@ -423,9 +452,25 @@ def _stream(blob: live_wave.Blob | None, *, protocol: bool) -> live_wave.Blob | 
         return None
 
 
+def _journal(row: dict[str, Any], plan: live_wave.WavePlan, reader: _Reader,
+             payload: Path) -> dict[str, Any] | None:
+    """Version 2: the adapter's verified projection and diagnostic, or None for
+    a version-1 row. A journal outside the wave's capture roots joins nothing."""
+    if 'protocol_v2' not in row:
+        return None
+    bound = row['protocol_v2']
+    wake = wave_wake_capture.parse_context(row['wake']['context']) if row['wake'] is not None else None
+    if not reader.capture_root(bound['root']):
+        return adapter._unknown(plan, 'journal-root-outside-wave-capture')
+    return adapter.adapt(payload / bound['root'], tj.parse_reference(bound['reference']),
+                         tj.parse_context(bound['context']), adapter.parse_inventory(bound['inventory']),
+                         plan, bound['deadline_ns'], adapter.parse_clock_join(bound['clock_join']), wake)
+
+
 def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dict[str, Any]) -> dict[str, Any]:
     plan = _plan(row['plan'])
     reader = _Reader(payload, catalogue, plan.wave_id)
+    journal = _journal(row, plan, reader, payload)
     roles = []
     try:
         wave = _observation(reader.metadata(row['observation'], None, 'wave-report'), row)
@@ -458,6 +503,10 @@ def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dic
             session = None
         transcript = reader.blob(capture['transcript'], binding.role, 'transcript')
         protocol = reader.blob(capture['protocol'], binding.role, 'protocol')
+        if journal is not None:
+            projected = journal['projections'].get(binding.role)
+            protocol = (live_wave.Blob(projected, hashlib.sha256(projected).hexdigest())
+                        if projected is not None else None)
         transcript = _stream(transcript, protocol=False)
         protocol = _stream(protocol, protocol=True)
         artifacts = None
@@ -475,7 +524,12 @@ def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dic
     evidence = live_wave.WaveEvidence(plan.wave_id, tuple(roles), wave['completion_elapsed'],
         wave['cleanup_confirmed'] and final_complete, wave['infrastructure_failed_at'], wave['deadline_witnessed_at'],
         wave['abandonment'])
-    return live_wave.verdict(plan, evidence, _grade(grader, row))
+    result = live_wave.verdict(plan, evidence, _grade(grader, row))
+    if journal is not None:
+        # Decision 5: a separate declared diagnostic; it never edits the verdict.
+        result['protocol_diagnostic'] = journal['diagnostic'] | {'status': journal['status'],
+                                                                 'reasons': journal['reasons']}
+    return result
 
 
 def report(arrival: object, expected: object, graders: object) -> dict[str, Any]:
@@ -526,5 +580,6 @@ def report(arrival: object, expected: object, graders: object) -> dict[str, Any]
             'declaration_digest': raw['declaration_digest'], 'export_status': export['export_status'],
             'primary': {'unit': 'wave', 'planned': len(waves), 'completed': sum(w['status'] == 'PASS' for w in waves),
                         **{s.lower(): sum(w['status'] == s for w in waves) for s in ('PASS', 'FAIL', 'UNKNOWN')}},
-            'waves': waves, 'coverage': {'semantic_protocol_producer': 'caller-supplied-captured-bytes',
+            'waves': waves, 'coverage': {'semantic_protocol_producer':
+                'controller-journal-v2' if raw['version'] == 2 else 'caller-supplied-captured-bytes',
                 'handoff_timings': 'deferred', 'clutter_lifecycle': 'not-joined', 'live_authority': False}}
