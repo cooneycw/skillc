@@ -647,34 +647,50 @@ scan_recheck() {
         [ "$_m" = "$_d $_i" ] || return 1
     done <"$1"
 }
-# scan_quiescent: exit 0 only if this pid namespace holds no process outside
-# the scan. Every process must be this shell, a descendant of it, or pid 1
-# when pid 1 is a different process with no children (P8: an idle sleep that
-# the scan was exec-ed beside). Any other process, a parent that cannot be
-# found, or a /proc that cannot be listed fails. The prune rule ASSUMES a
-# quiescent container; this check is that precondition, run before a scan.
+# scan_quiescent [PID1-NAME]: exit 0 only if the container pid namespace
+# holds exactly the processes the scan expects, and nothing else:
+# - this shell, and the awk that performs this check;
+# - with no PID1-NAME (P7): this shell must itself be pid 1;
+# - with PID1-NAME (P8: sleep): pid 1 must be a process of that name with
+#   no parent in the namespace, and this shell must have been exec-ed beside
+#   it (no parent in the namespace either).
+# Every numeric /proc entry must yield exactly one readable, well-formed
+# record whose Pid matches its directory; a missing, unreadable, malformed or
+# duplicated record, an empty listing, or any other process fails. Callers
+# run it before AND after the scan. The prune rule ASSUMES a quiescent
+# container: this checks that the construction held, it does not admit
+# concurrency. SCAN_PROC (default /proc) is the procfs listed; the self-test
+# points it at a stub.
 scan_quiescent() {
-    _ps=$(for _q in $(ls /proc); do
-        case $_q in *[!0-9]*) continue ;; esac
-        _pp=$(awk "\$1 == \"PPid:\" { print \$2 }" "/proc/$_q/status" 2>/dev/null) || continue
-        [ -n "$_pp" ] && printf "%s %s\n" "$_q" "$_pp"
-    done) || return 1
-    printf "%s\n" "$_ps" | awk -v me="$$" "
-        NF == 2 { pp[\$1] = \$2; n++ }
+    _w1=${1:-}
+    _proc=${SCAN_PROC:-/proc}
+    case $- in *f*) _gf=1; set +f ;; *) _gf=0 ;; esac
+    set -- "$_proc"/[0-9]*
+    if [ "$_gf" = 1 ]; then set -f; fi
+    [ -e "$1" ] || return 1
+    _n=$#
+    for _d do set -- "$@" "$_d/status"; done
+    shift "$_n"
+    awk -v me="$$" -v want1="$_w1" "
+        BEGIN {
+            while ((getline l < \"/proc/self/status\") > 0)
+                if (l ~ /^Pid:/) { split(l, f); self = f[2] }
+        }
+        FNR == 1 { files++; d = FILENAME; sub(/\/status\$/, \"\", d); sub(/.*\//, \"\", d); cur = d }
+        \$1 == \"Pid:\" { pid[cur] = \$2; np[cur]++ }
+        \$1 == \"PPid:\" { pp[cur] = \$2; npp[cur]++ }
+        \$1 == \"Name:\" { nm[cur] = \$2; nn[cur]++ }
         END {
-            if (n < 1 || !(me in pp)) exit 1
-            for (p in pp) if (pp[p] == 1 && me != 1) kids1++
-            for (p in pp) {
-                q = p; ok = 0
-                for (hop = 0; hop < 4096; hop++) {
-                    if (q == me) { ok = 1; break }
-                    if (q == 1 && me != 1 && !kids1) { ok = 1; break }
-                    if (!(q in pp)) break
-                    q = pp[q]
-                }
-                if (!ok) exit 1
+            if (files != ARGC - 1 || !(me in pid)) exit 1
+            for (p in pid) {
+                if (np[p] != 1 || npp[p] != 1 || nn[p] != 1 || pid[p] != p) exit 1
+                allowed = (p == me || p == self)
+                if (p == 1 && want1 != \"\" && me != 1 && nm[p] == want1 && pp[p] == 0) allowed = 1
+                if (!allowed) exit 1
             }
-        }"
+            if (want1 == \"\") { if (me != 1) exit 1 }
+            else if (me == 1 || !(1 in pid) || pp[me] != 0) exit 1
+        }" "$@"
 }
 # pruned_lines PRUNED: one "PRUNED <path>" line per pruned directory, or
 # "PRUNED-W <path>" for one this uid may write but not search. Paths never

@@ -174,13 +174,23 @@ Review pass 8 showed that a concurrent process of the probe uid timing
 renames between those steps, or creating an entry after its parent was
 listed, would defeat them, as it would any `find`-based inventory. Such a
 process is excluded by construction here, and the construction is
-**checked**. Before each scan, `scan_quiescent` reads every process in the
-container's pid namespace. Each must be the scan shell, a descendant of it,
-or pid 1 when pid 1 is a childless different process (P8's idle `sleep`).
-Anything else, an untraceable parent, or an unlistable `/proc` fails the
-scan as `OBSERVATION_FAILED`. Committed cases run it in a fresh pid
-namespace (root with `CAP_SYS_ADMIN`): the scan alone passes, a sibling
-process is refused, and a twin that accepts any process is caught.
+**checked**. Before **and after** each scan, `scan_quiescent` reads every
+numeric `/proc` entry in the container's pid namespace. Each must yield
+exactly one readable, well-formed record whose `Pid` matches its directory.
+The set of processes must be exactly:
+- the scan shell and the checking `awk`;
+- with nothing else (P7), the scan shell as pid 1;
+- or, for P8, a pid 1 named `sleep` with no parent, beside which the scan
+  shell was exec-ed.
+
+Any other process, a missing, malformed or duplicated record, or an empty
+listing fails the scan as `OBSERVATION_FAILED`. A process that starts and
+exits entirely between the two checks is not seen. This check confirms the
+construction held, and it is not a defence against a concurrent actor.
+Committed cases run it against a stub procfs (unprivileged), with twins for
+allowing any process, skipping record validation, and skipping pid 1's
+identity. They also run it in a fresh pid namespace (root with
+`CAP_SYS_ADMIN`): the scan alone passes, and a sibling is refused.
 
 **Carried requirement.** The prune rule's correctness ASSUMES a quiescent
 container. The scan must **not** be reused as-is against a container with

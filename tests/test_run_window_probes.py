@@ -1260,6 +1260,7 @@ def quiescence(lib: Path, tmp_path: Path, argv: list[str]) -> str:
     text.write_text(scan_lib_text(lib))
     run = subprocess.run([*argv, str(text)], capture_output=True, text=True,
                          env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=60)
+    assert run.returncode == 0, (run.returncode, run.stderr)
     return run.stdout.strip()
 
 
@@ -1270,19 +1271,89 @@ def test_scan_quiescent_accepts_the_scan_alone(tmp_path: Path) -> None:
 
 @needs_pidns
 def test_scan_quiescent_refuses_another_process(tmp_path: Path) -> None:
-    old = "if (!ok) exit 1"
+    """In a real pid namespace, a sibling of the checker under pid 1 is
+    refused (the stub cases and their twins pin each rule separately)."""
+    assert quiescence(LIB, tmp_path, BESIDE) == "BUSY"
+
+
+#: A stub procfs, built per case, then checked by scan_quiescent with
+#: SCAN_PROC pointing at it. The checking shell writes its own entry (it alone
+#: knows its pid) unless the case says otherwise. Fake pids are large, so they
+#: cannot collide with the real shell's pid.
+STUB_CHECK = """
+stub=$1
+if [ "$2" != noself ]; then
+    mkdir -p "$stub/$$"
+    printf "Name:\\tsh\\nPid:\\t%s\\nPPid:\\t%s\\n" "$$" "$2" >"$stub/$$/status"
+fi
+eval "$(cat "$3")"
+export SCAN_PROC="$stub"
+if scan_quiescent $4; then echo QUIESCENT; else echo BUSY; fi
+"""
+
+#: case -> (self entry: its PPid or "noself", argument, stub entries, expect).
+#: Entries are (directory, status text or None for a directory without one).
+SLEEP1 = ("1", "Name:\tsleep\nPid:\t1\nPPid:\t0\n")
+QUIESCENT_CASES: dict[str, tuple[str, str, list[tuple[str, str | None]], str]] = {
+    "p8-quiet": ("0", "sleep", [SLEEP1], "QUIESCENT"),
+    "p8-extra-process": ("0", "sleep", [SLEEP1, ("900001", "Name:\tsh\nPid:\t900001\nPPid:\t1\n")],
+                         "BUSY"),
+    "p8-pid1-not-sleep": ("0", "sleep", [("1", "Name:\tbash\nPid:\t1\nPPid:\t0\n")], "BUSY"),
+    "p8-pid1-missing": ("0", "sleep", [], "BUSY"),
+    "p8-shell-is-child-of-pid1": ("1", "sleep", [SLEEP1], "BUSY"),
+    "missing-status": ("0", "sleep", [SLEEP1, ("900002", None)], "BUSY"),
+    "malformed-record": ("0", "sleep", [SLEEP1, ("900003", "Name:\tx\nPid:\t900003\n")], "BUSY"),
+    "duplicated-record": ("0", "sleep", [("1", "Name:\tsleep\nPid:\t1\nPid:\t1\nPPid:\t0\n")],
+                          "BUSY"),
+    "pid-mismatch": ("0", "sleep", [SLEEP1, ("900004", "Name:\tx\nPid:\t900005\nPPid:\t0\n")],
+                     "BUSY"),
+    "p7-shell-not-pid1": ("0", "", [], "BUSY"),
+    "empty-listing": ("noself", "sleep", [], "BUSY"),
+}
+
+
+def stub_quiescence(lib: Path, tmp_path: Path, case: str) -> tuple[int, str]:
+    self_pp, arg, entries, _ = QUIESCENT_CASES[case]
+    stub = tmp_path / "proc"
+    stub.mkdir()
+    for name, text in entries:
+        (stub / name).mkdir()
+        if text is not None:
+            (stub / name / "status").write_text(text)
+    text = tmp_path / "scan-lib.sh"
+    text.write_text(scan_lib_text(lib))
+    run = subprocess.run(["sh", "-c", STUB_CHECK, "sh", str(stub), self_pp, str(text), arg],
+                         capture_output=True, text=True,
+                         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=30)
+    return run.returncode, run.stdout.strip()
+
+
+@needs_sh
+@pytest.mark.parametrize("case", sorted(QUIESCENT_CASES))
+def test_scan_quiescent_stub_case(tmp_path: Path, case: str) -> None:
+    assert stub_quiescence(LIB, tmp_path, case) == (0, QUIESCENT_CASES[case][3])
+
+
+#: (blind copy name, exact lib.sh text, weakened text, case)
+QUIESCENT_TWINS = [
+    ("any-process-allowed", "if (!allowed) exit 1", "if (0) exit 1", "p8-extra-process"),
+    ("records-unvalidated",
+     "if (np[p] != 1 || npp[p] != 1 || nn[p] != 1 || pid[p] != p) exit 1", ":",
+     "duplicated-record"),
+    ("pid1-identity-unchecked", "nm[p] == want1 && ", "", "p8-pid1-not-sleep"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new", "case"), QUIESCENT_TWINS,
+                         ids=[t[0] for t in QUIESCENT_TWINS])
+def test_scan_quiescent_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                             case: str) -> None:
     source = LIB.read_text()
     assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
-    mutated = tmp_path / "twin" / "lib.sh"
-    mutated.parent.mkdir()
-    mutated.write_text(source.replace(old, "if (0) exit 1"))
-    assert quiescence(LIB, tmp_path, BESIDE) == "BUSY"
-    assert quiescence(mutated, tmp_path / "twin", BESIDE) == "QUIESCENT"
-
-
-@needs_pidns
-def test_scan_quiescent_twin_does_not_change_the_quiet_case(tmp_path: Path) -> None:
-    """The quiet case must stay quiescent under the real check, so the
-    refusal above is about the sibling, not a check that always fails."""
-    assert quiescence(LIB, tmp_path, ALONE) == "QUIESCENT"
-    assert quiescence(LIB, tmp_path, BESIDE) == "BUSY"
+    mutated = tmp_path / "twin-lib.sh"
+    mutated.write_text(source.replace(old, new))
+    (tmp_path / "real").mkdir()
+    (tmp_path / "weak").mkdir()
+    assert stub_quiescence(LIB, tmp_path / "real", case) == (0, QUIESCENT_CASES[case][3])
+    assert stub_quiescence(mutated, tmp_path / "weak", case) != (0, QUIESCENT_CASES[case][3])

@@ -101,6 +101,8 @@ done <<EOT
 $mounts
 EOT
 [ ! -e "$dirs/failed" ] || exit 3
+# ...and after it: nothing else may have run while the scan ran.
+scan_quiescent || { printf "inventory: container not quiescent after the scan\n" >&2; exit 3; }
 outside() {
     c=0
     if [ -e "$1" ]; then

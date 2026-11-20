@@ -120,10 +120,11 @@ isolation() {
     # scan_quiescent); it must not be reused as-is against a container with
     # live participant processes.
     v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"'set -e
-scan_quiescent || { printf "scan: container not quiescent\n" >&2; exit 3; }
+scan_quiescent sleep || { printf "scan: container not quiescent\n" >&2; exit 3; }
 t=$(mktemp -d)
 trap "rm -rf \"$t\"" EXIT
 o=$(scan "$t/pruned" / all "/proc /sys" -type s)
+scan_quiescent sleep || { printf "scan: container not quiescent after the scan\n" >&2; exit 3; }
 n=$(printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }")
 p=0
 if [ -S /probe-host.sock ]; then p=$((p + 1)); fi
