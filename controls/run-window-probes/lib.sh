@@ -423,6 +423,32 @@ _upper_pid_same() {
     [ "$_n" = "$3" ] && [ "$_p" = "$2" ]
 }
 
+# marker_matches FD TOKEN: exit 0 only if, relative to the directory held on
+# FD, "tmp" is a directory and "tmp/TOKEN" a regular file, each opened without
+# following a symlink, whose bytes are exactly TOKEN (no trailing newline).
+# Every lookup is descriptor-relative, so no path can be swapped between a
+# test and the read. python3 -I (stdlib only), because sh has no
+# descriptor-relative open; the held FD is inherited by the child.
+marker_matches() {
+    python3 -I -c '
+import os, stat, sys
+fd, tok = int(sys.argv[1]), sys.argv[2]
+flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+d = os.open("tmp", flags | os.O_DIRECTORY, dir_fd=fd)
+try:
+    m = os.open(tok, flags | os.O_NONBLOCK, dir_fd=d)
+finally:
+    os.close(d)
+try:
+    if not stat.S_ISREG(os.fstat(m).st_mode):
+        sys.exit(1)
+    want = tok.encode()
+    sys.exit(0 if os.read(m, len(want) + 1) == want else 1)
+finally:
+    os.close(m)
+' "$1" "$2" 2>/dev/null
+}
+
 # upper_dir_of ID FD: open a RUNNING container's upper directory on FD (8 or
 # 9) and set PROBE_UPPER to /proc/$$/fd/FD, or refuse by name. Called directly
 # (never in a command substitution), so a refusal ends the probe. The
@@ -459,17 +485,15 @@ upper_dir_of() {
     fi
     _held=/proc/$$/fd/$2
     # Proof of identity: a fresh random token, written by this container into
-    # its own /tmp, must read back exactly through the held handle.
+    # its own /tmp, must read back exactly through the held handle
+    # (marker_matches, descriptor-relative throughout).
     _tok=$(probe_uuid) || probe_die 'uuid-failed'
     case $_tok in '' | *[!0-9a-f]*) probe_die 'uuid-failed' ;; esac
     [ "${#_tok}" -eq 32 ] || probe_die 'uuid-failed'
     _tok=skillc-dev-probe-id-$_tok
     docker exec "$1" sh -c 'printf "%s" "$1" >"/tmp/$1"' sh "$_tok" >/dev/null 2>&1 \
         || probe_die 'upperdir-mark-failed'
-    _m=$_held/tmp/$_tok
-    if [ -L "$_held/tmp" ] || [ ! -f "$_m" ] || [ -L "$_m" ]; then probe_die 'upperdir-unverified'; fi
-    _got=$(cat -- "$_m") || probe_die 'upperdir-unverified'
-    [ "$_got" = "$_tok" ] || probe_die 'upperdir-unverified'
+    marker_matches "$2" "$_tok" || probe_die 'upperdir-unverified'
     _upper_pid_same "$1" "$_pid" "$_ident" || probe_die 'container-pid-changed'
     PROBE_UPPER=$_held
 }
@@ -478,26 +502,27 @@ upper_dir_of() {
 
 # step_drain FILE: read stdin to EOF, keeping only its first 2048 bytes in
 # FILE and the count of the rest in FILE.rest. dd reads one byte at a time, so
-# nothing past the bound is ever written to disk, whatever the input size,
-# and the input is always drained, so the writer never blocks or dies on a
-# closed pipe. Never fails its caller.
+# nothing past the bound is ever written to disk, whatever the input size. If
+# FILE cannot be written, the input is still drained (to /dev/null), so the
+# writer never blocks or dies on a closed pipe. Never fails its caller.
 step_drain() {
-    dd bs=1 count=2048 of="$1" 2>/dev/null || :
-    wc -c | tr -d ' ' >"$1.rest" || :
+    if ! dd bs=1 count=2048 of="$1" 2>/dev/null; then cat >/dev/null; return 0; fi
+    _r=$(wc -c | tr -d ' ') || _r=
+    printf '%s\n' "$_r" >"$1.rest" 2>/dev/null || :
 }
 
 # step_capture FILE CMD...: run CMD (a command or a function) with its stdout
 # passed through unchanged and its stderr drained through step_drain into
-# FILE. Returns CMD's own exit status, or 125 if that status could not be
-# read back. A failure of the collector never changes the returned status.
+# FILE. Returns CMD's own exit status, which travels through a pipe into a
+# shell variable, never through a file, so no storage failure (a full or
+# unwritable scratch) can replace it. 125 only if the status cannot be read.
 step_capture() {
     _ef=$1
     shift
-    : >"$_ef.status"
-    { { "$@" 2>&3 3>&-; printf '%s\n' "$?" >"$_ef.status"; } 3>&1 1>&4 4>&- | step_drain "$_ef"; } 4>&1
-    _s=$(cat -- "$_ef.status" 2>/dev/null) || return 125
-    is_uint "$_s" || return 125
-    return "$_s"
+    { _st=$( { { "$@" 2>&1 1>&4 4>&- 5>&-; printf '%s' "$?" >&5; } \
+        | step_drain "$_ef" >/dev/null 2>&1 4>&- 5>&-; } 5>&1 ); } 4>&1
+    is_uint "$_st" || return 125
+    return "$_st"
 }
 
 # step_diag ARM STEP STATUS FILE: report a live step's exit status and the

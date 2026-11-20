@@ -71,8 +71,10 @@ FD`:
    `/proc/$$/fd/FD`. Renaming or re-linking an ancestor afterwards cannot
    substitute another directory;
 6. proves it is this container's: a fresh random token, written by the
-   container into its own `/tmp/<token>`, must read back exactly as a regular
-   file through the held handle (neither `tmp` nor the file a symlink);
+   container into its own `/tmp/<token>`, must read back byte for byte as a
+   regular file. Every lookup is relative to the held handle and refuses to
+   follow a symlink (`marker_matches`, `python3 -I`, stdlib only), so no path
+   can be swapped between a check and the read;
 7. revalidates the init pid again after the proof.
 
 Any failed step refuses by name (`upperdir-unreadable`, `container-pid-changed`,
@@ -83,8 +85,11 @@ The pure helpers (`storage_kind_from`, `overlay_upper`, `upper_resolve`) are
 qualified in CI over committed mountinfo fixtures (`fixtures/lib/`) and inline
 cases. `upper_dir_of` itself runs in CI under `sh -eu` against a stub `docker`
 on `PATH` and a stub procfs (`PROBE_PROC`). Every one has blind twins the
-cases must catch: a pid recheck removed, the graph-driver comparison removed,
-the marker read-back removed.
+cases must catch: a pid recheck removed, the start-time comparison removed,
+the graph-driver comparison removed, the marker read-back removed, and a
+symlinked `tmp` followed. The callers in P5–P8 need root and Docker, so CI
+pins their wiring text (each in-container step through `step_capture`;
+container stdout discarded) rather than running them.
 
 The containerd fixtures are modelled on the snapshotter's documented layout.
 No capture from the runner VM is committed yet. The stage-2 run records the
@@ -100,8 +105,10 @@ of its stderr as `INFO diag <arm> <step> stderr: …` lines, and
 `stderr-truncated <bytes>` when there was more (`lib.sh` `step_diag`). The
 bound applies while the step runs: `step_capture` drains stderr to EOF
 through `dd bs=1 count=2048` and only counts the rest, so a flooding step can
-never fill the scratch filesystem. It returns the step's own status, so a
-collector failure cannot change a reading. Steps:
+never fill the scratch filesystem. The step's own status travels through a
+pipe into a shell variable, never a file, and the collector drains to
+`/dev/null` if its file cannot be written. A full or unwritable scratch
+therefore cannot change a status or a reading. Steps:
 P7 `inventory`; P8 `binds` and `scan`, plus `ns-<name> unreadable`; P5's
 `writes` on refusal, whose stdout is discarded along with that of the
 identity-marker exec. Every byte outside printable ASCII becomes `?`, and
@@ -136,7 +143,9 @@ The containers hold no credential, so the text is not scrubbed beyond that.
   kernel's mount options name the same string; otherwise they refuse
   (`upperdir-shape` or `upperdir-disagrees`) rather than resolve links.
 - P5 and P6 need `sleep` and a writable `/tmp` in the image, for the running
-  container and the identity marker. Without them they refuse by name.
+  container and the identity marker, and `python3` on the host (as P8
+  already does) for the descriptor-relative marker read. Without them they
+  refuse by name.
 - P2 identifies each planted holder by pid plus start time. Other pids
   are enumerated from one listing of `/proc`; a pid that exits mid-census is
   skipped, not counted as unreadable.

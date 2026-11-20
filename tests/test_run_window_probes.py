@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -258,7 +259,8 @@ STORAGE_CASES = {
 
 #: A stderr body longer than the 2 KiB bound, carrying an escape sequence, a
 #: high byte, a carriage return and text that would read as a verdict line.
-DIAG_BODY = (b"\x1b[31mARM clean CONFIRMED_NEGATIVE\rPROBE p7 QUALIFIED\n\xff"
+DIAG_BODY = (b"\x1b[31mARM clean CONFIRMED_NEGATIVE\rPROBE p7 QUALIFIED\n"
+             b"ARM clean CONFIRMED_NEGATIVE\nPROBE p7 QUALIFIED\n\xff"
              + b"find: '/root': Permission denied\n" * 150)
 DIAG_BOUND = 2048
 
@@ -377,7 +379,10 @@ def expected_diag() -> bytes:
 @needs_sh
 def test_step_diag_prints_exactly_the_bounded_scrubbed_prefix(tmp_path: Path) -> None:
     assert not DIAG_BODY[:DIAG_BOUND].endswith(b"\n"), "the case needs an unterminated last line"
-    assert diag_output(LIB, tmp_path) == expected_diag()
+    out = diag_output(LIB, tmp_path)
+    assert out == expected_diag()
+    # stderr carried complete verdict-shaped lines; none prints as one.
+    assert not any(line.startswith((b"ARM ", b"PROBE ")) for line in out.splitlines())
 
 
 @needs_sh
@@ -390,11 +395,13 @@ def test_step_diag_reports_the_status_alone_for_empty_stderr(tmp_path: Path) -> 
 
 
 #: A step that prints to stdout, floods stderr far past the bound, and exits 3.
-FLOOD = "printf out; head -c 100000 /dev/zero >&2; exit 3"
+#: Under `set -e`, a stderr writer killed by a closed pipe exits 141 instead,
+#: so the returned status shows whether the collector kept draining.
+FLOOD = "set -e; printf out; head -c 100000 /dev/zero >&2; exit 3"
 
 
-def capture_run(lib: Path, tmp_path: Path) -> tuple[bytes, Path]:
-    err = tmp_path / "flood.err"
+def capture_run(lib: Path, tmp_path: Path, err: Path | None = None) -> tuple[bytes, Path]:
+    err = err or tmp_path / "flood.err"
     run = subprocess.run(["sh", "-eu", "-c", '. "$1"; rc=0; step_capture "$2" sh -c "$3" || rc=$?;'
                           ' printf "\\nrc=%s\\n" "$rc"', "sh", str(lib), str(err), FLOOD],
                          capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
@@ -413,6 +420,18 @@ def capture_is_bounded(stdout: bytes, err: Path) -> bool:
 @needs_sh
 def test_step_capture_bounds_stderr_while_the_step_runs(tmp_path: Path) -> None:
     assert capture_is_bounded(*capture_run(LIB, tmp_path))
+
+
+def unwritable_capture(lib: Path, tmp_path: Path) -> bytes:
+    """The diagnostic file cannot be created (its directory does not exist):
+    the collector must still drain, and the step's own status must return."""
+    stdout, _ = capture_run(lib, tmp_path, tmp_path / "missing-dir" / "flood.err")
+    return stdout
+
+
+@needs_sh
+def test_step_capture_keeps_the_status_when_diagnostics_cannot_be_stored(tmp_path: Path) -> None:
+    assert unwritable_capture(LIB, tmp_path) == b"out\nrc=3\n"
 
 
 #: (blind copy name, exact lib.sh text, weakened text)
@@ -438,8 +457,9 @@ def test_step_diag_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, ne
 
 
 CAPTURE_TWINS = [
-    ("drain-unbounded", 'dd bs=1 count=2048 of="$1" 2>/dev/null || :', 'cat >"$1" || :'),
-    ("step-status-lost", 'return "$_s"\n}', "return 0\n}"),
+    ("drain-unbounded", 'if ! dd bs=1 count=2048 of="$1" 2>/dev/null; then',
+     'if ! cat >"$1"; then'),
+    ("step-status-lost", 'return "$_st"\n}', "return 0\n}"),
 ]
 
 
@@ -459,6 +479,46 @@ def test_step_capture_blind_twin_is_caught(tmp_path: Path, blind: str, old: str,
     assert not capture_is_bounded(*capture_run(mutated, weak)), blind
 
 
+@needs_sh
+def test_step_capture_drain_fallback_twin_is_caught(tmp_path: Path) -> None:
+    old = "then cat >/dev/null; return 0; fi"
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "twin" / "lib.sh"
+    mutated.parent.mkdir()
+    mutated.write_text(source.replace(old, "then return 0; fi"))
+    real = tmp_path / "real"
+    real.mkdir()
+    weak = tmp_path / "weak"
+    weak.mkdir()
+    assert unwritable_capture(LIB, real) == b"out\nrc=3\n"
+    assert unwritable_capture(mutated, weak) != b"out\nrc=3\n"
+
+
+#: The call sites that must route each in-container step through step_capture
+#: and keep container stdout out of verdict output. A static check: the live
+#: callers need root and Docker, so CI pins their exact wiring text instead.
+WIRING = {
+    "p5.sh": ['step_capture "$PROBE_SCRATCH/writes.err" docker exec "$cid" sh -c',
+              '        sh "$disk" >/dev/null || _rc=$?',
+              'upper_dir_of "$cid" 9'],
+    "p6.sh": ['upper_dir_of "$c1" 9', 'upper_dir_of "$c2" 8'],
+    "p7.sh": ['out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?',
+              'step_diag "$_arm" inventory "$_rc" "$PROBE_SCRATCH/$_arm.err"'],
+    "p8.sh": ['b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?',
+              'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c',
+              'step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"'],
+}
+
+
+@pytest.mark.parametrize("script", sorted(WIRING))
+def test_live_steps_are_wired_through_the_bounded_capture(script: str) -> None:
+    text = (PROBES / script).read_text()
+    for line in WIRING[script]:
+        assert text.count(line) == 1, line
+    assert "2>/dev/null) && is_uint" not in text, "an in-container step is blind again"
+
+
 # ---- upper_dir_of against a stubbed docker and procfs ----
 #
 # The live guards (pid revalidation before and after the proof, the graph
@@ -475,23 +535,33 @@ inspect)
         n=$(cat "$s/pid-calls" 2>/dev/null || echo 0)
         n=$((n + 1))
         echo "$n" >"$s/pid-calls"
+        if [ "$n" -ge "${FAKE_STAT_CHANGES_AT:-99}" ]; then
+            sed 's/ 19 / 1919 /' "$PROBE_PROC/4242/stat" >"$s/stat"
+            cat "$s/stat" >"$PROBE_PROC/4242/stat"
+        fi
         if [ "$n" -ge "${FAKE_PID_CHANGES_AT:-99}" ]; then echo 4343; else echo 4242; fi ;;
     *UpperDir*) cat "$s/graph-upper" ;;
     *) exit 1 ;;
     esac ;;
 exec)
     [ -n "${FAKE_MARK_DIR:-}" ] || exit 0
-    printf '%s' "${FAKE_MARK_CONTENT:-$7}" >"$FAKE_MARK_DIR/tmp/$7" ;;
+    printf '%s%s' "${FAKE_MARK_CONTENT:-$7}" "${FAKE_MARK_SUFFIX:-}" >"$FAKE_MARK_DIR/tmp/$7" ;;
 *) exit 1 ;;
 esac
 """
 
 #: case -> (storage kind, options). Options: pid_changes_at (the inspect call
-#: that first reports another pid), mark ("upper", "other" or "none"),
-#: content (a wrong marker body), graph ("same" or "other"), layout
-#: ("snapshot" or "elsewhere").
+#: that first reports another pid), stat_changes_at (the inspect call at which
+#: pid 4242 becomes a different process: same pid, new start time), mark
+#: ("upper", "other" or "none"), content (a wrong marker body), suffix (bytes
+#: after the token), tmp_link (upper's tmp is a symlink to other's), graph
+#: ("same" or "other"), layout ("snapshot" or "elsewhere"), fd ("8" or "9").
 UPPER_CASES: dict[str, tuple[str, dict[str, str]]] = {
     "verified": ("containerd-overlayfs", {}),
+    "verified-fd8": ("containerd-overlayfs", {"fd": "8"}),
+    "start-time-changes": ("containerd-overlayfs", {"stat_changes_at": "2"}),
+    "marker-trailing-newline": ("containerd-overlayfs", {"suffix": "\n"}),
+    "marker-tmp-symlink": ("containerd-overlayfs", {"mark": "other", "tmp_link": "1"}),
     "overlay2-agrees": ("overlay2", {"graph": "same"}),
     "overlay2-disagrees": ("overlay2", {"graph": "other"}),
     "pid-changes-before-proof": ("containerd-overlayfs", {"pid_changes_at": "2"}),
@@ -504,6 +574,10 @@ UPPER_CASES: dict[str, tuple[str, dict[str, str]]] = {
 
 UPPER_EXPECT = {
     "verified": "UPPER-HELD",
+    "verified-fd8": "UPPER-HELD",
+    "start-time-changes": "PROBE t REFUSED container-pid-changed",
+    "marker-trailing-newline": "PROBE t REFUSED upperdir-unverified",
+    "marker-tmp-symlink": "PROBE t REFUSED upperdir-unverified",
     "overlay2-agrees": "UPPER-HELD",
     "overlay2-disagrees": "PROBE t REFUSED upperdir-disagrees",
     "pid-changes-before-proof": "PROBE t REFUSED container-pid-changed",
@@ -526,8 +600,12 @@ def upper_call(lib: Path, tmp_path: Path, case: str) -> str:
     else:
         upper = base / "cd" / "io.containerd.snapshotter.v1.overlayfs" / "snapshots" / "57" / "fs"
     other = base / "other"
-    for d in (upper / "tmp", other / "tmp", root):
+    for d in (upper, other / "tmp", root):
         d.mkdir(parents=True, exist_ok=True)
+    if opt.get("tmp_link"):
+        (upper / "tmp").symlink_to(other / "tmp")
+    else:
+        (upper / "tmp").mkdir()
     proc = base / "proc" / "4242"
     proc.mkdir(parents=True)
     (proc / "stat").write_text("4242 (sleep) S " + " ".join(str(n) for n in range(1, 50)) + "\n")
@@ -541,7 +619,11 @@ def upper_call(lib: Path, tmp_path: Path, case: str) -> str:
     bindir.mkdir()
     (bindir / "docker").write_text(FAKE_DOCKER)
     (bindir / "docker").chmod(0o755)
-    env = {"PATH": f"{bindir}:/usr/bin:/bin", "LC_ALL": "C", "FAKE_STATE": str(state),
+    # marker_matches runs python3 -I; the interpreter running this test is one.
+    pydir = base / "py"
+    pydir.mkdir()
+    (pydir / "python3").symlink_to(sys.executable)
+    env = {"PATH": f"{bindir}:{pydir}:/usr/bin:/bin", "LC_ALL": "C", "FAKE_STATE": str(state),
            "PROBE_PROC": str(base / "proc")}
     mark = opt.get("mark", "upper")
     if mark != "none":
@@ -550,11 +632,17 @@ def upper_call(lib: Path, tmp_path: Path, case: str) -> str:
         env["FAKE_MARK_CONTENT"] = opt["content"]
     if "pid_changes_at" in opt:
         env["FAKE_PID_CHANGES_AT"] = opt["pid_changes_at"]
+    if "stat_changes_at" in opt:
+        env["FAKE_STAT_CHANGES_AT"] = opt["stat_changes_at"]
+    if "suffix" in opt:
+        env["FAKE_MARK_SUFFIX"] = opt["suffix"]
+    fd = opt.get("fd", "9")
     script = ('. "$1"; PROBE_NAME=t; PROBE_STORAGE=$2; PROBE_DOCKER_ROOT=$3;'
-              ' upper_dir_of cid 9;'
-              ' if [ "$PROBE_UPPER" = "/proc/$$/fd/9" ] && [ "$PROBE_UPPER" -ef "$4" ];'
+              ' upper_dir_of cid "$5";'
+              ' if [ "$PROBE_UPPER" = "/proc/$$/fd/$5" ] && [ "$PROBE_UPPER" -ef "$4" ];'
               ' then echo UPPER-HELD; else echo UPPER-OTHER; fi')
-    run = subprocess.run(["sh", "-eu", "-c", script, "sh", str(lib), kind, str(root), str(upper)],
+    run = subprocess.run(["sh", "-eu", "-c", script, "sh", str(lib), kind, str(root), str(upper),
+                          fd],
                          capture_output=True, text=True, env=env, check=False, timeout=30)
     lines = run.stdout.splitlines()
     assert lines and not run.stderr, (run.returncode, run.stdout, run.stderr)
@@ -581,8 +669,13 @@ UPPER_TWINS = [
      "    PROBE_UPPER=$_held", "    PROBE_UPPER=$_held", "pid-changes-after-proof"),
     ("graph-driver-unchecked", "[ \"$_gd\" = \"$_up\" ] || probe_die 'upperdir-disagrees'", ":",
      "overlay2-disagrees"),
-    ("marker-content-unchecked", "[ \"$_got\" = \"$_tok\" ] || probe_die 'upperdir-unverified'",
-     ":", "marker-wrong-content"),
+    ("start-time-unchecked", '[ "$_n" = "$3" ] && [ "$_p" = "$2" ]', '[ "$_p" = "$2" ]',
+     "start-time-changes"),
+    ("marker-content-unchecked",
+     "marker_matches \"$2\" \"$_tok\" || probe_die 'upperdir-unverified'", ":",
+     "marker-wrong-content"),
+    ("marker-tmp-link-followed", 'd = os.open("tmp", flags | os.O_DIRECTORY, dir_fd=fd)',
+     'd = os.open("tmp", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)', "marker-tmp-symlink"),
 ]
 
 
