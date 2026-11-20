@@ -72,9 +72,12 @@ FD`:
    substitute another directory;
 6. proves it is this container's: a fresh random token, written by the
    container into its own `/tmp/<token>`, must read back byte for byte as a
-   regular file. Every lookup is relative to the held handle and refuses to
-   follow a symlink (`marker_matches`, `python3 -I`, stdlib only), so no path
-   can be swapped between a check and the read;
+   regular file. The lookup is one `openat2(2)` relative to the held handle
+   with `RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS`, so it
+   cannot leave the directory, follow a symlink, or cross a mount (another
+   tree's `tmp` bound over this one), and no path can be swapped between a
+   check and the read (`marker_matches`, `python3 -I` with `ctypes`, stdlib
+   only). A kernel without `openat2` (before 5.6) refuses;
 7. revalidates the init pid again after the proof.
 
 Any failed step refuses by name (`upperdir-unreadable`, `container-pid-changed`,
@@ -87,7 +90,9 @@ cases. `upper_dir_of` itself runs in CI under `sh -eu` against a stub `docker`
 on `PATH` and a stub procfs (`PROBE_PROC`). Every one has blind twins the
 cases must catch: a pid recheck removed, the start-time comparison removed,
 the graph-driver comparison removed, the marker read-back removed, and a
-symlinked `tmp` followed. The callers in P5–P8 need root and Docker, so CI
+symlinked `tmp` followed. A root-only case bind-mounts another tree's `tmp`
+over the held one and requires refusal, with a twin that drops
+`RESOLVE_NO_XDEV`; it skips where no mount can be made. The callers in P5–P8 need root and Docker, so CI
 pins their wiring text (each in-container step through `step_capture`;
 container stdout discarded) rather than running them.
 

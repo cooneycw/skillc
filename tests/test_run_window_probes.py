@@ -507,6 +507,7 @@ WIRING = {
               'step_diag "$_arm" inventory "$_rc" "$PROBE_SCRATCH/$_arm.err"'],
     "p8.sh": ['b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?',
               'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c',
+              'step_diag "$1" binds "$_rc" "$PROBE_SCRATCH/$1.binds.err"',
               'step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"'],
 }
 
@@ -674,8 +675,10 @@ UPPER_TWINS = [
     ("marker-content-unchecked",
      "marker_matches \"$2\" \"$_tok\" || probe_die 'upperdir-unverified'", ":",
      "marker-wrong-content"),
-    ("marker-tmp-link-followed", 'd = os.open("tmp", flags | os.O_DIRECTORY, dir_fd=fd)',
-     'd = os.open("tmp", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)', "marker-tmp-symlink"),
+    ("marker-resolve-unrestricted",
+     "how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,\n"
+     "              RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)",
+     "how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK, 0, 0)", "marker-tmp-symlink"),
 ]
 
 
@@ -694,3 +697,38 @@ def test_upper_dir_of_blind_twin_is_caught(tmp_path: Path, blind: str, old: str,
     weak.mkdir()
     assert upper_call(LIB, real, case) == UPPER_EXPECT[case]
     assert upper_call(mutated, weak, case) != UPPER_EXPECT[case], blind
+
+
+#: The mount-crossing twin: the same lookup with RESOLVE_NO_XDEV dropped.
+XDEV_TWIN = ("RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)",
+             "RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)")
+
+
+@needs_sh
+def test_marker_proof_refuses_a_bind_mounted_tmp(tmp_path: Path) -> None:
+    """Another tree's tmp, bind-mounted over the held upper's tmp, must not
+    authenticate it. Needs a mount, so it runs only where one can be made
+    (root with CAP_SYS_ADMIN: the runner VM's stage-1 root run)."""
+    held = tmp_path / "held"
+    (held / "tmp").mkdir(parents=True)
+    real = tmp_path / "real-tmp"
+    real.mkdir()
+    tok = "skillc-dev-probe-id-" + "ab" * 16
+    (real / tok).write_text(tok)
+    mounted = subprocess.run(["mount", "--bind", str(real), str(held / "tmp")],
+                             capture_output=True, check=False, timeout=30)
+    if mounted.returncode != 0:
+        pytest.skip("cannot bind-mount here (needs root with CAP_SYS_ADMIN)")
+    try:
+        source = LIB.read_text()
+        assert source.count(XDEV_TWIN[0]) == 1, "the mutation anchor moved; update the twin"
+        twin = tmp_path / "twin-lib.sh"
+        twin.write_text(source.replace(*XDEV_TWIN))
+        script = '. "$1"; exec 9<"$2"; if marker_matches 9 "$3"; then echo MATCH; else echo NO; fi'
+        env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "LC_ALL": "C"}
+        results = [subprocess.run(["sh", "-eu", "-c", script, "sh", str(lib), str(held), tok],
+                                  capture_output=True, text=True, env=env, check=False,
+                                  timeout=30).stdout.strip() for lib in (LIB, twin)]
+    finally:
+        subprocess.run(["umount", str(held / "tmp")], check=False, timeout=30)
+    assert results == ["NO", "MATCH"]

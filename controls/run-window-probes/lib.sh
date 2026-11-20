@@ -423,22 +423,32 @@ _upper_pid_same() {
     [ "$_n" = "$3" ] && [ "$_p" = "$2" ]
 }
 
-# marker_matches FD TOKEN: exit 0 only if, relative to the directory held on
-# FD, "tmp" is a directory and "tmp/TOKEN" a regular file, each opened without
-# following a symlink, whose bytes are exactly TOKEN (no trailing newline).
-# Every lookup is descriptor-relative, so no path can be swapped between a
-# test and the read. python3 -I (stdlib only), because sh has no
-# descriptor-relative open; the held FD is inherited by the child.
+# marker_matches FD TOKEN: exit 0 only if "tmp/TOKEN", resolved relative to
+# the directory held on FD, is a regular file whose bytes are exactly TOKEN
+# (no trailing newline). The whole lookup is ONE openat2(2) call with
+# RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS: it cannot leave the
+# held directory, follow any symlink, or cross a mount (a bind of another
+# tree's tmp over this one), and no path can be swapped between a test and
+# the read. A kernel without openat2 (before 5.6) fails closed. python3 -I
+# with ctypes (stdlib only); the held FD is inherited by the child.
 marker_matches() {
     python3 -I -c '
-import os, stat, sys
+import ctypes, os, stat, sys
 fd, tok = int(sys.argv[1]), sys.argv[2]
-flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
-d = os.open("tmp", flags | os.O_DIRECTORY, dir_fd=fd)
-try:
-    m = os.open(tok, flags | os.O_NONBLOCK, dir_fd=d)
-finally:
-    os.close(d)
+if not tok or "/" in tok:
+    sys.exit(1)
+class OpenHow(ctypes.Structure):
+    _fields_ = [("flags", ctypes.c_uint64), ("mode", ctypes.c_uint64), ("resolve", ctypes.c_uint64)]
+RESOLVE_NO_XDEV, RESOLVE_NO_SYMLINKS, RESOLVE_BENEATH = 0x01, 0x04, 0x08
+SYS_OPENAT2 = 437  # the same number on every Linux architecture
+how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,
+              RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+m = libc.syscall(ctypes.c_long(SYS_OPENAT2), ctypes.c_int(fd), ("tmp/" + tok).encode(),
+                 ctypes.byref(how), ctypes.c_size_t(ctypes.sizeof(how)))
+if m < 0:
+    sys.exit(1)
 try:
     if not stat.S_ISREG(os.fstat(m).st_mode):
         sys.exit(1)
