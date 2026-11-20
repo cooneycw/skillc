@@ -594,8 +594,8 @@ scan_identity_plain() {
         "/proc/$$/status"
 }
 # scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
-# "DEV INO PATH") must sit in a parent this uid cannot write (so this uid can
-# rename nothing there and cannot substitute the entry), must still be the
+# "DEV INO PATH") must have no ancestor this uid can write, up to / (so this
+# uid can substitute no path component), must still be the
 # same inode, list (with its inode, which must match) with a plain mode string
 # ("d" and nine permission characters, optionally "." for an SELinux context,
 # never "+" for an ACL), and then still match the prune predicate: not
@@ -610,8 +610,15 @@ scan_recheck() {
         _i=${_r%% *}
         _p=${_r#* }
         case $_p in /*) ;; *) return 1 ;; esac
-        _w=$(find "${_p%/*}/" -maxdepth 0 -writable) || return 1
-        [ -z "$_w" ] || return 1
+        # No ancestor may be writable by this uid, up to /, so this uid can
+        # substitute no component of the path between the steps below.
+        _a=${_p%/*}
+        while :; do
+            _w=$(find "$_a/" -maxdepth 0 -writable) || return 1
+            [ -z "$_w" ] || return 1
+            [ -n "$_a" ] || break
+            _a=${_a%/*}
+        done
         # The listing carries its inode, which must be the walk inode, so the
         # ACL observation is of the directory the two finds identify.
         _l=$(ls -ldi -- "$_p") || return 1

@@ -136,7 +136,7 @@ nonzero on them. Both scans now go through one function, `scan` in
 
 | Directory, as the probe uid | Treatment | Why |
 |---|---|---|
-| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and**, re-checked after the walk on the same inode, it sits in a parent this uid cannot write (so it cannot substitute the entry), carries no ACL, and still matches all of the above, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
+| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and**, re-checked after the walk on the same inode, no ancestor up to `/` is writable by this uid (so it cannot substitute any path component), its listing shows the walk inode, carries no ACL, and still matches all of the above, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
 | as above, but writable | pruned, reported with ` writable-without-search`; **not** counted as writable | write alone permits no entry change |
 | `access(2)` denies search but the mode bits grant it (an ACL, an I/O error), or a pruned directory carries an ACL | **`OBSERVATION_FAILED`** | the denial is not explained by the mode bits alone, so it is not trusted. With no ACL and no search bit for the uid's class, the kernel denies the lookup whatever `access(2)` reported |
 | unsearchable and owned by this uid | **`OBSERVATION_FAILED`** | the uid could `chmod` it searchable later in the window |
@@ -182,7 +182,8 @@ from root, or the test's own uid), over crafted trees:
   directory beside the four are still found, so pruning cannot hide a
   survivor;
 - **write without search**: pruned, reported, and not counted as writable;
-- **a writable parent**: both scans fail;
+- **a writable parent** (any writable ancestor fails the same way): both
+  scans fail;
 - **probe-owned unsearchable**, and **a newline in an ancestor's name**
   (the pruned directory's own name is plain): both scans fail;
 - **an ACL denial the mode bits do not explain**, and **a pruned directory
