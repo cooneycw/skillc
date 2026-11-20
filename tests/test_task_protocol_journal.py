@@ -422,3 +422,13 @@ def test_transact_writes_nothing_when_the_decision_raises_or_names_a_writer_kind
     with pytest.raises(JournalUnavailable):
         journal.transact(lambda e, f: ("capture-seal", {}, None))
     assert journal.append("fence", reason="closure")[0] == 2
+
+
+def test_a_backwards_clock_poisons_the_journal(tmp_path: Path) -> None:
+    values = iter([1000, 1100, 1050, 1200])
+    journal = _write(tmp_path / "j", clock_ns=lambda: next(values))
+    journal.append("fence", reason="closure")
+    with pytest.raises(JournalUnavailable, match="backwards"):
+        journal.transact(lambda e, f: ("fence", {"reason": "closure"}, None))
+    with pytest.raises(JournalUnavailable, match="poisoned"):
+        journal.append("fence", reason="closure")

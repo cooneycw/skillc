@@ -348,7 +348,10 @@ class Journal:
         now = self.clock_ns()
         _require(type(now) is int, "integer controller clock required")
         elapsed = now - self.origin_ns
-        _require(elapsed >= self.last_elapsed, "controller clock went backwards")
+        if elapsed < self.last_elapsed:
+            # A clock anomaly poisons: nothing after it can be ordered.
+            self.failed = True
+            raise JournalUnavailable("controller clock went backwards")
         return elapsed
 
     def _capacity(self, kind: str, fields: dict[str, Any], size: int) -> None:
