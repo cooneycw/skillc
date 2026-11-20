@@ -50,7 +50,17 @@ REASONS = ('evidence-population-mismatch', 'unknown-verdict', 'removed-surface-n
 
 
 def _obs(value: object) -> Observation | None:
-    return value if isinstance(value, Observation) else None
+    return value if type(value) is Observation else None
+
+
+def _plain(mapping: object) -> dict[str, str] | None:
+    """A built-in dict whose keys and values are exact str: the only accepted
+    representation, so no subclass can override lookup, hashing or equality."""
+    if type(mapping) is not dict:
+        return None
+    if any(type(k) is not str or type(v) is not str for k, v in mapping.items()):
+        return None
+    return dict(mapping)
 
 
 def removed_surface_verdict(*, census_complete: object, unlinked: object, reresolved: object,
@@ -68,21 +78,23 @@ def removed_surface_verdict(*, census_complete: object, unlinked: object, rereso
     - ABSENT only when every fact is CONFIRMED_NEGATIVE, the root is tmpfs,
       and 2b is CONFIRMED_NEGATIVE for its lifetime.
     """
-    if isinstance(reresolved, Reresolved):
+    if type(reresolved) is Reresolved:
+        if type(reresolved.rescan) is not bool:
+            return UNKNOWN  # Malformed evidence is never interpreted.
         rescan = reresolved.rescan
         fact4 = _obs(reresolved.observation)
     else:
         fact4 = _obs(reresolved)
         rescan = fact4 is SURV
-    if type(rescan) is bool and rescan:
+    if rescan:
         return PRESENT
     facts = (_obs(unlinked), fact4, _obs(teardown), _obs(no_holder), _obs(superblock_gone))
     if any(f is None for f in facts) or type(census_complete) is not bool or type(tmpfs) is not bool:
         return UNKNOWN
     if any(f is not NEG for f in facts) or not census_complete:
         return UNKNOWN  # Includes both vetoes: teardown SURV/FAIL and no_holder SURV/FAIL.
-    if (not isinstance(isolation, ScopedObservation) or isolation.observation is not NEG
-            or isolation.scope != LIFETIME):
+    if (type(isolation) is not ScopedObservation or isolation.observation is not NEG
+            or type(isolation.scope) is not str or isolation.scope != LIFETIME):
         return UNKNOWN  # A launch-only 2b never suffices (binding A-2 rule).
     return ABSENT if tmpfs else ABSENT_UNLINKED
 
@@ -90,7 +102,7 @@ def removed_surface_verdict(*, census_complete: object, unlinked: object, rereso
 def present_surface_verdict(scan: object) -> str:
     """A PRESENT removed root after its population was scanned: a match is
     NOT_CLEAN; anything else stays UNKNOWN (it was not removed)."""
-    if isinstance(scan, ScanResult) and scan.status == 'NOT_CLEAN':
+    if type(scan) is ScanResult and type(scan.status) is str and scan.status == 'NOT_CLEAN':
         return NOT_CLEAN
     return UNKNOWN
 
@@ -98,7 +110,7 @@ def present_surface_verdict(scan: object) -> str:
 def retained_surface_verdict(scan: object) -> str:
     """A retained surface: its own slice 4 result. CLEAN only for a CLEAN
     result; a match is NOT_CLEAN; anything else is UNKNOWN."""
-    if not isinstance(scan, ScanResult):
+    if type(scan) is not ScanResult or type(scan.status) is not str:
         return UNKNOWN
     if scan.status == 'NOT_CLEAN':
         return NOT_CLEAN
@@ -123,29 +135,32 @@ def window_verdict(verdicts: object, *, declared: object, capture_sealed: object
                    preconditions_held: object) -> WindowVerdict:
     """The total allowlist predicate (design 2.3).
 
-    NOT_CLEAN if any surface is NOT_CLEAN. CLEAN only if the verdicts cover
-    exactly the declared surfaces, every retained surface is CLEAN, every
-    removed surface is ABSENT, Contract B's capture is sealed, and the 1.2
-    preconditions held. UNKNOWN otherwise, with fixed reason tokens.
+    NOT_CLEAN if any verdict anywhere is NOT_CLEAN, declared or not ("any
+    match anywhere"). Otherwise CLEAN only if: both mappings are built-in
+    dicts of exact strings; the verdicts cover exactly the declared surfaces;
+    every retained surface is CLEAN; every removed surface is ABSENT; Contract
+    B's capture is sealed; and the 1.2 preconditions held. UNKNOWN otherwise,
+    with fixed reason tokens.
     """
-    reasons: list[str] = []
-    if not isinstance(verdicts, Mapping) or not isinstance(declared, Mapping) or not declared:
+    raw = verdicts if type(verdicts) is dict else {}
+    if any(type(v) is str and v == NOT_CLEAN for v in raw.values()):
+        return WindowVerdict(NOT_CLEAN, ('remnant-matched',), 0, 0)
+    found = _plain(verdicts)
+    decl = _plain(declared)
+    if found is None or decl is None or not decl:
         return WindowVerdict(UNKNOWN, ('evidence-population-mismatch',), 0, 0)
-    if (set(verdicts) != set(declared)
-            or any(d not in (REMOVED, RETAINED) for d in declared.values())):
+    reasons: list[str] = []
+    if set(found) != set(decl) or any(d not in (REMOVED, RETAINED) for d in decl.values()):
         reasons.append('evidence-population-mismatch')
-    removed = sum(1 for d in declared.values() if d == REMOVED)
-    retained = sum(1 for d in declared.values() if d == RETAINED)
-    matched = False
-    for surface, disposition in declared.items():
-        verdict = verdicts.get(surface)
+    removed = sum(1 for d in decl.values() if d == REMOVED)
+    retained = sum(1 for d in decl.values() if d == RETAINED)
+    for surface, disposition in decl.items():
+        verdict = found.get(surface)
         allowed = REMOVED_VERDICTS if disposition == REMOVED else RETAINED_VERDICTS
-        if not isinstance(verdict, str) or verdict not in allowed:
+        if verdict is None or verdict not in allowed:
             if 'unknown-verdict' not in reasons:
                 reasons.append('unknown-verdict')
             continue
-        if verdict == NOT_CLEAN:
-            matched = True
         if disposition == REMOVED and verdict != ABSENT and 'removed-surface-not-absent' not in reasons:
             reasons.append('removed-surface-not-absent')
         if disposition == RETAINED and verdict != CLEAN and 'retained-surface-not-clean' not in reasons:
@@ -154,8 +169,6 @@ def window_verdict(verdicts: object, *, declared: object, capture_sealed: object
         reasons.append('reference-retention-contract-unavailable')
     if preconditions_held is not True:
         reasons.append('preconditions-not-held')
-    if matched:
-        return WindowVerdict(NOT_CLEAN, ('remnant-matched', *reasons), removed, retained)
     return WindowVerdict(CLEAN if not reasons else UNKNOWN, tuple(reasons), removed, retained)
 
 

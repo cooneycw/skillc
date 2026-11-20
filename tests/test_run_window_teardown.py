@@ -784,7 +784,8 @@ def test_a3_composition_reaches_absent_with_sufficient_evidence() -> None:
     {'no_holder': SURV},  # a holder vetoes
 ], ids=['launch-only-isolation', 'domain-veto', 'holder-veto'])
 def test_a3_composition_refuses_absent_when_one_input_fails(override: dict[str, Any]) -> None:
-    assert a3_compose().removed_surface_verdict(**{**SUFFICIENT, **override}) != 'ABSENT'
+    # Exactly UNKNOWN: PRESENT or ABSENT_UNLINKED would also be wrong here.
+    assert a3_compose().removed_surface_verdict(**{**SUFFICIENT, **override}) == 'UNKNOWN'
 
 
 # ------------------------------------------------------------------ fact 3

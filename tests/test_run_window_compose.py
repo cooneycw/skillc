@@ -99,6 +99,44 @@ def test_inputs_of_the_wrong_type_are_never_coerced(field: str, value: Any) -> N
     assert verdict(**{field: value}) == rc.UNKNOWN
 
 
+class EqualToEverything:
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+class AbsentLike(str):
+    """A str subclass that hashes and compares like 'ABSENT'."""
+
+
+class LyingDict(dict[str, str]):
+    def get(self, key: str, default: Any = None) -> Any:
+        return rc.ABSENT
+
+
+@pytest.mark.parametrize('case', ['rescan-int', 'scope-object', 'reresolved-subclass'])
+def test_malformed_evidence_never_yields_absent(case: str) -> None:
+    if case == 'rescan-int':
+        assert verdict(reresolved=Reresolved(NEG, 1)) == rc.UNKNOWN  # type: ignore[arg-type]
+    elif case == 'scope-object':
+        assert verdict(isolation=ScopedObservation(NEG, EqualToEverything())) == rc.UNKNOWN  # type: ignore[arg-type]
+    else:
+        class Sub(Reresolved):
+            pass
+
+        assert verdict(reresolved=Sub(NEG, False)) == rc.UNKNOWN
+
+
+def test_a_status_that_only_compares_equal_is_not_clean_evidence() -> None:
+    fake = ScanResult(EqualToEverything(), b'{}')  # type: ignore[arg-type]
+    assert rc.retained_surface_verdict(fake) == rc.UNKNOWN
+    assert rc.present_surface_verdict(fake) == rc.UNKNOWN
+
+
 def test_present_root_after_its_scan() -> None:
     assert rc.present_surface_verdict(scan('NOT_CLEAN')) == rc.NOT_CLEAN
     for status in ('CLEAN', 'UNKNOWN'):
@@ -163,7 +201,9 @@ def test_one_surface_out_of_place_makes_the_window_unknown(surface: str, value: 
 
 def blind_class_aggregate(verdicts: dict[str, str]) -> str:
     """Reads one verdict per class, so a bad role hides behind a good one."""
-    by_class = {s.rsplit('/', 1)[-1]: v for s, v in sorted(verdicts.items(), reverse=True)}
+    # Ascending order: the later role overwrites the earlier, so one role's
+    # CLEAN hides another's UNKNOWN for the same class.
+    by_class = {s.rsplit('/', 1)[-1]: v for s, v in sorted(verdicts.items())}
     return rc.CLEAN if all(v in (rc.ABSENT, rc.CLEAN) for v in by_class.values()) else rc.UNKNOWN
 
 
@@ -174,9 +214,44 @@ def test_one_unreadable_role_is_not_hidden_by_another_roles_clean() -> None:
     assert window(verdicts, declared=declared).status == rc.UNKNOWN
 
 
-def test_any_match_is_not_clean_whatever_else_is_missing() -> None:
-    result = window({**GOOD, 'w1/worker/vault': rc.NOT_CLEAN}, capture_sealed=False)
-    assert result.status == rc.NOT_CLEAN and result.reasons[0] == 'remnant-matched'
+@pytest.mark.parametrize('case', ['declared', 'declared-with-missing', 'stray', 'empty-declaration',
+                                  'unsealed'])
+def test_any_match_anywhere_is_not_clean(case: str) -> None:
+    verdicts: dict[str, str] = dict(GOOD)
+    declared: dict[str, str] = dict(DECLARED)
+    sealed = True
+    if case == 'declared':
+        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+    elif case == 'declared-with-missing':
+        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+        del verdicts['w1/worker/home']
+    elif case == 'stray':
+        verdicts['stray'] = rc.NOT_CLEAN
+    elif case == 'empty-declaration':
+        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+        declared = {}
+    else:
+        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+        sealed = False
+    result = rc.window_verdict(verdicts, declared=declared, capture_sealed=sealed, preconditions_held=True)
+    assert result.status == rc.NOT_CLEAN and result.reasons == ('remnant-matched',)
+
+
+@pytest.mark.parametrize('case', ['str-subclass-verdict', 'lying-dict', 'non-str-keys', 'dict-subclass'])
+def test_only_plain_dicts_of_exact_strings_are_evidence(case: str) -> None:
+    verdicts: Any = dict(GOOD)
+    declared: Any = dict(DECLARED)
+    if case == 'str-subclass-verdict':
+        verdicts['w1/worker/home'] = AbsentLike(rc.ABSENT)
+    elif case == 'lying-dict':
+        verdicts = LyingDict({**GOOD, 'w1/worker/home': rc.UNKNOWN})
+    elif case == 'non-str-keys':
+        verdicts = {1: rc.ABSENT}
+        declared = {True: rc.REMOVED}
+    else:
+        declared = LyingDict(DECLARED)
+    assert rc.window_verdict(verdicts, declared=declared, capture_sealed=True,
+                             preconditions_held=True).status == rc.UNKNOWN
 
 
 def test_preconditions_must_hold() -> None:
@@ -186,8 +261,9 @@ def test_preconditions_must_hold() -> None:
 
 def test_public_result_is_an_exact_allowlist() -> None:
     result = window({**GOOD, 'w1/worker/home': rc.UNKNOWN}, capture_sealed=False)
-    public = result.public()
-    assert set(public) == {'version', 'status', 'reasons', 'surfaces'}
-    assert set(public['surfaces']) == {'removed', 'retained'}
-    assert all(reason in rc.REASONS for reason in public['reasons'])
-    assert 'w1/worker' not in repr(public)  # No surface name leaves the module.
+    assert result.public() == {'version': 1, 'status': rc.UNKNOWN,
+                               'reasons': ['removed-surface-not-absent',
+                                           'reference-retention-contract-unavailable'],
+                               'surfaces': {'removed': 2, 'retained': 1}}
+    assert all(reason in rc.REASONS for reason in result.public()['reasons'])
+    assert 'w1/worker' not in repr(result.public())  # No surface name leaves the module.
