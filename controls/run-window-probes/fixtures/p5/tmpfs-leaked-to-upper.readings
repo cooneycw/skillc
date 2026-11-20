@@ -1,0 +1,4 @@
+clean tmpfs_in_upper 1
+clean host_present 1
+survivor disk_in_upper 1
+fault disk_in_upper ERR

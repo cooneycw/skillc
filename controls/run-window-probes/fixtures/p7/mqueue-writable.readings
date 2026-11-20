@@ -1,0 +1,12 @@
+clean extra_dirs 1
+clean extra_files 0
+clean planted_dir 0
+clean planted_file 0
+survivor extra_dirs 1
+survivor extra_files 1
+survivor planted_dir 1
+survivor planted_file 1
+fault extra_dirs ERR
+fault extra_files ERR
+fault planted_dir ERR
+fault planted_file ERR
