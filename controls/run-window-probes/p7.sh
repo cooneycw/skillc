@@ -8,6 +8,12 @@
 # Inside the container, the inventory:
 # - requires every declared surface to be a listed mountpoint that accepts a
 #   real marker write and removal (a missing or read-only surface fails);
+# - prunes every directory the container uid cannot search (lib.sh SCAN_LIB:
+#   access(2) X_OK, reported as INFO pruned), and fails on any directory it
+#   can search but not list. The prune rule ASSUMES a quiescent container
+#   (this inventory is its only process, checked by scan_quiescent first);
+#   it must not be reused as-is against a container with live participant
+#   processes;
 # - lists writable directories (GNU find -writable, an access(2) check) on
 #   every mount except proc, sysfs and cgroup, and counts any outside the
 #   declared surfaces;
@@ -70,15 +76,17 @@ gids=$(id -G) || exit 3
 set -- \( -writable -o -perm -0002 -o \( -uid "$uid" -perm -0200 \)
 for g in $gids; do set -- "$@" -o \( -gid "$g" -perm -0020 \); done
 set -- "$@" \)
+# The prune rule assumes a quiescent container: nothing but this inventory.
+scan_quiescent || { printf "inventory: container not quiescent\n" >&2; exit 3; }
 dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
 while IFS=" " read -r fstype opts mp; do
     case $fstype in proc | sysfs | cgroup | cgroup2) continue ;; esac
     case ,$opts, in *,ro,*) ro=1 ;; *) ro=0 ;; esac
     if [ -d "$mp" ]; then
         if [ "$ro" = 1 ]; then
-            find "$mp" -xdev -type d -writable -print >>"$dirs/dirs" || : >"$dirs/failed"
+            scan "$dirs/pruned" "$mp" xdev "" -type d -writable >>"$dirs/dirs" || : >"$dirs/failed"
         else
-            find "$mp" -xdev -type d "$@" -print >>"$dirs/dirs" || : >"$dirs/failed"
+            scan "$dirs/pruned" "$mp" xdev "" -type d "$@" >>"$dirs/dirs" || : >"$dirs/failed"
         fi
     elif [ -e "$mp" ] || [ -L "$mp" ]; then
         if [ "$ro" = 1 ]; then
@@ -93,6 +101,8 @@ done <<EOT
 $mounts
 EOT
 [ ! -e "$dirs/failed" ] || exit 3
+# ...and after it: nothing else may have run while the scan ran.
+scan_quiescent || { printf "inventory: container not quiescent after the scan\n" >&2; exit 3; }
 outside() {
     c=0
     if [ -e "$1" ]; then
@@ -112,8 +122,10 @@ pd=0
 pf=0
 if [ -e "$dirs/dirs" ] && grep -qx /probe-extra "$dirs/dirs"; then pd=1; fi
 if [ -e "$dirs/files" ] && grep -qx /probe-extra-file "$dirs/files"; then pf=1; fi
+pl=$(pruned_lines "$dirs/pruned")
 rm -rf "$dirs"
 printf "%s %s %s %s\n" "$nd" "$nf" "$pd" "$pf"
+[ -z "$pl" ] || printf "%s\n" "$pl"
 '
 
 observe() {
@@ -147,7 +159,7 @@ observe() {
         # shellcheck disable=SC2086  # each element is built above from fixed text
         create_container --read-only --network none --ipc private --log-driver none \
             --user "$user" $_m -e "DECLARED=$DECLARED" \
-            -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
+            -- "$PROBE_IMAGE_ID" sh -c "$SCAN_LIB$INVENTORY"
         _rc=0
         out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?
         # Bounded stderr and the exit status, so a failed inventory names its
@@ -160,9 +172,12 @@ observe() {
                 probe_die 'fault-arm-not-exercised'
             fi
             set --
-        elif [ "$_rc" -eq 0 ]; then
+        elif [ "$_rc" -eq 0 ] && scan_report "$_arm" "$out"; then
+            # Globbing off while splitting, so no field can expand to a file.
+            set -f
             # shellcheck disable=SC2086  # four space-separated numbers
-            set -- $out
+            set -- $SCAN_HEAD
+            set +f
         else
             set --
         fi

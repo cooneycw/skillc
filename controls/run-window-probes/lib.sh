@@ -519,6 +519,218 @@ upper_dir_of() {
     PROBE_UPPER=$_held
 }
 
+# ---- In-container scans (P7, P8) ----
+#
+# SCAN_LIB is sh source the P7 inventory and the P8 socket scan prepend to
+# the script they run inside the container, and that the self-test runs
+# against crafted trees as an unprivileged uid. It holds the one prune rule.
+# shellcheck disable=SC2016  # expands inside the container
+SCAN_LIB='
+# scan PRUNED ROOT XDEV EXCLUDES TEST...: GNU find over ROOT printing every
+# path that matches TEST (find primaries), with two kinds of pruning:
+# - each absolute path in EXCLUDES (space-separated) is pruned unexamined;
+# - a directory this uid cannot SEARCH is pruned, and its path is appended to
+#   PRUNED, but ONLY when every one of these holds: access(2) X_OK as this
+#   uid says no (`! -executable`, evaluated once per directory); the mode
+#   bits of the class that applies to this uid (group if the directory group
+#   is one of its groups, else other) grant no search; it is not owned by
+#   this uid (which could chmod it); its full path has no newline; and, checked
+#   after the walk, it carries no ACL, so the mode bits are the whole
+#   permission and the denial cannot be an I/O error standing in for one. Without
+#   search permission nothing at or below the directory can be created,
+#   renamed, unlinked or opened (a socket included) by a fresh path lookup
+#   from this root. That holds for write without search too: write alone
+#   permits no entry change, so such a directory is never counted writable.
+# A denial the mode bits do not explain (an ACL, an I/O error), a directory
+# owned by this uid, a path containing a newline, or a pruned directory that
+# carries an ACL is AMBIGUOUS: it is not descended, and scan returns 1. A directory the uid can search
+# but not read is not pruned: find fails to list it and scan returns 1. Any
+# other find error returns 1. If anything was pruned, the scan identity must
+# also be plain: a non-root uid, real, effective, saved and filesystem ids
+# equal, and no effective or permitted capability (so access(2) answers for
+# the lookups it stands for). It is read from this shell process status,
+# the credentials find is started from; a set-id or file-capability find
+# binary is outside the scan scope.
+# XDEV is "xdev" or "all". The verdict this supports is scoped to fresh
+# pathname lookup from ROOT under this identity, at the observation instant,
+# in a quiescent tree: the probe container runs no other process that could
+# change it while the scan runs (see the probes README).
+scan() {
+    _pr=$1
+    _root=$2
+    _xd=$3
+    _ex=$4
+    shift 4
+    _u=$(id -u) || return 1
+    _gs=$(id -G) || return 1
+    case "$_u $_gs" in *[!0-9\ ]*) return 1 ;; esac
+    _g=
+    for _x in $_gs; do _g="$_g${_g:+ -o} -gid $_x"; done
+    [ -n "$_g" ] || return 1
+    _nlpat=$(printf "*\n*_")
+    _nlpat=${_nlpat%_}
+    : >"$_pr.amb" || return 1
+    # One access(2) evaluation per directory: an unsearchable directory is
+    # recorded as AMBIGUOUS or as PRUNED by the same test, then pruned.
+    eval "set -- \\( -type d ! -executable \\( \\( \\( -path \"\$_nlpat\" -o -uid $_u -o ! \\( \\( \\( $_g \\) ! -perm -g+x \\) -o \\( ! \\( $_g \\) ! -perm -o+x \\) \\) \\) -fprint \"\$_pr.amb\" \\) -o -fprintf \"\$_pr.new\" \"%D %i %p\\\\n\" \\) -prune \\) -o \\( \"\$@\" \\) -print"
+    for _e in $_ex; do set -- \( -path "$_e" -prune \) -o "$@"; done
+    if [ "$_xd" = xdev ]; then set -- -xdev "$@"; fi
+    find "$_root" "$@" || return 1
+    [ ! -s "$_pr.amb" ] || return 1
+    if [ -s "$_pr.new" ]; then
+        scan_identity_plain || return 1
+        scan_recheck "$_pr.new" "$_u" "$_g" || return 1
+    fi
+    cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1
+    rm -f "$_pr.new" "$_pr.amb"
+}
+# scan_identity_plain: a non-root uid, real, effective, saved and filesystem
+# uids and gids equal, and all-zero effective and permitted capability sets,
+# read from /proc/self (the reading process inherits this shell identity).
+scan_identity_plain() {
+    awk "\$1 == \"Uid:\" { u = (\$2 != 0 && \$2 == \$3 && \$3 == \$4 && \$4 == \$5); nu++ }
+         \$1 == \"Gid:\" { g = (\$2 == \$3 && \$3 == \$4 && \$4 == \$5); ng++ }
+         \$1 == \"CapEff:\" { c = (\$2 ~ /^0+\$/); nc++ }
+         \$1 == \"CapPrm:\" { p = (\$2 ~ /^0+\$/); np++ }
+         END { exit (nu == 1 && ng == 1 && nc == 1 && np == 1 && u && g && c && p) ? 0 : 1 }" \
+        "/proc/$$/status"
+}
+# scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
+# "DEV INO PATH") must have no symlink component and no ancestor up to /
+# that lets this uid replace a path component (owned or writable by it,
+# unless sticky, owned by another, and over an entry it does not own),
+# must still be the
+# same inode, list (with its inode, which must match) with a plain mode string
+# ("d" and nine permission characters, optionally "." for an SELinux context,
+# never "+" for an ACL), and then still match the prune predicate: not
+# searchable, no search bit in its class, not owned by U. Listing then
+# re-matching means a change between the walk and the check is seen, unless
+# another uid changes the directory and changes it back in between, which is
+# outside the scan scope.
+scan_recheck() {
+    while IFS= read -r _rec; do
+        _d=${_rec%% *}
+        _r=${_rec#* }
+        _i=${_r%% *}
+        _p=${_r#* }
+        case $_p in /*) ;; *) return 1 ;; esac
+        # No path component may be a symlink, and no ancestor up to / may let
+        # this uid replace the next component: the ancestor is neither owned
+        # nor writable by this uid, or it is sticky, not owned by this uid,
+        # and the next component is not owned by this uid either (a sticky
+        # directory lets only the entry or directory owner rename or replace
+        # an entry). So no component can be substituted between the steps
+        # below.
+        _c=$_p
+        _a=${_p%/*}
+        while :; do
+            _y=$(find "$_c" -maxdepth 0 -type l) || return 1
+            [ -z "$_y" ] || return 1
+            _x=$(find "$_a/" -maxdepth 0 \( -uid "$2" -o -writable \)) || return 1
+            if [ -n "$_x" ]; then
+                _k=$(find "$_a/" -maxdepth 0 -perm -1000 ! -uid "$2") || return 1
+                _o=$(find "$_c" -maxdepth 0 ! -uid "$2") || return 1
+                if [ -z "$_k" ] || [ -z "$_o" ]; then return 1; fi
+            fi
+            [ -n "$_a" ] || break
+            _c=$_a
+            _a=${_a%/*}
+        done
+        # The listing carries its inode, which must be the walk inode, so the
+        # ACL observation is of the directory the two finds identify.
+        _l=$(ls -ldi -- "$_p") || return 1
+        [ "${_l%% *}" = "$_i" ] || return 1
+        _l=${_l#* }
+        case ${_l%% *} in d?????????  | d?????????.) ;; *) return 1 ;; esac
+        eval "_m=\$(find \"\$_p\" -maxdepth 0 -type d ! -executable ! -uid $2 \\( \\( \\( $3 \\) ! -perm -g+x \\) -o \\( ! \\( $3 \\) ! -perm -o+x \\) \\) -printf \"%D %i\")" \
+            || return 1
+        [ "$_m" = "$_d $_i" ] || return 1
+    done <"$1"
+}
+# scan_quiescent [PID1-NAME]: exit 0 only if the container pid namespace
+# holds exactly the processes the scan expects, and nothing else:
+# - this shell, and the awk that performs this check;
+# - with no PID1-NAME (P7): this shell must itself be pid 1;
+# - with PID1-NAME (P8: sleep): pid 1 must be a process of that name with
+#   no parent in the namespace, and this shell must have been exec-ed beside
+#   it (no parent in the namespace either).
+# Every numeric /proc entry must yield exactly one readable, well-formed
+# record whose Pid matches its directory; a missing, unreadable, malformed or
+# duplicated record, an empty listing, or any other process fails. Callers
+# run it before AND after the scan. The prune rule ASSUMES a quiescent
+# container: this checks that the construction held, it does not admit
+# concurrency. SCAN_PROC (default /proc) is the procfs listed; the self-test
+# points it at a stub.
+scan_quiescent() {
+    _w1=${1:-}
+    _proc=${SCAN_PROC:-/proc}
+    case $- in *f*) _gf=1; set +f ;; *) _gf=0 ;; esac
+    set -- "$_proc"/[0-9]*
+    if [ "$_gf" = 1 ]; then set -f; fi
+    [ -e "$1" ] || return 1
+    _n=$#
+    for _d do set -- "$@" "$_d/status"; done
+    shift "$_n"
+    awk -v me="$$" -v want1="$_w1" "
+        BEGIN {
+            while ((getline l < \"/proc/self/status\") > 0)
+                if (l ~ /^Pid:/) { split(l, f); self = f[2] }
+        }
+        FNR == 1 { files++; d = FILENAME; sub(/\/status\$/, \"\", d); sub(/.*\//, \"\", d); cur = d }
+        \$1 == \"Pid:\" { pid[cur] = \$2; np[cur]++ }
+        \$1 == \"PPid:\" { pp[cur] = \$2; npp[cur]++ }
+        \$1 == \"Name:\" { nm[cur] = \$2; nn[cur]++ }
+        END {
+            if (files != ARGC - 1 || !(me in pid)) exit 1
+            for (p in pid) {
+                if (np[p] != 1 || npp[p] != 1 || nn[p] != 1 || pid[p] != p) exit 1
+                allowed = (p == me || p == self)
+                if (p == 1 && want1 != \"\" && me != 1 && nm[p] == want1 && pp[p] == 0) allowed = 1
+                if (!allowed) exit 1
+            }
+            if (want1 == \"\") { if (me != 1) exit 1 }
+            else if (me == 1 || !(1 in pid) || pp[me] != 0) exit 1
+        }" "$@"
+}
+# pruned_lines PRUNED: one "PRUNED <path>" line per pruned directory, or
+# "PRUNED-W <path>" for one this uid may write but not search. Paths never
+# contain a newline (scan refuses those).
+pruned_lines() {
+    [ -s "$1" ] || return 0
+    while IFS= read -r _p; do
+        if [ -w "$_p" ]; then printf "PRUNED-W %s\n" "$_p"; else printf "PRUNED %s\n" "$_p"; fi
+    done <"$1"
+}
+'
+
+# scan_report ARM OUTPUT: split an in-container scan's output into its first
+# line, set as SCAN_HEAD, and its "PRUNED <path>" / "PRUNED-W <path>" lines.
+# A tag must be exact and its path absolute. Each is reported as
+# `INFO pruned <arm> <path> unsearchable`, plus
+# ` writable-without-search` for PRUNED-W. Bytes outside printable ASCII
+# become '?', and at most 64 are listed, then a count. Returns 1 if any other
+# line appears, so unexpected output is an observation failure. Pure.
+scan_report() {
+    SCAN_HEAD=$(printf '%s\n' "$2" | sed -n 1p)
+    printf '%s\n' "$2" | LC_ALL=C awk -v a="$1" '
+        NR == 1 { next }
+        /^PRUNED \// || /^PRUNED-W \// {
+            n++
+            if (n <= 64) {
+                p = substr($0, index($0, " ") + 1)
+                gsub(/[^ -~]/, "?", p)
+                w = ($1 == "PRUNED-W") ? " writable-without-search" : ""
+                print "INFO pruned " a " " p " unsearchable" w
+            }
+            next
+        }
+        { bad = 1 }
+        END {
+            if (n > 64) print "INFO pruned " a " truncated " n
+            exit bad ? 1 : 0
+        }'
+}
+
 # ---- Step diagnostics (P5, P7, P8) ----
 
 # step_drain FILE: read stdin to EOF, keeping only its first 2048 bytes in

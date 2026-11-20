@@ -23,10 +23,15 @@ No live arm is run here, and nothing needs root, Docker or a VM.
 
 from __future__ import annotations
 
+import os
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -534,9 +539,23 @@ WIRING = {
               'upper_dir_of "$cid" 9'],
     "p6.sh": ['upper_dir_of "$c1" 9', 'upper_dir_of "$c2" 8'],
     "p7.sh": ['out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?',
+              'scan_quiescent || { printf "inventory: container not quiescent\\n" >&2; exit 3; }',
+              ('scan_quiescent || { printf "inventory: container not quiescent after the scan\\n"'
+               ' >&2; exit 3; }'),
+              '            set -f\n',
+              '            set -- $SCAN_HEAD\n            set +f\n',
+              '-- "$PROBE_IMAGE_ID" sh -c "$SCAN_LIB$INVENTORY"',
+              'scan "$dirs/pruned" "$mp" xdev "" -type d -writable >>"$dirs/dirs"',
+              'scan "$dirs/pruned" "$mp" xdev "" -type d "$@" >>"$dirs/dirs"',
+              'elif [ "$_rc" -eq 0 ] && scan_report "$_arm" "$out"; then',
               'step_diag "$_arm" inventory "$_rc" "$PROBE_SCRATCH/$_arm.err"'],
     "p8.sh": ['b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?',
-              'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c',
+              'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"',
+              'o=$(scan "$t/pruned" / all "/proc /sys" -type s)',
+              'scan_quiescent sleep || { printf "scan: container not quiescent\\n" >&2; exit 3; }',
+              ('scan_quiescent sleep || { printf "scan: container not quiescent after the scan\\n"'
+               ' >&2; exit 3; }'),
+              'if [ "$_rc" -eq 0 ] && scan_report "$1" "$v" && is_uint "${SCAN_HEAD% *}"',
               'step_diag "$1" binds "$_rc" "$PROBE_SCRATCH/$1.binds.err"',
               'step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"'],
 }
@@ -548,6 +567,7 @@ def test_live_steps_are_wired_through_the_bounded_capture(script: str) -> None:
     for line in WIRING[script]:
         assert text.count(line) == 1, line
     assert "2>/dev/null) && is_uint" not in text, "an in-container step is blind again"
+    assert "find / " not in text and 'find "$mp" -xdev' not in text, "a scan bypasses SCAN_LIB"
 
 
 # ---- upper_dir_of against a stubbed docker and procfs ----
@@ -761,3 +781,671 @@ def test_marker_proof_refuses_a_bind_mounted_tmp(tmp_path: Path) -> None:
     finally:
         subprocess.run(["umount", str(held / "tmp")], check=False, timeout=30)
     assert results == ["NO", "MATCH"]
+
+
+
+# ---- The in-container prune rule (lib.sh SCAN_LIB), on crafted trees ----
+#
+# The first live P7/P8 run read OBSERVATION_FAILED on every live arm: the
+# image has four root-only directories the probe uid cannot search, and the
+# whole-filesystem find exited nonzero on them. The rule: a directory the uid
+# cannot SEARCH, by access(2) AND by the mode bits of its class, and that it
+# does not own, is unreachable by a fresh path lookup, so it is pruned and
+# reported. Any other denial (an ACL, a probe-owned directory, a newline
+# name), or a directory it can search but not read, FAILS the scan. Each case
+# runs the real SCAN_LIB as nobody (dropped from root) over a root-owned tree
+# under a short, traversable /tmp parent, so the tree's permission bits apply.
+
+ROOT_RUN = os.geteuid() == 0
+NOBODY = 65534
+APT_UID = 42
+needs_root_drop = pytest.mark.skipif(not ROOT_RUN or shutil.which("find") is None,
+                                     reason="needs root (to build root-owned trees and "
+                                            "drop to nobody) and find")
+
+#: Permission classes for nobody, which is "other" on these root-owned trees.
+MODES = {
+    "open": 0o755,      # search + read, no write
+    "open-w": 0o757,    # search + read + write
+    "noexec": 0o750,    # no search
+    "wnx": 0o752,       # write, no search
+    "xnr": 0o751,       # search, no read
+    "owner-noexec": 0o600,  # for a nobody-owned directory: no search by any class
+    "owner-ro": 0o555,      # for a nobody-owned directory: searchable, not writable
+}
+
+#: The image's four root-only directories from the live run.
+IMAGE_PRUNED = ["root", "etc/ssl/private", "var/cache/ldconfig", "var/cache/apt/archives/partial"]
+NL_DIR = "odd\nname"
+
+
+def _image_tree() -> list[tuple[str, str, str]]:
+    """Every pruned directory hides a writable directory and a socket, so a
+    prune that descended, or one that failed to prune, would find them."""
+    tree = [(d, "dir", "open") for d in ("etc", "etc/ssl", "var", "var/cache", "var/cache/apt",
+                                         "var/cache/apt/archives")]
+    for d in IMAGE_PRUNED:
+        # Debian's apt partial directory is owned by _apt (uid 42), not root.
+        kind = "apt-dir" if d.endswith("/partial") else "dir"
+        tree += [(d, kind, "noexec"), (f"{d}/inner", "dir", "open-w"), (f"{d}/s.sock", "sock", "")]
+    return tree
+
+
+#: case -> entries (relative path, kind, final class), parents first. Kinds:
+#: "dir" (root-owned), "apt-dir" (owned by uid 42, as Debian's apt partial
+#: directory is), "nobody-dir" (owned by the scanning uid) and "sock".
+SCAN_TREES: dict[str, list[tuple[str, str, str]]] = {
+    "image-shape": _image_tree(),
+    "searchable-not-readable": [("opt", "dir", "open"), ("opt/locked", "dir", "xnr"),
+                                ("opt/locked/inner", "dir", "open-w")],
+    "survivor-beside-pruned": _image_tree() + [("srv", "dir", "open"),
+                                               ("srv/drop", "dir", "open-w"),
+                                               ("srv/s.sock", "sock", "")],
+    "write-without-search": [("spool", "dir", "wnx"), ("spool/inner", "dir", "open-w")],
+    "probe-owned-unsearchable": [("home", "dir", "open"),
+                                 ("home/mine", "nobody-dir", "owner-noexec")],
+    # The uid owns the parent (not writable now, but it could chmod it).
+    "parent-owned": [("own", "nobody-dir", "owner-ro"), ("own/locked", "dir", "noexec")],
+    # The uid may write the parent, so it could substitute the entry.
+    "parent-writable": [("pub", "dir", "open-w"), ("pub/locked", "dir", "noexec")],
+    # The newline is in an ANCESTOR; the pruned directory's own name is plain.
+    "newline-name": [(NL_DIR, "dir", "open"), (f"{NL_DIR}/locked", "dir", "noexec")],
+}
+
+#: (writable-scan ok, socket-scan ok, writable dirs, sockets, pruned lines)
+ScanResult = tuple[bool, bool, list[str], list[str], list[str]]
+
+#: case -> its ScanResult. A failed scan's partial output is never evidence,
+#: so it is not compared.
+SCAN_EXPECT: dict[str, ScanResult] = {
+    "image-shape": (True, True, [], [], [f"PRUNED {d}" for d in IMAGE_PRUNED]),
+    "searchable-not-readable": (False, False, [], [], []),
+    "survivor-beside-pruned": (True, True, ["srv/drop"], ["srv/s.sock"],
+                               [f"PRUNED {d}" for d in IMAGE_PRUNED]),
+    "write-without-search": (True, True, [], [], ["PRUNED-W spool"]),
+    "probe-owned-unsearchable": (False, False, [], [], []),
+    "newline-name": (False, False, [], [], []),
+    "parent-writable": (False, False, [], [], []),
+    "parent-owned": (False, False, [], [], []),
+
+}
+
+SCAN_SCRIPT = """
+set -euf
+w=0
+scan "$1/w.pruned" "$2" all "" -type d -writable >"$1/w.match" || w=$?
+s=0
+scan "$1/s.pruned" "$2" all "" -type s >"$1/s.match" || s=$?
+echo "rc=$w $s"
+sed "s|^$2/||" "$1/w.match" | sed "s/^/W /"
+sed "s|^$2/||" "$1/s.match" | sed "s/^/S /"
+if [ "$w" = 0 ]; then pruned_lines "$1/w.pruned" | sed "s|$2/||"; fi
+"""
+
+
+def scan_lib_text(lib: Path) -> str:
+    run = subprocess.run(["sh", "-c", '. "$1"; printf "%s" "$SCAN_LIB"', "sh", str(lib)],
+                         capture_output=True, text=True, check=True, timeout=30)
+    return run.stdout
+
+
+def short_dir(prefix: str) -> Path:
+    """A fresh directory directly under /tmp (short, so socket paths fit;
+    /tmp is world-searchable, so nobody can reach it)."""
+    path = Path(tempfile.mkdtemp(prefix=prefix, dir="/tmp"))
+    path.chmod(0o755)
+    return path
+
+
+def build_tree(base: Path, case: str, made: list[Path]) -> None:
+    """Create the case's tree, registering each directory in `made` as it is
+    created, then apply the final modes children first."""
+    final: dict[Path, str] = {base: "open"}
+    for rel, kind, cls in SCAN_TREES[case]:
+        path = base / rel
+        if kind == "sock":
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.bind(str(path))
+            continue
+        path.mkdir()
+        made.append(path)
+        if kind == "nobody-dir":
+            os.chown(path, NOBODY, NOBODY)
+        elif kind == "apt-dir":
+            os.chown(path, APT_UID, 0)
+        final[path] = cls
+    for path in sorted(final, key=lambda p: len(p.parts), reverse=True):
+        path.chmod(MODES[final[path]])
+
+
+def run_scan_script(lib: Path, shell: str, script: str,
+                    *args: str) -> subprocess.CompletedProcess[str]:
+    """Run SCAN_LIB plus a script as nobody, with the given arguments."""
+    return subprocess.run([shell, "-c", scan_lib_text(lib) + script, shell, *args],
+                          capture_output=True, text=True, cwd="/",
+                          env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=60,
+                          user=NOBODY, group=NOBODY, extra_groups=[])
+
+
+def run_scan(lib: Path, case: str, shell: str) -> ScanResult:
+    tree = short_dir("ss-")
+    work = short_dir("so-")
+    made: list[Path] = []
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        build_tree(tree, case, made)
+        run = run_scan_script(lib, shell, SCAN_SCRIPT, str(work), str(tree))
+    finally:
+        for path in [tree, *made]:
+            path.chmod(0o755)
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    lines = run.stdout.splitlines()
+    assert lines and lines[0].startswith("rc="), (run.stdout, run.stderr)
+    w_rc, s_rc = lines[0][3:].split()
+    w_ok, s_ok = w_rc == "0", s_rc == "0"
+    found_w = sorted(line[2:] for line in lines[1:] if line.startswith("W ")) if w_ok else []
+    found_s = sorted(line[2:] for line in lines[1:] if line.startswith("S ")) if s_ok else []
+    pruned = sorted(line for line in lines[1:] if line.startswith("PRUNED")) if w_ok else []
+    return (w_ok, s_ok, found_w, found_s, pruned)
+
+
+def scan_expected(case: str) -> ScanResult:
+    w_ok, s_ok, w, so, pr = SCAN_EXPECT[case]
+    return (w_ok, s_ok, sorted(w), sorted(so), sorted(pr))
+
+
+def test_scan_cases_have_expectations() -> None:
+    assert set(SCAN_TREES) == set(SCAN_EXPECT)
+
+
+@needs_root_drop
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("case", sorted(SCAN_TREES))
+def test_scan_prune_rule_case(case: str, shell: str) -> None:
+    assert run_scan(LIB, case, shell) == scan_expected(case)
+
+
+def acl_unavailable(reason: str, env: Mapping[str, str] | None = None) -> NoReturn:
+    """The ACL cases have no execution record except CI, where the gate
+    installs acl. So under CI (Woodpecker sets CI=woodpecker; any non-empty CI
+    counts) an unavailable ACL path FAILS, and a green CI proves both cases ran.
+    Elsewhere (the runner VM has no acl package) it skips, as before."""
+    if (env if env is not None else os.environ).get("CI"):
+        pytest.fail(f"ACL case could not run under CI: {reason}")
+    pytest.skip(reason)
+
+
+def require_root_drop(root: bool = ROOT_RUN, find: str | None = "default",
+                      env: Mapping[str, str] | None = None) -> None:
+    """The ACL cases' root gate, routed through acl_unavailable: under CI a
+    missing root (or find) fails, so a green CI still proves they ran."""
+    if find == "default":
+        find = shutil.which("find")
+    if not root or find is None:
+        acl_unavailable("needs root (to build root-owned trees and drop to nobody) and find", env)
+
+
+def require_setfacl() -> None:
+    if shutil.which("setfacl") is None:
+        acl_unavailable("setfacl is required")
+
+
+def set_acl_or_unavailable(path: Path) -> None:
+    acl = subprocess.run(["setfacl", "-m", f"u:{NOBODY}:---", str(path)],
+                         capture_output=True, check=False, timeout=30)
+    if acl.returncode != 0:
+        acl_unavailable("this filesystem refuses POSIX ACLs")
+
+
+@pytest.mark.parametrize(("env", "outcome"), [({"CI": "woodpecker"}, "failed"),
+                                              ({"CI": "true"}, "failed"),
+                                              ({"CI": ""}, "skipped"), ({}, "skipped")])
+def test_acl_gate_fails_under_ci_and_skips_elsewhere(env: dict[str, str], outcome: str) -> None:
+    try:
+        acl_unavailable("setfacl is required", env)
+    except pytest.fail.Exception:
+        got = "failed"
+    except pytest.skip.Exception:
+        got = "skipped"
+    else:
+        got = "returned"
+    assert got == outcome
+
+
+@pytest.mark.parametrize(("root", "find", "env", "outcome"), [
+    (False, "/usr/bin/find", {"CI": "woodpecker"}, "failed"),
+    (True, None, {"CI": "woodpecker"}, "failed"),
+    (False, "/usr/bin/find", {}, "skipped"),
+    (True, "/usr/bin/find", {"CI": "woodpecker"}, "returned"),
+    (True, "/usr/bin/find", {}, "returned"),
+])
+def test_acl_root_gate_fails_under_ci_and_skips_elsewhere(root: bool, find: str | None,
+                                                          env: dict[str, str],
+                                                          outcome: str) -> None:
+    try:
+        require_root_drop(root, find, env)
+    except pytest.fail.Exception:
+        got = "failed"
+    except pytest.skip.Exception:
+        got = "skipped"
+    else:
+        got = "returned"
+    assert got == outcome
+
+
+def test_scan_fails_on_a_denial_the_mode_bits_do_not_explain() -> None:
+    """The mode bits grant nobody search, but a named-user ACL entry denies
+    it: access(2) and the mode disagree, so the scan must fail, not prune."""
+    require_root_drop()
+    require_setfacl()
+    tree = short_dir("sa-")
+    work = short_dir("so-")
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        (tree / "acl").mkdir()
+        (tree / "acl").chmod(0o755)
+        set_acl_or_unavailable(tree / "acl")
+        script = 'scan "$1/p" "$2" all "" -type d -writable >/dev/null && echo OK || echo FAILED'
+        run = run_scan_script(LIB, "sh", script, str(work), str(tree))
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    assert run.stdout.strip() == "FAILED", (run.stdout, run.stderr)
+
+
+def acl_scan(lib: Path) -> str:
+    """A root-owned directory whose mode denies nobody search (o-x) and that
+    also carries an ACL: the mode bits are not the whole permission, so the
+    pruned path's post-check must fail the scan."""
+    tree = short_dir("sp-")
+    work = short_dir("so-")
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        (tree / "acl").mkdir()
+        (tree / "acl").chmod(MODES["noexec"])
+        set_acl_or_unavailable(tree / "acl")
+        script = 'scan "$1/p" "$2" all "" -type d -writable >/dev/null && echo OK || echo FAILED'
+        run = run_scan_script(lib, "sh", script, str(work), str(tree))
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    return run.stdout.strip()
+
+
+def test_scan_fails_on_a_pruned_directory_that_carries_an_acl(tmp_path: Path) -> None:
+    require_root_drop()
+    require_setfacl()
+    old = 'scan_recheck "$_pr.new" "$_u" "$_g" || return 1'
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, ":"))
+    assert acl_scan(LIB) == "FAILED"
+    assert acl_scan(mutated) == "OK"
+
+
+#: Two -xdev calls sharing one report, and an exclusion that hides a
+#: directory which would fail the scan if it were examined.
+APPEND_SCRIPT = """
+set -euf
+scan "$1/p" "$2/a" xdev "" -type d -writable >/dev/null
+scan "$1/p" "$2/b" xdev "$2/b/skip" -type d -writable >/dev/null
+pruned_lines "$1/p" | sed "s|$2/||"
+"""
+
+
+def run_append(lib: Path) -> list[str]:
+    tree = short_dir("sx-")
+    work = short_dir("so-")
+    made: list[Path] = []
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        for rel in ("a", "a/n", "b", "b/n", "b/skip", "b/skip/locked"):
+            (tree / rel).mkdir()
+            made.append(tree / rel)
+        for rel, cls in (("a/n", "noexec"), ("b/n", "noexec"), ("b/skip/locked", "xnr"),
+                         ("b/skip", "open"), ("a", "open"), ("b", "open")):
+            (tree / rel).chmod(MODES[cls])
+        run = run_scan_script(lib, "sh", APPEND_SCRIPT, str(work), str(tree))
+    finally:
+        for path in [tree, *made]:
+            path.chmod(0o755)
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    return [f"rc={run.returncode}", *sorted(run.stdout.splitlines())]
+
+
+@needs_root_drop
+def test_scan_appends_across_calls_and_honours_exclusions() -> None:
+    assert run_append(LIB) == ["rc=0", "PRUNED a/n", "PRUNED b/n"]
+
+
+@needs_root_drop
+def test_scan_fails_on_a_missing_root() -> None:
+    work = short_dir("so-")
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        script = 'scan "$1/p" "$1/absent" all "" -type d && echo OK || echo FAILED'
+        run = run_scan_script(LIB, "sh", script, str(work))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    assert run.stdout.strip() == "FAILED", (run.stdout, run.stderr)
+
+
+#: Fragments of the eval-built expression, exactly as they appear in lib.sh.
+EXPR_HEAD = 'eval "set -- \\\\( -type d ! -executable \\\\( \\\\( \\\\('
+EXPR_TAIL = '-prune \\\\) -o \\\\( \\"\\$@\\" \\\\) -print"'
+AMBIGUOUS_HEAD = '-path \\"\\$_nlpat\\" -o -uid $_u -o '
+
+#: The post-check, as it appears in lib.sh. A twin that weakens the walk must
+#: also remove it where it independently refuses what the walk mutant
+#: admits: a twin that weakens one of two layers cannot change the result.
+RECHECK = 'scan_recheck "$_pr.new" "$_u" "$_g" || return 1'
+
+#: (blind copy name, [(exact lib.sh text, weakened text), ...], case)
+SCAN_TWINS: list[tuple[str, list[tuple[str, str]], str]] = [
+    ("prune-on-any-denial",
+     [(EXPR_TAIL,
+       ('-prune \\\\) -o \\\\( -type d ! -readable -fprint \\"\\$_pr.new\\" -prune \\\\) -o '
+        '\\\\( \\"\\$@\\" \\\\) -print"')),
+      (RECHECK, ":")],
+     "searchable-not-readable"),
+    ("prune-every-directory", [(EXPR_HEAD, 'eval "set -- \\\\( -type d \\\\( \\\\( \\\\(')],
+     "survivor-beside-pruned"),
+    ("write-without-search-counted",
+     [(EXPR_HEAD,
+       ('eval "set -- \\\\( \\"\\$@\\" \\\\) -print -o '
+        '\\\\( -type d ! -executable \\\\( \\\\( \\\\('))],
+     "write-without-search"),
+    ("pruned-dirs-unrecorded", [('cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":")],
+     "image-shape"),
+    ("ambiguity-ignored", [('[ ! -s "$_pr.amb" ] || return 1', ":")],
+     "probe-owned-unsearchable"),
+    ("writable-parent-unchecked", [('if [ -n "$_x" ]; then', "if false; then")],
+     "parent-writable"),
+    ("owned-ancestor-unchecked", [('\\( -uid "$2" -o -writable \\)', "-writable")],
+     "parent-owned"),
+    ("ownership-unchecked",
+     [(AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o '), ("! -uid $2 ", "")],
+     "probe-owned-unsearchable"),
+]
+
+
+def mutate(source: str, edits: list[tuple[str, str]]) -> str:
+    for old, new in edits:
+        assert source.count(old) == 1, f"the mutation anchor moved; update the twin: {old!r}"
+        source = source.replace(old, new)
+    return source
+
+
+@needs_root_drop
+@pytest.mark.parametrize(("blind", "edits", "case"), SCAN_TWINS, ids=[t[0] for t in SCAN_TWINS])
+def test_scan_blind_twin_is_caught(tmp_path: Path, blind: str, edits: list[tuple[str, str]],
+                                   case: str) -> None:
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(mutate(LIB.read_text(), edits))
+    real = run_scan(LIB, case, "sh")
+    weak = run_scan(mutated, case, "sh")
+    assert real == scan_expected(case)
+    # The twin must DISAGREE with the real rule, not merely miss the
+    # expectation: a twin whose output matches the real one is a blind control.
+    assert weak != real, blind
+
+
+def symlink_root_scan(lib: Path) -> str:
+    """The scan root reaches a pruned directory through a symlinked
+    component (alias -> real): the post-check must refuse it, since the
+    lexical ancestors would not be the real ones."""
+    tree = short_dir("sl-")
+    work = short_dir("so-")
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        (tree / "real").mkdir()
+        (tree / "real" / "locked").mkdir()
+        (tree / "real" / "locked").chmod(MODES["noexec"])
+        (tree / "real").chmod(MODES["open"])
+        (tree / "alias").symlink_to(tree / "real")
+        script = ('scan "$1/p" "$2/alias/" all "" -type d -writable >/dev/null'
+                  ' && echo OK || echo FAILED')
+        run = run_scan_script(lib, "sh", script, str(work), str(tree))
+    finally:
+        (tree / "real" / "locked").chmod(0o755)
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    return run.stdout.strip()
+
+
+@needs_root_drop
+def test_scan_refuses_a_pruned_directory_behind_a_symlinked_component(tmp_path: Path) -> None:
+    old = '[ -z "$_y" ] || return 1'
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, ":"))
+    assert symlink_root_scan(LIB) == "FAILED"
+    assert symlink_root_scan(mutated) == "OK"
+
+
+@needs_root_drop
+def test_scan_newline_twin_is_caught(tmp_path: Path) -> None:
+    """A newline path is refused twice: the walk's -path guard, and the
+    post-check, which cannot parse a split record. Either alone fails the
+    scan, so the twin removes both."""
+    source = LIB.read_text()
+    weakened = source
+    for old, new in ((AMBIGUOUS_HEAD, "-uid $_u -o "),
+                     ('scan_recheck "$_pr.new" "$_u" "$_g" || return 1', ":")):
+        assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+        weakened = weakened.replace(old, new)
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(weakened)
+    assert run_scan(LIB, "newline-name", "sh") == scan_expected("newline-name")
+    assert run_scan(mutated, "newline-name", "sh") != scan_expected("newline-name")
+
+
+@needs_root_drop
+def test_scan_exclusion_twin_is_caught(tmp_path: Path) -> None:
+    old = 'for _e in $_ex; do set -- \\( -path "$_e" -prune \\) -o "$@"; done'
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, ":"))
+    assert run_append(LIB) == ["rc=0", "PRUNED a/n", "PRUNED b/n"]
+    assert run_append(mutated)[0] != "rc=0"
+
+
+#: (case, scan output, expected INFO stdout, expected status, expected head)
+REPORT_CASES = {
+    "counts-only": ("0 0 0 0", "", 0, "0 0 0 0"),
+    "pruned-lines": ("1 0 1 0\nPRUNED /root\nPRUNED-W /var/spool x",
+                     ("INFO pruned clean /root unsearchable\n"
+                      "INFO pruned clean /var/spool x unsearchable writable-without-search\n"),
+                     0, "1 0 1 0"),
+    "scrubbed": ("0 0\nPRUNED /a\x1b[31mb", "INFO pruned clean /a?[31mb unsearchable\n", 0, "0 0"),
+    "stray-line": ("0 0\nPRUNED /root\nARM clean CONFIRMED_NEGATIVE",
+                   "INFO pruned clean /root unsearchable\n", 1, "0 0"),
+    "bare-tag": ("0 0\nPRUNED", "", 1, "0 0"),
+    "relative-path": ("0 0\nPRUNED root", "", 1, "0 0"),
+    "indented-tag": ("0 0\n PRUNED /root", "", 1, "0 0"),
+    "many": ("0 0\n" + "\n".join(f"PRUNED /d{n}" for n in range(70)),
+             "".join(f"INFO pruned clean /d{n} unsearchable\n" for n in range(64))
+             + "INFO pruned clean truncated 70\n", 0, "0 0"),
+}
+
+
+def report_run(lib: Path, out: str) -> tuple[str, int, str]:
+    script = ('. "$1"; rc=0; scan_report clean "$2" || rc=$?;'
+              ' printf "rc=%s head=%s\\n" "$rc" "$SCAN_HEAD"')
+    run = subprocess.run(["sh", "-eu", "-c", script, "sh", str(lib), out],
+                         capture_output=True, text=True, env={"PATH": "/usr/bin:/bin",
+                                                              "LC_ALL": "C"},
+                         check=False, timeout=30)
+    assert run.returncode == 0 and not run.stderr, run.stderr
+    body, _, last = run.stdout.rstrip("\n").rpartition("\n")
+    rc, head = last.split(" ", 1)
+    return (body + "\n" if body else "", int(rc[3:]), head[5:])
+
+
+@needs_sh
+@pytest.mark.parametrize("case", sorted(REPORT_CASES))
+def test_scan_report_case(case: str) -> None:
+    out, info, rc, head = REPORT_CASES[case]
+    assert report_run(LIB, out) == (info, rc, head)
+
+
+REPORT_TWINS = [
+    ("stray-lines-accepted", "        { bad = 1 }\n", "        { }\n", "stray-line"),
+    ("tags-loosely-matched", '/^PRUNED \\// || /^PRUNED-W \\// {', '/PRUNED/ {', "relative-path"),
+    ("pruned-list-unbounded", "if (n <= 64) {", "if (1) {", "many"),
+    ("pruned-path-unscrubbed", 'gsub(/[^ -~]/, "?", p)', "p = p", "scrubbed"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new", "case"), REPORT_TWINS,
+                         ids=[t[0] for t in REPORT_TWINS])
+def test_scan_report_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                          case: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, new))
+    out, info, rc, head = REPORT_CASES[case]
+    assert report_run(LIB, out) == (info, rc, head)
+    assert report_run(mutated, out) != (info, rc, head), blind
+
+
+# ---- The quiescence precondition (lib.sh scan_quiescent) ----
+#
+# The prune rule assumes the probe container runs nothing but the scan (P7)
+# or an idle sleep beside it (P8). scan_quiescent checks that before each
+# scan. These cases run it in a fresh pid namespace, which needs root with
+# CAP_SYS_ADMIN (the stage-1 root step); they skip elsewhere.
+
+def _pidns_ok() -> bool:
+    if shutil.which("unshare") is None:
+        return False
+    run = subprocess.run(["unshare", "-fp", "--mount-proc", "true"], capture_output=True,
+                         check=False, timeout=30)
+    return run.returncode == 0
+
+
+needs_pidns = pytest.mark.skipif(not ROOT_RUN or not _pidns_ok(),
+                                 reason="needs root with CAP_SYS_ADMIN for a pid namespace")
+
+CHECK = 'eval "$(cat "$1")"; if scan_quiescent; then echo QUIESCENT; else echo BUSY; fi'
+#: The checker runs as pid 1 of the namespace: the P7 shape.
+ALONE = ["unshare", "-fp", "--mount-proc", "sh", "-c", CHECK, "sh"]
+#: pid 1 has another child (a sibling sleep) beside the checker: not quiescent.
+BESIDE = ["unshare", "-fp", "--mount-proc", "sh", "-c",
+          'sleep 30 & sh -c "$1" sh "$2"; kill "$!"', "sh", CHECK]
+
+
+def quiescence(lib: Path, tmp_path: Path, argv: list[str]) -> str:
+    text = tmp_path / "scan-lib.sh"
+    text.write_text(scan_lib_text(lib))
+    run = subprocess.run([*argv, str(text)], capture_output=True, text=True,
+                         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=60)
+    assert run.returncode == 0, (run.returncode, run.stderr)
+    return run.stdout.strip()
+
+
+@needs_pidns
+def test_scan_quiescent_accepts_the_scan_alone(tmp_path: Path) -> None:
+    assert quiescence(LIB, tmp_path, ALONE) == "QUIESCENT"
+
+
+@needs_pidns
+def test_scan_quiescent_refuses_another_process(tmp_path: Path) -> None:
+    """In a real pid namespace, a sibling of the checker under pid 1 is
+    refused (the stub cases and their twins pin each rule separately)."""
+    assert quiescence(LIB, tmp_path, BESIDE) == "BUSY"
+
+
+#: A stub procfs, built per case, then checked by scan_quiescent with
+#: SCAN_PROC pointing at it. The checking shell writes its own entry (it alone
+#: knows its pid) unless the case says otherwise. Fake pids are large, so they
+#: cannot collide with the real shell's pid.
+STUB_CHECK = """
+stub=$1
+if [ "$2" != noself ]; then
+    mkdir -p "$stub/$$"
+    printf "Name:\\tsh\\nPid:\\t%s\\nPPid:\\t%s\\n" "$$" "$2" >"$stub/$$/status"
+fi
+eval "$(cat "$3")"
+export SCAN_PROC="$stub"
+if scan_quiescent $4; then echo QUIESCENT; else echo BUSY; fi
+"""
+
+#: case -> (self entry: its PPid or "noself", argument, stub entries, expect).
+#: Entries are (directory, status text or None for a directory without one).
+SLEEP1 = ("1", "Name:\tsleep\nPid:\t1\nPPid:\t0\n")
+QUIESCENT_CASES: dict[str, tuple[str, str, list[tuple[str, str | None]], str]] = {
+    "p8-quiet": ("0", "sleep", [SLEEP1], "QUIESCENT"),
+    "p8-extra-process": ("0", "sleep", [SLEEP1, ("900001", "Name:\tsh\nPid:\t900001\nPPid:\t1\n")],
+                         "BUSY"),
+    "p8-pid1-not-sleep": ("0", "sleep", [("1", "Name:\tbash\nPid:\t1\nPPid:\t0\n")], "BUSY"),
+    "p8-pid1-missing": ("0", "sleep", [], "BUSY"),
+    "p8-shell-is-child-of-pid1": ("1", "sleep", [SLEEP1], "BUSY"),
+    "missing-status": ("0", "sleep", [SLEEP1, ("900002", None)], "BUSY"),
+    "malformed-record": ("0", "sleep", [SLEEP1, ("900003", "Name:\tx\nPid:\t900003\n")], "BUSY"),
+    "duplicated-record": ("0", "sleep", [("1", "Name:\tsleep\nPid:\t1\nPid:\t1\nPPid:\t0\n")],
+                          "BUSY"),
+    "pid-mismatch": ("0", "sleep", [SLEEP1, ("900004", "Name:\tx\nPid:\t900005\nPPid:\t0\n")],
+                     "BUSY"),
+    "p7-shell-not-pid1": ("0", "", [], "BUSY"),
+    "empty-listing": ("noself", "sleep", [], "BUSY"),
+}
+
+
+def stub_quiescence(lib: Path, tmp_path: Path, case: str) -> tuple[int, str]:
+    self_pp, arg, entries, _ = QUIESCENT_CASES[case]
+    stub = tmp_path / "proc"
+    stub.mkdir()
+    for name, body in entries:
+        (stub / name).mkdir()
+        if body is not None:
+            (stub / name / "status").write_text(body)
+    lib_text = tmp_path / "scan-lib.sh"
+    lib_text.write_text(scan_lib_text(lib))
+    run = subprocess.run(["sh", "-c", STUB_CHECK, "sh", str(stub), self_pp, str(lib_text), arg],
+                         capture_output=True, text=True,
+                         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=30)
+    return run.returncode, run.stdout.strip()
+
+
+@needs_sh
+@pytest.mark.parametrize("case", sorted(QUIESCENT_CASES))
+def test_scan_quiescent_stub_case(tmp_path: Path, case: str) -> None:
+    assert stub_quiescence(LIB, tmp_path, case) == (0, QUIESCENT_CASES[case][3])
+
+
+#: (blind copy name, exact lib.sh text, weakened text, case)
+QUIESCENT_TWINS = [
+    ("any-process-allowed", "if (!allowed) exit 1", "if (0) exit 1", "p8-extra-process"),
+    ("records-unvalidated",
+     "if (np[p] != 1 || npp[p] != 1 || nn[p] != 1 || pid[p] != p) exit 1", "if (0) exit 1",
+     "duplicated-record"),
+    ("pid1-identity-unchecked", "nm[p] == want1 && ", "", "p8-pid1-not-sleep"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new", "case"), QUIESCENT_TWINS,
+                         ids=[t[0] for t in QUIESCENT_TWINS])
+def test_scan_quiescent_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                             case: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "twin-lib.sh"
+    mutated.write_text(source.replace(old, new))
+    (tmp_path / "real").mkdir()
+    (tmp_path / "weak").mkdir()
+    real = stub_quiescence(LIB, tmp_path / "real", case)
+    weak = stub_quiescence(mutated, tmp_path / "weak", case)
+    assert real == (0, QUIESCENT_CASES[case][3])
+    # The twin must DISAGREE with the real check, not merely miss the
+    # expectation (an awk syntax error in a twin would read BUSY on both).
+    assert weak != real, blind

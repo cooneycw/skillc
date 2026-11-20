@@ -124,6 +124,124 @@ never print as an `ARM` or `PROBE` line. These are diagnostics only. Nothing
 is recorded as a reading, no classifier reads them, and no verdict changed.
 The containers hold no credential, so the text is not scrubbed beyond that.
 
+## In-container scans: the prune rule (P7, P8)
+
+The second live run qualified P5 and P6 on the containerd store. P7 and P8
+read `OBSERVATION_FAILED` on every live arm, and the new diagnostics named
+the cause. The image has four directories the probe uid cannot search
+(`/root`, `/etc/ssl/private`, `/var/cache/ldconfig`,
+`/var/cache/apt/archives/partial`), and the whole-filesystem `find` exited
+nonzero on them. Both scans now go through one function, `scan` in
+`lib.sh`'s `SCAN_LIB`, which carries one rule:
+
+| Directory, as the probe uid | Treatment | Why |
+|---|---|---|
+| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and**, re-checked after the walk on the same inode, no path component is a symlink, no ancestor up to `/` lets this uid replace a path component (each is neither owned nor writable by it, or is sticky, owned by another, and over an entry the uid does not own), its listing shows the walk inode, carries no ACL, and still matches all of the above, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
+| as above, but writable | pruned, reported with ` writable-without-search`; **not** counted as writable | write alone permits no entry change |
+| `access(2)` denies search but the mode bits grant it (an ACL, an I/O error), or a pruned directory carries an ACL | **`OBSERVATION_FAILED`** | the denial is not explained by the mode bits alone, so it is not trusted. With no ACL and no search bit for the uid's class, the kernel denies the lookup whatever `access(2)` reported |
+| unsearchable and owned by this uid | **`OBSERVATION_FAILED`** | the uid could `chmod` it searchable later in the window |
+| unsearchable with a newline anywhere in its path | **`OBSERVATION_FAILED`** | the line-based report could not carry it intact |
+| can search but cannot **read** (`x` without `r`) | **`OBSERVATION_FAILED`**, never pruned | the subtree cannot be listed, so it is unknown, not empty |
+| any other `find` error | `OBSERVATION_FAILED` | unchanged |
+
+Each directory gets one `access(2)` evaluation, which routes it to pruned or
+ambiguous, so two evaluations cannot disagree. If anything was pruned, the
+scan's identity must also be plain (read from `/proc/self/status`): a
+non-root uid, real, effective, saved and filesystem ids equal, and no
+effective or permitted capability, so `access(2)` answers for the lookups it
+stands for. Otherwise the scan fails. That identity is read by an exec of
+`awk` from this shell's own `/proc/$$/status`, the credentials `find` is
+started from. A set-id or file-capability `find` binary is outside scope. The owner may be anyone but the probe
+uid (root, or `_apt` for Debian's apt `partial` directory). A change made by
+another uid's process during the window is outside this scan's scope (see
+below).
+
+**Scope.** The verdict this supports is about **fresh pathname lookup** from
+the scanned roots, under the scan identity, at the observation instant. It
+says nothing about descriptors already open inside a pruned directory, a
+working directory there, another mount namespace, or `/proc/<pid>/` links.
+Those are other instruments' domains: P8's init socket-fd check, and the
+A-2 fd and `map_files` census of every task. Nor does it cover a later
+`chmod` by another (root) process during the window.
+
+**The scan assumes a quiescent tree.** It runs in a container the probe
+itself created, whose only processes are the scan (P7: the inventory is the
+container's command) or an idle `sleep` (P8). No process of any uid,
+including the probe uid, changes the tree while the scan runs. The
+post-check's ancestor, ownership, symlink and inode rules close the
+substitutions a single actor could make between the walk and the re-check.
+Review pass 8 showed that a concurrent process of the probe uid timing
+renames between those steps, or creating an entry after its parent was
+listed, would defeat them, as it would any `find`-based inventory. Such a
+process is excluded by construction here, and the construction is
+**checked**. Before **and after** each scan, `scan_quiescent` reads every
+numeric `/proc` entry in the container's pid namespace. Each must yield
+exactly one readable, well-formed record whose `Pid` matches its directory.
+The set of processes must be exactly:
+- the scan shell and the checking `awk`;
+- with nothing else (P7), the scan shell as pid 1;
+- or, for P8, a pid 1 named `sleep` with no parent, beside which the scan
+  shell was exec-ed.
+
+Any other process, a missing, malformed or duplicated record, or an empty
+listing fails the scan as `OBSERVATION_FAILED`. A process that starts and
+exits entirely between the two checks is not seen. This check confirms the
+construction held, and it is not a defence against a concurrent actor.
+Committed cases run it against a stub procfs (unprivileged), with twins for
+allowing any process, skipping record validation, and skipping pid 1's
+identity. They also run it in a fresh pid namespace (root with
+`CAP_SYS_ADMIN`): the scan alone passes, and a sibling is refused.
+
+**Carried requirement.** The prune rule's correctness ASSUMES a quiescent
+container. The scan must **not** be reused as-is against a container with
+live participant processes. When Contract A's window-time inventory (PR-1,
+the lifetime checks) needs this rule, it must either run only after the
+holder domain is confirmed empty, or handle concurrency itself. The window's containment
+design, not this scan, owns that.
+
+The rule never reads `find`'s error text. Any unexpected line in a scan's
+output is also an observation failure (`scan_report`). No classifier or
+reading changed: the counts the probes record are the same, and the scan
+can now complete.
+
+Committed cases (`tests/test_run_window_probes.py`) run the real `SCAN_LIB`
+under `sh`, `dash` and `bash`, as an unprivileged uid (`nobody` dropped
+from root, or the test's own uid), over crafted trees:
+
+- **image shape**: the four directories, each hiding a writable directory
+  and a socket. Both scans complete, find neither, and report all four
+  pruned;
+- **searchable, not readable**: both scans fail;
+- **negative control**: a writable directory and a socket in a searchable
+  directory beside the four are still found, so pruning cannot hide a
+  survivor;
+- **write without search**: pruned, reported, and not counted as writable;
+- **a writable parent**, and **a parent owned by the uid** (any such
+  ancestor fails the same way): both scans fail. So does **a pruned
+  directory reached through a symlinked component**;
+- **probe-owned unsearchable**, and **a newline in an ancestor's name**
+  (the pruned directory's own name is plain): both scans fail;
+- **an ACL denial the mode bits do not explain**, and **a pruned directory
+  that carries an ACL**: the scan fails (both skip where the filesystem
+  refuses POSIX ACLs; the second has a twin without the post-check);
+- two `-xdev` calls sharing one report, with an exclusion hiding a
+  directory that would otherwise fail; and a missing root, which fails.
+
+The tree cases need root, to build root-owned trees and drop to `nobody`,
+so they run in the stage-1 root step and in CI. Blind twins the cases must
+catch: pruning on any denial (including `x` without `r`), pruning every
+directory, testing writability before the prune, not recording pruned
+paths, ignoring ambiguity, skipping the ownership check, skipping the
+ACL and predicate post-check, skipping the ancestor writability, ownership
+or symlink checks, and ignoring exclusions. A newline path is
+refused twice, by the walk's `-path` guard and by the post-check, which
+cannot parse a split record, so its twin removes both. The
+image-shape fixture mirrors the image's owners, including the `_apt`-owned
+`partial` directory. The real P7 and P8 payloads need a container's mount
+table, so stage 2 exercises them end to end. `scan_report` has its own cases
+(stray lines, a bare or loosely matched tag, a relative path, scrubbing, the
+64-line bound) and twins.
+
 ## Stated limits
 
 - The scripts cannot prove that the unit named by `--runner-unit` IS the
@@ -132,6 +250,11 @@ The containers hold no credential, so the text is not scrubbed beyond that.
   as for a window.
 - P7 fails closed (`OBSERVATION_FAILED`) on any mountpoint that mountinfo had
   to escape (a backslash), rather than looking it up under the wrong name.
+- A mountpoint that lies below a directory the uid cannot search is not
+  reachable by name either, but P7 does not prune it. Its per-mount check
+  fails (`OBSERVATION_FAILED`), which is fail-safe.
+- P8's scan now needs GNU `find` (`-executable`, `-fprint`) in the image, as
+  P7's already did. Without it the scan fails, which is never read as clean.
 - P8 checks binds from the host side (a socket, or a directory containing
   one) **and** the socket files the container itself can see outside `/proc`
   and `/sys`. It does not model mount propagation beyond those two readings.
@@ -220,3 +343,17 @@ the files supplied on stdin) before any run.
 | 5 | `3ea04a69` | APPROVE-WITH-FIXES | arch gate confirmed fixed; P6's late re-read confirmed; the one major (an overflowing wait value) is already excluded by `is_uint`, which accepts at most 18 digits, inside the shell's integer range. No change |
 
 Still open, and stated: no committed runner-VM mountinfo capture (stage 2 records it); a failed directory open after the `-d` check has no committed case; the callers are pinned by wiring text, not run end to end.
+
+### Prune rule (P7, P8)
+
+| Pass | Reviewed | Verdict | Outcome |
+|---|---|---|---|
+| 1 | `bd16b398` | REQUEST-CHANGES (1 blocker, 3 major) | `! -executable` conflates denial with I/O errors; scope of the claim; scan identity; tests short of the payloads. Addressed in `9bb4617b` (mode-class agreement, ownership, newline, identity, scope statement) |
+| 2 | `9bb4617b` | REQUEST-CHANGES (1 blocker, 3 major) | scope accepted; a transient access error still read as a denial; two access evaluations could disagree; basename-only newline check. Addressed in `0a52b51f` (one evaluation, ACL post-check, full-path newline, non-root identity) |
+| 3 | `0a52b51f` | REQUEST-CHANGES | kernel denial confirmed given no ACL; stage 2 accepted as the end-to-end bound; post-check not bound to the walk inode. Addressed in `802004fa` |
+| 4 | `802004fa` | REQUEST-CHANGES | `ls` substitution; identity source; record parsing. Addressed in `4d435329` |
+| 5 | `4d435329` | REQUEST-CHANGES | the ACL listing not inode-bound. Addressed in `22cf2cf4` (`ls -ldi`) |
+| 6 | `22cf2cf4` | REQUEST-CHANGES | inode numbers repeat across devices, so an ancestor substitution could redirect `ls`. Addressed in `dbec77b9`, `2688b9ce` (no replaceable ancestor; sticky over a foreign entry allowed) |
+| 7 | `2688b9ce` | REQUEST-CHANGES | owned ancestors; lexical ancestors through a symlink. Addressed in `74c05af6` |
+| 8 | `74c05af6` | REQUEST-CHANGES | owned ancestors FIXED; the remaining two need a concurrent probe-uid process timing renames, or creating entries mid-walk. Answered by scope: the probe container is quiescent by construction (above) |
+| ruling | `236b4c30` | orchestrator: ACCEPT the quiescence exclusion, on two conditions | the assumption and the reuse warning are stated here and in the probe headers, and carried to #797; quiescence is checked before each scan (`scan_quiescent`) |
