@@ -74,8 +74,11 @@ def lease_dir(private_root: Path, endpoint_id: str) -> Path:
         raise PlacementError("bounded endpoint id required")
     try:
         _mount_source(private_root / endpoint_id)
-    except ValueError as exc:
-        raise PlacementError(str(exc)) from None
+        mountable = True
+    except ValueError:
+        mountable = False
+    if not mountable:  # raised outside the handler: no chained context (B7)
+        raise PlacementError("lease path cannot be a mount source")
     private_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = os.lstat(private_root)
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
@@ -264,7 +267,9 @@ def audit(records: Mapping[str, Mapping[str, Any] | None],
             if not isinstance(value, str):
                 reasons.append(f"{principal}:{key}-unreadable")
             elif value == "host" or value.startswith("container:"):
-                reasons.append(f"{principal}:{key}:{value}")
+                # The value can name another container (`container:<id>`); a
+                # reason names the field, never daemon-supplied text (B7).
+                reasons.append(f"{principal}:{key}-shared-or-host")
     raw = json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
     return not reasons, sorted(set(reasons)), digest if not reasons else ""

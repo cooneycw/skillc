@@ -30,7 +30,7 @@ import json
 import re
 import socket
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 ENDPOINT = "/run/skillc-task-protocol/channel.sock"
 VERSION = 1
@@ -151,9 +151,17 @@ def call(fields: dict[str, Any], endpoint: str = ENDPOINT,
     return parse_receipt(b"".join(chunks))
 
 
+class _Parser(argparse.ArgumentParser):
+    """Usage errors print one FIXED line: never the offending argument, so no
+    caller-chosen bytes reach a diagnostic (design section 6, B7)."""
+
+    def error(self, message: str) -> NoReturn:
+        self.exit(EXIT_USAGE, "skillc-task-protocol: usage error (see --help)\n")
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="skillc-task-protocol",
-                                     description="Report task protocol events to the controller.")
+    parser = _Parser(prog="skillc-task-protocol",
+                     description="Report task protocol events to the controller.")
     sub = parser.add_subparsers(dest="op", required=True)
     for op in OPERATIONS:
         command = sub.add_parser(op)
