@@ -537,6 +537,8 @@ WIRING = {
               'upper_dir_of "$cid" 9'],
     "p6.sh": ['upper_dir_of "$c1" 9', 'upper_dir_of "$c2" 8'],
     "p7.sh": ['out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?',
+              '            set -f\n',
+              '            set -- $SCAN_HEAD\n            set +f\n',
               '-- "$PROBE_IMAGE_ID" sh -c "$SCAN_LIB$INVENTORY"',
               'scan "$dirs/pruned" "$mp" xdev "" -type d -writable >>"$dirs/dirs"',
               'scan "$dirs/pruned" "$mp" xdev "" -type d "$@" >>"$dirs/dirs"',
@@ -788,6 +790,7 @@ def test_marker_proof_refuses_a_bind_mounted_tmp(tmp_path: Path) -> None:
 
 ROOT_RUN = os.geteuid() == 0
 NOBODY = 65534
+APT_UID = 42
 needs_root_drop = pytest.mark.skipif(not ROOT_RUN or shutil.which("find") is None,
                                      reason="needs root (to build root-owned trees and "
                                             "drop to nobody) and find")
@@ -813,12 +816,15 @@ def _image_tree() -> list[tuple[str, str, str]]:
     tree = [(d, "dir", "open") for d in ("etc", "etc/ssl", "var", "var/cache", "var/cache/apt",
                                          "var/cache/apt/archives")]
     for d in IMAGE_PRUNED:
-        tree += [(d, "dir", "noexec"), (f"{d}/inner", "dir", "open-w"), (f"{d}/s.sock", "sock", "")]
+        # Debian's apt partial directory is owned by _apt (uid 42), not root.
+        kind = "apt-dir" if d.endswith("/partial") else "dir"
+        tree += [(d, kind, "noexec"), (f"{d}/inner", "dir", "open-w"), (f"{d}/s.sock", "sock", "")]
     return tree
 
 
-#: case -> entries (relative path, "dir"/"sock"/"nobody-dir", final class),
-#: parents first. "nobody-dir" is a directory owned by the scanning uid.
+#: case -> entries (relative path, kind, final class), parents first. Kinds:
+#: "dir" (root-owned), "apt-dir" (owned by uid 42, as Debian's apt partial
+#: directory is), "nobody-dir" (owned by the scanning uid) and "sock".
 SCAN_TREES: dict[str, list[tuple[str, str, str]]] = {
     "image-shape": _image_tree(),
     "searchable-not-readable": [("opt", "dir", "open"), ("opt/locked", "dir", "xnr"),
@@ -888,6 +894,8 @@ def build_tree(base: Path, case: str, made: list[Path]) -> None:
         made.append(path)
         if kind == "nobody-dir":
             os.chown(path, NOBODY, NOBODY)
+        elif kind == "apt-dir":
+            os.chown(path, APT_UID, 0)
         final[path] = cls
     for path in sorted(final, key=lambda p: len(p.parts), reverse=True):
         path.chmod(MODES[final[path]])
@@ -965,6 +973,40 @@ def test_scan_fails_on_a_denial_the_mode_bits_do_not_explain() -> None:
     assert run.stdout.strip() == "FAILED", (run.stdout, run.stderr)
 
 
+def acl_scan(lib: Path) -> str:
+    """A root-owned directory whose mode denies nobody search (o-x) and that
+    also carries an ACL: the mode bits are not the whole permission, so the
+    pruned path's post-check must fail the scan."""
+    tree = short_dir("sp-")
+    work = short_dir("so-")
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        (tree / "acl").mkdir()
+        (tree / "acl").chmod(MODES["noexec"])
+        acl = subprocess.run(["setfacl", "-m", f"u:{NOBODY}:---", str(tree / "acl")],
+                             capture_output=True, check=False, timeout=30)
+        if acl.returncode != 0:
+            pytest.skip("this filesystem refuses POSIX ACLs")
+        script = 'scan "$1/p" "$2" all "" -type d -writable >/dev/null && echo OK || echo FAILED'
+        run = run_scan_script(lib, "sh", script, str(work), str(tree))
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    return run.stdout.strip()
+
+
+@needs_root_drop
+@pytest.mark.skipif(shutil.which("setfacl") is None, reason="setfacl is required")
+def test_scan_fails_on_a_pruned_directory_that_carries_an_acl(tmp_path: Path) -> None:
+    old = 'scan_no_acl "$_pr.new" || return 1'
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, ":"))
+    assert acl_scan(LIB) == "FAILED"
+    assert acl_scan(mutated) == "OK"
+
+
 #: Two -xdev calls sharing one report, and an exclusion that hides a
 #: directory which would fail the scan if it were examined.
 APPEND_SCRIPT = """
@@ -1013,24 +1055,26 @@ def test_scan_fails_on_a_missing_root() -> None:
     assert run.stdout.strip() == "FAILED", (run.stdout, run.stderr)
 
 
-#: The prune clause and the full expression, as they appear in lib.sh.
-PRUNE_CLAUSE = '\\\\( -type d ! -executable -fprint \\"\\$_pr.new\\" -prune \\\\)'
-AMBIGUOUS_HEAD = '\\\\( -name \\"\\$_nlpat\\" -o -uid $_u -o '
+#: Fragments of the eval-built expression, exactly as they appear in lib.sh.
+EXPR_HEAD = 'eval "set -- \\\\( -type d ! -executable \\\\( \\\\( \\\\('
+EXPR_TAIL = '-prune \\\\) -o \\\\( \\"\\$@\\" \\\\) -print"'
+AMBIGUOUS_HEAD = '-path \\"\\$_nlpat\\" -o -uid $_u -o '
 
 #: (blind copy name, exact lib.sh text, weakened text, case)
 SCAN_TWINS = [
-    ("prune-on-any-denial", PRUNE_CLAUSE,
-     '\\\\( -type d \\\\( ! -executable -o ! -readable \\\\) -fprint \\"\\$_pr.new\\" -prune \\\\)',
-     "searchable-not-readable"),
-    ("prune-every-directory", PRUNE_CLAUSE,
-     '\\\\( -type d -fprint \\"\\$_pr.new\\" -prune \\\\)', "survivor-beside-pruned"),
-    ("write-without-search-counted", PRUNE_CLAUSE + ' -o \\\\( \\"\\$@\\" \\\\) -print"',
-     '\\\\( \\"\\$@\\" \\\\) -print -o ' + PRUNE_CLAUSE + '"', "write-without-search"),
+    ("prune-on-any-denial", EXPR_TAIL,
+     ('-prune \\\\) -o \\\\( -type d ! -readable -fprint \\"\\$_pr.new\\" -prune \\\\) -o '
+      '\\\\( \\"\\$@\\" \\\\) -print"'), "searchable-not-readable"),
+    ("prune-every-directory", EXPR_HEAD, 'eval "set -- \\\\( -type d \\\\( \\\\( \\\\(',
+     "survivor-beside-pruned"),
+    ("write-without-search-counted", EXPR_HEAD,
+     'eval "set -- \\\\( \\"\\$@\\" \\\\) -print -o \\\\( -type d ! -executable \\\\( \\\\( \\\\(',
+     "write-without-search"),
     ("pruned-dirs-unrecorded", 'cat "$_pr.new" >>"$_pr" || return 1', ":", "image-shape"),
     ("ambiguity-ignored", '[ ! -s "$_pr.amb" ] || return 1', ":", "probe-owned-unsearchable"),
-    ("ownership-unchecked", AMBIGUOUS_HEAD, '\\\\( -name \\"\\$_nlpat\\" -o ',
+    ("ownership-unchecked", AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o ',
      "probe-owned-unsearchable"),
-    ("newline-name-unchecked", AMBIGUOUS_HEAD, '\\\\( -uid $_u -o ', "newline-name"),
+    ("newline-path-unchecked", AMBIGUOUS_HEAD, "-uid $_u -o ", "newline-name"),
 ]
 
 
