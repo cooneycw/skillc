@@ -17,7 +17,9 @@ from test_live_wave_assembly_v2 import STEPS, _to_v2
 from skillc import live_wave_assembly as assembly
 
 INTEGRATOR_ONLY = [s for s in STEPS if s[0] == "integrator"]
-OFFER_ONLY = INTEGRATOR_ONLY + [("worker", "offer", 1, 200_000_000)]
+# Steps must be in elapsed order: the fixture's injected clock follows them and
+# the journal refuses a clock that goes backwards.
+OFFER_ONLY = sorted(INTEGRATOR_ONLY + [("worker", "offer", 1, 200_000_000)], key=lambda s: s[3])
 
 
 @pytest.mark.parametrize("steps", [INTEGRATOR_ONLY, OFFER_ONLY], ids=["no-events", "offer-only"])
