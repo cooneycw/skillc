@@ -72,9 +72,15 @@ class Context:
     roles: tuple[str, ...]
     deadline_digest: str
     clock: str
+    #: #620 PR-B / #622: the attempt's ONE monotonic origin, in integer ns, so
+    #: a sealed capture proves its own clock join. None is the original
+    #: six-field shape: still verifiable, but it joins nothing (B6 adapter).
+    origin_ns: int | None = None
 
     def __post_init__(self) -> None:
         ww._role(self.attempt_id)
+        if self.origin_ns is not None and (type(self.origin_ns) is not int or self.origin_ns < 0):
+            raise CaptureUnavailable('integer capture origin required')
         for value in (self.approved_declaration_digest, self.policy_digest, self.deadline_digest):
             ww._digest(value)
         if type(self.roles) is not tuple or ww._roles(self.roles) != self.roles:
@@ -82,14 +88,27 @@ class Context:
         if self.clock not in ('monotonic', 'injected-policy-only'):
             raise CaptureUnavailable('declared capture clock required')
 
+    def fields(self) -> dict[str, Any]:
+        """The serialized context. Without an origin it is EXACTLY the original
+        six-field shape, so existing sealed captures keep their digests."""
+        row = asdict(self)
+        if row['origin_ns'] is None:
+            del row['origin_ns']
+        return row
+
     @property
     def digest(self) -> str:
-        return _hash(_json(asdict(self)))
+        return _hash(_json(self.fields()))
+
+
+_BASE_FIELDS = set(Context.__dataclass_fields__) - {'origin_ns'}
 
 
 def parse_context(value: object) -> Context:
-    row = _object(value, set(Context.__dataclass_fields__))
-    return Context(**{**row, 'roles': ww._roles(row['roles'])})
+    if type(value) is not dict or set(value) not in (_BASE_FIELDS, _BASE_FIELDS | {'origin_ns'}):
+        raise CaptureUnavailable('closed wake capture object required')
+    assert isinstance(value, dict)
+    return Context(**{**value, 'roles': ww._roles(value['roles'])})
 
 
 @dataclass(frozen=True)
@@ -142,8 +161,10 @@ class Capture:
     def __init__(self, root: Path, context: Context, origin: float) -> None:
         if not isinstance(root, Path) or type(context) is not Context:
             raise CaptureUnavailable('owned capture root/context required')
-        self.context = parse_context(asdict(context))
+        self.context = parse_context(context.fields())
         self.origin = ww._time(origin)
+        if self.context.origin_ns is not None and round(self.origin * 1e9) != self.context.origin_ns:
+            raise CaptureUnavailable('capture origin differs from its recorded context origin')
         self.root = root
         self.count = self.size = 0
         self.previous = ZERO
@@ -153,7 +174,7 @@ class Capture:
         fd = os.open(root / 'events.tmp', os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         self.stream = os.fdopen(fd, 'w+b', buffering=0)
         try:
-            self._append({'event': 'capture-start', 'version': 1, 'context': asdict(self.context)})
+            self._append({'event': 'capture-start', 'version': 1, 'context': self.context.fields()})
         except BaseException:
             self.stream.close()
             raise
@@ -378,7 +399,7 @@ def verify(root: object, reference: object, expected: object) -> dict[str, Any]:
         if not isinstance(root, Path) or type(reference) is not Reference or type(expected) is not Context:
             raise CaptureUnavailable('independently held capture binding required')
         reference = parse_reference(asdict(reference))
-        expected = parse_context(asdict(expected))
+        expected = parse_context(expected.fields())
         return _decode(_read(root, reference.digest, reference.size), reference, expected)
     except (OSError, ValueError, RecursionError):
         return {'status': 'UNKNOWN', 'complete': False, 'reason': 'wake capture unavailable or unverifiable'}

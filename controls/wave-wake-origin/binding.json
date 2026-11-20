@@ -1,0 +1,19 @@
+{
+ "context": {
+  "approved_declaration_digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "attempt_id": "origin-wave",
+  "clock": "monotonic",
+  "deadline_digest": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+  "policy_digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+  "roles": [
+   "worker-a",
+   "worker-b"
+  ]
+ },
+ "reference": {
+  "context_digest": "sha256:77ba8ae0c58575a29e58071c65c4fc4ba9fbbb079d50f74e6a5844d8785ad2ad",
+  "digest": "sha256:0833a7e96135a57d4bd66680d21c026faf93a1181494fff27bb609b96dba4a3c",
+  "size": 819,
+  "version": 1
+ }
+}
