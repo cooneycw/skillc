@@ -682,6 +682,18 @@ def test_mapping_only_holder_is_seen_with_the_fake_reader(held_tree: tuple[Path,
     assert rt.fact_no_holder(census, proc=proc) is SURV
 
 
+def test_fd_holder_of_a_census_file_is_seen_with_the_fake_reader(
+        held_tree: tuple[Path, ra.Census]) -> None:
+    # The unconditional regular-file fd positive: the other fake fd holders
+    # hold the census root (a directory), and the real fd-holder test runs only
+    # where map_files is readable, so without this a scan that skipped
+    # regular-file descriptors would pass everywhere else.
+    root, census = held_tree
+    held = os.stat(root / 'secret')
+    proc = FakeProc({'1': proc_entry('1'), '97': proc_entry('97', fd={'5': held})})
+    assert rt.fact_no_holder(census, proc=proc) is SURV
+
+
 @pytest.mark.parametrize('where', ['process', 'worker'])
 def test_holder_of_the_root_is_seen_even_in_a_worker_task(held_tree: tuple[Path, ra.Census],
                                                            where: str) -> None:
