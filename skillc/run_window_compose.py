@@ -22,7 +22,6 @@ B's capture is sealed.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,14 +52,18 @@ def _obs(value: object) -> Observation | None:
     return value if type(value) is Observation else None
 
 
-def _plain(mapping: object) -> dict[str, str] | None:
-    """A built-in dict whose keys and values are exact str: the only accepted
+def _snapshot(mapping: object) -> dict[Any, Any] | None:
+    """One shallow copy of a built-in dict, taken FIRST, so every later check
+    reads the same contents even if the caller mutates its own dict."""
+    return dict(mapping) if type(mapping) is dict else None
+
+
+def _plain(snapshot: dict[Any, Any] | None) -> dict[str, str] | None:
+    """The snapshot, if every key and value is an exact str: the only accepted
     representation, so no subclass can override lookup, hashing or equality."""
-    if type(mapping) is not dict:
+    if snapshot is None or any(type(k) is not str or type(v) is not str for k, v in snapshot.items()):
         return None
-    if any(type(k) is not str or type(v) is not str for k, v in mapping.items()):
-        return None
-    return dict(mapping)
+    return snapshot
 
 
 def removed_surface_verdict(*, census_complete: object, unlinked: object, reresolved: object,
@@ -142,11 +145,12 @@ def window_verdict(verdicts: object, *, declared: object, capture_sealed: object
     B's capture is sealed; and the 1.2 preconditions held. UNKNOWN otherwise,
     with fixed reason tokens.
     """
-    raw = verdicts if type(verdicts) is dict else {}
-    if any(type(v) is str and v == NOT_CLEAN for v in raw.values()):
+    raw = _snapshot(verdicts)
+    decl_raw = _snapshot(declared)
+    if raw is not None and any(type(v) is str and v == NOT_CLEAN for v in raw.values()):
         return WindowVerdict(NOT_CLEAN, ('remnant-matched',), 0, 0)
-    found = _plain(verdicts)
-    decl = _plain(declared)
+    found = _plain(raw)
+    decl = _plain(decl_raw)
     if found is None or decl is None or not decl:
         return WindowVerdict(UNKNOWN, ('evidence-population-mismatch',), 0, 0)
     reasons: list[str] = []
