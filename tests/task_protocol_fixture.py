@@ -65,9 +65,11 @@ def build(root: Path, plan: live_wave.WavePlan, declaration: str, deadline_diges
           steps: Iterable[Step], *, deadline_ns: int | None = None,
           unbound: Iterable[str] = (), capacity_for: Iterable[str] = (),
           limits: dict[str, int] | None = None, origin_ns: int = 0,
-          extra: Callable[[tj.Journal, Leases], None] | None = None) -> Built:
+          extra: Callable[[tj.Journal, Leases], None] | None = None,
+          unknown_coverage: Iterable[str] = ()) -> Built:
     """One sealed journal. `steps` are applied in order with their elapsed
-    times; `unbound` roles are marked unstarted at the barrier."""
+    times; `unbound` roles are marked unstarted at the barrier, and
+    `unknown_coverage` roles are sealed with unknown coverage."""
     deadline = round(plan.deadline * 1e9) if deadline_ns is None else deadline_ns
     inventory = inventory_for(plan, declaration, origin_ns)
     context = tj.Context(plan.wave_id, declaration, inventory.digest, deadline_digest,
@@ -113,7 +115,8 @@ def build(root: Path, plan: live_wave.WavePlan, declaration: str, deadline_diges
     if extra is not None:
         extra(journal, leases)
     journal.append("fence", reason="closure")
-    coverage = {p: "complete" for p in inventory.principals}
+    unknown = {principal_of(r) for r in unknown_coverage}
+    coverage = {p: "unknown" if p in unknown else "complete" for p in inventory.principals}
     reference = journal.seal(coverage)
     return Built(root, reference, context, inventory, deadline)
 
