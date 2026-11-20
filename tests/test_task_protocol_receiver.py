@@ -267,7 +267,8 @@ def test_no_receipt_is_sent_for_a_decision_that_is_not_durable(
 
 def test_a_silent_connection_is_dropped_and_leaves_coverage_unknown(
         make_world: Callable[..., World]) -> None:
-    world = make_world(request_timeout=0.5)
+    # The silent peer never sends, so load can only delay the drop, never beat it.
+    world = make_world(request_timeout=0.5)  # timing: must-fire - the read timeout under test
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.connect(world.paths["p-b"])
         conn.settimeout(5)
