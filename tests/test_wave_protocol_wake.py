@@ -192,3 +192,19 @@ def test_a_wake_mode_needs_exactly_an_approved_policy(tmp_path: Path, short: Pat
                          deadline_digest=DEADLINE, deadline_seconds=60,
                          lease_root=short / "x", journal_root=tmp_path / "x",
                          measured=measured, wake_policy=policy)
+
+
+@pytest.mark.parametrize("field", ["declaration_digest", "deadline_digest"])
+def test_wake_mode_refuses_a_journal_the_wake_capture_cannot_join(
+        tmp_path: Path, short: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+        field: str) -> None:
+    """A declaration or deadline that differs from the wake capture's is refused
+    at construction, not left to fail late as clock-join-unavailable."""
+    world, run = _wake_world(tmp_path, short, monkeypatch)
+    slots = [Slot("slot-" + r, r, "task-" + r, 0, 1, "nonce-" + r) for r in ROLES]
+    good = {"declaration_digest": run.context.declaration_digest,
+            "deadline_digest": run.context.deadline_digest}
+    with pytest.raises(ValueError, match="wake mode"):
+        wpr.ProtocolWave(world.wave, slots=slots, **{**good, field: "sha256:" + "e" * 64},
+                         deadline_seconds=60, lease_root=short / "y",
+                         journal_root=tmp_path / "y", measured="wake", wake_policy=POLICY)
