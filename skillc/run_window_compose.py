@@ -52,18 +52,20 @@ def _obs(value: object) -> Observation | None:
     return value if type(value) is Observation else None
 
 
-def _snapshot(mapping: object) -> dict[Any, Any] | None:
-    """One shallow copy of a built-in dict, taken FIRST, so every later check
-    reads the same contents even if the caller mutates its own dict."""
-    return dict(mapping) if type(mapping) is dict else None
+def _snapshot(mapping: object) -> list[tuple[Any, Any]] | None:
+    """The entries of a built-in dict, taken FIRST as a list, so every later
+    check reads the same contents even if the caller mutates its own dict, and
+    no caller-defined key is hashed or compared before its type is checked."""
+    return list(mapping.items()) if type(mapping) is dict else None
 
 
-def _plain(snapshot: dict[Any, Any] | None) -> dict[str, str] | None:
-    """The snapshot, if every key and value is an exact str: the only accepted
-    representation, so no subclass can override lookup, hashing or equality."""
-    if snapshot is None or any(type(k) is not str or type(v) is not str for k, v in snapshot.items()):
+def _plain(entries: list[tuple[Any, Any]] | None) -> dict[str, str] | None:
+    """A lookup dict built only once every key and value is an exact str: the
+    only accepted representation, so no subclass can override lookup, hashing
+    or equality."""
+    if entries is None or any(type(k) is not str or type(v) is not str for k, v in entries):
         return None
-    return snapshot
+    return dict(entries)
 
 
 def removed_surface_verdict(*, census_complete: object, unlinked: object, reresolved: object,
@@ -147,7 +149,7 @@ def window_verdict(verdicts: object, *, declared: object, capture_sealed: object
     """
     raw = _snapshot(verdicts)
     decl_raw = _snapshot(declared)
-    if raw is not None and any(type(v) is str and v == NOT_CLEAN for v in raw.values()):
+    if raw is not None and any(type(v) is str and v == NOT_CLEAN for _, v in raw):
         return WindowVerdict(NOT_CLEAN, ('remnant-matched',), 0, 0)
     found = _plain(raw)
     decl = _plain(decl_raw)
