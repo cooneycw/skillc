@@ -208,3 +208,15 @@ the files supplied on stdin) before any run.
 | 6 | `b997cfd2` | REQUEST-CHANGES (9 of 12 fixed, plus residual paths) | mandatory mountinfo fields after the separator (P3, P7); P7 fault arm proven by an exit-4 `MISSING-SURFACE` token after a good table read; P8 mount-type validation, `shared_net`/`planted_binds` read and cross-checked on every arm, per-destination visibility; pid-lookup errors are not absence (P2, P3); an untracked new volume makes cleanup unverified (reported, never removed). Plus orchestrator hardening: scratch is a private self-bind before any probe mount (no propagation to peer namespaces), and scratch removal uses `--one-file-system`. Addressed in the commit that adds this row |
 | 7 | `d2983b62` | REQUEST-CHANGES (pass-6 items fixed except one; 3 blockers, 2 minor) | P7 validates the whole mount table before its fault token, which now names `/probe-home`; P7 writability is `access(2)` OR mode bits (on rw mounts), so an access error cannot hide a writable path; P2 and P3 enumerate pids from one checked listing; P8 namespace counts bounded (at most 4, at most 3 non-net); P3 `fd_reads 0` fails. Cleanup and the scratch self-bind found correct. Addressed in the commit that adds this row |
 | 8 | `10cf4c70` | REQUEST-CHANGES (3 of 5 fixed; the 2 remaining and 1 new item are ACL/row edge cases) | P7 mount rows now validated field by field (ids, `major:minor`, absolute roots and mountpoints), as in P3. The two ACL edge cases (named-user ACL hidden only by a concurrent `access(2)` I/O error; mode-bit over-report, which is fail-safe) are recorded under "Stated limits", not fixed. Review stopped here by the orchestrator's rule; the non-author review binds to the head that adds this row |
+
+### Follow-up (containerd storage, step diagnostics)
+
+| Pass | Reviewed | Verdict | Outcome |
+|---|---|---|---|
+| 1 | `7a1b15f8` | REQUEST-CHANGES (3 major, 3 minor) | upper dir proven through a path, not a handle; stderr bounded only after an unbounded write; P5 exec stdout on the verdict stream; live guards untested. Addressed in `b6a42ae3` |
+| 2 | `b6a42ae3` | REQUEST-CHANGES (2 major, 1 minor) | marker read by pathname after the checks; status stored in a file a full scratch could lose; stubs left the start-time comparison and caller wiring unqualified. Addressed in `219a1df5` |
+| 3 | `219a1df5` | REQUEST-CHANGES (1 new major) | the marker lookup could cross a bind mount. Addressed in `fea5a850` (one `openat2` with `RESOLVE_NO_XDEV`) |
+| 4 | `fea5a850` | REQUEST-CHANGES (1 new major) | syscall 437 is `openat2` only on some ABIs. Addressed in `bd4032f7` (x86-64 and AArch64 only; others refuse by name) |
+| 5 | `3ea04a69` | APPROVE-WITH-FIXES | arch gate confirmed fixed; P6's late re-read confirmed; the one major (an overflowing wait value) is already excluded by `is_uint`, which accepts at most 18 digits, inside the shell's integer range. No change |
+
+Still open, and stated: no committed runner-VM mountinfo capture (stage 2 records it); a failed directory open after the `-d` check has no committed case; the callers are pinned by wiring text, not run end to end.
