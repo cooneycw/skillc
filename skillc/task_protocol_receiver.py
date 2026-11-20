@@ -51,6 +51,13 @@ from .task_protocol_schema import MAX_REQUEST_BYTES, Receipt, Rejected, Request,
 from .task_protocol_state import Machine
 
 
+#: After replying, the receiver reads the rest of an over-long request before
+#: closing, so the kernel delivers the reply instead of resetting the
+#: connection. Bounded in bytes (here) and time (`request_timeout`); a sender
+#: that exceeds either is an I/O-limit outcome: coverage UNKNOWN, never a hang.
+DRAIN_LIMIT = 64 * 1024
+
+
 class PeerVerifier(Protocol):
     """Maps a connected peer's kernel credentials to its runtime instance, or
     None when that cannot be established. Never reads the request."""
@@ -213,9 +220,30 @@ class Receiver:
                     conn.sendall(receipt.encode())
                 except OSError:
                     self._mark_unknown(self._owners[endpoint])
+                    return
+                if not self._drain(conn):
+                    self._mark_unknown(self._owners[endpoint])
         finally:
             with self._state_lock:
                 self._handlers.discard(threading.current_thread())
+
+    @staticmethod
+    def _drain(conn: socket.socket) -> bool:
+        """Half-close, then read to EOF within DRAIN_LIMIT and the socket's
+        timeout. Closing with unread bytes would make the kernel reset the
+        connection and discard the reply just sent. False when the bound is
+        hit or the read fails."""
+        try:
+            conn.shutdown(socket.SHUT_WR)
+            drained = 0
+            while drained <= DRAIN_LIMIT:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    return True
+                drained += len(chunk)
+        except OSError:
+            return False
+        return False
 
     def _decide(self, endpoint: str, instance: str | None, raw: bytes) -> Receipt | None:
         with self.lock:

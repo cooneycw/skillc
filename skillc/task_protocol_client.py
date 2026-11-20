@@ -173,6 +173,8 @@ def main(argv: list[str] | None = None, endpoint: str = ENDPOINT) -> int:
     try:
         fields = request_fields(args.op, args.request, getattr(args, "offer", None),
                                 getattr(args, "reason", None))
+        if len(encode(fields)) > MAX_BYTES:
+            raise ValueError("request exceeds the controller's size bound")
     except ValueError as exc:
         print(f"skillc-task-protocol: {exc}", file=sys.stderr)
         return EXIT_USAGE
