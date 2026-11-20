@@ -1,0 +1,75 @@
+{
+  "branch": "issue-555-cli-and-small-path-defects-leak-values-to-stderr-d",
+  "counts": {
+    "accepted": 5,
+    "deferred": 2,
+    "rejected": 4
+  },
+  "escalation": {
+    "raised_cap": 4,
+    "reference": "https://github.com/cooneycw/skillc/issues/555#issuecomment-7038043117",
+    "ruled_by": "owner"
+  },
+  "extra_passes_reason": "pass 3: owner approved after pass 2 found a regression in the pass-1 fix (narrowed); pass 4: owner approved fixing pass 3's HIGH",
+  "head": "1e4df1114832954e5edacde8a86d32d969e08ed0",
+  "implementer": "claude/claude-opus-5-5",
+  "implementer_evidence": {
+    "kind": "session_id",
+    "models": [
+      "claude/claude-opus-5-5"
+    ],
+    "runtime": "claude",
+    "session_id": "c2c11864-3a73-420f-8ee1-302ef25daddd",
+    "sources": [
+      {
+        "bytes": 2333518,
+        "path": "-home-user-Projects/c2c11864-3a73-420f-8ee1-302ef25daddd.jsonl",
+        "sha256": "84e2b8de9272bf815e8d3a9b0eb65faee90da3c799e133a32d70ab12190b8e87"
+      }
+    ],
+    "transcript": "-home-user-Projects/c2c11864-3a73-420f-8ee1-302ef25daddd.jsonl"
+  },
+  "issue": "555",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 4,
+  "recorded_at": "2026-11-20T11:10:56Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 11
+  },
+  "reviewed_artifact": {
+    "base_sha": "a2f9ffd67c2f109b7056852ac6a46657a4fd0912",
+    "merge_base": "a2f9ffd67c2f109b7056852ac6a46657a4fd0912",
+    "method": "runtime-head",
+    "patch_sha256": "869d23340b1829df35940dc3575cbdc1624c4d833d6ba8fc326a198fc287b4fe",
+    "report_record": 98,
+    "target_head": "1e4df1114832954e5edacde8a86d32d969e08ed0"
+  },
+  "reviewer": "codex/gpt-6.1-sol",
+  "reviewer_evidence": {
+    "exec_log": "codex-review-stream.AbbVwe",
+    "kind": "exec_log",
+    "models": [
+      "codex/gpt-6.1-sol"
+    ],
+    "rollout": "2026/11/20/rollout-2026-11-20T06-07-08-01a1f8a3-8375-7881-b507-edddd24d6fa8.jsonl",
+    "runtime": "codex",
+    "sources": [
+      {
+        "bytes": 208063,
+        "path": "codex-review-stream.AbbVwe",
+        "sha256": "531113e51cf7f6709697529d3810e4d3ffb119100aa3c0aecdef07669e185341"
+      },
+      {
+        "bytes": 835242,
+        "path": "2026/11/20/rollout-2026-11-20T06-07-08-01a1f8a3-8375-7881-b507-edddd24d6fa8.jsonl",
+        "sha256": "f410afa8a90a43a2fc22e127c0ec82718fcd1ff474733e0ebd04abd8ec12d664"
+      }
+    ],
+    "thread_id": "01a1f8a3-8375-7881-b507-edddd24d6fa8"
+  },
+  "schema": 5,
+  "scope": "full",
+  "status": "ran"
+}
