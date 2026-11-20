@@ -114,7 +114,7 @@ class AbsentLike(str):
 
 
 class LyingDict(dict[str, str]):
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:  # type: ignore[override]
         return rc.ABSENT
 
 
