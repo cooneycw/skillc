@@ -519,6 +519,79 @@ upper_dir_of() {
     PROBE_UPPER=$_held
 }
 
+# ---- In-container scans (P7, P8) ----
+#
+# SCAN_LIB is sh source the P7 inventory and the P8 socket scan prepend to
+# the script they run inside the container, and that the self-test runs
+# against crafted trees as an unprivileged uid. It holds the one prune rule.
+# shellcheck disable=SC2016  # expands inside the container
+SCAN_LIB='
+# scan PRUNED ROOT XDEV EXCLUDES TEST...: GNU find over ROOT printing every
+# path that matches TEST (find primaries), with two kinds of pruning:
+# - each absolute path in EXCLUDES (space-separated) is pruned unexamined;
+# - each directory this uid cannot SEARCH is pruned, and its path is
+#   appended to PRUNED. Searchability is access(2) X_OK as this uid
+#   (`! -executable`), never an error message. Nothing at or below such a
+#   directory can be created, renamed or unlinked by this uid, and nothing
+#   inside it (a socket included) can be opened by path, because each of
+#   those needs search permission on the directory. That holds for a
+#   directory with write but not search permission too: write alone permits
+#   no entry change, so such a directory is never counted as writable (it is
+#   reported as PRUNED-W, see pruned_lines).
+# A directory the uid CAN search but cannot read is NOT pruned: find fails to
+# list it, scan returns 1, and the caller reads that as an observation
+# failure, so an unlistable subtree is never read as empty. Any other find
+# error also returns 1. XDEV is "xdev" or "all".
+scan() {
+    _pr=$1
+    _root=$2
+    _xd=$3
+    _ex=$4
+    shift 4
+    set -- \( -type d ! -executable -fprint "$_pr.new" -prune \) -o \( "$@" \) -print
+    for _e in $_ex; do set -- \( -path "$_e" -prune \) -o "$@"; done
+    if [ "$_xd" = xdev ]; then set -- -xdev "$@"; fi
+    find "$_root" "$@" || return 1
+    cat "$_pr.new" >>"$_pr" || return 1
+    rm -f "$_pr.new"
+}
+# pruned_lines PRUNED: one "PRUNED <path>" line per pruned directory, or
+# "PRUNED-W <path>" for one this uid may write but not search.
+pruned_lines() {
+    [ -s "$1" ] || return 0
+    while IFS= read -r _p; do
+        if [ -w "$_p" ]; then printf "PRUNED-W %s\n" "$_p"; else printf "PRUNED %s\n" "$_p"; fi
+    done <"$1"
+}
+'
+
+# scan_report ARM OUTPUT: split an in-container scan's output into its first
+# line, set as SCAN_HEAD, and its "PRUNED <path>" / "PRUNED-W <path>" lines.
+# Each is reported as `INFO pruned <arm> <path> unsearchable`, plus
+# ` writable-without-search` for PRUNED-W. Bytes outside printable ASCII
+# become '?', and at most 64 are listed, then a count. Returns 1 if any other
+# line appears, so unexpected output is an observation failure. Pure.
+scan_report() {
+    SCAN_HEAD=$(printf '%s\n' "$2" | sed -n 1p)
+    printf '%s\n' "$2" | LC_ALL=C awk -v a="$1" '
+        NR == 1 { next }
+        $1 == "PRUNED" || $1 == "PRUNED-W" {
+            n++
+            if (n <= 64) {
+                p = substr($0, length($1) + 2)
+                gsub(/[^ -~]/, "?", p)
+                w = ($1 == "PRUNED-W") ? " writable-without-search" : ""
+                print "INFO pruned " a " " p " unsearchable" w
+            }
+            next
+        }
+        { bad = 1 }
+        END {
+            if (n > 64) print "INFO pruned " a " truncated " n
+            exit bad ? 1 : 0
+        }'
+}
+
 # ---- Step diagnostics (P5, P7, P8) ----
 
 # step_drain FILE: read stdin to EOF, keeping only its first 2048 bytes in

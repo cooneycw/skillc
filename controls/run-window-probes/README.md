@@ -124,6 +124,46 @@ never print as an `ARM` or `PROBE` line. These are diagnostics only. Nothing
 is recorded as a reading, no classifier reads them, and no verdict changed.
 The containers hold no credential, so the text is not scrubbed beyond that.
 
+## In-container scans: the prune rule (P7, P8)
+
+The second live run qualified P5 and P6 on the containerd store. P7 and P8
+read `OBSERVATION_FAILED` on every live arm, and the new diagnostics named
+the cause. The image has four directories the probe uid cannot search
+(`/root`, `/etc/ssl/private`, `/var/cache/ldconfig`,
+`/var/cache/apt/archives/partial`), and the whole-filesystem `find` exited
+nonzero on them. Both scans now go through one function, `scan` in
+`lib.sh`'s `SCAN_LIB`, which carries one rule:
+
+| Directory, as the probe uid | Treatment | Why |
+|---|---|---|
+| cannot **search** (no `x`), by `access(2)` `X_OK` (`find ! -executable`) | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | provably unreachable: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
+| may write but not search | pruned, reported with ` writable-without-search`; **not** counted as writable | write alone permits no entry change |
+| can search but cannot **read** (`x` without `r`) | **`OBSERVATION_FAILED`**, never pruned | the subtree cannot be listed, so it is unknown, not empty |
+| any other `find` error | `OBSERVATION_FAILED` | unchanged |
+
+The rule never reads `find`'s error text. Any unexpected line in a scan's
+output is also an observation failure (`scan_report`). No classifier or
+reading changed: the counts the probes record are the same, and the scan
+can now complete.
+
+Committed cases (`tests/test_run_window_probes.py`) run the real `SCAN_LIB`
+under `sh`, `dash` and `bash`, as an unprivileged uid (`nobody` dropped
+from root, or the test's own uid), over crafted trees:
+
+- **image shape**: the four directories, each hiding a writable directory
+  and a socket. The scan completes, finds neither, and reports all four
+  pruned;
+- **searchable, not readable**: the scan fails;
+- **negative control**: a writable directory and a socket in a searchable
+  directory beside the four are still found, so pruning cannot hide a
+  survivor;
+- **write without search**: pruned, reported, and not counted as writable.
+
+Blind twins the cases must catch: pruning on any denial (including `x`
+without `r`), pruning every directory, testing writability before the
+prune, and not recording pruned paths. `scan_report` has its own cases
+(stray lines, scrubbing, the 64-line bound) and twins.
+
 ## Stated limits
 
 - The scripts cannot prove that the unit named by `--runner-unit` IS the
@@ -132,6 +172,11 @@ The containers hold no credential, so the text is not scrubbed beyond that.
   as for a window.
 - P7 fails closed (`OBSERVATION_FAILED`) on any mountpoint that mountinfo had
   to escape (a backslash), rather than looking it up under the wrong name.
+- A mountpoint that lies below a directory the uid cannot search is not
+  reachable by name either, but P7 does not prune it. Its per-mount check
+  fails (`OBSERVATION_FAILED`), which is fail-safe.
+- P8's scan now needs GNU `find` (`-executable`, `-fprint`) in the image, as
+  P7's already did. Without it the scan fails, which is never read as clean.
 - P8 checks binds from the host side (a socket, or a directory containing
   one) **and** the socket files the container itself can see outside `/proc`
   and `/sys`. It does not model mount propagation beyond those two readings.

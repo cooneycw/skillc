@@ -114,8 +114,11 @@ isolation() {
     # socket (the file bind itself; anything beneath the directory bind).
     _rc=0
     # shellcheck disable=SC2016  # expands inside the container
-    v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c 'set -e
-o=$(find / \( -path /proc -o -path /sys \) -prune -o -type s -print)
+    # The scan prunes directories this uid cannot search (lib.sh SCAN_LIB) and
+    # fails on one it can search but not list.
+    v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"'set -e
+t=$(mktemp -d)
+o=$(scan "$t/pruned" / all "/proc /sys" -type s)
 n=$(printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }")
 p=0
 if [ -S /probe-host.sock ]; then p=$((p + 1)); fi
@@ -123,13 +126,16 @@ if [ -d /probe-sockdir ]; then
     d=$(find /probe-sockdir -type s -print)
     if [ -n "$d" ]; then p=$((p + 1)); fi
 fi
-printf "%s %s\n" "$n" "$p"') || _rc=$?
+printf "%s %s\n" "$n" "$p"
+pruned_lines "$t/pruned"
+rm -rf "$t"') || _rc=$?
     # Bounded stderr and the exit status of the in-container scan, so a failed
     # scan names its cause. Diagnostic only: the readings are unchanged.
     step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"
-    if [ "$_rc" -eq 0 ] && is_uint "${v% *}" && is_uint "${v#* }"; then
-        record "$1" visible_sockets "${v% *}"
-        record "$1" visible_planted "${v#* }"
+    if [ "$_rc" -eq 0 ] && scan_report "$1" "$v" && is_uint "${SCAN_HEAD% *}" \
+        && is_uint "${SCAN_HEAD#* }"; then
+        record "$1" visible_sockets "${SCAN_HEAD% *}"
+        record "$1" visible_planted "${SCAN_HEAD#* }"
     else
         record "$1" visible_sockets ERR
         record "$1" visible_planted ERR

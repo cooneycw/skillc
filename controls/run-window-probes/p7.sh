@@ -8,6 +8,9 @@
 # Inside the container, the inventory:
 # - requires every declared surface to be a listed mountpoint that accepts a
 #   real marker write and removal (a missing or read-only surface fails);
+# - prunes every directory the container uid cannot search (lib.sh SCAN_LIB:
+#   access(2) X_OK, reported as INFO pruned), and fails on any directory it
+#   can search but not list;
 # - lists writable directories (GNU find -writable, an access(2) check) on
 #   every mount except proc, sysfs and cgroup, and counts any outside the
 #   declared surfaces;
@@ -76,9 +79,9 @@ while IFS=" " read -r fstype opts mp; do
     case ,$opts, in *,ro,*) ro=1 ;; *) ro=0 ;; esac
     if [ -d "$mp" ]; then
         if [ "$ro" = 1 ]; then
-            find "$mp" -xdev -type d -writable -print >>"$dirs/dirs" || : >"$dirs/failed"
+            scan "$dirs/pruned" "$mp" xdev "" -type d -writable >>"$dirs/dirs" || : >"$dirs/failed"
         else
-            find "$mp" -xdev -type d "$@" -print >>"$dirs/dirs" || : >"$dirs/failed"
+            scan "$dirs/pruned" "$mp" xdev "" -type d "$@" >>"$dirs/dirs" || : >"$dirs/failed"
         fi
     elif [ -e "$mp" ] || [ -L "$mp" ]; then
         if [ "$ro" = 1 ]; then
@@ -112,8 +115,10 @@ pd=0
 pf=0
 if [ -e "$dirs/dirs" ] && grep -qx /probe-extra "$dirs/dirs"; then pd=1; fi
 if [ -e "$dirs/files" ] && grep -qx /probe-extra-file "$dirs/files"; then pf=1; fi
+pl=$(pruned_lines "$dirs/pruned")
 rm -rf "$dirs"
 printf "%s %s %s %s\n" "$nd" "$nf" "$pd" "$pf"
+[ -z "$pl" ] || printf "%s\n" "$pl"
 '
 
 observe() {
@@ -147,7 +152,7 @@ observe() {
         # shellcheck disable=SC2086  # each element is built above from fixed text
         create_container --read-only --network none --ipc private --log-driver none \
             --user "$user" $_m -e "DECLARED=$DECLARED" \
-            -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
+            -- "$PROBE_IMAGE_ID" sh -c "$SCAN_LIB$INVENTORY"
         _rc=0
         out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?
         # Bounded stderr and the exit status, so a failed inventory names its
@@ -160,9 +165,9 @@ observe() {
                 probe_die 'fault-arm-not-exercised'
             fi
             set --
-        elif [ "$_rc" -eq 0 ]; then
+        elif [ "$_rc" -eq 0 ] && scan_report "$_arm" "$out"; then
             # shellcheck disable=SC2086  # four space-separated numbers
-            set -- $out
+            set -- $SCAN_HEAD
         else
             set --
         fi
