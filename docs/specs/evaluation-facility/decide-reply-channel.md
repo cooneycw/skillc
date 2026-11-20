@@ -224,10 +224,12 @@ change and a mutation-checked test (`test_docker_backend.py`,
 `test_decide_reply_channel.py`):
 
 **(a) Directory and socket modes/ownership.** `trigger_socket_dir`
-(`DEFAULT_TRIGGER_SOCKET_DIR` or a caller override) is never trusted blindly.
+(`DEFAULT_TRIGGER_SOCKET_DIR`, per uid since #817, or a caller override) is
+never trusted blindly.
 `_ensure_private_trigger_dir()` creates it at mode `0o700` if absent; if it
 already exists, the directory's owner and mode are checked and the WHOLE
-ATTEMPT is refused (`BackendUnavailable`) on either mismatch — never widened
+ATTEMPT is refused (`BackendUnavailable`; since #817 its `TriggerDirRefused`
+subclass with a closed `reason_class`) on either mismatch — never widened
 to match, never used anyway on the assumption it is probably fine. This is
 the real access-control boundary: directory traversal permission is checked
 by the kernel before a file's own permission bits, for every syscall that
