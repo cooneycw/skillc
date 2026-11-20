@@ -1,0 +1,154 @@
+{
+ "appends": [
+  {
+   "fields": {
+    "evidence_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "principal": "role-a"
+   },
+   "kind": "binding"
+  },
+  {
+   "fields": {
+    "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "principal": "role-b"
+   },
+   "kind": "binding"
+  },
+  {
+   "fields": {
+    "bindings_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "slots": [
+     {
+      "principal": "role-a",
+      "state": "bound"
+     },
+     {
+      "principal": "role-b",
+      "state": "bound"
+     },
+     {
+      "principal": "role-c",
+      "state": "unstarted"
+     }
+    ]
+   },
+   "kind": "barrier"
+  },
+  {
+   "fields": {
+    "decision": "offered",
+    "offer_id": "o-a-1",
+    "op": "offer",
+    "principal": "role-a",
+    "reason": null,
+    "request": 1,
+    "request_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+   },
+   "kind": "decision"
+  },
+  {
+   "fields": {
+    "decision": "acknowledged",
+    "offer_id": "o-a-1",
+    "op": "ack",
+    "principal": "role-a",
+    "reason": null,
+    "request": 2,
+    "request_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+   },
+   "kind": "decision"
+  },
+  {
+   "fields": {
+    "original_seq": 6,
+    "principal": "role-a",
+    "request": 2,
+    "request_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+   },
+   "kind": "retry"
+  },
+  {
+   "fields": {
+    "content_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "length": 12,
+    "principal": null,
+    "reason": "unauthenticated-peer"
+   },
+   "kind": "rejection"
+  },
+  {
+   "fields": {
+    "decision": "offered",
+    "offer_id": "o-b-1",
+    "op": "offer",
+    "principal": "role-b",
+    "reason": null,
+    "request": 1,
+    "request_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+   },
+   "kind": "decision"
+  },
+  {
+   "fields": {
+    "decision": "refusal-retained",
+    "offer_id": "o-b-1",
+    "op": "refuse",
+    "principal": "role-b",
+    "reason": "blocked",
+    "request": 2,
+    "request_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+   },
+   "kind": "decision"
+  },
+  {
+   "fields": {
+    "reason": "closure"
+   },
+   "kind": "fence"
+  },
+  {
+   "fields": {
+    "content_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "length": 40,
+    "principal": "role-a",
+    "reason": "fenced"
+   },
+   "kind": "rejection"
+  },
+  {
+   "fields": {
+    "principal": "role-b",
+    "reason": "closed"
+   },
+   "kind": "revocation"
+  }
+ ],
+ "clock_step_ns": 100,
+ "context": {
+  "attempt_id": "attempt-1",
+  "clock": "monotonic-ns",
+  "deadline_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "declaration_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "limits": {
+   "closure_reserve_bytes": 262144,
+   "closure_reserve_records": 256,
+   "decisions_per_principal": 256,
+   "max_bytes": 67108864,
+   "max_records": 32768,
+   "request_bytes": 4096
+  },
+  "population_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "principals": [
+   "role-a",
+   "role-b",
+   "role-c"
+  ],
+  "producer_version": "skillc-test-1"
+ },
+ "coverage": {
+  "role-a": "complete",
+  "role-b": "complete",
+  "role-c": "complete"
+ },
+ "origin_ns": 1000
+}
