@@ -14,7 +14,7 @@ import socket
 import tempfile
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from test_docker_wave import ModelBackend
@@ -39,8 +39,8 @@ class ProtocolModel(ModelBackend):
     """The lifecycle model plus the install primitives, and resume turns that
     speak the task protocol through the installed client's code."""
 
-    installed: dict[str, bytes] = {}
-    fail_install: set[str] = set()
+    installed: ClassVar[dict[str, bytes]] = {}
+    fail_install: ClassVar[set[str]] = set()
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -327,7 +327,7 @@ def test_a_census_before_the_confirmed_stop_is_caught(tmp_path: Path, short: Pat
     honest.run.run()
     blind = World(tmp_path / "b", short / "b", monkeypatch, census=blind_census)
     _with(_CensusBeforeStop, blind).run()
-    honest_final = [c for c in honest_census.calls if c[0] == "finalize"][0]
-    blind_final = [c for c in blind_census.calls if c[0] == "finalize"][0]
+    honest_final = next(c for c in honest_census.calls if c[0] == "finalize")
+    blind_final = next(c for c in blind_census.calls if c[0] == "finalize")
     assert set(honest_final[1].values()) == {"confirmed"}
     assert set(blind_final[1].values()) != {"confirmed"}
