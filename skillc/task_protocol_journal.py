@@ -365,14 +365,16 @@ class Journal:
                 and self.per_principal.get(principal, 0) + 1 > limits["decisions_per_principal"]):
             raise CapacityExceeded("principal")
 
-    def _append_locked(self, kind: str, fields: dict[str, Any]) -> tuple[int, int]:
+    def _append_locked(self, kind: str, fields: dict[str, Any],
+                       elapsed: int | None = None) -> tuple[int, int]:
         if self.failed:
             raise JournalUnavailable("journal poisoned")
         if self.sealed:
             raise JournalUnavailable("journal sealed")
         if self.fenced and kind not in AFTER_FENCE:
             raise JournalUnavailable("ingress fenced")
-        elapsed = self._elapsed()
+        if elapsed is None:
+            elapsed = self._elapsed()
         row = {"seq": self.count + 1, "prev_hash": self.previous, "kind": kind,
                "elapsed_ns": elapsed, **fields}
         _check_row(row, self.context)
@@ -405,6 +407,24 @@ class Journal:
                  "caller record kind required")
         with self.lock:
             return self._append_locked(kind, fields)
+
+    def transact(self, decide: Callable[[int, bool], tuple[str, dict[str, Any], Any]]
+                 ) -> tuple[int, int, Any]:
+        """Decide and record at ONE elapsed reading, under the journal lock.
+
+        `decide(elapsed_ns, fenced)` returns `(kind, fields, extra)`; the record
+        is appended with exactly that `elapsed_ns`, so a decision about
+        lateness and its recorded time can never disagree. If `decide` raises,
+        nothing is written. Returns `(sequence, elapsed_ns, extra)`."""
+        with self.lock:
+            if self.failed or self.sealed:
+                raise JournalUnavailable("journal poisoned or sealed")
+            elapsed = self._elapsed()
+            kind, fields, extra = decide(elapsed, self.fenced)
+            _require(kind in KINDS and kind not in ("capture-start", "capture-seal"),
+                     "caller record kind required")
+            seq, _ = self._append_locked(kind, dict(fields), elapsed)
+            return seq, elapsed, extra
 
     def seal(self, coverage: dict[str, str]) -> Reference:
         """Seal after the caller has fenced ingress, drained in-flight work
