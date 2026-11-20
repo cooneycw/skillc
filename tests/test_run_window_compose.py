@@ -14,9 +14,11 @@ from skillc.remnant_scan import ScanResult
 from skillc.run_window_absence import FAIL, NEG, SURV, Reresolved
 from skillc.run_window_teardown import LAUNCH_ONLY, ScopedObservation
 
-SUFFICIENT: dict[str, Any] = dict(census_complete=True, unlinked=NEG, reresolved=Reresolved(NEG, False),
-                                  teardown=NEG, no_holder=NEG, superblock_gone=NEG, tmpfs=True,
-                                  isolation=ScopedObservation(NEG, rc.LIFETIME))
+SUFFICIENT: dict[str, Any] = {
+    'census_complete': True, 'unlinked': NEG, 'reresolved': Reresolved(NEG, False), 'teardown': NEG,
+    'no_holder': NEG, 'superblock_gone': NEG, 'tmpfs': True,
+    'isolation': ScopedObservation(NEG, rc.LIFETIME),
+}
 FACTS = ('unlinked', 'teardown', 'no_holder', 'superblock_gone')
 
 

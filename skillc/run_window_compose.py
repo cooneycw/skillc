@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .remnant_scan import ScanResult
-from .run_window_absence import FAIL, NEG, SURV, Observation, Reresolved
+from .run_window_absence import NEG, SURV, Observation, Reresolved
 from .run_window_teardown import ScopedObservation
 
 ABSENT = 'ABSENT'
@@ -176,8 +176,3 @@ def window_verdict(verdicts: object, *, declared: object, capture_sealed: object
     if preconditions_held is not True:
         reasons.append('preconditions-not-held')
     return WindowVerdict(CLEAN if not reasons else UNKNOWN, tuple(reasons), removed, retained)
-
-
-__all__ = ['ABSENT', 'ABSENT_UNLINKED', 'PRESENT', 'UNKNOWN', 'NOT_CLEAN', 'CLEAN', 'LIFETIME', 'REMOVED',
-           'RETAINED', 'REASONS', 'removed_surface_verdict', 'present_surface_verdict',
-           'retained_surface_verdict', 'WindowVerdict', 'window_verdict', 'FAIL']
