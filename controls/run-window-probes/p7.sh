@@ -41,7 +41,7 @@ mi=/proc/self/mountinfo
 [ -r "$mi" ] || exit 3
 # Validate the WHOLE table first: every row needs the "-" separator after at
 # least six fields and three fields after it. Prints "FSTYPE OPTIONS MOUNTPOINT".
-mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 3) bad = 1; else print \$(s + 1), \$6, \$5; n++ } END { exit (bad || n < 1) ? 1 : 0 }" "$mi") || exit 3
+mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 3 || \$1 !~ /^[0-9]+\$/ || \$2 !~ /^[0-9]+\$/ || \$3 !~ /^[0-9]+:[0-9]+\$/ || \$4 !~ /^\// || \$5 !~ /^\//) bad = 1; else print \$(s + 1), \$6, \$5; n++ } END { exit (bad || n < 1) ? 1 : 0 }" "$mi") || exit 3
 case $mounts in *\\*) exit 3 ;; esac
 # Exit 4 with "MISSING-SURFACE <path>" means exactly that a declared surface is
 # not mounted, after the table read above succeeded. Any other failure is 3.
@@ -59,7 +59,9 @@ EOT
 done
 # Writable = access(2) says so, OR (on an rw mount) the mode bits say so for
 # this uid or one of its groups. The union means an access(2) error cannot
-# hide a path that the bits show writable. find(1) fails on unreadable paths.
+# hide a path that the bits show writable; find(1) fails on unreadable paths.
+# The union may over-report (fail-safe: MISMATCH, never a false clean); see
+# the README's stated limits for the ACL cases.
 uid=$(id -u) || exit 3
 gids=$(id -G) || exit 3
 set -- \( -writable -o -perm -0002 -o \( -uid "$uid" -perm -0200 \)

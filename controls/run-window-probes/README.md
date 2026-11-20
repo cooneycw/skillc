@@ -55,6 +55,13 @@ login, spend or host action beyond the probe itself.
   mounting anything under it, so probe mounts do not propagate to peer mount
   namespaces. The scratch self-bind itself is created on the (usually shared)
   parent and is unmounted at cleanup.
+- P7's writability check is `access(2)` (GNU `find -writable`) OR the mode
+  bits on rw mounts. Two ACL edge cases remain. A path writable only through
+  a named-user ACL is seen by `access(2)` alone, so an I/O error in that one
+  check would hide it; that needs two faults at once. And the mode-bit branch
+  can over-report a path whose ACL mask sets a group bit the uid cannot use.
+  That direction is fail-safe: a MISMATCH to investigate, never a false clean.
+  Neither is excluded by the script.
 - P2 identifies each planted holder by pid plus start time. Other pids
   are enumerated from one listing of `/proc`; a pid that exits mid-census is
   skipped, not counted as unreadable.
@@ -109,3 +116,4 @@ the files supplied on stdin) before any run.
 | 5 | `11c952d2` | REQUEST-CHANGES (7 of 9 fixed, plus residual paths) | P8 planted-bind and net-namespace specificity and mount-JSON validation; P3 strict row validation; P7 unusable rows, inaccessible mountpoints and a fault arm that must reach its own check (exit 4); P2 re-listing before skipping an entry; scratch absence checked by listing its parent. Addressed in the commit that adds this row |
 | 6 | `b997cfd2` | REQUEST-CHANGES (9 of 12 fixed, plus residual paths) | mandatory mountinfo fields after the separator (P3, P7); P7 fault arm proven by an exit-4 `MISSING-SURFACE` token after a good table read; P8 mount-type validation, `shared_net`/`planted_binds` read and cross-checked on every arm, per-destination visibility; pid-lookup errors are not absence (P2, P3); an untracked new volume makes cleanup unverified (reported, never removed). Plus orchestrator hardening: scratch is a private self-bind before any probe mount (no propagation to peer namespaces), and scratch removal uses `--one-file-system`. Addressed in the commit that adds this row |
 | 7 | `d2983b62` | REQUEST-CHANGES (pass-6 items fixed except one; 3 blockers, 2 minor) | P7 validates the whole mount table before its fault token, which now names `/probe-home`; P7 writability is `access(2)` OR mode bits (on rw mounts), so an access error cannot hide a writable path; P2 and P3 enumerate pids from one checked listing; P8 namespace counts bounded (at most 4, at most 3 non-net); P3 `fd_reads 0` fails. Cleanup and the scratch self-bind found correct. Addressed in the commit that adds this row |
+| 8 | `10cf4c70` | REQUEST-CHANGES (3 of 5 fixed; the 2 remaining and 1 new item are ACL/row edge cases) | P7 mount rows now validated field by field (ids, `major:minor`, absolute roots and mountpoints), as in P3. The two ACL edge cases (named-user ACL hidden only by a concurrent `access(2)` I/O error; mode-bit over-report, which is fail-safe) are recorded under "Stated limits", not fixed. Review stopped here by the orchestrator's rule; the non-author review binds to the head that adds this row |
