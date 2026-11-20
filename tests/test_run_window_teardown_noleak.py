@@ -35,7 +35,7 @@ def marked_capture(tmp_path: Path) -> tuple[rt.LaunchIdentity, References]:
     docker = FakeDocker()
     docker.info = {**docker.info, 'Mounts': [{'Type': 'bind', 'Source': str(bind), 'Destination': '/w'}]}
     proc = FakeProc({'1': proc_entry('1'),
-                     '4242': proc_entry('4242', cgroup=f'/docker/{CID}/' + marker, ns=CONTAINER_NS,
+                     '4242': proc_entry('4242', cgroup='/docker/' + marker + f'/{CID}', ns=CONTAINER_NS,
                                         root_view={'/': DIR, '/w': DIR},
                                         mountinfo=table(ROOT_ROW, PROC_ROW, '81 1 0:1 / /w rw - ext4 /dev/x rw'))})
     ident = rt.capture_launch_identity('skillc-attempt', generation=object(), docker=docker, proc=proc)

@@ -301,9 +301,11 @@ def test_bind_sockets_are_counted_at_the_destination_not_the_source() -> None:
                           mountinfo=table(ROOT_ROW, PROC_ROW, BIND_ROW))
     ident = captured(object(), docker=docker, proc=proc)
     assert ident.usable and ident._bind_sockets == 1
+    assert rt.fact_channel_isolated([ident]) == rt.ScopedObservation(SURV, rt.LAUNCH_ONLY)
 
 
-@pytest.mark.parametrize('case', ['no-mount-record', 'device-mismatch', 'tree-changes', 'fd-table-changes'])
+@pytest.mark.parametrize('case', ['no-mount-record', 'device-mismatch', 'tree-changes', 'inode-replaced',
+                                  'fd-table-changes'])
 def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -> None:
     docker = FakeDocker()
     docker.info = {**docker.info, 'Mounts': [{'Type': 'bind', 'Source': '/x', 'Destination': '/work/run'}]}
@@ -326,6 +328,19 @@ def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -
             return names
 
         proc.listdir_under_root = growing  # type: ignore[method-assign]
+    if case == 'inode-replaced':
+        proc.procs['4242']['root_view']['/work/run/f'] = REG
+        real_lstat = proc.lstat_under_root
+        hits = []
+
+        def swapped(pid: str, path: str) -> os.stat_result:
+            info = real_lstat(pid, path)
+            if path == '/work/run/f':
+                hits.append(1)
+                return fake_stat(REG, ino=2 if len(hits) > 1 else 1)
+            return info
+
+        proc.lstat_under_root = swapped  # type: ignore[method-assign]
     if case == 'fd-table-changes':
         real_read = proc.readlink
         seen = []
@@ -338,7 +353,6 @@ def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -
 
         proc.readlink = swapping  # type: ignore[method-assign]
     assert not captured(object(), docker=docker, proc=proc).usable
-    assert rt.fact_channel_isolated([ident]) == rt.ScopedObservation(SURV, rt.LAUNCH_ONLY)
 
 
 def test_bind_destination_through_a_link_is_unusable() -> None:
@@ -782,6 +796,30 @@ def test_namespace_seen_only_through_a_chrooted_task_is_failed(released: tuple[P
     proc.procs['94'] = proc_entry('94', ns={**HOST_NS, 'mnt': 'mnt:[30004]'}, mountinfo=table(record),
                                   chrooted=True)
     assert rt.fact_superblock_gone(census, proc=proc) is FAIL
+
+
+CHROOTED = '''
+import os, sys, time
+os.chroot(sys.argv[1])
+os.chdir('/')
+open('/ready', 'w').close()
+time.sleep(30)
+'''
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason='chroot needs root; root CI runs it')
+def test_real_predicate_tells_a_chrooted_task_from_a_namespace_root(tmp_path: Path) -> None:
+    jail = tmp_path.resolve() / 'jail'
+    jail.mkdir()
+    child = subprocess.Popen([sys.executable, '-I', '-S', '-c', CHROOTED, str(jail)])
+    try:
+        wait_ready(jail / 'ready')
+        reader = rt.RealProc()
+        assert reader.root_is_ns_root(f'{os.getpid()}/task/{os.getpid()}')
+        assert not reader.root_is_ns_root(f'{child.pid}/task/{child.pid}')
+    finally:
+        child.kill()
+        child.wait()
 
 
 @pytest.mark.parametrize('bad', ['garbage', '1 0 8:1 / / rw tmpfs t rw', 'x y 8:1 / / rw - tmpfs t rw',

@@ -177,6 +177,15 @@ not re-prove them:
   host workload. A descriptor transfer between surviving host processes during
   a scan is outside that workload's behaviour. Fact 2's second pass narrows
   that race; it cannot exclude it.
+- **The surviving host workload does not build deceptive views.** Fact 3's
+  coverage test needs two things: the task's root must be its own parent
+  through `/proc/<task>/root/..`, and its table's `/` record must have root
+  `/`. A chroot onto a filesystem root that was bind-mounted onto its own
+  immediate child passes both. Such a construction is outside the declared
+  host workload, and a real-chroot control (run as root) qualifies the common
+  case. A bind destination is walked through the task's own root, so it counts
+  what the container sees; the device check confirms it is a mountpoint, but
+  does not separate two mounts of one filesystem.
 
 **Launch-identity capture (`capture_launch_identity`)** is read-only. It runs
 once per role or login container, after `prepare()` starts it and before any

@@ -329,6 +329,11 @@ def _sockets_at(proc: ProcReader, pid: str, dest: str, rows: list[tuple[str, str
         path = f'{path}/{part}'
         if stat.S_ISLNK(proc.lstat_under_root(pid, path).st_mode):
             raise _sanitised()
+    # The walk goes through the task's own root, so it counts what the
+    # container actually sees at the destination. The record check confirms
+    # that the destination IS a mountpoint there (the effective, last-listed
+    # one) on the walked device; two mounts of one filesystem share a device,
+    # which this does not separate and does not need to.
     mounted = [dev for dev, _, mountpoint in rows if mountpoint == path]
     info = proc.lstat_under_root(pid, path)
     if not mounted or mounted[-1] != f'{os.major(info.st_dev)}:{os.minor(info.st_dev)}':
@@ -336,14 +341,17 @@ def _sockets_at(proc: ProcReader, pid: str, dest: str, rows: list[tuple[str, str
     first = _walk_tree(proc, pid, path, 0)
     if _walk_tree(proc, pid, path, 0) != first:
         raise _sanitised()  # The tree changed while it was read.
-    return sum(1 for _, mode in first if stat.S_ISSOCK(mode))
+    return sum(1 for _, mode, _, _ in first if stat.S_ISSOCK(mode))
 
 
-def _walk_tree(proc: ProcReader, pid: str, path: str, depth: int) -> list[tuple[str, int]]:
+def _walk_tree(proc: ProcReader, pid: str, path: str, depth: int) -> list[tuple[str, int, int, int]]:
+    """(path, mode, device, inode) for the whole tree, so a second walk also
+    notices an entry replaced by another inode of the same type."""
     if depth > ra.LIMITS['depth']:
         raise _sanitised()
-    mode = proc.lstat_under_root(pid, path).st_mode
-    out = [(path, mode)]
+    info = proc.lstat_under_root(pid, path)
+    mode = info.st_mode
+    out = [(path, mode, info.st_dev, info.st_ino)]
     if stat.S_ISDIR(mode):
         for name in sorted(proc.listdir_under_root(pid, path)):
             out.extend(_walk_tree(proc, pid, f'{path}/{name}', depth + 1))
@@ -647,7 +655,8 @@ def fact_superblock_gone(census: ra.Census, *, proc: ProcReader | None = None) -
             rows = _table(proc.read(node, 'mountinfo'))
             # A table is complete only if this task's root is its mount
             # namespace's root; a chrooted task's table omits outer mounts.
-            complete = proc.root_is_ns_root(node)
+            complete = proc.root_is_ns_root(node) and any(
+                mountpoint == '/' and root == '/' for _, root, mountpoint in rows)
             if _stat_fields(proc, node)[19] != before:
                 return FAIL
         except OSError:
