@@ -106,6 +106,8 @@ BLIND_TWINS = [
      'if [ "$e" -ne 0 ]; then', "p3", "qualified", "fault"),
     ("lazy-listing-ignored", "p3.sh", '"$PROBE_NEG") if [ "$r" -eq 1 ]',
      '"$PROBE_NEG" | "$PROBE_SURV") if [ "$r" -eq 1 ]', "p3", "lazy-still-listed", "lazy"),
+    ("late-reading-ignored", "p6.sh", 'a=$(rd_uint "$1" after_late)', 'a=$(rd_uint "$1" after)',
+     "p6", "gc-late-kept-gone", "removed"),
     ("failed-rm-trusted", "p6.sh", 'if [ "$ok" -ne 1 ] || [ "$b" -lt 1 ]', "if false",
      "p6", "rm-failed", "removed"),
     ("unlanded-write-trusted", "p5.sh", 'if [ "$p" -eq 1 ]; then printf', "if true; then printf",

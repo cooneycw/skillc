@@ -1,0 +1,12 @@
+removed baseline 2
+removed rm_ok 1
+removed after 1
+removed after_late 1
+kept baseline 2
+kept rm_ok 1
+kept after 2
+kept after_late 2
+fault baseline ERR
+fault rm_ok 0
+fault after ERR
+fault after_late ERR

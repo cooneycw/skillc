@@ -6,9 +6,12 @@
 # ROOT REQUIRED. TOUCHES DOCKER.
 # Storage: overlay2, or the containerd image store's overlayfs snapshotter
 # (lib.sh, "Container storage"). Each container runs so its upper directory
-# can be read from the kernel and proven to be its own by a marker. Under the
-# containerd store, a SURVIVOR on `removed` can mean the snapshot is removed
-# later by garbage collection: that is a finding, not a script error.
+# can be read from the kernel and proven to be its own by a marker.
+# Each link count is read twice: once immediately (`after`, kept as evidence)
+# and again PROBE_GC_WAIT seconds later (`after_late`, default 10, at most
+# 300), on which the verdict rests. Under the containerd store a snapshot may
+# be removed by asynchronous garbage collection, so an immediate positive
+# count followed by a late 0 is GC timing; a late positive count is retention.
 # Usage: p6.sh --image-id sha256:<64 hex> --runner-unit <unit>
 #
 # Arms and expected verdicts:
@@ -32,6 +35,8 @@ observe() {
     require_runner_idle
     require_image
     require_overlay_storage
+    wait_s=${PROBE_GC_WAIT:-10}
+    if ! is_uint "$wait_s" || [ "$wait_s" -gt 300 ]; then probe_die 'gc-wait-invalid'; fi
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
 
     create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
@@ -46,7 +51,6 @@ observe() {
         record removed rm_ok 0
     fi
     record removed after "$(nlink_of_fd 9)"
-    exec 9<&-
 
     create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c2=$cid
@@ -55,6 +59,13 @@ observe() {
     record kept baseline "$(nlink_of_fd 8)"
     record kept rm_ok 1
     record kept after "$(nlink_of_fd 8)"
+
+    # The late readings, through the same held descriptors.
+    info "gc-wait $wait_s"
+    sleep "$wait_s"
+    record removed after_late "$(nlink_of_fd 9)"
+    record kept after_late "$(nlink_of_fd 8)"
+    exec 9<&-
     exec 8<&-
 
     # Fault: removing an ID this probe never created fails; fd 7 is closed
@@ -64,13 +75,15 @@ observe() {
     if docker rm "$absent_id" >/dev/null 2>&1; then record fault rm_ok 1; else record fault rm_ok 0; fi
     record fault baseline "$(nlink_of_fd 7)"
     record fault after "$(nlink_of_fd 7)"
+    record fault after_late "$(nlink_of_fd 7)"
     recheck_runner
 }
 
 verdict() {
     b=$(rd_uint "$1" baseline) || { printf '%s\n' "$PROBE_FAIL"; return; }
     ok=$(rd_bool "$1" rm_ok) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    a=$(rd_uint "$1" after) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    # The verdict rests on the late reading; the immediate one is evidence.
+    a=$(rd_uint "$1" after_late) || { printf '%s\n' "$PROBE_FAIL"; return; }
     # A failed removal, or a held dir that never had a positive link count, is
     # not evidence of anything.
     if [ "$ok" -ne 1 ] || [ "$b" -lt 1 ]; then printf '%s\n' "$PROBE_FAIL"; return; fi

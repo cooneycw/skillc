@@ -188,7 +188,7 @@ sets the container uid for P5 and P7. P2, P3, P4 and P8 use `python3 -I`
 | P3 | QUALIFIED | fact 3 or 4 needs redesign for this kernel |
 | P4 | QUALIFIED | the `live` arm shows swap, a piped core handler or a resume device: windows stay blocked until fixed |
 | P5 | QUALIFIED | home bind leaks to VM disk or does not survive removal: PR-1 design must change |
-| P6 | QUALIFIED | records the mechanism only. Under the containerd store, a SURVIVOR on `removed` can mean the snapshot is removed later by garbage collection: record it as a finding, not a script error |
+| P6 | QUALIFIED | records the mechanism only. Each count is read immediately (`after`, evidence) and again after `PROBE_GC_WAIT` seconds (`after_late`, default 10, at most 300), and the verdict rests on the late one. An immediate positive count with a late 0 is asynchronous snapshot collection; a late positive count is retention |
 | P7 | QUALIFIED, unless the image exposes an extra writable mount (for example `/dev/mqueue`), which PR-1 must then close | PR-1 containment must close the listed extra |
 | P8 | QUALIFIED | channel isolation does not hold; fact 2b fails closed. If the `clean` arm's only survivor is a socket on fd 0–2 of the container's init (container-runtime stdio), record it: PR-1 must decide that case explicitly, not dismiss it |
 
