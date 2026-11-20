@@ -174,6 +174,9 @@ class Leases:
         self.inventory = inventory
         self._entries = {s.principal: _Entry(s) for s in inventory.slots}
         self._used_instances = {_private(i) for i in used_instances}
+        #: Runtime instances presented in THIS attempt, by the slot that
+        #: presented them (bound or not).
+        self._presented: dict[str, str] = {}
         self._used_endpoints = {_private(e) for e in used_endpoints}
         self._token = token
         self._barrier: dict[str, Any] | None = None
@@ -204,10 +207,17 @@ class Leases:
         """Bind a leased slot to its actual runtime instance and its
         independently captured startup session. Returns B2's `binding` record.
 
-        A missing session (None), a second bind, a runtime instance or session
-        another slot already holds, or one an earlier attempt held, resolves the
-        slot `unavailable` instead: no task credit, never an agent's
-        replacement identity."""
+        Identities are one-to-one, so a collision cannot say which binding is
+        wrong:
+
+        - A runtime instance or session that ANOTHER slot of this attempt
+          already presented makes BOTH slots `unavailable`.
+        - A runtime instance an EARLIER attempt held marks only this slot.
+        - A missing session (None) or a second bind for this slot marks this
+          slot.
+
+        Each gives no task credit, and none accepts an agent's replacement
+        identity."""
         entry = self._open(principal)
         if entry.lease is None:
             raise LeaseError("slot has no lease")
@@ -216,21 +226,34 @@ class Leases:
         if entry.state is not None:
             entry.state, entry.reason = "unavailable", "conflicting-startup-binding"
             raise LeaseError("slot already resolved")
+        other = self._presented.get(instance)
+        if other is not None and other != principal:
+            self._collide(entry, self._entries[other])
+            raise LeaseError("runtime instance presented by two slots of this attempt")
         if instance in self._used_instances:
             entry.state, entry.reason = "unavailable", "runtime-instance-reused"
             raise LeaseError("runtime instance already held a lease")
         # This instance now held a lease, whatever happens next.
         self._used_instances.add(instance)
+        self._presented[instance] = principal
+        entry.runtime_instance = instance
         if session_id is None:
             entry.state, entry.reason = "unavailable", "missing-startup-session"
             raise LeaseError("no independently captured startup session")
         session = _private(session_id)
-        if any(e.session_id == session for e in self._entries.values()):
-            entry.state, entry.reason = "unavailable", "session-held-by-another-slot"
-            raise LeaseError("startup session already bound to another slot")
-        entry.runtime_instance, entry.session_id = instance, session
+        holder = next((e for e in self._entries.values()
+                       if e is not entry and e.session_id == session), None)
+        entry.session_id = session
+        if holder is not None:
+            self._collide(entry, holder)
+            raise LeaseError("startup session presented by two slots of this attempt")
         entry.evidence_digest, entry.state = evidence, "bound"
         return {"principal": principal, "evidence_digest": evidence}
+
+    @staticmethod
+    def _collide(entry: _Entry, holder: _Entry) -> None:
+        for slot in (entry, holder):
+            slot.state, slot.reason = "unavailable", "startup-identity-collision"
 
     def mark_unstarted(self, principal: str) -> None:
         """A planned slot that was positively never started. It stays in the

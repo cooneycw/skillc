@@ -142,6 +142,20 @@ class _NeverFreezes(Leases):
         return self._entries[principal]
 
 
+class _KeepsFirstHolder(Leases):
+    """The finding on #804: a collision that marks only the newcomer."""
+
+    def bind(self, principal: str, *, runtime_instance: str, session_id: str | None,
+             evidence_digest: str) -> dict[str, Any]:
+        before = {p: (e.state, e.reason) for p, e in self._entries.items() if p != principal}
+        try:
+            return super().bind(principal, runtime_instance=runtime_instance,
+                                session_id=session_id, evidence_digest=evidence_digest)
+        finally:
+            for other, (state, reason) in before.items():
+                self._entries[other].state, self._entries[other].reason = state, reason
+
+
 @pytest.mark.parametrize("variant,must_miss", [
     (_Rebinds, "conflicting-second-bind"),
     (_IgnoresRevocation, "revocation-is-one-way"),
@@ -149,6 +163,8 @@ class _NeverFreezes(Leases):
     (_GuessesNonstarts, "barrier-refused-while-unresolved"),
     (_ForgetsEarlierAttempts, "runtime-instance-from-earlier-attempt"),
     (_NeverFreezes, "frozen-after-barrier"),
+    (_KeepsFirstHolder, "runtime-instance-collision-within-attempt"),
+    (_KeepsFirstHolder, "session-collision-within-attempt"),
 ], ids=lambda v: getattr(v, "__name__", str(v)))
 def test_a_blind_lease_table_disagrees(variant: type[Leases], must_miss: str) -> None:
     case = next(c for c in CASES if c["name"] == must_miss)
