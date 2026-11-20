@@ -24,6 +24,8 @@ parse_common "$@"
 # IDENTITY is a kernel dev:ino. Each directory is listed exactly once; entry
 # names in /proc fd and map_files never contain whitespace.
 census() {
+    nl='
+'
     fd_hits=0
     map_hits=0
     unreadable=0
@@ -47,7 +49,9 @@ census() {
                             map_hits=$((map_hits + 1))
                         fi
                     fi
-                elif [ -L "$e" ]; then
+                elif again=$(ls -1A -- "$p/$sub" 2>/dev/null); then
+                    case "$nl$again$nl" in *"$nl$n$nl"*) unreadable=$((unreadable + 1)) ;; esac
+                elif [ -d "$p" ]; then
                     unreadable=$((unreadable + 1))
                 fi
             done

@@ -44,7 +44,13 @@ sb_listed() {
             # after at least six fields; otherwise the table is unreadable.
             if n=$(printf '%s\n' "$t" | awk -v d="$2" '
                 NF == 0 { next }
-                { r++; sep = 0; for (i = 7; i <= NF; i++) if ($i == "-") sep = 1; if (!sep) bad = 1 }
+                {
+                    r++; sep = 0
+                    for (i = 7; i <= NF; i++) if ($i == "-") { sep = i; break }
+                    if (!sep || NF < sep + 2) bad = 1
+                    if ($1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+:[0-9]+$/) bad = 1
+                    if ($4 !~ /^\// || $5 !~ /^\//) bad = 1
+                }
                 $3 == d { c++ }
                 END { if (r < 1 || bad) exit 1; print c + 0 }') && is_uint "$n"; then
                 listed=$((listed + n))

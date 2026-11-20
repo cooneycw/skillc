@@ -191,6 +191,19 @@ container_absent() {
     [ -z "$_out" ]
 }
 
+# path_absent PATH: 0 only when PATH's parent was listed successfully and the
+# name is not in that listing (no reliance on `test -e`, which cannot tell a
+# missing path from a lookup failure). Nonzero otherwise.
+path_absent() {
+    _parent=$(dirname -- "$1")
+    _base=$(basename -- "$1")
+    _list=$(ls -1A -- "$_parent" 2>/dev/null) || return 1
+    _nl='
+'
+    case "$_nl$_list$_nl" in *"$_nl$_base$_nl"*) return 1 ;; esac
+    return 0
+}
+
 # probe_cleanup: release every tracked resource and verify it is gone. Returns
 # nonzero, keeping the scratch directory, if anything could not be verified.
 # Idempotent: released resources are removed from the tracking lists.
@@ -240,9 +253,9 @@ probe_cleanup() {
     # Once any cleanup could not be verified, the scratch directory is kept for
     # inspection for the rest of the run, including the EXIT trap's retry.
     if [ "$_ok" != 0 ]; then PROBE_KEEP=1; fi
-    if [ "$PROBE_KEEP" = 0 ] && [ -n "$PROBE_SCRATCH" ] && [ -e "$PROBE_SCRATCH" ]; then
+    if [ "$PROBE_KEEP" = 0 ] && [ -n "$PROBE_SCRATCH" ]; then
         rm -rf -- "$PROBE_SCRATCH" 2>/dev/null || true
-        if [ -e "$PROBE_SCRATCH" ]; then _ok=1; PROBE_KEEP=1; else PROBE_SCRATCH=; fi
+        if path_absent "$PROBE_SCRATCH"; then PROBE_SCRATCH=; else _ok=1; PROBE_KEEP=1; fi
     fi
     return "$_ok"
 }

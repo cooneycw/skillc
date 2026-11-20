@@ -28,22 +28,33 @@ socket_binds() {
     _j=$(docker inspect --format '{{json .Mounts}}' "$1") || return 1
     printf '%s\n' "$_j" | python3 -I -c '
 import json, os, stat, sys
+mounts = json.load(sys.stdin)
+if not isinstance(mounts, list):
+    sys.exit(1)
+planted = {"/probe-host.sock", "/probe-sockdir"}
 count = 0
-for m in json.load(sys.stdin):
-    if m.get("Type") != "bind":
+hit = set()
+def fail(err):
+    raise err
+for m in mounts:
+    if not isinstance(m, dict) or not all(isinstance(m.get(k), str) for k in ("Type", "Source", "Destination")):
+        sys.exit(1)
+    if m["Type"] != "bind":
         continue
-    src = m["Source"]
+    src, dst = m["Source"], m["Destination"]
     st = os.lstat(src)
+    found = 0
     if stat.S_ISSOCK(st.st_mode):
-        count += 1
+        found = 1
     elif stat.S_ISDIR(st.st_mode):
-        def fail(err):
-            raise err
         for root, dirs, files in os.walk(src, onerror=fail):
             for name in dirs + files:
                 if stat.S_ISSOCK(os.lstat(os.path.join(root, name)).st_mode):
-                    count += 1
-print(count)
+                    found += 1
+    count += found
+    if found and dst in planted:
+        hit.add(dst)
+print(count, len(hit))
 '
 }
 
@@ -60,18 +71,30 @@ isolation() {
     shared=0
     ok=1
     [ -n "$ident" ] || ok=0
+    shared_net=0
     for ns in net ipc mnt pid; do
         if c=$(readlink "/proc/$pid/ns/$ns") && h=$(readlink "/proc/1/ns/$ns"); then
-            if [ "$c" = "$h" ]; then shared=$((shared + 1)); fi
+            if [ "$c" = "$h" ]; then
+                shared=$((shared + 1))
+                if [ "$ns" = net ]; then shared_net=1; fi
+            fi
         else
             ok=0
         fi
     done
-    if [ "$ok" = 1 ]; then record "$1" shared_ns "$shared"; else record "$1" shared_ns ERR; fi
-    if b=$(socket_binds "$2" 2>/dev/null) && is_uint "$b"; then
-        record "$1" socket_binds "$b"
+    if [ "$ok" = 1 ]; then
+        record "$1" shared_ns "$shared"
+        record "$1" shared_net "$shared_net"
+    else
+        record "$1" shared_ns ERR
+        record "$1" shared_net ERR
+    fi
+    if b=$(socket_binds "$2" 2>/dev/null) && is_uint "${b% *}" && is_uint "${b#* }"; then
+        record "$1" socket_binds "${b% *}"
+        record "$1" planted_binds "${b#* }"
     else
         record "$1" socket_binds ERR
+        record "$1" planted_binds ERR
     fi
     # The container's own view: socket files it can see outside /proc and /sys.
     # `set -e` plus a plain assignment: a find(1) that fails, or is missing,
@@ -188,17 +211,17 @@ v_iso() {
 v_sockbind() {
     base=$(v_iso sockbind)
     [ "$base" != "$PROBE_FAIL" ] || { printf '%s\n' "$PROBE_FAIL"; return; }
-    b=$(rd_uint sockbind socket_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    p=$(rd_uint sockbind planted_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
     v=$(rd_uint sockbind visible_sockets) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$b" -ge 2 ] && [ "$v" -ge 2 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
+    if [ "$p" -eq 2 ] && [ "$v" -ge 2 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
 }
 
 # v_hostnet: the survivor must be the shared namespace itself.
 v_hostnet() {
     base=$(v_iso hostnet)
     [ "$base" != "$PROBE_FAIL" ] || { printf '%s\n' "$PROBE_FAIL"; return; }
-    s=$(rd_uint hostnet shared_ns) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$s" -ge 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
+    s=$(rd_bool hostnet shared_net) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$s" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
 }
 
 v_zero() {

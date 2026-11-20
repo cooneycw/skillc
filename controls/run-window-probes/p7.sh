@@ -39,13 +39,15 @@ INVENTORY='
 set -euf
 mi=/proc/self/mountinfo
 [ -r "$mi" ] || exit 3
+# Exit 4 means exactly "a declared surface is missing or not writable", so the
+# fault arm can prove it reached this check rather than failing elsewhere.
 for s in $DECLARED; do
-    awk -v m="$s" "\$5 == m { f = 1 } END { exit f ? 0 : 1 }" "$mi" || exit 3
+    awk -v m="$s" "\$5 == m { f = 1 } END { exit f ? 0 : 1 }" "$mi" || exit 4
     w="$s/.skillc-dev-probe-write"
-    printf "x\n" > "$w" || exit 3
-    rm "$w" || exit 3
+    printf "x\n" > "$w" || exit 4
+    rm "$w" || exit 4
 done
-mounts=$(awk "{ for (i = 7; i <= NF; i++) if (\$i == \"-\") { print \$(i + 1), \$5; break } }" "$mi") || exit 3
+mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 2) bad = 1; else print \$(s + 1), \$5 } END { exit bad ? 1 : 0 }" "$mi") || exit 3
 [ -n "$mounts" ] || exit 3
 case $mounts in *\\*) exit 3 ;; esac
 dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
@@ -53,8 +55,10 @@ printf "%s\n" "$mounts" | while IFS=" " read -r fstype mp; do
     case $fstype in proc | sysfs | cgroup | cgroup2) continue ;; esac
     if [ -d "$mp" ]; then
         find "$mp" -xdev -type d -writable -print >>"$dirs/dirs" || { : >"$dirs/failed"; continue; }
-    elif [ -w "$mp" ]; then
-        printf "%s\n" "$mp" >>"$dirs/files"
+    elif [ -e "$mp" ] || [ -L "$mp" ]; then
+        if [ -w "$mp" ]; then printf "%s\n" "$mp" >>"$dirs/files"; fi
+    else
+        : >"$dirs/failed"
     fi
 done
 [ ! -e "$dirs/failed" ] || exit 3
@@ -116,8 +120,13 @@ observe() {
             # shellcheck disable=SC2086  # four space-separated numbers
             set -- $out
         else
+            _rc=$?
             set --
+            # The fault arm must fail at the declared-surface check (exit 4),
+            # not anywhere else, or it has not exercised what it claims.
+            if [ "$_arm" = fault ] && [ "$_rc" -ne 4 ]; then probe_die 'fault-arm-not-exercised'; fi
         fi
+        if [ "$_arm" = fault ] && [ "$#" -ne 0 ]; then probe_die 'fault-arm-not-exercised'; fi
         if [ "$#" -eq 4 ]; then
             record "$_arm" extra_dirs "$1"
             record "$_arm" extra_files "$2"
