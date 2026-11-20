@@ -80,6 +80,7 @@ def test_a_flow_list_a_yaml_loader_rejects_is_refused_too(doc: str) -> None:
 @pytest.mark.parametrize("doc", [
     "---\nk:\n  -   id: a\n    t: x\n---\n",          # keys two right of the dash, not under `id`
     "---\nk:\n  -  id: a\n      t: x\n  - id: b\n---\n",  # one column past `id`
+    "---\nk:\n  -  id: a\n     t: x\n---\n",       # U+00A0 counted as a column (counter-model review)
 ])
 def test_a_mis_aligned_list_mapping_a_yaml_loader_rejects_is_refused_too(doc: str) -> None:
     """#739: the parser assumed a `- key:` item's keys sit two columns right of

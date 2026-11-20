@@ -457,8 +457,13 @@ class _Parser:
                 # line in place and read the mapping at that column; it ends at
                 # the next item or a dedent.
                 gap = text[1:len(text) - len(text[1:].lstrip())]
+                # Only ASCII spaces count as columns (counter-model review): a
+                # tab or a Unicode space such as U+00A0 would be stripped and
+                # silently repaired, while YAML rejects it.
                 if "\t" in gap:
                     raise _unsupported(lineno, "a tab after a list dash")
+                if gap.strip(" "):
+                    raise _unsupported(lineno, "a non-ASCII space after a list dash")
                 column = ind + len(gap) + 1
                 self.lines[i] = " " * column + value
                 # The depth carries through (counter-model review): restarting it
