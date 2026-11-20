@@ -162,7 +162,18 @@ says nothing about descriptors already open inside a pruned directory, a
 working directory there, another mount namespace, or `/proc/<pid>/` links.
 Those are other instruments' domains: P8's init socket-fd check, and the
 A-2 fd and `map_files` census of every task. Nor does it cover a later
-`chmod` by another (root) process during the window. The window's containment
+`chmod` by another (root) process during the window.
+
+**The scan assumes a quiescent tree.** It runs in a container the probe
+itself created, whose only processes are the scan (P7: the inventory is the
+container's command) or an idle `sleep` (P8). No process of any uid,
+including the probe uid, changes the tree while the scan runs. The
+post-check's ancestor, ownership, symlink and inode rules close the
+substitutions a single actor could make between the walk and the re-check.
+Review pass 8 showed that a concurrent process of the probe uid timing
+renames between those steps, or creating an entry after its parent was
+listed, would defeat them, as it would any `find`-based inventory. Such a
+process is excluded by construction here, not detected. The window's containment
 design, not this scan, owns that.
 
 The rule never reads `find`'s error text. Any unexpected line in a scan's
@@ -309,3 +320,16 @@ the files supplied on stdin) before any run.
 | 5 | `3ea04a69` | APPROVE-WITH-FIXES | arch gate confirmed fixed; P6's late re-read confirmed; the one major (an overflowing wait value) is already excluded by `is_uint`, which accepts at most 18 digits, inside the shell's integer range. No change |
 
 Still open, and stated: no committed runner-VM mountinfo capture (stage 2 records it); a failed directory open after the `-d` check has no committed case; the callers are pinned by wiring text, not run end to end.
+
+### Prune rule (P7, P8)
+
+| Pass | Reviewed | Verdict | Outcome |
+|---|---|---|---|
+| 1 | `bd16b398` | REQUEST-CHANGES (1 blocker, 3 major) | `! -executable` conflates denial with I/O errors; scope of the claim; scan identity; tests short of the payloads. Addressed in `9bb4617b` (mode-class agreement, ownership, newline, identity, scope statement) |
+| 2 | `9bb4617b` | REQUEST-CHANGES (1 blocker, 3 major) | scope accepted; a transient access error still read as a denial; two access evaluations could disagree; basename-only newline check. Addressed in `0a52b51f` (one evaluation, ACL post-check, full-path newline, non-root identity) |
+| 3 | `0a52b51f` | REQUEST-CHANGES | kernel denial confirmed given no ACL; stage 2 accepted as the end-to-end bound; post-check not bound to the walk inode. Addressed in `802004fa` |
+| 4 | `802004fa` | REQUEST-CHANGES | `ls` substitution; identity source; record parsing. Addressed in `4d435329` |
+| 5 | `4d435329` | REQUEST-CHANGES | the ACL listing not inode-bound. Addressed in `22cf2cf4` (`ls -ldi`) |
+| 6 | `22cf2cf4` | REQUEST-CHANGES | inode numbers repeat across devices, so an ancestor substitution could redirect `ls`. Addressed in `dbec77b9`, `2688b9ce` (no replaceable ancestor; sticky over a foreign entry allowed) |
+| 7 | `2688b9ce` | REQUEST-CHANGES | owned ancestors; lexical ancestors through a symlink. Addressed in `74c05af6` |
+| 8 | `74c05af6` | REQUEST-CHANGES | owned ancestors FIXED; the remaining two need a concurrent probe-uid process timing renames, or creating entries mid-walk. Answered by scope: the probe container is quiescent by construction (above) |

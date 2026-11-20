@@ -552,7 +552,9 @@ SCAN_LIB='
 # the credentials find is started from; a set-id or file-capability find
 # binary is outside the scan scope.
 # XDEV is "xdev" or "all". The verdict this supports is scoped to fresh
-# pathname lookup from ROOT under this identity, at the observation instant.
+# pathname lookup from ROOT under this identity, at the observation instant,
+# in a quiescent tree: the probe container runs no other process that could
+# change it while the scan runs (see the probes README).
 scan() {
     _pr=$1
     _root=$2
