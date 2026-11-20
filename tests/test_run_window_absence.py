@@ -568,6 +568,7 @@ def test_held_tree_reads_the_held_root_after_the_path_moves(tmp_path: Path) -> N
         while held_number not in reused and len(reused) < 512:
             reused.append(os.open(str(tmp), os.O_RDONLY))
         try:
+            assert held_number in reused, 'the kernel should hand back the freed number'
             tree.close()
             for number in reused:
                 os.fstat(number)
