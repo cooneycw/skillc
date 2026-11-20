@@ -1,13 +1,19 @@
-"""Join retained tap operations to the existing independent wave verdict input.
+"""A DIAGNOSTIC-ONLY join of retained tap operations (#626).
 
-The caller supplies the digest receipt held by its controller, not actor data.
-Refusals stay distinct protocol violations; they never become successful acks.
+Owner ruling 2026-11-20 (option A, #626 comment 7039734091): the #620 PR-B
+task-protocol client journal is the verdict source. The Q15 A helper tap is
+kept as a CPP-arm corroboration journal, diagnostic only. So this join takes
+no `WaveEvidence` and returns none: it reports what the tap retained BESIDE
+the verdict and cannot feed it. Its custody, refusal and UNKNOWN-coverage
+rules are unchanged. The caller supplies the digest receipt held by its
+controller, not actor data. Refusals stay distinct; they never become
+successful acks.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +21,14 @@ from . import live_wave as lw
 from .git_snapshot import SafeTree, Unreadable
 
 
-def protocol_evidence(plan: lw.WavePlan, evidence: lw.WaveEvidence,
-                      collection: dict[str, Any], journal_root: Path) -> lw.WaveEvidence:
+#: What this diagnostic does to the primary verdict, stated in every report.
+VERDICT_EFFECT = "none (diagnostic only; #626 ruling 7039734091)"
+
+
+def corroboration(plan: lw.WavePlan, collection: dict[str, Any],
+                  journal_root: Path) -> dict[str, Any]:
+    """The tap's retained operations and refusals per planned role, and
+    whether its coverage is COMPLETE. Never a verdict input."""
     complete = False
     rows: dict[str, list[dict[str, Any]]] = {role.role: [] for role in plan.roles}
     refusal_sequences: set[int] = set()
@@ -30,7 +42,7 @@ def protocol_evidence(plan: lw.WavePlan, evidence: lw.WaveEvidence,
         document = json.loads(raw)
         bindings = document["bindings"]
         if (document["version"] != 1 or len(bindings) != len(expected)
-                or {b["role"]: b for b in bindings} != expected or evidence.wave_id != plan.wave_id):
+                or {b["role"]: b for b in bindings} != expected):
             raise ValueError("tap population binding mismatch")
         complete = collection.get("status") == "COMPLETE" and not document["unknown"]
         for row in document["rows"]:
@@ -82,10 +94,11 @@ def protocol_evidence(plan: lw.WavePlan, evidence: lw.WaveEvidence,
                 complete = False
     except (OSError, Unreadable, ValueError, KeyError, TypeError):
         complete = False
-    roles = []
-    for role in evidence.roles:
-        events = sorted(rows.get(role.role, []), key=lambda event: event["elapsed"])
+    roles: dict[str, dict[str, Any]] = {}
+    for role in plan.roles:
+        events = sorted(rows[role.role], key=lambda event: event["elapsed"])
         payload = b"".join(json.dumps(event, sort_keys=True).encode() + b"\n" for event in events)
-        protocol = lw.Blob(payload, hashlib.sha256(payload).hexdigest()) if payload else None
-        roles.append(replace(role, protocol=protocol, capture_complete=role.capture_complete and complete))
-    return replace(evidence, roles=tuple(roles))
+        roles[role.role] = {"ops": [event["op"] for event in events],
+                            "sha256": hashlib.sha256(payload).hexdigest()}
+    return {"status": "COMPLETE" if complete else "UNKNOWN", "roles": roles,
+            "verdict_effect": VERDICT_EFFECT}

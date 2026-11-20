@@ -196,9 +196,29 @@ def wave_inputs(world: Any, *, wrong_output: bool = False) -> Any:
     return lw, plan, evidence, grade
 
 
+def _reenabled_old_join(plan: Any, evidence: Any, diagnostic: dict[str, Any]) -> Any:
+    """BLIND TWIN: the pre-ruling join, re-enabled, feeding the tap's retained
+    operations back into the verdict input as protocol rows. The real code has
+    no such path; each control below asserts the twin's verdict DIFFERS."""
+    from dataclasses import asdict, replace
+
+    from skillc import live_wave as lw
+    roles = []
+    for binding, role in zip(plan.roles, evidence.roles, strict=True):
+        base = {"wave_id": plan.wave_id, **{k: v for k, v in asdict(binding).items()
+                                            if k != "required_artifacts"}}
+        rows = [{**base, "op": op, "elapsed": float(i + 1)}
+                for i, op in enumerate(diagnostic["roles"][binding.role]["ops"])]
+        payload = b"".join(json.dumps(row, sort_keys=True).encode() + b"\n" for row in rows)
+        protocol = lw.Blob(payload, hashlib.sha256(payload).hexdigest()) if payload else None
+        roles.append(replace(role, protocol=protocol, capture_complete=role.capture_complete
+                             and diagnostic["status"] == "COMPLETE"))
+    return replace(evidence, roles=tuple(roles))
+
+
 @pytest.mark.parametrize("coverage_loss", [False, True])
 def test_protocol_refusal_does_not_become_successful_ack(boundary: Any, coverage_loss: bool) -> None:
-    from skillc.wave_tap_join import protocol_evidence
+    from skillc.wave_tap_join import VERDICT_EFFECT, corroboration
     assert not request(boundary, seq=1)["accepted"]
     if coverage_loss:
         boundary.executor.available = False
@@ -208,17 +228,19 @@ def test_protocol_refusal_does_not_become_successful_ack(boundary: Any, coverage
     assert request(boundary, "complete")["accepted"]
     boundary.executor.stopped = True
     collection = boundary.tap.finalize()
-    lw, plan, evidence, grade = wave_inputs(boundary)
-    joined = protocol_evidence(plan, evidence, collection, boundary.tap.root)
-    assert joined.roles[0].protocol is not None
-    ops = [json.loads(line)["op"] for line in joined.roles[0].protocol.data.splitlines()]
-    assert ops == ["refused-protocol", "ack", "complete"]
-    assert lw.verdict(plan, joined, grade)["status"] == "FAIL"
+    plan = wave_inputs(boundary)[1]
+    diagnostic = corroboration(plan, collection, boundary.tap.root)
+    assert diagnostic["roles"][plan.roles[0].role]["ops"] == ["refused-protocol", "ack", "complete"]
+    assert diagnostic["verdict_effect"] == VERDICT_EFFECT
+    if coverage_loss:
+        assert diagnostic["status"] == "UNKNOWN"
 
 
 @pytest.mark.parametrize("fault", ["coverage", "custody", "participant-log", "wrong-task"])
 def test_task_grade_and_protocol_completeness_are_both_required(boundary: Any, fault: str) -> None:
-    from skillc.wave_tap_join import protocol_evidence
+    """The tap never supplies protocol evidence, so without the client journal
+    the verdict is UNKNOWN; a wrong delivered task still FAILs."""
+    from skillc.wave_tap_join import corroboration
     if fault == "coverage":
         boundary.executor.available = False
         assert not request(boundary)["accepted"]
@@ -233,8 +255,12 @@ def test_task_grade_and_protocol_completeness_are_both_required(boundary: Any, f
     if fault == "participant-log":
         collection["events"] = [{"op": "ack"}, {"op": "complete"}]
     lw, plan, evidence, grade = wave_inputs(boundary, wrong_output=fault == "wrong-task")
-    joined = protocol_evidence(plan, evidence, collection, boundary.tap.root)
-    assert lw.verdict(plan, joined, grade)["status"] == ("FAIL" if fault == "wrong-task" else "UNKNOWN")
+    diagnostic = corroboration(plan, collection, boundary.tap.root)
+    if fault in ("coverage", "custody"):
+        assert diagnostic["status"] == "UNKNOWN"
+    if fault == "participant-log":
+        assert diagnostic["roles"][plan.roles[0].role]["ops"] == []
+    assert lw.verdict(plan, evidence, grade)["status"] == ("FAIL" if fault == "wrong-task" else "UNKNOWN")
 
 
 def test_real_dropped_connection_prevents_complete_coverage(boundary: Any) -> None:
@@ -256,20 +282,29 @@ def test_pinned_helper_replacement_is_unavailable(boundary: Any) -> None:
     assert boundary.tap.rows[-1]["kind"] == "unavailable"
 
 
-def test_complete_protocol_and_correct_task_can_pass(boundary: Any) -> None:
-    from skillc.wave_tap_join import protocol_evidence
+def test_a_complete_tap_alone_cannot_pass_and_its_old_join_would(boundary: Any) -> None:
+    """Ruling 7039734091: complete tap coverage and a correct task do NOT make a
+    PASS, because the tap is not the verdict source. The re-enabled old join
+    (the blind twin) would PASS the same inputs, so it DIFFERS."""
+    from skillc.wave_tap_join import corroboration
     assert request(boundary)["accepted"]
     assert request(boundary, "complete")["accepted"]
     boundary.executor.stopped = True
     collection = boundary.tap.finalize()
     lw, plan, evidence, grade = wave_inputs(boundary)
-    joined = protocol_evidence(plan, evidence, collection, boundary.tap.root)
-    assert lw.verdict(plan, joined, grade)["status"] == "PASS"
+    diagnostic = corroboration(plan, collection, boundary.tap.root)
+    assert diagnostic["status"] == "COMPLETE"
+    assert diagnostic["roles"][plan.roles[0].role]["ops"] == ["ack", "complete"]
+    real = lw.verdict(plan, evidence, grade)
+    blind = lw.verdict(plan, _reenabled_old_join(plan, evidence, diagnostic), grade)
+    assert real["status"] == "UNKNOWN" and f"{plan.roles[0].role}:protocol-unavailable" in real["unknown"]
+    assert blind["status"] == "PASS"
+    assert real["status"] != blind["status"]
 
 
 @pytest.mark.parametrize("lost", ["journal.json", "refusals.json"])
 def test_known_refusal_survives_loss_of_other_custody(boundary: Any, lost: str) -> None:
-    from skillc.wave_tap_join import protocol_evidence
+    from skillc.wave_tap_join import corroboration
     assert not request(boundary, event={"op": "complete"})["accepted"]
     assert request(boundary)["accepted"]
     assert request(boundary, "complete")["accepted"]
@@ -277,6 +312,7 @@ def test_known_refusal_survives_loss_of_other_custody(boundary: Any, lost: str) 
     collection = boundary.tap.finalize()
     (boundary.tap.root / lost).write_bytes(b"{}")
     lw, plan, evidence, grade = wave_inputs(boundary)
-    joined = protocol_evidence(plan, evidence, collection, boundary.tap.root)
-    assert not joined.roles[0].capture_complete
-    assert lw.verdict(plan, joined, grade)["status"] == "FAIL"
+    diagnostic = corroboration(plan, collection, boundary.tap.root)
+    assert diagnostic["status"] == "UNKNOWN"
+    assert "refused-protocol" in diagnostic["roles"][plan.roles[0].role]["ops"]
+    assert lw.verdict(plan, evidence, grade)["status"] == "UNKNOWN"

@@ -50,19 +50,27 @@ the actual owned channels, dropped counts, drain results, operation population
 and role/helper stop observations. An empty or incomplete operation population
 never establishes complete coverage.
 
-Normalized `ack` and `complete` rows require confirmed real helper execution
-and its effect. Completion is a protocol signal, not delivered-task success.
-`wave_tap_join.protocol_evidence()` re-reads the controller-held receipts and
-matches the frozen population before replacing the verdict input's protocol
-stream. It reads neither participant logs nor collection-supplied event lists.
-Missing observation makes capture coverage incomplete, preventing PASS.
+**Verdict source (owner ruling 2026-11-20, option A, [#626 comment
+7039734091](https://github.com/cooneycw/skillc/issues/626#issuecomment-7039734091)).**
+The #620 PR-B task-protocol client journal is the verdict source. The tap is
+kept as a CPP-arm corroboration journal, DIAGNOSTIC ONLY. Its custody, refusal
+and UNKNOWN-coverage rules still apply to what it records, but its rows never
+become verdict rows.
 
-An authenticated, retained refusal projects as the distinct `refused-protocol`
-event, which the existing wave verifier's invalid-operation rule rejects. It
-never becomes a successful ack/complete. Either intact custody stream can
-preserve a known violation when other coverage is lost; loss of both witnesses
-cannot invent a violation. The independent delivered-remote grader still runs
-under the existing verdict completeness rules. Successful signals cannot rescue
+Normalized `ack` and `complete` tap rows still require confirmed real helper
+execution and its effect. Completion is a protocol signal, not delivered-task
+success. `wave_tap_join.corroboration()` re-reads the controller-held receipts
+and matches the frozen population. It takes no `WaveEvidence` and returns
+none, so it cannot replace the verdict input's protocol stream; it reports
+per-role tap operations and a COMPLETE/UNKNOWN coverage status beside the
+verdict. It reads neither participant logs nor collection-supplied event lists.
+
+An authenticated, retained refusal is reported as the distinct
+`refused-protocol` operation. It never becomes a successful ack/complete.
+Either intact custody stream can preserve a known refusal in the diagnostic
+when other coverage is lost; loss of both witnesses cannot invent one. The
+independent delivered-remote grader still runs under the existing verdict
+completeness rules. Successful signals cannot rescue
 wrong or undelivered arithmetic output, and good output cannot rescue missing
 trusted protocol coverage.
 
