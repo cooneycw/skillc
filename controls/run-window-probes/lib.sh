@@ -594,8 +594,9 @@ scan_identity_plain() {
         "/proc/$$/status"
 }
 # scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
-# "DEV INO PATH") must have no ancestor up to / that lets this uid replace a
-# path component (writable, unless sticky over an entry it does not own),
+# "DEV INO PATH") must have no symlink component and no ancestor up to /
+# that lets this uid replace a path component (owned or writable by it,
+# unless sticky, owned by another, and over an entry it does not own),
 # must still be the
 # same inode, list (with its inode, which must match) with a plain mode string
 # ("d" and nine permission characters, optionally "." for an SELinux context,
@@ -611,17 +612,21 @@ scan_recheck() {
         _i=${_r%% *}
         _p=${_r#* }
         case $_p in /*) ;; *) return 1 ;; esac
-        # No ancestor up to / may let this uid replace the next component: it
-        # is not writable, or it is sticky and that component is not owned by
-        # this uid (a sticky directory lets only the owner rename or replace
-        # an entry). So no path component can be substituted between the
-        # steps below.
+        # No path component may be a symlink, and no ancestor up to / may let
+        # this uid replace the next component: the ancestor is neither owned
+        # nor writable by this uid, or it is sticky, not owned by this uid,
+        # and the next component is not owned by this uid either (a sticky
+        # directory lets only the entry or directory owner rename or replace
+        # an entry). So no component can be substituted between the steps
+        # below.
         _c=$_p
         _a=${_p%/*}
         while :; do
-            _w=$(find "$_a/" -maxdepth 0 -writable) || return 1
-            if [ -n "$_w" ]; then
-                _k=$(find "$_a/" -maxdepth 0 -perm -1000) || return 1
+            _y=$(find "$_c" -maxdepth 0 -type l) || return 1
+            [ -z "$_y" ] || return 1
+            _x=$(find "$_a/" -maxdepth 0 \( -uid "$2" -o -writable \)) || return 1
+            if [ -n "$_x" ]; then
+                _k=$(find "$_a/" -maxdepth 0 -perm -1000 ! -uid "$2") || return 1
                 _o=$(find "$_c" -maxdepth 0 ! -uid "$2") || return 1
                 if [ -z "$_k" ] || [ -z "$_o" ]; then return 1; fi
             fi

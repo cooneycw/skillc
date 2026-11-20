@@ -803,6 +803,7 @@ MODES = {
     "wnx": 0o752,       # write, no search
     "xnr": 0o751,       # search, no read
     "owner-noexec": 0o600,  # for a nobody-owned directory: no search by any class
+    "owner-ro": 0o555,      # for a nobody-owned directory: searchable, not writable
 }
 
 #: The image's four root-only directories from the live run.
@@ -835,6 +836,8 @@ SCAN_TREES: dict[str, list[tuple[str, str, str]]] = {
     "write-without-search": [("spool", "dir", "wnx"), ("spool/inner", "dir", "open-w")],
     "probe-owned-unsearchable": [("home", "dir", "open"),
                                  ("home/mine", "nobody-dir", "owner-noexec")],
+    # The uid owns the parent (not writable now, but it could chmod it).
+    "parent-owned": [("own", "nobody-dir", "owner-ro"), ("own/locked", "dir", "noexec")],
     # The uid may write the parent, so it could substitute the entry.
     "parent-writable": [("pub", "dir", "open-w"), ("pub/locked", "dir", "noexec")],
     # The newline is in an ANCESTOR; the pruned directory's own name is plain.
@@ -855,6 +858,8 @@ SCAN_EXPECT: dict[str, ScanResult] = {
     "probe-owned-unsearchable": (False, False, [], [], []),
     "newline-name": (False, False, [], [], []),
     "parent-writable": (False, False, [], [], []),
+    "parent-owned": (False, False, [], [], []),
+
 }
 
 SCAN_SCRIPT = """
@@ -1077,7 +1082,10 @@ SCAN_TWINS = [
     ("pruned-dirs-unrecorded", 'cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":",
      "image-shape"),
     ("ambiguity-ignored", '[ ! -s "$_pr.amb" ] || return 1', ":", "probe-owned-unsearchable"),
-    ("writable-parent-unchecked", 'if [ -n "$_w" ]; then', "if false; then", "parent-writable"),
+    ("writable-parent-unchecked", 'if [ -n "$_x" ]; then', "if false; then", "parent-writable"),
+    ("owned-ancestor-unchecked", '\\( -uid "$2" -o -writable \\)', "-writable",
+     "parent-owned"),
+
     ("ownership-unchecked", AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o ',
      "probe-owned-unsearchable"),
 ]
@@ -1094,6 +1102,40 @@ def test_scan_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: st
     mutated.write_text(source.replace(old, new))
     assert run_scan(LIB, case, "sh") == scan_expected(case)
     assert run_scan(mutated, case, "sh") != scan_expected(case), blind
+
+
+def symlink_root_scan(lib: Path) -> str:
+    """The scan root reaches a pruned directory through a symlinked
+    component (alias -> real): the post-check must refuse it, since the
+    lexical ancestors would not be the real ones."""
+    tree = short_dir("sl-")
+    work = short_dir("so-")
+    try:
+        os.chown(work, NOBODY, NOBODY)
+        (tree / "real").mkdir()
+        (tree / "real" / "locked").mkdir()
+        (tree / "real" / "locked").chmod(MODES["noexec"])
+        (tree / "real").chmod(MODES["open"])
+        (tree / "alias").symlink_to(tree / "real")
+        script = ('scan "$1/p" "$2/alias/" all "" -type d -writable >/dev/null'
+                  ' && echo OK || echo FAILED')
+        run = run_scan_script(lib, "sh", script, str(work), str(tree))
+    finally:
+        (tree / "real" / "locked").chmod(0o755)
+        shutil.rmtree(tree, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+    return run.stdout.strip()
+
+
+@needs_root_drop
+def test_scan_refuses_a_pruned_directory_behind_a_symlinked_component(tmp_path: Path) -> None:
+    old = '[ -z "$_y" ] || return 1'
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, ":"))
+    assert symlink_root_scan(LIB) == "FAILED"
+    assert symlink_root_scan(mutated) == "OK"
 
 
 @needs_root_drop

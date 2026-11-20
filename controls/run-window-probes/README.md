@@ -136,7 +136,7 @@ nonzero on them. Both scans now go through one function, `scan` in
 
 | Directory, as the probe uid | Treatment | Why |
 |---|---|---|
-| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and**, re-checked after the walk on the same inode, no ancestor up to `/` lets this uid replace a path component (each is unwritable, or sticky over an entry the uid does not own), its listing shows the walk inode, carries no ACL, and still matches all of the above, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
+| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and**, re-checked after the walk on the same inode, no path component is a symlink, no ancestor up to `/` lets this uid replace a path component (each is neither owned nor writable by it, or is sticky, owned by another, and over an entry the uid does not own), its listing shows the walk inode, carries no ACL, and still matches all of the above, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
 | as above, but writable | pruned, reported with ` writable-without-search`; **not** counted as writable | write alone permits no entry change |
 | `access(2)` denies search but the mode bits grant it (an ACL, an I/O error), or a pruned directory carries an ACL | **`OBSERVATION_FAILED`** | the denial is not explained by the mode bits alone, so it is not trusted. With no ACL and no search bit for the uid's class, the kernel denies the lookup whatever `access(2)` reported |
 | unsearchable and owned by this uid | **`OBSERVATION_FAILED`** | the uid could `chmod` it searchable later in the window |
@@ -182,8 +182,9 @@ from root, or the test's own uid), over crafted trees:
   directory beside the four are still found, so pruning cannot hide a
   survivor;
 - **write without search**: pruned, reported, and not counted as writable;
-- **a writable parent** (any writable ancestor fails the same way): both
-  scans fail;
+- **a writable parent**, and **a parent owned by the uid** (any such
+  ancestor fails the same way): both scans fail. So does **a pruned
+  directory reached through a symlinked component**;
 - **probe-owned unsearchable**, and **a newline in an ancestor's name**
   (the pruned directory's own name is plain): both scans fail;
 - **an ACL denial the mode bits do not explain**, and **a pruned directory
@@ -197,8 +198,8 @@ so they run in the stage-1 root step and in CI. Blind twins the cases must
 catch: pruning on any denial (including `x` without `r`), pruning every
 directory, testing writability before the prune, not recording pruned
 paths, ignoring ambiguity, skipping the ownership check, skipping the
-ACL and predicate post-check, skipping the parent-writability check, and
-ignoring exclusions. A newline path is
+ACL and predicate post-check, skipping the ancestor writability, ownership
+or symlink checks, and ignoring exclusions. A newline path is
 refused twice, by the walk's `-path` guard and by the post-check, which
 cannot parse a split record, so its twin removes both. The
 image-shape fixture mirrors the image's owners, including the `_apt`-owned
