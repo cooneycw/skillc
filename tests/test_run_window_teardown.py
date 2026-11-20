@@ -269,7 +269,7 @@ def test_malformed_cgroup_record_is_unusable(line: str) -> None:
 
 def test_capture_detects_pid_reuse_or_container_change_during_reads() -> None:
     proc = container_proc()
-    calls = []
+    calls: list[str] = []
     real = proc.read
 
     def changing(node: str, name: str) -> bytes:
@@ -317,7 +317,7 @@ def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -
     proc = container_proc(root_view={'/': DIR, '/work': DIR, '/work/run': DIR}, mountinfo=table(*rows))
     if case == 'tree-changes':
         real = proc.listdir_under_root
-        calls = []
+        calls: list[str] = []
 
         def growing(pid: str, path: str) -> list[str]:
             calls.append(path)
@@ -331,7 +331,7 @@ def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -
     if case == 'inode-replaced':
         proc.procs['4242']['root_view']['/work/run/f'] = REG
         real_lstat = proc.lstat_under_root
-        hits = []
+        hits: list[int] = []
 
         def swapped(pid: str, path: str) -> os.stat_result:
             info = real_lstat(pid, path)
@@ -343,7 +343,7 @@ def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -
         proc.lstat_under_root = swapped  # type: ignore[method-assign]
     if case == 'fd-table-changes':
         real_read = proc.readlink
-        seen = []
+        seen: list[int] = []
 
         def swapping(node: str, name: str) -> str:
             if name == 'fd/1':
@@ -662,7 +662,7 @@ def test_holder_of_the_root_is_seen_even_in_a_worker_task(held_tree: tuple[Path,
 def test_task_replaced_during_the_census_is_failed(held_tree: tuple[Path, ra.Census]) -> None:
     _, census = held_tree
     proc = FakeProc({'1': proc_entry('1'), '95': proc_entry('95')})
-    reads = []
+    reads: list[int] = []
     real = proc.read
 
     def replacing(node: str, name: str) -> bytes:
