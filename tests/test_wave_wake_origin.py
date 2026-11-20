@@ -135,5 +135,7 @@ def test_a_join_without_the_origin_comparison_is_caught(tmp_path: Path,
     monkeypatch.setitem(sys.modules, blind.__name__, blind)
     code = compile(source.replace(anchor, ""), "<blind-adapter>", "exec")
     exec(code, blind.__dict__)  # noqa: S102
+    for name in ("real", "blind"):
+        (tmp_path / name).mkdir()  # tpf builds the journal at <dir>/j; Journal never makes parents
     assert _adapt(adapter, tmp_path / "real", None)["status"] == "UNKNOWN"
     assert _adapt(blind, tmp_path / "blind", None)["status"] == "CAPTURED"

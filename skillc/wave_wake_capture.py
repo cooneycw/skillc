@@ -413,6 +413,7 @@ def verify(root: object, reference: object, expected: object) -> dict[str, Any]:
     """Expected reference/context come from the trusted caller, never a report."""
     try:
         if (not isinstance(root, Path) or type(reference) is not Reference
+                or not isinstance(expected, Context)
                 or type(expected) not in (Context, OriginContext)):
             raise CaptureUnavailable('independently held capture binding required')
         reference = parse_reference(asdict(reference))
