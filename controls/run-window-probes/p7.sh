@@ -61,7 +61,7 @@ done
 # this uid or one of its groups. The union means an access(2) error cannot
 # hide a path that the bits show writable; find(1) fails on unreadable paths.
 # The union may over-report (fail-safe: MISMATCH, never a false clean); see
-# the README's stated limits for the ACL cases.
+# the stated limits in README.md for the ACL cases.
 uid=$(id -u) || exit 3
 gids=$(id -G) || exit 3
 set -- \( -writable -o -perm -0002 -o \( -uid "$uid" -perm -0200 \)
