@@ -215,7 +215,7 @@ def test_ancestor_renamed_between_lookups_is_caught_by_the_second_walk(window: W
     with window.census() as census:
         remove_entries(window.root)
         census.release_entries()
-        fired = []
+        fired: list[int] = []
 
         def racing(name: str, flags: int, *args: Any, **kwargs: Any) -> int:
             if name == 'removed-root' and not fired:
@@ -316,7 +316,7 @@ def test_listing_stops_at_the_budget_instead_of_draining(window: Window,
                                                          monkeypatch: pytest.MonkeyPatch) -> None:
     for index in range(50):
         (window.root / f'extra-{index:02d}').write_bytes(b'x')
-    consumed = []
+    consumed: list[str] = []
     real = os.scandir
 
     class Recording:
@@ -359,7 +359,7 @@ def test_descriptor_budget_refuses_an_impossible_census() -> None:
 
 
 def test_emfile_partway_through_a_census_fails_and_leaks_nothing(window: Window) -> None:
-    opened = []
+    opened: list[str] = []
     # `/` plus every component resolve first; fail three opens into the walk.
     limit = len(window.root.parts) + 3
 
@@ -383,7 +383,7 @@ def test_fstat_failure_after_open_leaks_nothing(window: Window, monkeypatch: pyt
     # fstat order: `/`, each component (the last is the root), then entries.
     nth = {'slash': 1, 'ancestor': 2, 'root': len(window.root.parts),
            'first-entry': len(window.root.parts) + 1}[where]
-    calls = []
+    calls: list[int] = []
     real = os.fstat
 
     def failing(fd: int) -> os.stat_result:

@@ -55,7 +55,7 @@ import resource
 import stat
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, NoReturn, SupportsIndex
+from typing import Any, NoReturn, Self, SupportsIndex
 
 from .git_snapshot import MAX_FILE_BYTES, Unreadable
 from .remnant_scan import LIMITS, BoundedTree
@@ -140,7 +140,7 @@ def _components(path: str | os.PathLike[str]) -> list[str]:
     try:
         text = os.fspath(path)
     except Exception:  # noqa: BLE001 - a caller's __fspath__ text is private
-        pass
+        text = None  # Not silent: refused just below, outside the handler.
     # Raised outside the handler, so the refusal carries no __context__ (a
     # caller's exception text could hold the very path being protected).
     if text is None:
@@ -224,7 +224,7 @@ class MountpointRecord(_NoCopy):
             _close(self._held.fd)
             self._held = None
 
-    def __enter__(self) -> MountpointRecord:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -324,7 +324,7 @@ class Census(_NoCopy):
         self._ancestors = [_Held(-1, i.identity, i.mode, i.nlink, i.dev) for i in self._ancestors]
         self._closed = True
 
-    def __enter__(self) -> Census:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
