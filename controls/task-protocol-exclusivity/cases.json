@@ -1,0 +1,1308 @@
+{
+ "cases": [
+  {
+   "name": "healthy-two-sandboxes",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": true
+  },
+  {
+   "name": "healthy-with-trigger-socket-and-wave-volume",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/var/lib/skillc/trigger/a.sock",
+       "Destination": "/run/skillc/trigger.sock",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "volume",
+       "Name": "skillc-wave-x",
+       "Source": "/var/lib/docker/volumes/skillc-wave-x/_data",
+       "Destination": "/wave",
+       "Mode": "z",
+       "RW": true,
+       "Propagation": ""
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/var/lib/skillc/trigger/b.sock",
+       "Destination": "/run/skillc/trigger.sock",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": true
+  },
+  {
+   "name": "deliberate-mismount-a-in-b",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/probe-misplaced",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "shared-parent-of-leases",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases",
+       "Destination": "/srv/x",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "own-lease-aliased-elsewhere",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a/channel.sock",
+       "Destination": "/tmp/alias.sock",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "endpoint-read-write",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "endpoint-missing",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "second-mount-under-endpoint",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/srv/other",
+       "Destination": "/run/skillc-task-protocol/extra",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "mount-covering-the-endpoint",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/srv/run",
+       "Destination": "/run",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "trigger-socket-placed-on-the-endpoint",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/var/lib/skillc/trigger/a.sock",
+       "Destination": "/run/skillc-task-protocol/channel.sock",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "endpoint-is-the-other-lease",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "endpoint-not-a-bind",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "volume",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "docker-socket",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      },
+      {
+       "Type": "bind",
+       "Source": "/var/run/docker.sock",
+       "Destination": "/var/run/docker.sock",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "privileged",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": true,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "pid-mode-host",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "host",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "ipc-shared-with-a",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "container:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "container-id-differs",
+   "records": {
+    "a": {
+     "Id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "inspect-missing",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": null
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "hostconfig-field-missing",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    },
+    "b": {
+     "Id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-b",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none"
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  },
+  {
+   "name": "population-mismatch",
+   "records": {
+    "a": {
+     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "State": {
+      "Pid": 4242,
+      "Status": "running"
+     },
+     "Mounts": [
+      {
+       "Type": "bind",
+       "Source": "/srv/skillc/leases/ep-a",
+       "Destination": "/run/skillc-task-protocol",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+      }
+     ],
+     "HostConfig": {
+      "Privileged": false,
+      "PidMode": "",
+      "IpcMode": "private",
+      "NetworkMode": "none",
+      "UsernsMode": ""
+     }
+    }
+   },
+   "expected": {
+    "a": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "/srv/skillc/leases/ep-a"
+    ],
+    "b": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "/srv/skillc/leases/ep-b"
+    ]
+   },
+   "expect": false
+  }
+ ]
+}

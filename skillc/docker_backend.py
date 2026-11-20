@@ -277,6 +277,13 @@ _FORWARDING_PROBE_TOKEN_PREFIX = "skillc-probe-"
 #: capability probe.
 TRIGGER_SOCKET_PATH = "/run/skillc/trigger.sock"
 
+#: Where #620 PR-B's per-lease task-protocol endpoint DIRECTORY is bind-mounted
+#: read-only (shape B, the owner's 2026-11-20 ruling on #620, decided by the
+#: B0 probe's recreate readings). A single hardcoded constant, never a
+#: `compose_run_argv` parameter, exactly like `TRIGGER_SOCKET_PATH`. The client
+#: connects to `channel.sock` beneath it.
+TASK_PROTOCOL_DIR = "/run/skillc-task-protocol"
+
 #: Where the HOST side of #183's socket lives, by default - deliberately
 #: SHORT and independent of `base_dir` (a workspace/session clone root),
 #: because a Unix domain socket path is capped by the kernel
@@ -492,6 +499,7 @@ def compose_run_argv(
     trigger_socket_host_path: Path | None = None,
     dns: str | None = None,
     wave_attachment: WaveAttachment | None = None,
+    task_protocol_host_dir: Path | None = None,
 ) -> list[str]:
     """The full `docker run` argv. Pure - makes no call, mutates nothing. A
     FIXED, closed set of flags: there is no passthrough for arbitrary extra
@@ -501,6 +509,10 @@ def compose_run_argv(
     exception the owner's 2026-10-03 ruling on #183 authorized. #621's
     `wave_attachment` adds one controller-owned NAMED volume at a fixed
     wave-state path; it accepts neither host paths nor caller-chosen targets.
+    #620 PR-B's `task_protocol_host_dir` is the second named exception (the
+    owner's 2026-11-20 ruling on #620): one controller-owned per-lease
+    DIRECTORY bound READ-ONLY at the fixed `TASK_PROTOCOL_DIR`, never a
+    caller-chosen target. `None` leaves the argv byte-identical to before.
     All other mounts and arbitrary flags remain refused.
 
     NO BIND MOUNT for the workspace or home (design decision, orchestrator
@@ -571,6 +583,9 @@ def compose_run_argv(
         argv += ["--storage-opt", f"size={disk_limit}"]
     if trigger_socket_host_path is not None:
         argv += ["--mount", f"type=bind,source={trigger_socket_host_path},target={TRIGGER_SOCKET_PATH}"]
+    if task_protocol_host_dir is not None:
+        argv += ["--mount",
+                 f"type=bind,source={task_protocol_host_dir},target={TASK_PROTOCOL_DIR},readonly"]
     if wave_attachment is not None:
         argv += wave_attachment.mount_args()
     argv += [
@@ -992,6 +1007,10 @@ class DockerBackend:
     agent_exec_env: Callable[[], Mapping[str, str]] | None = field(default=None, repr=False)
     #: #621: one closed named-volume mount, created and retired by the wave controller.
     wave_attachment: WaveAttachment | None = None
+    #: #620 PR-B: this attempt's own task-protocol lease directory, bound
+    #: read-only at `TASK_PROTOCOL_DIR` (see `compose_run_argv`). `None`, the
+    #: default for every existing caller, changes nothing.
+    task_protocol_host_dir: Path | None = None
     #: Explicit controller assertion about the network it created with --internal.
     #: Description only, not a probe or permission to infer isolation from a name.
     controller_owned_internal_network: bool = False
@@ -1090,7 +1109,7 @@ class DockerBackend:
             pids_limit=self.pids_limit, cpus=self.cpus, shm_size=self.shm_size,
             container_user=_container_user(), disk_limit=self.disk_limit,
             trigger_socket_host_path=trigger_socket_host_path, dns=dns,
-            wave_attachment=self.wave_attachment,
+            wave_attachment=self.wave_attachment, task_protocol_host_dir=self.task_protocol_host_dir,
         )
         argv.insert(argv.index("run") + 1, "-d")
         argv.remove("--rm")
