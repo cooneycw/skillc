@@ -1,0 +1,6 @@
+{
+ "note": "Hand-derived from DockerWave._backend and DockerWave.prepare at the parent of #620 B8b. Each backend's constructor keywords, with the task protocol unused. The parent run must reproduce these exactly.",
+ "remote": ["base_dir", "controller_owned_internal_network", "daemon_timeout", "docker_bin", "image", "network", "wave_attachment", "witness_io"],
+ "role": ["base_dir", "daemon_timeout", "docker_bin", "egress", "image", "trigger_decide", "wave_attachment", "witness_io"],
+ "role_values": {"image": "scripted-image", "docker_bin": ["docker"], "witness_io": true, "egress": true}
+}
