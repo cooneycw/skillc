@@ -65,6 +65,10 @@ def _blind(old: str, new: str, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setitem(sys.modules, module.__name__, module)
     code = compile(source.replace(old, new), "<blind-wave-wake>", "exec")
     exec(code, module.__dict__)  # noqa: S102
+    # drive checks its inputs by exact type (`type(x) is WakeBinding`), so the
+    # copy must use the REAL classes, or it refuses before it can be blind.
+    for name in ("WakeBinding", "WakePolicy", "Revision", "Poke", "WakeRefused"):
+        setattr(module, name, getattr(wave_wake, name))
     return module
 
 
@@ -113,8 +117,9 @@ def test_a_hook_that_does_not_wait_for_the_bootstraps_disagrees(
     blind = _blind(GATE, GATE.replace("if futures:", "if False:"), monkeypatch)
     real = _after_bootstrap_seen(wave_wake, tmp_path / "real")
     twin = _after_bootstrap_seen(blind, tmp_path / "blind")
-    assert real["ended"] == ["worker-a", "worker-b"]
-    assert twin["ended"] != real["ended"]
+    assert real["ended"] == ["worker-a", "worker-b"], real
+    assert twin["calls"] == 1, twin
+    assert twin["ended"] != real["ended"], (real, twin)
 
 
 def test_before_close_runs_before_close_with_every_role_still_running(tmp_path: Path) -> None:

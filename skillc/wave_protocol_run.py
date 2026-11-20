@@ -55,8 +55,8 @@ from pathlib import Path
 from typing import Any
 
 from . import task_protocol_docker as tpd
-from . import wave_wake
 from . import task_protocol_journal as tj
+from . import wave_wake
 from .backend import Confirmation
 from .docker_wave import DockerWave
 from .task_protocol_lease import Inventory, LeaseError, Leases, Slot
@@ -90,8 +90,9 @@ def _bounded(exc: BaseException) -> str:
 WAKE_OPTIONS = frozenset({"read_revision", "deliver", "clock", "sleep"})
 
 
-class _WakeDone(Exception):  # noqa: N818 - internal control flow, never escapes run()
-    """The wake driver already ran the turns, fence and live census."""
+class _WakeDone(Exception):
+    """Internal control flow, never escapes run(): the wake driver already
+    ran the turns, fence and live census."""
 
 
 class ProtocolWave:

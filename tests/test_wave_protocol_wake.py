@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import itertools
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from test_wave_protocol_run import (
@@ -54,6 +53,8 @@ class WakeModel(ProtocolModel):
     """A poked turn speaks the whole protocol through the installed client's
     code; an attempt reads as running until it is ended."""
 
+    poked: ClassVar[list[str]] = []
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.ended = False
@@ -67,6 +68,7 @@ class WakeModel(ProtocolModel):
                 offer = None if op == "offer" else "offer-" + role
                 client.call(client.request_fields(op, next(self.requests), offer),
                             str(Path(lease) / "channel.sock"), timeout=10)
+            self.poked.append(role)
         return super(ProtocolModel, self).execute_turn(handle, argv, limits, cancel)
 
     def end_attempt(self, handle: object) -> None:
@@ -78,12 +80,15 @@ class WakeModel(ProtocolModel):
         return Confirmation.CONFIRMED if self.ended else Confirmation.NOT_CONFIRMED
 
 
-def _fresh_revisions() -> Any:
-    """Every sample is a new revision, so each role is poked once (max 1)."""
-    counter = itertools.count()
+def _shared_state(events: list[str]) -> Any:
+    """The controller-observed shared state. It changes once when the
+    protocol starts serving (the assignment), then once per completed poked
+    turn. A revision must hold still between the offer and the dispatch
+    re-sample, or the driver refuses the poke as stale."""
 
     def read() -> wave_wake.Revision:
-        digest = hashlib.sha256(str(next(counter)).encode()).hexdigest()
+        state = f"{'serving' in events}:{len(WakeModel.poked)}"
+        digest = hashlib.sha256(state.encode()).hexdigest()
         return wave_wake.Revision("sha256:" + digest, "sha256:" + "0" * 64)
     return read
 
@@ -97,21 +102,26 @@ def _wake_world(root: Path, short_dir: Path, monkeypatch: pytest.MonkeyPatch,
                                  fixture=root / "fixture", roles=roles, seconds=60)
     declaration = json.dumps({"roles": list(ROLES), "controller_wake": {"version": 1,
                               **asdict(POLICY)}}, sort_keys=True, separators=(",", ":")).encode()
-    world.wave.approved_wake = wave_wake.WakeBinding(  # type: ignore[attr-defined]
-        declaration=declaration,
-        approved_digest="sha256:" + hashlib.sha256(declaration).hexdigest())
+    WakeModel.poked = []
+    # The caller-held approval wave_wake.drive reads; bind_declaration
+    # verifies it against the independently held digest.
+    approved = wave_wake.bind_declaration(json.loads(declaration),
+                                          "sha256:" + hashlib.sha256(declaration).hexdigest())
+    setattr(world.wave, "approved_wake", approved)  # noqa: B010 - DockerWave declares no field
     assert "measured" in inspect.signature(wpr.ProtocolWave).parameters, \
         "ProtocolWave has no wake mode"
     slots = [Slot("slot-" + r, r, "task-" + r, 0, 1, "nonce-" + r) for r in ROLES]
     budget = world.wave.deadline.marker(world.wave.attempt_id)["budget_id"]
+    events: list[str] = []
     run = wpr.ProtocolWave(world.wave, slots=slots,
-                           declaration_digest=world.wave.approved_wake.approved_digest,
+                           declaration_digest=approved.approved_digest,
                            deadline_digest="sha256:" + str(budget), deadline_seconds=60,
                            lease_root=short_dir / "wake-leases", journal_root=root / "wake-journal",
                            census=census, inspect=world.inspect, freeze=world.freeze,
                            receiver_factory=PeerFromEndpoint, measured="wake",
                            wake_policy=POLICY,
-                           wake_options={"read_revision": _fresh_revisions()})
+                           wake_options={"read_revision": _shared_state(events)})
+    run.events = events  # the observer reads the run's own event list
     world.run = run
     return world, run
 
