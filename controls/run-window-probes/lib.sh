@@ -540,7 +540,11 @@ step_drain() {
 step_capture() {
     _ef=$1
     shift
-    { _st=$( { { "$@" 2>&1 1>&4 4>&- 5>&-; printf '%s' "$?" >&5; } \
+    # The step runs as an `if` condition: under `set -e` (dash applies it in
+    # this pipeline subshell) a failing step would otherwise end the subshell
+    # before its status is written.
+    { _st=$( { { if "$@" 2>&1 1>&4 4>&- 5>&-; then _s=0; else _s=$?; fi
+        printf '%s' "$_s" >&5; } \
         | step_drain "$_ef" >/dev/null 2>&1 4>&- 5>&-; } 5>&1 ); } 4>&1
     is_uint "$_st" || return 125
     return "$_st"

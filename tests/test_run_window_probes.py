@@ -236,8 +236,8 @@ RESOLVE_CASES = {
     "overlay2-relative-root": ("overlay2", "relative/root", f"{HEX}/diff", None),
     "containerd-other-dir": ("containerd-overlayfs", DROOT, f"{DROOT}/other/snapshots/5/fs", None),
     "containerd-dot-dot": ("containerd-overlayfs", DROOT,
-                           f"{DROOT}/containerd/../daemon/io.containerd.snapshotter.v1.overlayfs"
-                           "/snapshots/7/fs", None),
+                           (f"{DROOT}/containerd/../daemon/io.containerd.snapshotter.v1.overlayfs"
+                            "/snapshots/7/fs"), None),
     "containerd-escaped": ("containerd-overlayfs", DROOT,
                            "/var/lib/a\\054b/io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs",
                            None),
@@ -254,8 +254,8 @@ STORAGE_CASES = {
     "containerd": ("overlayfs", "driver-type=io.containerd.snapshotter.v1", "containerd-overlayfs"),
     "containerd-other-type": ("overlayfs", "driver-type=io.containerd.snapshotter.v2", None),
     "containerd-no-status": ("overlayfs", "", None),
-    "containerd-type-twice": ("overlayfs", "driver-type=io.containerd.snapshotter.v1\n"
-                              "driver-type=io.containerd.snapshotter.v1", None),
+    "containerd-type-twice": ("overlayfs", ("driver-type=io.containerd.snapshotter.v1\n"
+                                            "driver-type=io.containerd.snapshotter.v1"), None),
     "other-driver": ("devicemapper", "driver-type=io.containerd.snapshotter.v1", None),
 }
 
@@ -331,8 +331,8 @@ LIB_TWINS = [
     ("overlay2-id-unchecked", "case $_id in '' | *[!0-9a-f]*) return 1 ;; esac", ":", "resolve",
      "overlay2-nested-id"),
     ("snapshot-dir-unchecked",
-     "case ${_base%/*} in /?*/io.containerd.snapshotter.v1.overlayfs/snapshots) ;; "
-     "*) return 1 ;; esac", ":", "resolve", "containerd-other-dir"),
+     ("case ${_base%/*} in /?*/io.containerd.snapshotter.v1.overlayfs/snapshots) ;; "
+      "*) return 1 ;; esac"), ":", "resolve", "containerd-other-dir"),
     ("dot-components-accepted", "case /$_x/ in */./* | */../*) return 1 ;; esac", ":", "resolve",
      "containerd-dot-dot"),
     ("escaped-path-accepted", "case $_x in '' | *//* | *[!A-Za-z0-9/._-]*) return 1 ;; esac",
@@ -402,10 +402,19 @@ def test_step_diag_reports_the_status_alone_for_empty_stderr(tmp_path: Path) -> 
 FLOOD = "set -e; printf out; head -c 100000 /dev/zero >&2; exit 3"
 
 
-def capture_run(lib: Path, tmp_path: Path, err: Path | None = None) -> tuple[bytes, Path]:
+#: The shells the capture is qualified under. dash (the runner VM's and CI's
+#: /bin/sh) applies `set -e` inside a pipeline subshell where bash does not;
+#: running both means a bash-only pass cannot hide that difference.
+SHELLS = ["sh"] + (["dash"] if shutil.which("dash") else []) + (
+    ["bash"] if shutil.which("bash") else [])
+CAPTURE_SCRIPT = ('. "$1"; rc=0; step_capture "$2" sh -c "$3" || rc=$?;'
+                  ' printf "\\nrc=%s\\n" "$rc"')
+
+
+def capture_run(lib: Path, tmp_path: Path, err: Path | None = None,
+                shell: str = "sh") -> tuple[bytes, Path]:
     err = err or tmp_path / "flood.err"
-    run = subprocess.run(["sh", "-eu", "-c", '. "$1"; rc=0; step_capture "$2" sh -c "$3" || rc=$?;'
-                          ' printf "\\nrc=%s\\n" "$rc"', "sh", str(lib), str(err), FLOOD],
+    run = subprocess.run([shell, "-eu", "-c", CAPTURE_SCRIPT, shell, str(lib), str(err), FLOOD],
                          capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
                          check=False, timeout=60)
     assert run.returncode == 0 and run.stderr == b"", run.stderr
@@ -420,20 +429,36 @@ def capture_is_bounded(stdout: bytes, err: Path) -> bool:
 
 
 @needs_sh
-def test_step_capture_bounds_stderr_while_the_step_runs(tmp_path: Path) -> None:
-    assert capture_is_bounded(*capture_run(LIB, tmp_path))
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_bounds_stderr_while_the_step_runs(tmp_path: Path, shell: str) -> None:
+    assert capture_is_bounded(*capture_run(LIB, tmp_path, shell=shell))
 
 
-def unwritable_capture(lib: Path, tmp_path: Path) -> bytes:
+@needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_returns_a_failing_step_status_under_errexit(tmp_path: Path,
+                                                                  shell: str) -> None:
+    """The regression case from stage 1: under `sh -e` (dash), a step that
+    fails must return its own status, not 125."""
+    run = subprocess.run([shell, "-eu", "-c", '. "$1"; rc=0; step_capture "$2" sh -c "exit 7"'
+                          ' || rc=$?; echo "rc=$rc"', shell, str(LIB), str(tmp_path / "e.err")],
+                         capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                         check=False, timeout=30)
+    assert (run.returncode, run.stdout, run.stderr) == (0, b"rc=7\n", b"")
+
+
+def unwritable_capture(lib: Path, tmp_path: Path, shell: str = "sh") -> bytes:
     """The diagnostic file cannot be created (its directory does not exist):
     the collector must still drain, and the step's own status must return."""
-    stdout, _ = capture_run(lib, tmp_path, tmp_path / "missing-dir" / "flood.err")
+    stdout, _ = capture_run(lib, tmp_path, tmp_path / "missing-dir" / "flood.err", shell=shell)
     return stdout
 
 
 @needs_sh
-def test_step_capture_keeps_the_status_when_diagnostics_cannot_be_stored(tmp_path: Path) -> None:
-    assert unwritable_capture(LIB, tmp_path) == b"out\nrc=3\n"
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_keeps_the_status_when_diagnostics_cannot_be_stored(tmp_path: Path,
+                                                                         shell: str) -> None:
+    assert unwritable_capture(LIB, tmp_path, shell) == b"out\nrc=3\n"
 
 
 #: (blind copy name, exact lib.sh text, weakened text)
@@ -466,8 +491,10 @@ CAPTURE_TWINS = [
 
 
 @needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize(("blind", "old", "new"), CAPTURE_TWINS, ids=[t[0] for t in CAPTURE_TWINS])
-def test_step_capture_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str) -> None:
+def test_step_capture_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                           shell: str) -> None:
     source = LIB.read_text()
     assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
     mutated = tmp_path / "twin" / "lib.sh"
@@ -475,14 +502,15 @@ def test_step_capture_blind_twin_is_caught(tmp_path: Path, blind: str, old: str,
     mutated.write_text(source.replace(old, new))
     real = tmp_path / "real"
     real.mkdir()
-    assert capture_is_bounded(*capture_run(LIB, real))
+    assert capture_is_bounded(*capture_run(LIB, real, shell=shell))
     weak = tmp_path / "weak"
     weak.mkdir()
-    assert not capture_is_bounded(*capture_run(mutated, weak)), blind
+    assert not capture_is_bounded(*capture_run(mutated, weak, shell=shell)), blind
 
 
 @needs_sh
-def test_step_capture_drain_fallback_twin_is_caught(tmp_path: Path) -> None:
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_drain_fallback_twin_is_caught(tmp_path: Path, shell: str) -> None:
     old = "then cat >/dev/null; return 0; fi"
     source = LIB.read_text()
     assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
@@ -493,8 +521,8 @@ def test_step_capture_drain_fallback_twin_is_caught(tmp_path: Path) -> None:
     real.mkdir()
     weak = tmp_path / "weak"
     weak.mkdir()
-    assert unwritable_capture(LIB, real) == b"out\nrc=3\n"
-    assert unwritable_capture(mutated, weak) != b"out\nrc=3\n"
+    assert unwritable_capture(LIB, real, shell) == b"out\nrc=3\n"
+    assert unwritable_capture(mutated, weak, shell) != b"out\nrc=3\n"
 
 
 #: The call sites that must route each in-container step through step_capture
@@ -668,8 +696,8 @@ UPPER_TWINS = [
     ("pid-revalidation-blind", '[ "$_n" = "$3" ] && [ "$_p" = "$2" ]', ":",
      "pid-changes-before-proof"),
     ("final-pid-recheck-removed",
-     "    _upper_pid_same \"$1\" \"$_pid\" \"$_ident\" || probe_die 'container-pid-changed'\n"
-     "    PROBE_UPPER=$_held", "    PROBE_UPPER=$_held", "pid-changes-after-proof"),
+     ("    _upper_pid_same \"$1\" \"$_pid\" \"$_ident\" || probe_die 'container-pid-changed'\n"
+      "    PROBE_UPPER=$_held"), "    PROBE_UPPER=$_held", "pid-changes-after-proof"),
     ("graph-driver-unchecked", "[ \"$_gd\" = \"$_up\" ] || probe_die 'upperdir-disagrees'", ":",
      "overlay2-disagrees"),
     ("start-time-unchecked", '[ "$_n" = "$3" ] && [ "$_p" = "$2" ]', '[ "$_p" = "$2" ]',
@@ -677,8 +705,8 @@ UPPER_TWINS = [
     ("marker-content-unchecked", "*) probe_die 'upperdir-unverified' ;;", "*) ;;",
      "marker-wrong-content"),
     ("marker-resolve-unrestricted",
-     "how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,\n"
-     "              RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)",
+     ("how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,\n"
+      "              RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)"),
      "how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK, 0, 0)", "marker-tmp-symlink"),
 ]
 
