@@ -173,7 +173,20 @@ substitutions a single actor could make between the walk and the re-check.
 Review pass 8 showed that a concurrent process of the probe uid timing
 renames between those steps, or creating an entry after its parent was
 listed, would defeat them, as it would any `find`-based inventory. Such a
-process is excluded by construction here, not detected. The window's containment
+process is excluded by construction here, and the construction is
+**checked**. Before each scan, `scan_quiescent` reads every process in the
+container's pid namespace. Each must be the scan shell, a descendant of it,
+or pid 1 when pid 1 is a childless different process (P8's idle `sleep`).
+Anything else, an untraceable parent, or an unlistable `/proc` fails the
+scan as `OBSERVATION_FAILED`. Committed cases run it in a fresh pid
+namespace (root with `CAP_SYS_ADMIN`): the scan alone passes, a sibling
+process is refused, and a twin that accepts any process is caught.
+
+**Carried requirement.** The prune rule's correctness ASSUMES a quiescent
+container. The scan must **not** be reused as-is against a container with
+live participant processes. When Contract A's window-time inventory (PR-1,
+the lifetime checks) needs this rule, it must either run only after the
+holder domain is confirmed empty, or handle concurrency itself. The window's containment
 design, not this scan, owns that.
 
 The rule never reads `find`'s error text. Any unexpected line in a scan's
@@ -333,3 +346,4 @@ Still open, and stated: no committed runner-VM mountinfo capture (stage 2 record
 | 6 | `22cf2cf4` | REQUEST-CHANGES | inode numbers repeat across devices, so an ancestor substitution could redirect `ls`. Addressed in `dbec77b9`, `2688b9ce` (no replaceable ancestor; sticky over a foreign entry allowed) |
 | 7 | `2688b9ce` | REQUEST-CHANGES | owned ancestors; lexical ancestors through a symlink. Addressed in `74c05af6` |
 | 8 | `74c05af6` | REQUEST-CHANGES | owned ancestors FIXED; the remaining two need a concurrent probe-uid process timing renames, or creating entries mid-walk. Answered by scope: the probe container is quiescent by construction (above) |
+| ruling | `236b4c30` | orchestrator: ACCEPT the quiescence exclusion, on two conditions | the assumption and the reuse warning are stated here and in the probe headers, and carried to #797; quiescence is checked before each scan (`scan_quiescent`) |

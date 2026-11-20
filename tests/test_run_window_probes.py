@@ -537,6 +537,7 @@ WIRING = {
               'upper_dir_of "$cid" 9'],
     "p6.sh": ['upper_dir_of "$c1" 9', 'upper_dir_of "$c2" 8'],
     "p7.sh": ['out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?',
+              'scan_quiescent || { printf "inventory: container not quiescent\\n" >&2; exit 3; }',
               '            set -f\n',
               '            set -- $SCAN_HEAD\n            set +f\n',
               '-- "$PROBE_IMAGE_ID" sh -c "$SCAN_LIB$INVENTORY"',
@@ -547,6 +548,7 @@ WIRING = {
     "p8.sh": ['b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?',
               'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"',
               'o=$(scan "$t/pruned" / all "/proc /sys" -type s)',
+              'scan_quiescent || { printf "scan: container not quiescent\\n" >&2; exit 3; }',
               'if [ "$_rc" -eq 0 ] && scan_report "$1" "$v" && is_uint "${SCAN_HEAD% *}"',
               'step_diag "$1" binds "$_rc" "$PROBE_SCRATCH/$1.binds.err"',
               'step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"'],
@@ -1225,3 +1227,62 @@ def test_scan_report_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, 
     out, info, rc, head = REPORT_CASES[case]
     assert report_run(LIB, out) == (info, rc, head)
     assert report_run(mutated, out) != (info, rc, head), blind
+
+
+# ---- The quiescence precondition (lib.sh scan_quiescent) ----
+#
+# The prune rule assumes the probe container runs nothing but the scan (P7)
+# or an idle sleep beside it (P8). scan_quiescent checks that before each
+# scan. These cases run it in a fresh pid namespace, which needs root with
+# CAP_SYS_ADMIN (the stage-1 root step); they skip elsewhere.
+
+def _pidns_ok() -> bool:
+    if shutil.which("unshare") is None:
+        return False
+    run = subprocess.run(["unshare", "-fp", "--mount-proc", "true"], capture_output=True,
+                         check=False, timeout=30)
+    return run.returncode == 0
+
+
+needs_pidns = pytest.mark.skipif(not ROOT_RUN or not _pidns_ok(),
+                                 reason="needs root with CAP_SYS_ADMIN for a pid namespace")
+
+CHECK = 'eval "$(cat "$1")"; if scan_quiescent; then echo QUIESCENT; else echo BUSY; fi'
+#: The checker runs as pid 1 of the namespace: the P7 shape.
+ALONE = ["unshare", "-fp", "--mount-proc", "sh", "-c", CHECK, "sh"]
+#: pid 1 has another child (a sibling sleep) beside the checker: not quiescent.
+BESIDE = ["unshare", "-fp", "--mount-proc", "sh", "-c",
+          'sleep 30 & sh -c "$1" sh "$2"; kill "$!"', "sh", CHECK]
+
+
+def quiescence(lib: Path, tmp_path: Path, argv: list[str]) -> str:
+    text = tmp_path / "scan-lib.sh"
+    text.write_text(scan_lib_text(lib))
+    run = subprocess.run([*argv, str(text)], capture_output=True, text=True,
+                         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=60)
+    return run.stdout.strip()
+
+
+@needs_pidns
+def test_scan_quiescent_accepts_the_scan_alone(tmp_path: Path) -> None:
+    assert quiescence(LIB, tmp_path, ALONE) == "QUIESCENT"
+
+
+@needs_pidns
+def test_scan_quiescent_refuses_another_process(tmp_path: Path) -> None:
+    old = "if (!ok) exit 1"
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "twin" / "lib.sh"
+    mutated.parent.mkdir()
+    mutated.write_text(source.replace(old, "if (0) exit 1"))
+    assert quiescence(LIB, tmp_path, BESIDE) == "BUSY"
+    assert quiescence(mutated, tmp_path / "twin", BESIDE) == "QUIESCENT"
+
+
+@needs_pidns
+def test_scan_quiescent_twin_does_not_change_the_quiet_case(tmp_path: Path) -> None:
+    """The quiet case must stay quiescent under the real check, so the
+    refusal above is about the sibling, not a check that always fails."""
+    assert quiescence(LIB, tmp_path, ALONE) == "QUIESCENT"
+    assert quiescence(LIB, tmp_path, BESIDE) == "BUSY"

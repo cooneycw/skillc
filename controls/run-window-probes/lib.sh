@@ -647,6 +647,35 @@ scan_recheck() {
         [ "$_m" = "$_d $_i" ] || return 1
     done <"$1"
 }
+# scan_quiescent: exit 0 only if this pid namespace holds no process outside
+# the scan. Every process must be this shell, a descendant of it, or pid 1
+# when pid 1 is a different process with no children (P8: an idle sleep that
+# the scan was exec-ed beside). Any other process, a parent that cannot be
+# found, or a /proc that cannot be listed fails. The prune rule ASSUMES a
+# quiescent container; this check is that precondition, run before a scan.
+scan_quiescent() {
+    _ps=$(for _q in $(ls /proc); do
+        case $_q in *[!0-9]*) continue ;; esac
+        _pp=$(awk "\$1 == \"PPid:\" { print \$2 }" "/proc/$_q/status" 2>/dev/null) || continue
+        [ -n "$_pp" ] && printf "%s %s\n" "$_q" "$_pp"
+    done) || return 1
+    printf "%s\n" "$_ps" | awk -v me="$$" "
+        NF == 2 { pp[\$1] = \$2; n++ }
+        END {
+            if (n < 1 || !(me in pp)) exit 1
+            for (p in pp) if (pp[p] == 1 && me != 1) kids1++
+            for (p in pp) {
+                q = p; ok = 0
+                for (hop = 0; hop < 4096; hop++) {
+                    if (q == me) { ok = 1; break }
+                    if (q == 1 && me != 1 && !kids1) { ok = 1; break }
+                    if (!(q in pp)) break
+                    q = pp[q]
+                }
+                if (!ok) exit 1
+            }
+        }"
+}
 # pruned_lines PRUNED: one "PRUNED <path>" line per pruned directory, or
 # "PRUNED-W <path>" for one this uid may write but not search. Paths never
 # contain a newline (scan refuses those).

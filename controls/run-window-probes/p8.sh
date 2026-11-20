@@ -115,8 +115,12 @@ isolation() {
     _rc=0
     # shellcheck disable=SC2016  # expands inside the container
     # The scan prunes directories this uid cannot search (lib.sh SCAN_LIB) and
-    # fails on one it can search but not list.
+    # fails on one it can search but not list. The prune rule ASSUMES a
+    # quiescent container (an idle sleep plus this scan, checked first by
+    # scan_quiescent); it must not be reused as-is against a container with
+    # live participant processes.
     v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"'set -e
+scan_quiescent || { printf "scan: container not quiescent\n" >&2; exit 3; }
 t=$(mktemp -d)
 trap "rm -rf \"$t\"" EXIT
 o=$(scan "$t/pruned" / all "/proc /sys" -type s)

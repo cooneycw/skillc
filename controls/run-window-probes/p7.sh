@@ -10,7 +10,10 @@
 #   real marker write and removal (a missing or read-only surface fails);
 # - prunes every directory the container uid cannot search (lib.sh SCAN_LIB:
 #   access(2) X_OK, reported as INFO pruned), and fails on any directory it
-#   can search but not list;
+#   can search but not list. The prune rule ASSUMES a quiescent container
+#   (this inventory is its only process, checked by scan_quiescent first);
+#   it must not be reused as-is against a container with live participant
+#   processes;
 # - lists writable directories (GNU find -writable, an access(2) check) on
 #   every mount except proc, sysfs and cgroup, and counts any outside the
 #   declared surfaces;
@@ -73,6 +76,8 @@ gids=$(id -G) || exit 3
 set -- \( -writable -o -perm -0002 -o \( -uid "$uid" -perm -0200 \)
 for g in $gids; do set -- "$@" -o \( -gid "$g" -perm -0020 \); done
 set -- "$@" \)
+# The prune rule assumes a quiescent container: nothing but this inventory.
+scan_quiescent || { printf "inventory: container not quiescent\n" >&2; exit 3; }
 dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
 while IFS=" " read -r fstype opts mp; do
     case $fstype in proc | sysfs | cgroup | cgroup2) continue ;; esac
