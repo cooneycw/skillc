@@ -835,7 +835,8 @@ SCAN_TREES: dict[str, list[tuple[str, str, str]]] = {
     "write-without-search": [("spool", "dir", "wnx"), ("spool/inner", "dir", "open-w")],
     "probe-owned-unsearchable": [("home", "dir", "open"),
                                  ("home/mine", "nobody-dir", "owner-noexec")],
-    "newline-name": [(NL_DIR, "dir", "noexec")],
+    # The newline is in an ANCESTOR; the pruned directory's own name is plain.
+    "newline-name": [(NL_DIR, "dir", "open"), (f"{NL_DIR}/locked", "dir", "noexec")],
 }
 
 #: (writable-scan ok, socket-scan ok, writable dirs, sockets, pruned lines)
@@ -998,7 +999,7 @@ def acl_scan(lib: Path) -> str:
 @needs_root_drop
 @pytest.mark.skipif(shutil.which("setfacl") is None, reason="setfacl is required")
 def test_scan_fails_on_a_pruned_directory_that_carries_an_acl(tmp_path: Path) -> None:
-    old = 'scan_no_acl "$_pr.new" || return 1'
+    old = 'scan_recheck "$_pr.new" "$_u" "$_g" || return 1'
     source = LIB.read_text()
     assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
     mutated = tmp_path / "lib.sh"
@@ -1070,11 +1071,11 @@ SCAN_TWINS = [
     ("write-without-search-counted", EXPR_HEAD,
      'eval "set -- \\\\( \\"\\$@\\" \\\\) -print -o \\\\( -type d ! -executable \\\\( \\\\( \\\\(',
      "write-without-search"),
-    ("pruned-dirs-unrecorded", 'cat "$_pr.new" >>"$_pr" || return 1', ":", "image-shape"),
+    ("pruned-dirs-unrecorded", 'cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":",
+     "image-shape"),
     ("ambiguity-ignored", '[ ! -s "$_pr.amb" ] || return 1', ":", "probe-owned-unsearchable"),
     ("ownership-unchecked", AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o ',
      "probe-owned-unsearchable"),
-    ("newline-path-unchecked", AMBIGUOUS_HEAD, "-uid $_u -o ", "newline-name"),
 ]
 
 
@@ -1089,6 +1090,23 @@ def test_scan_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: st
     mutated.write_text(source.replace(old, new))
     assert run_scan(LIB, case, "sh") == scan_expected(case)
     assert run_scan(mutated, case, "sh") != scan_expected(case), blind
+
+
+@needs_root_drop
+def test_scan_newline_twin_is_caught(tmp_path: Path) -> None:
+    """A newline path is refused twice: the walk's -path guard, and the
+    post-check, which cannot parse a split record. Either alone fails the
+    scan, so the twin removes both."""
+    source = LIB.read_text()
+    weakened = source
+    for old, new in ((AMBIGUOUS_HEAD, "-uid $_u -o "),
+                     ('scan_recheck "$_pr.new" "$_u" "$_g" || return 1', ":")):
+        assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+        weakened = weakened.replace(old, new)
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(weakened)
+    assert run_scan(LIB, "newline-name", "sh") == scan_expected("newline-name")
+    assert run_scan(mutated, "newline-name", "sh") != scan_expected("newline-name")
 
 
 @needs_root_drop

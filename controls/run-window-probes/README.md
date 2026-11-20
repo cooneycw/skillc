@@ -136,7 +136,7 @@ nonzero on them. Both scans now go through one function, `scan` in
 
 | Directory, as the probe uid | Treatment | Why |
 |---|---|---|
-| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and** (checked after the walk) it carries no ACL, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
+| cannot **search**: `access(2)` `X_OK` says no (`find ! -executable`), **and** the mode bits of the class that applies to this uid (group if the directory's group is one of its groups, else other) grant no `x`, **and** it is not owned by this uid, **and** its full path has no newline, **and**, re-checked after the walk on the same inode, it carries no ACL and still matches all of the above, so the mode bits are the whole permission | **pruned**, reported as `INFO pruned <arm> <path> unsearchable` | unreachable by a fresh path lookup: creating, renaming or unlinking an entry, or opening anything inside it (a socket included), each needs search permission |
 | as above, but writable | pruned, reported with ` writable-without-search`; **not** counted as writable | write alone permits no entry change |
 | `access(2)` denies search but the mode bits grant it (an ACL, an I/O error), or a pruned directory carries an ACL | **`OBSERVATION_FAILED`** | the denial is not explained by the mode bits alone, so it is not trusted. With no ACL and no search bit for the uid's class, the kernel denies the lookup whatever `access(2)` reported |
 | unsearchable and owned by this uid | **`OBSERVATION_FAILED`** | the uid could `chmod` it searchable later in the window |
@@ -149,7 +149,8 @@ ambiguous, so two evaluations cannot disagree. If anything was pruned, the
 scan's identity must also be plain (read from `/proc/self/status`): a
 non-root uid, real, effective, saved and filesystem ids equal, and no
 effective or permitted capability, so `access(2)` answers for the lookups it
-stands for. Otherwise the scan fails. The owner may be anyone but the probe
+stands for. Otherwise the scan fails. That identity is read by an exec of
+`awk`, whose post-exec credentials are the ones `find` had. The owner may be anyone but the probe
 uid (root, or `_apt` for Debian's apt `partial` directory). A change made by
 another uid's process during the window is outside this scan's scope (see
 below).
@@ -180,8 +181,8 @@ from root, or the test's own uid), over crafted trees:
   directory beside the four are still found, so pruning cannot hide a
   survivor;
 - **write without search**: pruned, reported, and not counted as writable;
-- **probe-owned unsearchable**, and **a newline in the path**: both scans
-  fail;
+- **probe-owned unsearchable**, and **a newline in an ancestor's name**
+  (the pruned directory's own name is plain): both scans fail;
 - **an ACL denial the mode bits do not explain**, and **a pruned directory
   that carries an ACL**: the scan fails (both skip where the filesystem
   refuses POSIX ACLs; the second has a twin without the post-check);
@@ -193,7 +194,9 @@ so they run in the stage-1 root step and in CI. Blind twins the cases must
 catch: pruning on any denial (including `x` without `r`), pruning every
 directory, testing writability before the prune, not recording pruned
 paths, ignoring ambiguity, skipping the ownership check, skipping the
-newline check, skipping the ACL post-check, and ignoring exclusions. The
+ACL and predicate post-check, and ignoring exclusions. A newline path is
+refused twice, by the walk's `-path` guard and by the post-check, which
+cannot parse a split record, so its twin removes both. The
 image-shape fixture mirrors the image's owners, including the `_apt`-owned
 `partial` directory. The real P7 and P8 payloads need a container's mount
 table, so stage 2 exercises them end to end. `scan_report` has its own cases

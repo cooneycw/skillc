@@ -548,7 +548,8 @@ SCAN_LIB='
 # other find error returns 1. If anything was pruned, the scan identity must
 # also be plain: a non-root uid, real, effective, saved and filesystem ids
 # equal, and no effective or permitted capability (so access(2) answers for
-# the lookups it stands for).
+# the lookups it stands for). It is read by an exec of awk, whose post-exec
+# credentials are those find had, find being an exec of the same kind.
 # XDEV is "xdev" or "all". The verdict this supports is scoped to fresh
 # pathname lookup from ROOT under this identity, at the observation instant.
 scan() {
@@ -568,16 +569,16 @@ scan() {
     : >"$_pr.amb" || return 1
     # One access(2) evaluation per directory: an unsearchable directory is
     # recorded as AMBIGUOUS or as PRUNED by the same test, then pruned.
-    eval "set -- \\( -type d ! -executable \\( \\( \\( -path \"\$_nlpat\" -o -uid $_u -o ! \\( \\( \\( $_g \\) ! -perm -g+x \\) -o \\( ! \\( $_g \\) ! -perm -o+x \\) \\) \\) -fprint \"\$_pr.amb\" \\) -o -fprint \"\$_pr.new\" \\) -prune \\) -o \\( \"\$@\" \\) -print"
+    eval "set -- \\( -type d ! -executable \\( \\( \\( -path \"\$_nlpat\" -o -uid $_u -o ! \\( \\( \\( $_g \\) ! -perm -g+x \\) -o \\( ! \\( $_g \\) ! -perm -o+x \\) \\) \\) -fprint \"\$_pr.amb\" \\) -o -fprintf \"\$_pr.new\" \"%D %i %p\\\\n\" \\) -prune \\) -o \\( \"\$@\" \\) -print"
     for _e in $_ex; do set -- \( -path "$_e" -prune \) -o "$@"; done
     if [ "$_xd" = xdev ]; then set -- -xdev "$@"; fi
     find "$_root" "$@" || return 1
     [ ! -s "$_pr.amb" ] || return 1
     if [ -s "$_pr.new" ]; then
         scan_identity_plain || return 1
-        scan_no_acl "$_pr.new" || return 1
+        scan_recheck "$_pr.new" "$_u" "$_g" || return 1
     fi
-    cat "$_pr.new" >>"$_pr" || return 1
+    cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1
     rm -f "$_pr.new" "$_pr.amb"
 }
 # scan_identity_plain: a non-root uid, real, effective, saved and filesystem
@@ -591,13 +592,21 @@ scan_identity_plain() {
          END { exit (nu == 1 && ng == 1 && nc == 1 && np == 1 && u && g && c && p) ? 0 : 1 }" \
         /proc/self/status
 }
-# scan_no_acl PRUNED: every pruned directory lists as a plain mode string:
-# "d" and nine permission characters, optionally followed by "." (an SELinux
-# context), never "+" (an ACL). A listing that fails is a failure too.
-scan_no_acl() {
-    while IFS= read -r _p; do
+# scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
+# "DEV INO PATH") must still be the same inode, list with a plain mode string
+# ("d" and nine permission characters, optionally "." for an SELinux context,
+# never "+" for an ACL), and then still match the prune predicate: not
+# searchable, no search bit in its class, not owned by U. Listing then
+# re-matching means a change between the walk and the check is seen, unless
+# another uid changes the directory and changes it back in between, which is
+# outside the scan scope.
+scan_recheck() {
+    while read -r _d _i _p; do
         _l=$(ls -ld -- "$_p") || return 1
         case ${_l%% *} in d?????????  | d?????????.) ;; *) return 1 ;; esac
+        eval "_m=\$(find \"\$_p\" -maxdepth 0 -type d ! -executable ! -uid $2 \\( \\( \\( $3 \\) ! -perm -g+x \\) -o \\( ! \\( $3 \\) ! -perm -o+x \\) \\) -printf \"%D %i\")" \
+            || return 1
+        [ "$_m" = "$_d $_i" ] || return 1
     done <"$1"
 }
 # pruned_lines PRUNED: one "PRUNED <path>" line per pruned directory, or
