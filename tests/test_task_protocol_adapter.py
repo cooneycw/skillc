@@ -231,3 +231,53 @@ def test_an_adapter_ignoring_coverage_is_caught(tmp_path: Path) -> None:
                   if r["kind"] == "decision" and r["decision"] in adapter.PROJECTED
                   and r["principal"] == tpf.principal_of("worker")]
     assert len(blind_rows) == 2  # what a coverage-blind projection would have emitted
+
+
+# -- the remaining planned blind variants (#811 review) --------------------------------
+
+
+def test_a_projection_counting_retries_as_completions_is_caught(tmp_path: Path) -> None:
+    """Blind variant: replay each retry as its original decision."""
+    plan = tpf.plan_of(ROLES)
+    steps = HEALTHY + [("worker", "complete", 3, 5_000_000_000)]
+    built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, steps)
+    records = tj.verify(built.root, built.reference, built.context)["records"]
+    by_seq = {r["seq"]: r for r in records}
+    replayed = [by_seq[r["original_seq"]] if r["kind"] == "retry" else r for r in records]
+    blind = [r for r in replayed if r["kind"] == "decision"
+             and r["decision"] == "completion-claimed"
+             and r["principal"] == tpf.principal_of("worker")]
+    honest = [r for r in _rows(_adapt(built, plan), "worker") or [] if r["op"] == "complete"]
+    assert len(blind) == 2 and len(honest) == 1
+
+
+def test_a_projection_taking_identity_from_the_journal_is_caught(tmp_path: Path) -> None:
+    """Blind variant: name the row by the journal's principal, not the plan's
+    role binding. The kernel would read it as the wrong assignment."""
+    plan = tpf.plan_of(ROLES)
+    built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, HEALTHY)
+    honest = _rows(_adapt(built, plan), "worker") or []
+    records = tj.verify(built.root, built.reference, built.context)["records"]
+    blind_roles = {r["principal"] for r in records
+                   if r["kind"] == "decision" and r["decision"] in adapter.PROJECTED}
+    assert {r["role"] for r in honest} == {"worker"}
+    assert "worker" not in blind_roles and tpf.principal_of("worker") in blind_roles
+    binding = next(r for r in plan.roles if r.role == "worker")
+    assert {r["attempt_id"] for r in honest} == {binding.attempt_id}
+    assert all("attempt_id" not in r for r in records)  # the journal cannot supply it
+
+
+def test_an_adapter_without_the_clock_join_is_caught(tmp_path: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = tpf.plan_of(ROLES)
+    built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, HEALTHY)
+    bad = replace(_join(built), origin_ns=7)
+    assert _adapt(built, plan, join=bad)["reasons"] == ["clock-join-unavailable"]
+    real = adapter._check_bindings
+
+    def joinless(*args: Any) -> str | None:
+        problem = real(*args)
+        return None if problem == "clock-join-unavailable" else problem
+
+    monkeypatch.setattr(adapter, "_check_bindings", joinless)
+    assert _adapt(built, plan, join=bad)["status"] == "CAPTURED"
