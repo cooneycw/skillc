@@ -50,7 +50,6 @@ from .task_protocol_lease import Lease, Leases
 from .task_protocol_schema import MAX_REQUEST_BYTES, Receipt, Rejected, Request, parse_request
 from .task_protocol_state import Machine
 
-
 #: After replying, the receiver reads the rest of an over-long request before
 #: closing, so the kernel delivers the reply instead of resetting the
 #: connection. Bounded in bytes (here) and time (`request_timeout`); a sender
