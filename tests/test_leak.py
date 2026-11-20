@@ -690,7 +690,9 @@ def _fake_account_db(
 
 
 @pytest.mark.usefixtures("_fresh_exemptions")
-@pytest.mark.parametrize("account", ["user.operator", "user-operator", "user_operator", "user.ops-team"])
+@pytest.mark.parametrize("account", [
+    "user.operator", "user-operator", "user_operator", "user.ops-team", "user--operator", "user._op",
+])
 def test_a_directory_account_the_listing_OMITS_keeps_the_encoded_home_a_finding(
     account: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

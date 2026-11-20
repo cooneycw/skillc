@@ -257,7 +257,7 @@ def _encoded_exempt(name: str) -> bool:
 #: an account name. A directory account with more separators than this, and
 #: absent from the listing, is not found by the probe.
 _PROBE_SEGMENTS = 3
-_ENCODED_TAIL_RE = re.compile(r"(?:-[A-Za-z0-9]+)+")
+_ENCODED_TAIL_RE = re.compile(r"-[A-Za-z0-9-]*")
 
 
 @functools.lru_cache(maxsize=4096)
@@ -267,7 +267,8 @@ def _encoded_tail_names_account(name: str, tail: str) -> bool:
     that lookup by name still finds, so an encoded placeholder match is
     exempt only if no de-encoding of the text actually seen names one. Every
     mix of `-`, `.` and `_` is tried for up to `_PROBE_SEGMENTS` segments."""
-    segments = [s for s in tail.split("-") if s][:_PROBE_SEGMENTS]
+    # Empty segments are kept: `user--operator` encodes with a doubled dash.
+    segments = tail.split("-")[1:][:_PROBE_SEGMENTS]
     for count in range(1, len(segments) + 1):
         for separators in itertools.product("-._", repeat=count):
             candidate = name + "".join(sep + seg for sep, seg in zip(separators, segments[:count]))
