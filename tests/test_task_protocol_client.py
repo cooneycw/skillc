@@ -178,3 +178,16 @@ def server() -> Iterator[_Server]:
     running.sock.close()
     running.thread.join(5)
     shutil.rmtree(short, ignore_errors=True)
+
+
+def test_the_largest_legal_request_fits_the_size_bound() -> None:
+    largest = client.request_fields("refuse", client.MAX_REQUEST_NUMBER, "a" * 64,
+                                    max(client.REFUSAL_REASONS, key=len))
+    assert len(client.encode(largest)) < client.MAX_BYTES
+
+
+def test_an_oversize_request_is_refused_locally(monkeypatch: pytest.MonkeyPatch,
+                                                server: Any) -> None:
+    monkeypatch.setattr(client, "MAX_BYTES", 10)
+    assert client.main(["offer", "--request", "1"], server.path) == client.EXIT_USAGE
+    assert server.received == []

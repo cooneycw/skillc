@@ -380,3 +380,41 @@ def test_peer_authority_has_one_implementation() -> None:
     assert "peer_credentials(conn)" in receiver_source
     assert channel_source.count("socket.SO_PEERCRED") == 1
     assert "peer_credentials(self.request)" in channel_source
+
+
+def test_a_far_oversize_sender_gets_a_bounded_outcome(make_world: Callable[..., World]) -> None:
+    """Regression (B5a early VM run): the receiver used to close with unread
+    request bytes, so the kernel reset the connection and the oversize reply
+    was lost. A 1 MiB sender must now end within the I/O bounds, be recorded
+    as oversize, and leave that endpoint's coverage UNKNOWN."""
+    world = make_world(request_timeout=2.0)
+    world.verifier.current = "inst-a"
+    outcome: dict[str, Any] = {}
+
+    def send() -> None:
+        try:
+            outcome["reply"] = world.raw("p-a", b"x" * (1 << 20))
+        except OSError as exc:
+            outcome["error"] = type(exc).__name__
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    sender.join(30)
+    assert not sender.is_alive()
+    result = world.finish()
+    assert [(r["principal"], r["reason"]) for r in _rows(result, "rejection")] == [
+        ("p-a", "oversize")]
+    assert result["coverage"]["p-a"] == "unknown" and result["outcome"] == "UNKNOWN"
+    if "reply" in outcome:
+        assert _decision(client.parse_receipt(outcome["reply"])) == ("rejected", "oversize")
+
+
+def test_a_just_oversize_request_still_receives_its_reply_and_drains_clean(
+        make_world: Callable[..., World]) -> None:
+    world = make_world()
+    world.verifier.current = "inst-a"
+    reply = world.raw("p-a", b'{"version":1,"op":"offer","request":1,"x":"' + b"y" * 5000 + b'"}\n')
+    assert _decision(client.parse_receipt(reply)) == ("rejected", "oversize")
+    world.receiver.fence()
+    world.receiver.stop()
+    assert world.receiver.coverage()["p-a"] == "complete"
