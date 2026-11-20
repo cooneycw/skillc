@@ -1,0 +1,140 @@
+{
+ "note": "Hand-derived from compose_run_argv at the parent of #620 B5b (origin/main 2e0c589b); the pre-change VM run must reproduce these exactly. trigger_socket_host_path is a string here and converted to Path by the test.",
+ "goldens": [
+  {
+   "name": "minimal",
+   "inputs": {
+    "docker_bin": [
+     "docker"
+    ],
+    "image": "skillc-trial@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "name": "skillc-golden-1",
+    "attempt_id": "attempt-g1",
+    "subject_argv": [
+     "sleep",
+     "infinity"
+    ],
+    "env": {
+     "A": "1",
+     "B": "two"
+    },
+    "network": "none",
+    "memory": "2g",
+    "pids_limit": "256",
+    "cpus": "2",
+    "shm_size": "64m",
+    "container_user": "10001:10001",
+    "disk_limit": null
+   },
+   "argv": [
+    "docker",
+    "run",
+    "--rm",
+    "-i",
+    "--name",
+    "skillc-golden-1",
+    "--label",
+    "skillc.managed=true",
+    "--label",
+    "skillc.attempt-id=attempt-g1",
+    "--network",
+    "none",
+    "--user",
+    "10001:10001",
+    "--hostname",
+    "skillc-trial",
+    "--init",
+    "--memory",
+    "2g",
+    "--memory-swap",
+    "2g",
+    "--pids-limit",
+    "256",
+    "--cpus",
+    "2",
+    "--shm-size",
+    "64m",
+    "-w",
+    "/work",
+    "-e",
+    "HOME=/home/candidate",
+    "-e",
+    "A=1",
+    "-e",
+    "B=two",
+    "--",
+    "skillc-trial@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "sleep",
+    "infinity"
+   ]
+  },
+  {
+   "name": "trigger-dns-disk",
+   "inputs": {
+    "docker_bin": [
+     "docker"
+    ],
+    "image": "skillc-trial@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "name": "skillc-golden-2",
+    "attempt_id": "attempt-g2",
+    "subject_argv": [
+     "sleep",
+     "infinity"
+    ],
+    "env": {},
+    "network": "skillc-egress-net",
+    "memory": "2g",
+    "pids_limit": "256",
+    "cpus": "2",
+    "shm_size": "64m",
+    "container_user": "10001:10001",
+    "disk_limit": "10G",
+    "trigger_socket_host_path": "/var/lib/skillc/trigger/abc.sock",
+    "dns": "192.0.2.53"
+   },
+   "argv": [
+    "docker",
+    "run",
+    "--rm",
+    "-i",
+    "--name",
+    "skillc-golden-2",
+    "--label",
+    "skillc.managed=true",
+    "--label",
+    "skillc.attempt-id=attempt-g2",
+    "--network",
+    "skillc-egress-net",
+    "--dns",
+    "192.0.2.53",
+    "--user",
+    "10001:10001",
+    "--hostname",
+    "skillc-trial",
+    "--init",
+    "--memory",
+    "2g",
+    "--memory-swap",
+    "2g",
+    "--pids-limit",
+    "256",
+    "--cpus",
+    "2",
+    "--shm-size",
+    "64m",
+    "--storage-opt",
+    "size=10G",
+    "--mount",
+    "type=bind,source=/var/lib/skillc/trigger/abc.sock,target=/run/skillc/trigger.sock",
+    "-w",
+    "/work",
+    "-e",
+    "HOME=/home/candidate",
+    "--",
+    "skillc-trial@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "sleep",
+    "infinity"
+   ]
+  }
+ ]
+}
