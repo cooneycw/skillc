@@ -155,8 +155,8 @@ def test_retained_surface_uses_its_own_scan_only() -> None:
 
 # --------------------------------------------------------- window predicate
 
-DECLARED = {'w1/worker/home': rc.REMOVED, 'w1/worker/vault': rc.REMOVED, 'w1/worker/transcript': rc.RETAINED}
-GOOD = {'w1/worker/home': rc.ABSENT, 'w1/worker/vault': rc.ABSENT, 'w1/worker/transcript': rc.CLEAN}
+DECLARED = {'wave-a/worker/home': rc.REMOVED, 'wave-a/worker/vault': rc.REMOVED, 'wave-a/worker/transcript': rc.RETAINED}
+GOOD = {'wave-a/worker/home': rc.ABSENT, 'wave-a/worker/vault': rc.ABSENT, 'wave-a/worker/transcript': rc.CLEAN}
 
 
 def window(verdicts: Any = None, **kw: Any) -> rc.WindowVerdict:
@@ -182,21 +182,21 @@ def test_evidence_population_must_match_the_declaration(case: str) -> None:
     verdicts: Any = dict(GOOD)
     declared: Any = dict(DECLARED)
     if case == 'missing':
-        del verdicts['w1/worker/vault']
+        del verdicts['wave-a/worker/vault']
     elif case == 'extra':
-        verdicts['w1/worker/stray'] = rc.ABSENT
+        verdicts['wave-a/worker/stray'] = rc.ABSENT
     elif case == 'not-a-mapping':
         verdicts = list(GOOD.items())
     elif case == 'empty-declared':
         declared = {}
     else:
-        declared['w1/worker/home'] = 'sometimes'
+        declared['wave-a/worker/home'] = 'sometimes'
     assert window(verdicts, declared=declared).status == rc.UNKNOWN
 
 
-@pytest.mark.parametrize('surface,value', [('w1/worker/home', rc.UNKNOWN), ('w1/worker/home', rc.PRESENT),
-                                           ('w1/worker/home', rc.CLEAN), ('w1/worker/transcript', rc.ABSENT),
-                                           ('w1/worker/transcript', rc.UNKNOWN), ('w1/worker/vault', 'absent')])
+@pytest.mark.parametrize('surface,value', [('wave-a/worker/home', rc.UNKNOWN), ('wave-a/worker/home', rc.PRESENT),
+                                           ('wave-a/worker/home', rc.CLEAN), ('wave-a/worker/transcript', rc.ABSENT),
+                                           ('wave-a/worker/transcript', rc.UNKNOWN), ('wave-a/worker/vault', 'absent')])
 def test_one_surface_out_of_place_makes_the_window_unknown(surface: str, value: str) -> None:
     assert window({**GOOD, surface: value}).status == rc.UNKNOWN
 
@@ -210,8 +210,8 @@ def blind_class_aggregate(verdicts: dict[str, str]) -> str:
 
 
 def test_one_unreadable_role_is_not_hidden_by_another_roles_clean() -> None:
-    declared = {**DECLARED, 'w1/integrator/transcript': rc.RETAINED}
-    verdicts = {**GOOD, 'w1/integrator/transcript': rc.UNKNOWN}
+    declared = {**DECLARED, 'wave-a/integrator/transcript': rc.RETAINED}
+    verdicts = {**GOOD, 'wave-a/integrator/transcript': rc.UNKNOWN}
     assert blind_class_aggregate(verdicts) == rc.CLEAN
     assert window(verdicts, declared=declared).status == rc.UNKNOWN
 
@@ -223,17 +223,17 @@ def test_any_match_anywhere_is_not_clean(case: str) -> None:
     declared: dict[str, str] = dict(DECLARED)
     sealed = True
     if case == 'declared':
-        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+        verdicts['wave-a/worker/vault'] = rc.NOT_CLEAN
     elif case == 'declared-with-missing':
-        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
-        del verdicts['w1/worker/home']
+        verdicts['wave-a/worker/vault'] = rc.NOT_CLEAN
+        del verdicts['wave-a/worker/home']
     elif case == 'stray':
         verdicts['stray'] = rc.NOT_CLEAN
     elif case == 'empty-declaration':
-        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+        verdicts['wave-a/worker/vault'] = rc.NOT_CLEAN
         declared = {}
     else:
-        verdicts['w1/worker/vault'] = rc.NOT_CLEAN
+        verdicts['wave-a/worker/vault'] = rc.NOT_CLEAN
         sealed = False
     result = rc.window_verdict(verdicts, declared=declared, capture_sealed=sealed, preconditions_held=True)
     assert result.status == rc.NOT_CLEAN and result.reasons == ('remnant-matched',)
@@ -244,9 +244,9 @@ def test_only_plain_dicts_of_exact_strings_are_evidence(case: str) -> None:
     verdicts: Any = dict(GOOD)
     declared: Any = dict(DECLARED)
     if case == 'str-subclass-verdict':
-        verdicts['w1/worker/home'] = AbsentLike(rc.ABSENT)
+        verdicts['wave-a/worker/home'] = AbsentLike(rc.ABSENT)
     elif case == 'lying-dict':
-        verdicts = LyingDict({**GOOD, 'w1/worker/home': rc.UNKNOWN})
+        verdicts = LyingDict({**GOOD, 'wave-a/worker/home': rc.UNKNOWN})
     elif case == 'non-str-keys':
         verdicts = {1: rc.ABSENT}
         declared = {True: rc.REMOVED}
@@ -262,10 +262,10 @@ def test_preconditions_must_hold() -> None:
 
 
 def test_public_result_is_an_exact_allowlist() -> None:
-    result = window({**GOOD, 'w1/worker/home': rc.UNKNOWN}, capture_sealed=False)
+    result = window({**GOOD, 'wave-a/worker/home': rc.UNKNOWN}, capture_sealed=False)
     assert result.public() == {'version': 1, 'status': rc.UNKNOWN,
                                'reasons': ['removed-surface-not-absent',
                                            'reference-retention-contract-unavailable'],
                                'surfaces': {'removed': 2, 'retained': 1}}
     assert all(reason in rc.REASONS for reason in result.public()['reasons'])
-    assert 'w1/worker' not in repr(result.public())  # No surface name leaves the module.
+    assert 'wave-a/worker' not in repr(result.public())  # No surface name leaves the module.
