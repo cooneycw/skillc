@@ -72,15 +72,9 @@ class Context:
     roles: tuple[str, ...]
     deadline_digest: str
     clock: str
-    #: #620 PR-B / #622: the attempt's ONE monotonic origin, in integer ns, so
-    #: a sealed capture proves its own clock join. None is the original
-    #: six-field shape: still verifiable, but it joins nothing (B6 adapter).
-    origin_ns: int | None = None
 
     def __post_init__(self) -> None:
         ww._role(self.attempt_id)
-        if self.origin_ns is not None and (type(self.origin_ns) is not int or self.origin_ns < 0):
-            raise CaptureUnavailable('integer capture origin required')
         for value in (self.approved_declaration_digest, self.policy_digest, self.deadline_digest):
             ww._digest(value)
         if type(self.roles) is not tuple or ww._roles(self.roles) != self.roles:
@@ -88,27 +82,48 @@ class Context:
         if self.clock not in ('monotonic', 'injected-policy-only'):
             raise CaptureUnavailable('declared capture clock required')
 
-    def fields(self) -> dict[str, Any]:
-        """The serialized context. Without an origin it is EXACTLY the original
-        six-field shape, so existing sealed captures keep their digests."""
-        row = asdict(self)
-        if row['origin_ns'] is None:
-            del row['origin_ns']
-        return row
-
     @property
     def digest(self) -> str:
-        return _hash(_json(self.fields()))
+        return _hash(_json(asdict(self)))
+
+    @property
+    def clock_origin_ns(self) -> int | None:
+        """The original six-field context records no origin, so it joins no
+        task-protocol clock (#620 PR-B, B8a)."""
+        return None
 
 
-_BASE_FIELDS = set(Context.__dataclass_fields__) - {'origin_ns'}
+@dataclass(frozen=True)
+class OriginContext(Context):
+    """#622 / #620 PR-B B8a: a context that also records the wave's ONE
+    monotonic origin in integer ns, so the sealed capture proves its own clock
+    join. A separate closed shape: the original six fields stay exactly as
+    they were, and their digests are unchanged."""
+
+    origin_ns: int
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if type(self.origin_ns) is not int or self.origin_ns < 0:
+            raise CaptureUnavailable('integer capture origin required')
+
+    @property
+    def clock_origin_ns(self) -> int | None:
+        return self.origin_ns
+
+
+_BASE_FIELDS = set(Context.__dataclass_fields__)
+_ORIGIN_FIELDS = set(OriginContext.__dataclass_fields__)
 
 
 def parse_context(value: object) -> Context:
-    if type(value) is not dict or set(value) not in (_BASE_FIELDS, _BASE_FIELDS | {'origin_ns'}):
-        raise CaptureUnavailable('closed wake capture object required')
-    assert isinstance(value, dict)
-    return Context(**{**value, 'roles': ww._roles(value['roles'])})
+    """Exactly two closed shapes: the original six keys, or those plus an
+    integer `origin_ns`. A missing, extra or null field is refused."""
+    if type(value) is dict and set(value) == _ORIGIN_FIELDS:
+        assert isinstance(value, dict)
+        return OriginContext(**{**value, 'roles': ww._roles(value['roles'])})
+    row = _object(value, _BASE_FIELDS)
+    return Context(**{**row, 'roles': ww._roles(row['roles'])})
 
 
 @dataclass(frozen=True)
@@ -159,11 +174,12 @@ class Capture:
     """Single-use private writer. Each transition is fsynced before dispatch."""
 
     def __init__(self, root: Path, context: Context, origin: float) -> None:
-        if not isinstance(root, Path) or type(context) is not Context:
+        if not isinstance(root, Path) or type(context) not in (Context, OriginContext):
             raise CaptureUnavailable('owned capture root/context required')
-        self.context = parse_context(context.fields())
+        self.context = parse_context(asdict(context))
         self.origin = ww._time(origin)
-        if self.context.origin_ns is not None and round(self.origin * 1e9) != self.context.origin_ns:
+        recorded = self.context.clock_origin_ns
+        if recorded is not None and round(self.origin * 1e9) != recorded:
             raise CaptureUnavailable('capture origin differs from its recorded context origin')
         self.root = root
         self.count = self.size = 0
@@ -174,7 +190,7 @@ class Capture:
         fd = os.open(root / 'events.tmp', os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         self.stream = os.fdopen(fd, 'w+b', buffering=0)
         try:
-            self._append({'event': 'capture-start', 'version': 1, 'context': self.context.fields()})
+            self._append({'event': 'capture-start', 'version': 1, 'context': asdict(self.context)})
         except BaseException:
             self.stream.close()
             raise
@@ -396,10 +412,11 @@ def _decode(raw: bytes, ref: Reference, expected: Context) -> dict[str, Any]:
 def verify(root: object, reference: object, expected: object) -> dict[str, Any]:
     """Expected reference/context come from the trusted caller, never a report."""
     try:
-        if not isinstance(root, Path) or type(reference) is not Reference or type(expected) is not Context:
+        if (not isinstance(root, Path) or type(reference) is not Reference
+                or type(expected) not in (Context, OriginContext)):
             raise CaptureUnavailable('independently held capture binding required')
         reference = parse_reference(asdict(reference))
-        expected = parse_context(expected.fields())
+        expected = parse_context(asdict(expected))
         return _decode(_read(root, reference.digest, reference.size), reference, expected)
     except (OSError, ValueError, RecursionError):
         return {'status': 'UNKNOWN', 'complete': False, 'reason': 'wake capture unavailable or unverifiable'}

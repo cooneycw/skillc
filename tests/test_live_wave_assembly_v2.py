@@ -31,7 +31,8 @@ def _rewake(source: Path, entries: dict[str, Any], row: dict[str, Any], origin_n
     origin (B8a), at a sibling root; the original capture stays catalogued."""
     old = row["wake"]
     root = old["root"] + "-origin"
-    context = replace(wave_wake_capture.parse_context(old["context"]), origin_ns=origin_ns)
+    base = wave_wake_capture.parse_context(old["context"])
+    context = wave_wake_capture.OriginContext(**asdict(base), origin_ns=origin_ns)
     capture = wave_wake_capture.Capture(source / root, context, origin_ns / 1e9)
     state = wave_wake.WakeState(replace(policy(), max_pokes=1), context.roles)
     state.journal = lambda event: capture.append(dict(event))
@@ -52,7 +53,7 @@ def _rewake(source: Path, entries: dict[str, Any], row: dict[str, Any], origin_n
     obj = root + "/objects/" + reference.digest[7:]
     data = (source / obj).read_bytes()
     entries[obj] = {"kind": "file", "mode": 0o400, "bytes": len(data), "sha256": exported.sha(data)}
-    row["wake"] = {"root": root, "reference": asdict(reference), "context": context.fields()}
+    row["wake"] = {"root": root, "reference": asdict(reference), "context": asdict(context)}
 
 
 def _to_v2(steps: list[Any] = STEPS, *, keep_v1_protocol: bool = False,

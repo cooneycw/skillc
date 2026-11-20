@@ -1,14 +1,18 @@
 """#622 / #620 PR-B B8a: the wake capture records its own clock origin.
 
-The original six-field capture shape stays verifiable, pinned by a capture
-committed in controls/wave-wake-origin/ that was generated without running
-this module. An origin-bearing capture proves its clock join from sealed
-bytes, and the task-protocol adapter's join requires it."""
+The original six-field Context is unchanged; OriginContext adds a required
+integer origin_ns as a second closed shape. The committed six-field capture
+(controls/wave-wake-origin/, generated without running this module) still
+verifies, and tests/test_wave_wake_old_shape.py proves on the parent API
+that it is genuinely old-shape. The task-protocol adapter's clock join
+requires the wake capture's own origin."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, replace
+import sys
+import types
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -23,25 +27,45 @@ CONTROL = ROOT / "controls" / "wave-wake-origin"
 BINDING = json.loads((CONTROL / "binding.json").read_text())
 
 
+def _canonical(value: Any) -> str:
+    """Compare serializations, not Python containers (a tuple of roles and its
+    JSON list are the same context)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def test_the_committed_six_field_capture_still_verifies() -> None:
     context = wc.parse_context(BINDING["context"])
     reference = wc.parse_reference(BINDING["reference"])
-    assert context.origin_ns is None and context.fields() == BINDING["context"]
+    assert type(context) is wc.Context and context.clock_origin_ns is None
+    assert _canonical(asdict(context)) == _canonical(BINDING["context"])
     assert context.digest == reference.context_digest
     assert wc.verify(CONTROL / "capture", reference, context)["status"] == "CAPTURED"
-    seven = {**BINDING["context"], "origin_ns": None}
-    assert wc.parse_context(seven) == context  # asdict() of an old context parses too
 
 
-def _context(origin_ns: int | None) -> wc.Context:
-    return replace(wc.parse_context(BINDING["context"]), origin_ns=origin_ns)
+def _base() -> wc.Context:
+    return wc.parse_context(BINDING["context"])
 
 
-def test_an_origin_changes_the_digest_and_round_trips() -> None:
-    with_origin = _context(5_000_000_000)
-    assert with_origin.fields()["origin_ns"] == 5_000_000_000
-    assert wc.parse_context(with_origin.fields()) == with_origin
-    assert with_origin.digest != _context(None).digest
+def _origin(origin_ns: int) -> wc.OriginContext:
+    return wc.OriginContext(**asdict(_base()), origin_ns=origin_ns)
+
+
+def test_an_origin_context_is_a_second_closed_shape() -> None:
+    with_origin = _origin(5_000_000_000)
+    assert asdict(with_origin)["origin_ns"] == 5_000_000_000
+    assert wc.parse_context(asdict(with_origin)) == with_origin
+    assert with_origin.digest != _base().digest and with_origin != _base()
+
+
+@pytest.mark.parametrize("value", [None, -1, True, 1.5, "5"])
+def test_a_null_or_malformed_origin_is_refused(value: Any) -> None:
+    with pytest.raises(ValueError):
+        wc.parse_context({**BINDING["context"], "origin_ns": value})
+
+
+def test_an_eighth_key_is_refused() -> None:
+    with pytest.raises(ValueError):
+        wc.parse_context({**asdict(_origin(1)), "unexpected": None})
 
 
 def _seal(root: Path, context: wc.Context, origin: float) -> wc.Reference:
@@ -50,7 +74,7 @@ def _seal(root: Path, context: wc.Context, origin: float) -> wc.Reference:
 
 
 def test_a_capture_must_start_at_its_recorded_origin(tmp_path: Path) -> None:
-    context = _context(5_000_000_000)
+    context = _origin(5_000_000_000)
     reference = _seal(tmp_path / "ok", context, 5.0)
     assert wc.verify(tmp_path / "ok", reference, context)["status"] == "CAPTURED"
     with pytest.raises(wc.CaptureUnavailable):
@@ -58,15 +82,9 @@ def test_a_capture_must_start_at_its_recorded_origin(tmp_path: Path) -> None:
 
 
 def test_an_origin_capture_does_not_verify_against_another_origin(tmp_path: Path) -> None:
-    reference = _seal(tmp_path / "c", _context(5_000_000_000), 5.0)
-    for other in (None, 6_000_000_000):
-        assert wc.verify(tmp_path / "c", reference, _context(other))["status"] == "UNKNOWN"
-
-
-@pytest.mark.parametrize("value", [-1, True, 1.5, "5"])
-def test_a_malformed_origin_is_refused(value: Any) -> None:
-    with pytest.raises(ValueError):
-        wc.parse_context({**BINDING["context"], "origin_ns": value})
+    reference = _seal(tmp_path / "c", _origin(5_000_000_000), 5.0)
+    for other in (_base(), _origin(6_000_000_000)):
+        assert wc.verify(tmp_path / "c", reference, other)["status"] == "UNKNOWN"
 
 
 # The task-protocol join now requires the wake capture's own origin.
@@ -78,8 +96,18 @@ STEPS = [("integrator", "offer", 1, 1), ("integrator", "ack", 2, 2)]
 
 
 def _wake(plan: Any, origin_ns: int | None) -> wc.Context:
-    return wc.Context(plan.wave_id, DECL, "sha256:" + "f" * 64, ROLES, DEADLINE, "monotonic",
-                      origin_ns=origin_ns)
+    base = wc.Context(plan.wave_id, DECL, "sha256:" + "f" * 64, ROLES, DEADLINE, "monotonic")
+    return base if origin_ns is None else wc.OriginContext(**asdict(base), origin_ns=origin_ns)
+
+
+def _adapt(module: Any, tmp_path: Path, origin: int | None) -> dict[str, Any]:
+    plan = tpf.plan_of(ROLES)
+    built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, STEPS)
+    wake = _wake(plan, origin)
+    join = module.ClockJoin(built.inventory.digest, wake.digest, built.inventory.clock_origin_ns)
+    result: dict[str, Any] = module.adapt(built.root, built.reference, built.context,
+                                          built.inventory, plan, built.deadline_ns, join, wake)
+    return result
 
 
 @pytest.mark.parametrize("origin,expected",
@@ -87,34 +115,25 @@ def _wake(plan: Any, origin_ns: int | None) -> wc.Context:
                          ids=["matches-inventory", "old-shape", "differs"])
 def test_the_join_requires_the_wake_capture_origin(tmp_path: Path, origin: int | None,
                                                    expected: str) -> None:
-    plan = tpf.plan_of(ROLES)
-    built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, STEPS)
-    wake = _wake(plan, origin)
-    join = adapter.ClockJoin(built.inventory.digest, wake.digest, built.inventory.clock_origin_ns)
-    result = adapter.adapt(built.root, built.reference, built.context, built.inventory, plan,
-                           built.deadline_ns, join, wake)
+    result = _adapt(adapter, tmp_path, origin)
     assert result["status"] == expected
     if expected == "UNKNOWN":
         assert result["reasons"] == ["clock-join-unavailable"]
 
 
-def test_a_join_without_the_origin_comparison_is_caught(tmp_path: Path) -> None:
-    """A source mutant of the real adapter that drops the origin check."""
+def test_a_join_without_the_origin_comparison_is_caught(tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A source mutant of the REAL adapter with the origin check removed. It is
+    registered as a module so its dataclasses resolve, then shown to ACCEPT
+    the old-shape wake capture that the real adapter refuses."""
     source = Path(adapter.__file__).read_text()
-    anchor = ("\n                or wake.origin_ns is None"
-              " or wake.origin_ns != inventory.clock_origin_ns")
+    anchor = ("\n                or wake.clock_origin_ns is None"
+              " or wake.clock_origin_ns != inventory.clock_origin_ns")
     assert source.count(anchor) == 1
-    namespace: dict[str, Any] = {"__name__": "skillc._blind_adapter", "__package__": "skillc"}
-    exec(compile(source.replace(anchor, ""), "<blind-adapter>", "exec"), namespace)  # noqa: S102
-    plan = tpf.plan_of(ROLES)
-    built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, STEPS)
-    wake = _wake(plan, None)
-    join = namespace["ClockJoin"](built.inventory.digest, wake.digest, 0)
-    blind = namespace["adapt"](built.root, built.reference, built.context, built.inventory, plan,
-                               built.deadline_ns, join, wake)
-    assert blind["status"] == "CAPTURED"  # the old-shape capture would have joined
-
-
-def test_asdict_and_fields_agree_on_the_digest_for_an_old_context() -> None:
-    context = _context(None)
-    assert wc.parse_context(asdict(context)).digest == context.digest
+    blind = types.ModuleType("skillc._blind_adapter")
+    blind.__package__ = "skillc"
+    monkeypatch.setitem(sys.modules, blind.__name__, blind)
+    code = compile(source.replace(anchor, ""), "<blind-adapter>", "exec")
+    exec(code, blind.__dict__)  # noqa: S102
+    assert _adapt(adapter, tmp_path / "real", None)["status"] == "UNKNOWN"
+    assert _adapt(blind, tmp_path / "blind", None)["status"] == "CAPTURED"

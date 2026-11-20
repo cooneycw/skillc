@@ -144,7 +144,7 @@ def _check_bindings(context: tj.Context, inventory: Inventory, plan: live_wave.W
     if wake is not None:
         # B8a: the wake capture's OWN sealed origin must be the inventory's.
         if (join.wake_context_digest != wake.digest
-                or wake.origin_ns is None or wake.origin_ns != inventory.clock_origin_ns
+                or wake.clock_origin_ns is None or wake.clock_origin_ns != inventory.clock_origin_ns
                 or wake.attempt_id != context.attempt_id
                 or wake.approved_declaration_digest != context.declaration_digest
                 or wake.deadline_digest != context.deadline_digest):
