@@ -27,6 +27,16 @@ from skillc import calibration
 
 FIXTURE = ROOT / 'controls' / 'run-window-contracts' / 'legacy-calibration.json'
 
+#: declaration_digest of each legacy input, computed by the PARENT's own code
+#: (VM job 40 at the parent, identical over two runs). The head must compute
+#: the same values, so a change to the digest algorithm or to how these inputs
+#: are built is caught, rather than passing at both revisions.
+PARENT_DIGESTS = {
+    'plain': 'sha256:864ecfe57a7ab8d597172105c98a57a8b1b4e981216cb07f3f19c7d9aa3159b8',
+    'remnant-scan': 'sha256:e1f4fccb2434225f9c540487e0f3180766e7055bd45271755bc77bc28cbc0d1a',
+    'credential-window': 'sha256:a4d7d64a883d91c6be4c473d7518169a9a192117a5f77f740856a7b8e9714766',
+}
+
 
 def _without_scan() -> dict[str, Any]:
     raw = window_data()
@@ -80,6 +90,11 @@ def legacy_report() -> dict[str, Any]:
             row['require_approved'] = _approval_outcome(parsed)
         report[name] = row
     return report
+
+
+def test_legacy_digests_are_the_parents() -> None:
+    observed = {name: calibration.declaration_digest(CASES[name][0]()) for name in PARENT_DIGESTS}
+    assert observed == PARENT_DIGESTS
 
 
 def test_legacy_declarations_behave_as_on_the_parent() -> None:

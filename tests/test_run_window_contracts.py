@@ -19,7 +19,6 @@ from test_vm_credential_window_declaration import data as window_data
 from skillc import calibration, remnant_scan
 from skillc import run_window_contracts as rc
 
-
 ONLY_CALIBRATION = 'run_window_contracts is supported only for calibration-declaration'
 
 
@@ -95,7 +94,9 @@ class Exploding:
 def test_non_string_keys_are_refused_with_fixed_text(where: str, key: str) -> None:
     """Directly against the validator, so no serialization can mask it."""
     plan = contracts()
-    target = plan if where == 'top' else plan['limits']
+    # Deliberately non-str keys are the point of this test, so the target is
+    # typed as accepting any key.
+    target = cast(dict[object, Any], plan if where == 'top' else plan['limits'])
     name = 'version' if where == 'top' else 'max_entries'
     value = target.pop(name)
     target[Sneaky(name) if key == 'subclass' else Exploding(name)] = value
