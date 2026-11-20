@@ -361,9 +361,9 @@ class Journal:
         if self.size + size > budget:
             raise CapacityExceeded("bytes")
         principal = fields.get("principal")
-        if kind in COUNTED and principal is not None:
-            if self.per_principal.get(principal, 0) + 1 > limits["decisions_per_principal"]:
-                raise CapacityExceeded("principal")
+        if (kind in COUNTED and principal is not None
+                and self.per_principal.get(principal, 0) + 1 > limits["decisions_per_principal"]):
+            raise CapacityExceeded("principal")
 
     def _append_locked(self, kind: str, fields: dict[str, Any]) -> tuple[int, int]:
         if self.failed:
