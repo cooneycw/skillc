@@ -16,6 +16,15 @@ record and produces two things per planned role:
   and the #626 ruling, it is a separate declared diagnostic that never changes
   the primary verdict. Any primary-endpoint effect is #639's to decide.
 
+PROVEN EMPTY (#626 a1, owner ruling 2026-11-20, "626 empty: a1"). A role with
+zero projected rows is listed in `proven_empty` only when ALL of these hold:
+it was bound at the startup barrier, its seal coverage is complete, it had no
+capacity event, the journal sealed CLOSED, and the bindings and clock join
+held (otherwise nothing is projected at all). Assembly v2 turns that into
+`live_wave.ProvenEmpty`, never empty bytes. This is a primary-endpoint
+effect (#639): a fully observed natural abandonment reads FAIL instead of
+UNKNOWN. The diagnostic itself still never edits the verdict.
+
 A role gets NO projection, so `live_wave` reports its protocol as unavailable
 (UNKNOWN), when any of these holds:
 
@@ -115,7 +124,7 @@ def _empty_diagnostic() -> dict[str, Any]:
 
 def _unknown(plan: live_wave.WavePlan, reason: str) -> dict[str, Any]:
     return {"status": "UNKNOWN", "reasons": [reason],
-            "projections": {r.role: None for r in plan.roles},
+            "projections": {r.role: None for r in plan.roles}, "proven_empty": [],
             "diagnostic": {"roles": {r.role: _empty_diagnostic() for r in plan.roles},
                            "unauthenticated_ingress": None, "capacity_events": None,
                            "seal_outcome": None, "primary_effect": "none (decision 5)"}}
@@ -236,6 +245,7 @@ def adapt(root: Path, reference: tj.Reference, context: tj.Context, inventory: I
                                "op": op, "elapsed": elapsed_ns / 1e9})
 
     projections: dict[str, bytes | None] = {}
+    proven_empty: list[str] = []
     for slot in inventory.slots:
         role, principal = slot.role, slot.principal
         complete = (coverage.get(principal) == "complete" and principal not in capacity
@@ -246,8 +256,13 @@ def adapt(root: Path, reference: tj.Reference, context: tj.Context, inventory: I
         projections[role] = (b"".join(json.dumps(row, sort_keys=True, separators=(",", ":"))
                                       .encode() + b"\n" for row in rows[role])
                              if complete and rows[role] else None)
+        # a1: every proof item is its own term; none is implied by another.
+        if (principal in bound and coverage.get(principal) == "complete"
+                and principal not in capacity and verified["outcome"] == "CLOSED"
+                and role not in refused and not rows[role]):
+            proven_empty.append(role)
     return {"status": "CAPTURED", "reasons": sorted(set(refused.values())),
-            "projections": projections,
+            "projections": projections, "proven_empty": proven_empty,
             "diagnostic": {"roles": roles, "unauthenticated_ingress": unauthenticated,
                            "capacity_events": capacity_events, "seal_outcome": verified["outcome"],
                            "primary_effect": "none (decision 5)"}}

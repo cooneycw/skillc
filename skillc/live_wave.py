@@ -70,6 +70,20 @@ class Blob:
 
 
 @dataclass(frozen=True)
+class ProvenEmpty(Blob):
+    """#626 a1 (owner ruling 2026-11-20, "626 empty: a1"): the controller
+    PROVED this role made zero projected protocol events. Only assembly v2
+    builds one, and only from the adapter's proof. It is distinct from empty
+    bytes, which stay a missing capture. The kernel reads it as zero rows and
+    then applies its existing rules, so `unfinished-role` can FAIL only a
+    fully observed, clean natural exit. Anything else stays UNKNOWN."""
+
+
+def _proven_empty(blob: Blob | None) -> bool:
+    return type(blob) is ProvenEmpty and blob.data == b"" and blob.valid()
+
+
+@dataclass(frozen=True)
 class PokeCount:
     """A #622 wake-report poke_counts row; attempts, never acknowledgements."""
 
@@ -263,7 +277,13 @@ def verdict(plan: WavePlan, evidence: WaveEvidence | None, grade: ArtifactGrader
         except (ValueError, TypeError, AttributeError, UnicodeError):
             unknown.add(f"{name}:transcript-unavailable")
         try:
-            rows = _jsonl(r.protocol)
+            if _proven_empty(r.protocol):
+                # a1: stopped, killed or crashed roles stay UNKNOWN.
+                if not (r.capture_complete is True and natural_exit and r.exit_code == 0):
+                    raise ValueError("proven empty without a fully observed clean exit")
+                rows: list[dict[str, Any]] = []
+            else:
+                rows = _jsonl(r.protocol)
             record["protocol_sha256"] = r.protocol.sha256 if r.protocol else None
             acknowledged = completed = False
             last = -1.0

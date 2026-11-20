@@ -507,8 +507,12 @@ def _assemble(row: dict[str, Any], payload: Path, grader: object, catalogue: dic
             projected = journal['projections'].get(binding.role)
             protocol = (live_wave.Blob(projected, hashlib.sha256(projected).hexdigest())
                         if projected is not None else None)
+            if projected is None and binding.role in journal['proven_empty']:
+                # #626 a1: the adapter's proof, never empty bytes.
+                protocol = live_wave.ProvenEmpty(b'', hashlib.sha256(b'').hexdigest())
         transcript = _stream(transcript, protocol=False)
-        protocol = _stream(protocol, protocol=True)
+        if type(protocol) is not live_wave.ProvenEmpty:
+            protocol = _stream(protocol, protocol=True)
         artifacts = None
         if capture['artifacts'] is not None:
             blobs = {name: reader.blob(ref, binding.role, 'artifact') for name, ref in capture['artifacts'].items()}
