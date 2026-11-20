@@ -538,6 +538,8 @@ WIRING = {
     "p6.sh": ['upper_dir_of "$c1" 9', 'upper_dir_of "$c2" 8'],
     "p7.sh": ['out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?',
               'scan_quiescent || { printf "inventory: container not quiescent\\n" >&2; exit 3; }',
+              ('scan_quiescent || { printf "inventory: container not quiescent after the scan\\n"'
+               ' >&2; exit 3; }'),
               '            set -f\n',
               '            set -- $SCAN_HEAD\n            set +f\n',
               '-- "$PROBE_IMAGE_ID" sh -c "$SCAN_LIB$INVENTORY"',
@@ -548,7 +550,9 @@ WIRING = {
     "p8.sh": ['b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?',
               'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"',
               'o=$(scan "$t/pruned" / all "/proc /sys" -type s)',
-              'scan_quiescent || { printf "scan: container not quiescent\\n" >&2; exit 3; }',
+              'scan_quiescent sleep || { printf "scan: container not quiescent\\n" >&2; exit 3; }',
+              ('scan_quiescent sleep || { printf "scan: container not quiescent after the scan\\n"'
+               ' >&2; exit 3; }'),
               'if [ "$_rc" -eq 0 ] && scan_report "$1" "$v" && is_uint "${SCAN_HEAD% *}"',
               'step_diag "$1" binds "$_rc" "$PROBE_SCRATCH/$1.binds.err"',
               'step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"'],
@@ -1071,39 +1075,59 @@ EXPR_HEAD = 'eval "set -- \\\\( -type d ! -executable \\\\( \\\\( \\\\('
 EXPR_TAIL = '-prune \\\\) -o \\\\( \\"\\$@\\" \\\\) -print"'
 AMBIGUOUS_HEAD = '-path \\"\\$_nlpat\\" -o -uid $_u -o '
 
-#: (blind copy name, exact lib.sh text, weakened text, case)
-SCAN_TWINS = [
-    ("prune-on-any-denial", EXPR_TAIL,
-     ('-prune \\\\) -o \\\\( -type d ! -readable -fprint \\"\\$_pr.new\\" -prune \\\\) -o '
-      '\\\\( \\"\\$@\\" \\\\) -print"'), "searchable-not-readable"),
-    ("prune-every-directory", EXPR_HEAD, 'eval "set -- \\\\( -type d \\\\( \\\\( \\\\(',
-     "survivor-beside-pruned"),
-    ("write-without-search-counted", EXPR_HEAD,
-     'eval "set -- \\\\( \\"\\$@\\" \\\\) -print -o \\\\( -type d ! -executable \\\\( \\\\( \\\\(',
-     "write-without-search"),
-    ("pruned-dirs-unrecorded", 'cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":",
-     "image-shape"),
-    ("ambiguity-ignored", '[ ! -s "$_pr.amb" ] || return 1', ":", "probe-owned-unsearchable"),
-    ("writable-parent-unchecked", 'if [ -n "$_x" ]; then', "if false; then", "parent-writable"),
-    ("owned-ancestor-unchecked", '\\( -uid "$2" -o -writable \\)', "-writable",
-     "parent-owned"),
+#: The post-check, as it appears in lib.sh. A twin that weakens the walk must
+#: also remove it where it independently refuses what the walk mutant
+#: admits: a twin that weakens one of two layers cannot change the result.
+RECHECK = 'scan_recheck "$_pr.new" "$_u" "$_g" || return 1'
 
-    ("ownership-unchecked", AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o ',
+#: (blind copy name, [(exact lib.sh text, weakened text), ...], case)
+SCAN_TWINS: list[tuple[str, list[tuple[str, str]], str]] = [
+    ("prune-on-any-denial",
+     [(EXPR_TAIL,
+       ('-prune \\\\) -o \\\\( -type d ! -readable -fprint \\"\\$_pr.new\\" -prune \\\\) -o '
+        '\\\\( \\"\\$@\\" \\\\) -print"')),
+      (RECHECK, ":")],
+     "searchable-not-readable"),
+    ("prune-every-directory", [(EXPR_HEAD, 'eval "set -- \\\\( -type d \\\\( \\\\( \\\\(')],
+     "survivor-beside-pruned"),
+    ("write-without-search-counted",
+     [(EXPR_HEAD,
+       ('eval "set -- \\\\( \\"\\$@\\" \\\\) -print -o '
+        '\\\\( -type d ! -executable \\\\( \\\\( \\\\('))],
+     "write-without-search"),
+    ("pruned-dirs-unrecorded", [('cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":")],
+     "image-shape"),
+    ("ambiguity-ignored", [('[ ! -s "$_pr.amb" ] || return 1', ":")],
+     "probe-owned-unsearchable"),
+    ("writable-parent-unchecked", [('if [ -n "$_x" ]; then', "if false; then")],
+     "parent-writable"),
+    ("owned-ancestor-unchecked", [('\\( -uid "$2" -o -writable \\)', "-writable")],
+     "parent-owned"),
+    ("ownership-unchecked",
+     [(AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o '), ("! -uid $2 ", "")],
      "probe-owned-unsearchable"),
 ]
 
 
+def mutate(source: str, edits: list[tuple[str, str]]) -> str:
+    for old, new in edits:
+        assert source.count(old) == 1, f"the mutation anchor moved; update the twin: {old!r}"
+        source = source.replace(old, new)
+    return source
+
+
 @needs_root_drop
-@pytest.mark.parametrize(("blind", "old", "new", "case"), SCAN_TWINS,
-                         ids=[t[0] for t in SCAN_TWINS])
-def test_scan_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+@pytest.mark.parametrize(("blind", "edits", "case"), SCAN_TWINS, ids=[t[0] for t in SCAN_TWINS])
+def test_scan_blind_twin_is_caught(tmp_path: Path, blind: str, edits: list[tuple[str, str]],
                                    case: str) -> None:
-    source = LIB.read_text()
-    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
     mutated = tmp_path / "lib.sh"
-    mutated.write_text(source.replace(old, new))
-    assert run_scan(LIB, case, "sh") == scan_expected(case)
-    assert run_scan(mutated, case, "sh") != scan_expected(case), blind
+    mutated.write_text(mutate(LIB.read_text(), edits))
+    real = run_scan(LIB, case, "sh")
+    weak = run_scan(mutated, case, "sh")
+    assert real == scan_expected(case)
+    # The twin must DISAGREE with the real rule, not merely miss the
+    # expectation: a twin whose output matches the real one is a blind control.
+    assert weak != real, blind
 
 
 def symlink_root_scan(lib: Path) -> str:
@@ -1316,13 +1340,13 @@ def stub_quiescence(lib: Path, tmp_path: Path, case: str) -> tuple[int, str]:
     self_pp, arg, entries, _ = QUIESCENT_CASES[case]
     stub = tmp_path / "proc"
     stub.mkdir()
-    for name, text in entries:
+    for name, body in entries:
         (stub / name).mkdir()
-        if text is not None:
-            (stub / name / "status").write_text(text)
-    text = tmp_path / "scan-lib.sh"
-    text.write_text(scan_lib_text(lib))
-    run = subprocess.run(["sh", "-c", STUB_CHECK, "sh", str(stub), self_pp, str(text), arg],
+        if body is not None:
+            (stub / name / "status").write_text(body)
+    lib_text = tmp_path / "scan-lib.sh"
+    lib_text.write_text(scan_lib_text(lib))
+    run = subprocess.run(["sh", "-c", STUB_CHECK, "sh", str(stub), self_pp, str(lib_text), arg],
                          capture_output=True, text=True,
                          env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, check=False, timeout=30)
     return run.returncode, run.stdout.strip()
@@ -1338,7 +1362,7 @@ def test_scan_quiescent_stub_case(tmp_path: Path, case: str) -> None:
 QUIESCENT_TWINS = [
     ("any-process-allowed", "if (!allowed) exit 1", "if (0) exit 1", "p8-extra-process"),
     ("records-unvalidated",
-     "if (np[p] != 1 || npp[p] != 1 || nn[p] != 1 || pid[p] != p) exit 1", ":",
+     "if (np[p] != 1 || npp[p] != 1 || nn[p] != 1 || pid[p] != p) exit 1", "if (0) exit 1",
      "duplicated-record"),
     ("pid1-identity-unchecked", "nm[p] == want1 && ", "", "p8-pid1-not-sleep"),
 ]
@@ -1355,5 +1379,9 @@ def test_scan_quiescent_blind_twin_is_caught(tmp_path: Path, blind: str, old: st
     mutated.write_text(source.replace(old, new))
     (tmp_path / "real").mkdir()
     (tmp_path / "weak").mkdir()
-    assert stub_quiescence(LIB, tmp_path / "real", case) == (0, QUIESCENT_CASES[case][3])
-    assert stub_quiescence(mutated, tmp_path / "weak", case) != (0, QUIESCENT_CASES[case][3])
+    real = stub_quiescence(LIB, tmp_path / "real", case)
+    weak = stub_quiescence(mutated, tmp_path / "weak", case)
+    assert real == (0, QUIESCENT_CASES[case][3])
+    # The twin must DISAGREE with the real check, not merely miss the
+    # expectation (an awk syntax error in a twin would read BUSY on both).
+    assert weak != real, blind
