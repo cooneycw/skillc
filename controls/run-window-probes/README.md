@@ -54,25 +54,42 @@ storage kinds and refuse anything else by name (`driver-unsupported`):
 | `containerd-overlayfs` | driver `overlayfs` **and** exactly one `driver-type=io.containerd.snapshotter.v1` | absolute `…/io.containerd.snapshotter.v1.overlayfs/snapshots/<number>/fs` |
 
 The driver name is never trusted alone, and the upper directory is never
-taken from `docker inspect` alone. Each container runs, and `upper_dir_of`:
+taken from `docker inspect` alone. Each container runs, and `upper_dir_of ID
+FD`:
 
 1. reads the one `overlay` mount at `/` in its init process's
    `/proc/<pid>/mountinfo`. Every row must be well formed, exactly one row is
    at `/`, and its super options carry exactly one `upperdir=`;
 2. revalidates the init pid (same pid, same start time) after that read;
 3. accepts only plain path characters, so an escaped value fails closed, with
-   no `.`, `..` or empty component, and requires the shape for its kind;
+   no `.`, `..` or empty component, and requires the shape for its kind. A
+   refused value is printed, scrubbed and bounded, as `INFO diag setup
+   upperdir-raw …`, so a new runtime shape is recorded, not only refused;
 4. on `overlay2`, requires it to equal the graph driver's own `UpperDir`;
-5. proves it is this container's: a random marker written inside the
-   container at `/tmp/<token>` must appear at `<upper>/tmp/<token>`.
+5. **holds** the directory on file descriptor FD before proving it, so every
+   later read (the proof, P5's search, P6's link count) goes through
+   `/proc/$$/fd/FD`. Renaming or re-linking an ancestor afterwards cannot
+   substitute another directory;
+6. proves it is this container's: a fresh random token, written by the
+   container into its own `/tmp/<token>`, must read back exactly as a regular
+   file through the held handle (neither `tmp` nor the file a symlink);
+7. revalidates the init pid again after the proof.
 
 Any failed step refuses by name (`upperdir-unreadable`, `container-pid-changed`,
 `upperdir-shape`, `upperdir-disagrees`, `upperdir-missing`,
-`upperdir-unverified`). P5's survivor marker now has a random name too, so a
-stale file in another snapshot cannot answer for it. The pure helpers
-(`storage_kind_from`, `overlay_upper`, `upper_resolve`) are qualified in CI
-over committed mountinfo fixtures (`fixtures/lib/`) and inline cases, each
-with blind twins the cases must catch.
+`upperdir-unverified`, `upperdir-open-failed`). P5's survivor marker now has a
+random name too, so a stale file in another snapshot cannot answer for it.
+The pure helpers (`storage_kind_from`, `overlay_upper`, `upper_resolve`) are
+qualified in CI over committed mountinfo fixtures (`fixtures/lib/`) and inline
+cases. `upper_dir_of` itself runs in CI under `sh -eu` against a stub `docker`
+on `PATH` and a stub procfs (`PROBE_PROC`). Every one has blind twins the
+cases must catch: a pid recheck removed, the graph-driver comparison removed,
+the marker read-back removed.
+
+The containerd fixtures are modelled on the snapshotter's documented layout.
+No capture from the runner VM is committed yet. The stage-2 run records the
+real value (`INFO diag setup upperdir-raw` on refusal), and a relative
+`upperdir=` under containerd is refused rather than guessed.
 
 ## Step diagnostics (P5, P7, P8)
 
@@ -80,9 +97,14 @@ The first live run left P7 and P8 blind: every failed in-container step read
 `OBSERVATION_FAILED` with its stderr sent to `/dev/null`. Each such step now
 prints `INFO diag <arm> <step> exit <status>`, then up to the first 2048 bytes
 of its stderr as `INFO diag <arm> <step> stderr: …` lines, and
-`stderr-truncated <bytes>` when there was more (`lib.sh` `step_diag`). Steps:
+`stderr-truncated <bytes>` when there was more (`lib.sh` `step_diag`). The
+bound applies while the step runs: `step_capture` drains stderr to EOF
+through `dd bs=1 count=2048` and only counts the rest, so a flooding step can
+never fill the scratch filesystem. It returns the step's own status, so a
+collector failure cannot change a reading. Steps:
 P7 `inventory`; P8 `binds` and `scan`, plus `ns-<name> unreadable`; P5's
-`writes` on refusal. Every byte outside printable ASCII becomes `?`, and
+`writes` on refusal, whose stdout is discarded along with that of the
+identity-marker exec. Every byte outside printable ASCII becomes `?`, and
 every line carries the `INFO` prefix and its own newline, so stderr text can
 never print as an `ARM` or `PROBE` line. These are diagnostics only. Nothing
 is recorded as a reading, no classifier reads them, and no verdict changed.

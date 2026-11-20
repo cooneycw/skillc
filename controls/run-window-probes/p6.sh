@@ -37,9 +37,8 @@ observe() {
     create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c1=$cid
     docker start "$c1" >/dev/null || probe_die 'start-failed'
-    upper_dir_of "$c1"
-    up1=$PROBE_UPPER
-    exec 9<"$up1"
+    # Held on fd 9 before it is proven; nlink is read through that handle.
+    upper_dir_of "$c1" 9
     record removed baseline "$(nlink_of_fd 9)"
     if docker rm -f -v "$c1" >/dev/null && container_absent "$c1"; then
         record removed rm_ok 1
@@ -52,9 +51,7 @@ observe() {
     create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c2=$cid
     docker start "$c2" >/dev/null || probe_die 'start-failed'
-    upper_dir_of "$c2"
-    up2=$PROBE_UPPER
-    exec 8<"$up2"
+    upper_dir_of "$c2" 8
     record kept baseline "$(nlink_of_fd 8)"
     record kept rm_ok 1
     record kept after "$(nlink_of_fd 8)"

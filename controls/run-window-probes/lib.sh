@@ -179,7 +179,7 @@ is_mounted() {
 # proc_identity PID: "STARTTIME" of a live, non-zombie process, or fail. The
 # comm field may contain spaces, so fields are counted after its last ")".
 proc_identity() {
-    _s=$(cat -- "/proc/$1/stat" 2>/dev/null) || return 1
+    _s=$(cat -- "${PROBE_PROC:-/proc}/$1/stat" 2>/dev/null) || return 1
     _s=${_s##*) }
     case $_s in Z* | X* | x*) return 1 ;; esac
     printf '%s\n' "$_s" | awk 'NF >= 20 { print $20; ok = 1 } END { exit ok ? 0 : 1 }'
@@ -415,50 +415,112 @@ require_overlay_storage() {
     info "storage $PROBE_STORAGE"
 }
 
-# upper_dir_of ID: set PROBE_UPPER to a RUNNING container's upper directory,
-# or refuse by name. Called directly (never in a command substitution), so a
-# refusal ends the probe. The init pid is revalidated (same pid, same start
-# time) after the mountinfo read, so a reused pid cannot answer for it.
+# _upper_pid_same ID PID IDENT: the container still reports PID as its init,
+# and PID is still the same process (same start time).
+_upper_pid_same() {
+    _n=$(proc_identity "$2") || return 1
+    _p=$(docker inspect --format '{{.State.Pid}}' "$1") || return 1
+    [ "$_n" = "$3" ] && [ "$_p" = "$2" ]
+}
+
+# upper_dir_of ID FD: open a RUNNING container's upper directory on FD (8 or
+# 9) and set PROBE_UPPER to /proc/$$/fd/FD, or refuse by name. Called directly
+# (never in a command substitution), so a refusal ends the probe. The
+# directory is HELD before it is proven, and the proof and every later read go
+# through that handle, so renaming or re-linking any ancestor afterwards
+# cannot substitute another directory. The init pid is revalidated after the
+# mountinfo read and again after the proof. PROBE_PROC (default /proc) is the
+# procfs the container's pid is read from; the self-test points it at a stub.
 upper_dir_of() {
     PROBE_UPPER=
+    case $2 in 8 | 9) ;; *) probe_die 'upper-fd-invalid' ;; esac
     _pid=$(docker inspect --format '{{.State.Pid}}' "$1") || probe_die 'inspect-failed'
     if ! is_uint "$_pid" || [ "$_pid" -eq 0 ]; then probe_die 'container-pid-invalid'; fi
     _ident=$(proc_identity "$_pid") || probe_die 'container-pid-gone'
-    _raw=$(overlay_upper "/proc/$_pid/mountinfo") || probe_die 'upperdir-unreadable'
-    _now=$(proc_identity "$_pid") || probe_die 'container-pid-gone'
-    _pid2=$(docker inspect --format '{{.State.Pid}}' "$1") || probe_die 'inspect-failed'
-    if [ "$_now" != "$_ident" ] || [ "$_pid2" != "$_pid" ]; then probe_die 'container-pid-changed'; fi
-    _up=$(upper_resolve "$PROBE_STORAGE" "$PROBE_DOCKER_ROOT" "$_raw") || probe_die 'upperdir-shape'
+    _raw=$(overlay_upper "${PROBE_PROC:-/proc}/$_pid/mountinfo") || probe_die 'upperdir-unreadable'
+    _upper_pid_same "$1" "$_pid" "$_ident" || probe_die 'container-pid-changed'
+    if ! _up=$(upper_resolve "$PROBE_STORAGE" "$PROBE_DOCKER_ROOT" "$_raw"); then
+        # The refused value, scrubbed and bounded, so a new runtime shape is
+        # recorded rather than only refused.
+        info "diag setup upperdir-raw $(printf '%s' "$_raw" | head -c 512 | LC_ALL=C tr -c '[:print:]' '?')"
+        probe_die 'upperdir-shape'
+    fi
     if [ "$PROBE_STORAGE" = overlay2 ]; then
         _gd=$(docker inspect --format '{{.GraphDriver.Data.UpperDir}}' "$1") || probe_die 'inspect-failed'
         [ "$_gd" = "$_up" ] || probe_die 'upperdir-disagrees'
     fi
     if [ ! -d "$_up" ] || [ -L "$_up" ]; then probe_die 'upperdir-missing'; fi
-    # Proof of identity: a random marker written inside this container must
-    # appear in this directory. A stale or foreign snapshot cannot hold it.
-    _tok=skillc-dev-probe-id-$(probe_uuid)
-    docker exec "$1" sh -c ': >"/tmp/$1"' sh "$_tok" || probe_die 'upperdir-mark-failed'
-    [ -f "$_up/tmp/$_tok" ] || probe_die 'upperdir-unverified'
-    PROBE_UPPER=$_up
+    # `command` keeps a failed redirection from ending the shell (exec is a
+    # special builtin), so a vanished directory refuses by name.
+    if [ "$2" = 9 ]; then
+        command exec 9<"$_up" || probe_die 'upperdir-open-failed'
+    else
+        command exec 8<"$_up" || probe_die 'upperdir-open-failed'
+    fi
+    _held=/proc/$$/fd/$2
+    # Proof of identity: a fresh random token, written by this container into
+    # its own /tmp, must read back exactly through the held handle.
+    _tok=$(probe_uuid) || probe_die 'uuid-failed'
+    case $_tok in '' | *[!0-9a-f]*) probe_die 'uuid-failed' ;; esac
+    [ "${#_tok}" -eq 32 ] || probe_die 'uuid-failed'
+    _tok=skillc-dev-probe-id-$_tok
+    docker exec "$1" sh -c 'printf "%s" "$1" >"/tmp/$1"' sh "$_tok" >/dev/null 2>&1 \
+        || probe_die 'upperdir-mark-failed'
+    _m=$_held/tmp/$_tok
+    if [ -L "$_held/tmp" ] || [ ! -f "$_m" ] || [ -L "$_m" ]; then probe_die 'upperdir-unverified'; fi
+    _got=$(cat -- "$_m") || probe_die 'upperdir-unverified'
+    [ "$_got" = "$_tok" ] || probe_die 'upperdir-unverified'
+    _upper_pid_same "$1" "$_pid" "$_ident" || probe_die 'container-pid-changed'
+    PROBE_UPPER=$_held
 }
 
 # ---- Step diagnostics (P5, P7, P8) ----
 
+# step_drain FILE: read stdin to EOF, keeping only its first 2048 bytes in
+# FILE and the count of the rest in FILE.rest. dd reads one byte at a time, so
+# nothing past the bound is ever written to disk, whatever the input size,
+# and the input is always drained, so the writer never blocks or dies on a
+# closed pipe. Never fails its caller.
+step_drain() {
+    dd bs=1 count=2048 of="$1" 2>/dev/null || :
+    wc -c | tr -d ' ' >"$1.rest" || :
+}
+
+# step_capture FILE CMD...: run CMD (a command or a function) with its stdout
+# passed through unchanged and its stderr drained through step_drain into
+# FILE. Returns CMD's own exit status, or 125 if that status could not be
+# read back. A failure of the collector never changes the returned status.
+step_capture() {
+    _ef=$1
+    shift
+    : >"$_ef.status"
+    { { "$@" 2>&3 3>&-; printf '%s\n' "$?" >"$_ef.status"; } 3>&1 1>&4 4>&- | step_drain "$_ef"; } 4>&1
+    _s=$(cat -- "$_ef.status" 2>/dev/null) || return 125
+    is_uint "$_s" || return 125
+    return "$_s"
+}
+
 # step_diag ARM STEP STATUS FILE: report a live step's exit status and the
-# first 2048 bytes of its stderr as INFO lines, so an OBSERVATION_FAILED names
-# its cause. Every byte outside printable ASCII becomes '?', and every line
-# gets the INFO prefix and its own newline, so no stderr text can print as an
-# ARM or PROBE line or run into the next line. Diagnostic only: nothing here
-# is recorded as a reading, and no verdict depends on it.
+# kept stderr (at most 2048 bytes) as INFO lines, so an OBSERVATION_FAILED
+# names its cause. Every byte outside printable ASCII becomes '?', and every
+# line gets the INFO prefix and its own newline, so no stderr text can print
+# as an ARM or PROBE line or run into the next line. Diagnostic only: nothing
+# here is recorded as a reading, no verdict depends on it, and it never fails
+# its caller.
 step_diag() {
     printf 'INFO diag %s %s exit %s\n' "$1" "$2" "$3"
     [ -s "$4" ] || return 0
     head -c 2048 -- "$4" | LC_ALL=C tr -c '\n[:print:]' '?' \
-        | LC_ALL=C awk -v a="$1" -v s="$2" '{ print "INFO diag " a " " s " stderr: " $0 }'
-    _bytes=$(wc -c <"$4" | tr -d ' ') || return 0
+        | LC_ALL=C awk -v a="$1" -v s="$2" '{ print "INFO diag " a " " s " stderr: " $0 }' || :
+    _bytes=$(wc -c <"$4" | tr -d ' ') || _bytes=
+    if [ -f "$4.rest" ]; then
+        _rest=$(cat -- "$4.rest") || _rest=
+        if is_uint "$_rest" && is_uint "$_bytes"; then _bytes=$((_bytes + _rest)); else _bytes=; fi
+    fi
     if is_uint "$_bytes" && [ "$_bytes" -gt 2048 ]; then
         printf 'INFO diag %s %s stderr-truncated %s\n' "$1" "$2" "$_bytes"
     fi
+    return 0
 }
 
 # scratch_private: make the scratch directory its own PRIVATE mountpoint

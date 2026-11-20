@@ -26,7 +26,8 @@ parse_common "$@"
 count_found() {
     _dir=$1
     shift
-    if _out=$(find "$_dir" "$@" -print 2>/dev/null); then
+    # -H: the start point may be the held /proc/$$/fd link; it is followed.
+    if _out=$(find -H "$_dir" "$@" -print 2>/dev/null); then
         printf '%s\n' "$_out" | awk 'NF > 0 { c++ } END { print c + 0 }'
     else
         printf 'ERR\n'
@@ -51,19 +52,23 @@ observe() {
     # A random name, so a stale file in some other snapshot cannot match.
     disk=probe-disk-$(probe_uuid)
     # Foreground exec: returns only after the writes finished, with their status.
+    # Its stdout is discarded: nothing from the container reaches verdict output.
     _rc=0
-    docker exec "$cid" sh -c \
+    # shellcheck disable=SC2016  # $1 expands inside the container
+    step_capture "$PROBE_SCRATCH/writes.err" docker exec "$cid" sh -c \
         'echo skillc-dev-marker > /probe-home/t && echo skillc-dev-marker > "/tmp/$1"' \
-        sh "$disk" 2>"$PROBE_SCRATCH/writes.err" || _rc=$?
+        sh "$disk" >/dev/null || _rc=$?
     if [ "$_rc" -ne 0 ]; then
         step_diag setup writes "$_rc" "$PROBE_SCRATCH/writes.err"
         probe_die 'container-writes-failed'
     fi
-    upper_dir_of "$cid"
+    # Every read below goes through the held handle (fd 9).
+    upper_dir_of "$cid" 9
     up=$PROBE_UPPER
     record clean tmpfs_in_upper "$(count_found "$up" -path '*/probe-home/t')"
     record survivor disk_in_upper "$(count_found "$up" -name "$disk")"
     record fault disk_in_upper "$(count_found "$PROBE_SCRATCH/absent-upper" -name "$disk")"
+    exec 9<&-
     docker rm -f -v "$cid" >/dev/null || probe_die 'rm-failed'
     container_absent "$cid" || probe_die 'rm-unverified'
     if [ -f "$home/t" ]; then record clean host_present 1; else record clean host_present 0; fi

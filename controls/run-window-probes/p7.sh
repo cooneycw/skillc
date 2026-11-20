@@ -149,7 +149,7 @@ observe() {
             --user "$user" $_m -e "DECLARED=$DECLARED" \
             -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
         _rc=0
-        out=$(docker start -a "$cid" 2>"$PROBE_SCRATCH/$_arm.err") || _rc=$?
+        out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?
         # Bounded stderr and the exit status, so a failed inventory names its
         # cause. Diagnostic only: the readings below are unchanged.
         step_diag "$_arm" inventory "$_rc" "$PROBE_SCRATCH/$_arm.err"
