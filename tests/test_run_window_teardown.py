@@ -800,7 +800,11 @@ def test_namespace_seen_only_through_a_chrooted_task_is_failed(released: tuple[P
 
 CHROOTED = '''
 import os, sys, time
-os.chroot(sys.argv[1])
+try:
+    os.chroot(sys.argv[1])
+except PermissionError:
+    open(sys.argv[1] + '/denied', 'w').close()
+    sys.exit(0)
 os.chdir('/')
 open('/ready', 'w').close()
 time.sleep(30)
@@ -813,6 +817,12 @@ def test_real_predicate_tells_a_chrooted_task_from_a_namespace_root(tmp_path: Pa
     jail.mkdir()
     child = subprocess.Popen([sys.executable, '-I', '-S', '-c', CHROOTED, str(jail)])
     try:
+        for _ in range(100):
+            if (jail / 'ready').exists() or (jail / 'denied').exists():
+                break
+            time.sleep(0.05)
+        if (jail / 'denied').exists():
+            pytest.skip('this root runner lacks CAP_SYS_CHROOT')
         wait_ready(jail / 'ready')
         reader = rt.RealProc()
         assert reader.root_is_ns_root(f'{os.getpid()}/task/{os.getpid()}')
