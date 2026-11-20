@@ -68,6 +68,15 @@ def _inspect_with(wave: DockerWave) -> Inspect:
     return inspect
 
 
+def _bounded(exc: BaseException) -> str:
+    """The exception's class, plus its closed `reason_class` when it carries
+    one (#817). Never its message, which can hold paths or uids (B7)."""
+    reason = getattr(exc, "reason_class", None)
+    allowed = getattr(type(exc), "REASONS", ())
+    return type(exc).__name__ + (":" + reason if isinstance(reason, str) and reason in allowed
+                                 else "")
+
+
 class ProtocolWave:
     """One protocol-instrumented wave. Single use."""
 
@@ -156,7 +165,7 @@ class ProtocolWave:
                 self.census.capture_after()
                 self._event("census-after")
         except Exception as exc:  # noqa: BLE001 - recorded, then cleanup always runs
-            self._fail("protocol-step-unavailable:" + type(exc).__name__)
+            self._fail("protocol-step-unavailable:" + _bounded(exc))
         finally:
             wave_report = self._close()
             reference = self._seal(receiver, journal)

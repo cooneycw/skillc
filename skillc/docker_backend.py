@@ -317,7 +317,16 @@ def _mount_source(path: Path) -> str:
 #: fixed-length name for the same reason: `attempt_id` is caller-supplied
 #: and unbounded, and a long one must not reintroduce the overflow this
 #: default was chosen to avoid.
-DEFAULT_TRIGGER_SOCKET_DIR = Path(tempfile.gettempdir()) / "skillc-trigger"
+#: #817: PER UID, so two host identities (say the CI lane's service account
+#: and a root controller) each get their own private directory instead of the
+#: second being refused by `_ensure_private_trigger_dir`, whose checks are
+#: unchanged. The uid suffix is short, so the AF_UNIX margin above holds.
+def default_trigger_socket_dir() -> Path:
+    """The per-uid default, read when called (#817)."""
+    return Path(tempfile.gettempdir()) / f"skillc-trigger-{os.getuid()}"
+
+
+DEFAULT_TRIGGER_SOCKET_DIR = default_trigger_socket_dir()
 
 
 def trigger_socket_host_path_for(trigger_socket_dir: Path, name: str) -> Path:
@@ -379,6 +388,20 @@ def trigger_socket_host_path_for(trigger_socket_dir: Path, name: str) -> Path:
 TRIGGER_SOCKET_MODE = 0o666
 
 
+class TriggerDirRefused(BackendUnavailable):
+    """A refused trigger-socket directory (#817). `reason_class` is a closed,
+    path-free and uid-free token a report may carry; the message keeps the
+    detail for an operator and must not be reported."""
+
+    REASONS = ("trigger-dir-not-directory", "trigger-dir-foreign-owner", "trigger-dir-mode")
+
+    def __init__(self, message: str, reason_class: str) -> None:
+        if reason_class not in self.REASONS:
+            raise ValueError("closed trigger-dir reason required")
+        super().__init__(message)
+        self.reason_class = reason_class
+
+
 def _ensure_private_trigger_dir(path: Path) -> None:
     """Design doc §2f decision (a). Creates `path` at mode 0700 if absent.
     If present, refuses (raises `BackendUnavailable`) unless it is already
@@ -403,18 +426,21 @@ def _ensure_private_trigger_dir(path: Path) -> None:
         return
     st = path.lstat()
     if not stat.S_ISDIR(st.st_mode):
-        raise BackendUnavailable(
-            f"refusing to use trigger socket directory {path}: not a real directory"
+        raise TriggerDirRefused(
+            f"refusing to use trigger socket directory {path}: not a real directory",
+            "trigger-dir-not-directory",
         )
     if st.st_uid != os.getuid():
-        raise BackendUnavailable(
+        raise TriggerDirRefused(
             f"refusing to use trigger socket directory {path}: owned by uid {st.st_uid}, "
-            f"not this process's own uid {os.getuid()}"
+            f"not this process's own uid {os.getuid()}",
+            "trigger-dir-foreign-owner",
         )
     if stat.S_IMODE(st.st_mode) != 0o700:
-        raise BackendUnavailable(
+        raise TriggerDirRefused(
             f"refusing to use trigger socket directory {path}: mode "
-            f"{oct(stat.S_IMODE(st.st_mode))}, expected 0o700"
+            f"{oct(stat.S_IMODE(st.st_mode))}, expected 0o700",
+            "trigger-dir-mode",
         )
 
 
