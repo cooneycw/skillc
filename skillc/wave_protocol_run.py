@@ -24,10 +24,18 @@ invented, and cleanup always runs.
    cleanup. Then stop the receiver (drain) and seal the journal.
 9. Finalize the census with the CONFIRMED role and helper stops.
 
-Decision (a), owner ruling pending: a role with complete coverage but zero
-projected events stays UNKNOWN downstream (option a2). This module records
-the facts the a1 alternative would need (`zero_event_complete`) and changes
-no verdict.
+Decision (a) is ruled a1 (owner, 2026-11-20, "626 empty: a1"): the adapter,
+not this module, proves a zero-event role empty for assembly v2. This module
+changes no verdict.
+
+WAKE MODE (#626 P2). `measured="wake"` hands the turns to `wave_wake.drive`
+with the caller's approved policy. Its three inert-by-default hooks keep the
+same order: drive runs every bootstrap turn, then `after_bootstrap` binds,
+barriers, freezes and serves before any poke; `before_close` fences and takes
+the live census before `wave.close()`; and terminal roles stay running (with
+no further turn or poke) until then. The wake capture's own context digest
+joins `protocol_v2`'s clock join, and the report carries the `wake` binding
+for the assembly row. The default `measured="scripted"` path is unchanged.
 
 The full export and assembly is the caller's. This returns the held
 `protocol_v2` binding and the census report, never a verdict.
@@ -47,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from . import task_protocol_docker as tpd
+from . import wave_wake
 from . import task_protocol_journal as tj
 from .backend import Confirmation
 from .docker_wave import DockerWave
@@ -77,6 +86,14 @@ def _bounded(exc: BaseException) -> str:
                                  else "")
 
 
+#: The doubles `wave_wake.drive` accepts; nothing else passes through.
+WAKE_OPTIONS = frozenset({"read_revision", "deliver", "clock", "sleep"})
+
+
+class _WakeDone(Exception):  # noqa: N818 - internal control flow, never escapes run()
+    """The wake driver already ran the turns, fence and live census."""
+
+
 class ProtocolWave:
     """One protocol-instrumented wave. Single use."""
 
@@ -87,9 +104,28 @@ class ProtocolWave:
                  verifier: PeerVerifier | None = None,
                  freeze: Callable[[Mapping[str, str | None]], object] | None = None,
                  receiver_factory: Callable[..., Receiver] = Receiver,
-                 clock_ns: Callable[[], int] = time.monotonic_ns) -> None:
+                 clock_ns: Callable[[], int] = time.monotonic_ns,
+                 measured: str = "scripted", wake_policy: Any = None,
+                 wake_options: Mapping[str, Any] | None = None) -> None:
         if [s.role for s in slots] != [r.name for r in wave.roles]:
             raise ValueError("one slot per wave role, in role order")
+        wants_policy = measured == "wake"
+        if measured not in ("scripted", "wake") or wants_policy != (wake_policy is not None):
+            raise ValueError("measured is 'scripted', or 'wake' with an approved wake policy")
+        if wake_options is not None and set(wake_options) - WAKE_OPTIONS:
+            raise ValueError("wake options are drive's observer and transport doubles only")
+        if measured == "wake":
+            # The adapter joins the wake capture only if both captures name one
+            # approved declaration and one deadline, so refuse a mismatch now.
+            bound = getattr(wave, "approved_wake", None)
+            if getattr(bound, "approved_digest", None) != declaration_digest:
+                raise ValueError("wake mode: the journal declaration is the approved wake one")
+            budget = wave.deadline.marker(wave.attempt_id)["budget_id"]
+            if deadline_digest != "sha256:" + str(budget):
+                raise ValueError("wake mode: the journal deadline is the wave's own budget")
+        self.measured, self.wake_policy = measured, wake_policy
+        self.wake_options = dict(wake_options or {})
+        self.wake_outcome: str | None = None
         self.wave = wave
         self.origin_ns = round(wave.deadline.start * 1e9)
         self.inventory = Inventory(wave.attempt_id, declaration_digest, tuple(slots),
@@ -148,6 +184,16 @@ class ProtocolWave:
             audit = self._audit(dirs)
             self._event("audited")
             installed = self._install(audit["ok"], leases)
+            if self.measured == "wake":
+                box: dict[str, Any] = {}
+                try:
+                    self._wake(installed, leases, journal, audit, issued, dirs, box)
+                finally:
+                    receiver = box.get("receiver")
+                    planned = box.get("planned")
+                    sessions = box.get("sessions", {})
+                    census_report = box.get("census")
+                raise _WakeDone
             self._bootstrap(installed, leases, journal, audit)
             self._event("bootstrapped")
             journal.append("barrier", **leases.barrier())
@@ -164,6 +210,8 @@ class ProtocolWave:
                 census_report = {"after": "captured"}
                 self.census.capture_after()
                 self._event("census-after")
+        except _WakeDone:
+            pass
         except Exception as exc:  # noqa: BLE001 - recorded, then cleanup always runs
             self._fail("protocol-step-unavailable:" + _bounded(exc))
         finally:
@@ -208,19 +256,69 @@ class ProtocolWave:
                    audit: Mapping[str, Any]) -> None:
         """The audited container ids are the runtime instances; the audit's
         mapping digest is each binding's evidence."""
-        instances, evidence = audit["instances"], audit["digest"]
         for slot in self.inventory.slots:
             if slot.role not in installed:
                 continue
             self.wave.turn(slot.role)
-            session = self.wave.states[slot.role].session_id
+            self._bind(slot, leases, journal, audit)
+
+    def _bind(self, slot: Slot, leases: Leases, journal: tj.Journal,
+              audit: Mapping[str, Any]) -> None:
+        session = self.wave.states[slot.role].session_id
+        try:
+            record = leases.bind(slot.principal,
+                                 runtime_instance=audit["instances"][slot.principal],
+                                 session_id=session, evidence_digest=audit["digest"])
+        except LeaseError:
+            self._fail(slot.role + ":startup-binding-unavailable")
+            return
+        journal.append("binding", **record)
+
+    def _wake(self, installed: Mapping[str, str], leases: Leases, journal: tj.Journal,
+              audit: Mapping[str, Any], issued: Mapping[str, Any], dirs: Mapping[str, Path],
+              box: dict[str, Any]) -> None:
+        """The wake driver owns the turns; the hooks keep the scripted order."""
+
+        def after_bootstrap() -> None:
+            for slot in self.inventory.slots:
+                if slot.role in installed:
+                    self._bind(slot, leases, journal, audit)
+            self._event("bootstrapped")
+            journal.append("barrier", **leases.barrier())
+            self._event("barrier")
+            box["sessions"] = leases.bound_sessions()
+            if self.freeze is not None:
+                box["planned"] = self.freeze(box["sessions"])
+                self._event("frozen")
+            box["receiver"] = self._serve(leases, journal, issued, dirs)
+
+        def before_close() -> None:
+            # Never raises: drive's cleanup must run, and each failure is recorded.
+            self._event("turns-done")
+            receiver = box.get("receiver")
             try:
-                record = leases.bind(slot.principal, runtime_instance=instances[slot.principal],
-                                     session_id=session, evidence_digest=evidence)
-            except LeaseError:
-                self._fail(slot.role + ":startup-binding-unavailable")
-                continue
-            journal.append("binding", **record)
+                if receiver is None:
+                    raise ValueError("no receiver to fence")
+                receiver.fence()
+                self._event("fenced")
+            except Exception as exc:  # noqa: BLE001 - recorded
+                self._fail("wake-fence-unavailable:" + type(exc).__name__)
+                return
+            if self.census is None:
+                return
+            try:
+                for slot in self.inventory.slots:
+                    self.census.completion(slot.role)
+                self.census.capture_after()
+                box["census"] = {"after": "captured"}
+                self._event("census-after")
+            except Exception as exc:  # noqa: BLE001 - recorded; the census stays UNKNOWN
+                self._fail("census-settle-unavailable:" + type(exc).__name__)
+
+        report = wave_wake.drive(self.wave, self.wake_policy, after_bootstrap=after_bootstrap,
+                                 before_close=before_close, defer_terminal_stop=True,
+                                 **self.wake_options)
+        self.wake_outcome = report.get("outcome") if isinstance(report, dict) else None
 
     def _serve(self, leases: Leases, journal: tj.Journal, issued: Mapping[str, Any],
                dirs: Mapping[str, Path]) -> Receiver:
@@ -323,9 +421,30 @@ class ProtocolWave:
                         "clock_join": {"inventory_digest": self.inventory.digest,
                                        "wake_context_digest": None,
                                        "origin_ns": self.inventory.clock_origin_ns}}
+        wake = self._wake_binding()
+        if protocol is not None and wake is not None:
+            protocol["clock_join"]["wake_context_digest"] = wake["context_digest"]
         return {"version": 1, "scope": "protocol-lifecycle-only", "events": list(self.events),
                 "unknown": list(self.unknown), "wave": wave_report,
                 "audit": {k: audit[k] for k in ("ok", "reasons", "digest")},
                 "sessions": dict(sessions), "planned_frozen": planned is not None,
                 "protocol_v2": protocol, "census": census,
-                "decision_a": "a2: zero-event complete roles stay UNKNOWN (owner ruling pending)"}
+                "decision_a": "a2: zero-event complete roles stay UNKNOWN (owner ruling pending)",
+                **({} if self.measured == "scripted" else {
+                    "wake": None if wake is None else wake["binding"],
+                    "wake_outcome": self.wake_outcome})}
+
+    def _wake_binding(self) -> dict[str, Any] | None:
+        """The sealed wake capture's held binding: its root, Reference and the
+        OriginContext it recorded, which must carry the inventory's origin."""
+        if self.measured != "wake":
+            return None
+        reference = getattr(self.wave, "wake_capture_reference", None)
+        context = getattr(self.wave, "wake_capture_context", None)
+        if reference is None or context is None or getattr(context, "clock_origin_ns", None) \
+                != self.inventory.clock_origin_ns:
+            self._fail("wake-capture-unavailable")
+            return None
+        return {"context_digest": context.digest,
+                "binding": {"root": str(self.wave.root / "wake-capture"),
+                            "reference": asdict(reference), "context": asdict(context)}}

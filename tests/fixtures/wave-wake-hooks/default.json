@@ -1,0 +1,7 @@
+{
+  "_source": "the deterministic facts tests/test_wave_wake.py::test_scripted_arms_receive_identical_controller_pokes asserts for drive with no hooks, recorded before #626 P2",
+  "outcome": "STOPPED",
+  "poke_count": 2,
+  "ends": {"worker-a": "max-pokes", "worker-b": "max-pokes"},
+  "calls_after_bootstrap": [["worker-a", "literal", "worker-a-session"], ["worker-b", "literal", "worker-b-session"]]
+}
