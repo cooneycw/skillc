@@ -165,6 +165,11 @@ def _close(fd: int) -> None:
 def _open_held(opener: Opener, name: str, flags: int, dir_fd: int | None) -> _Held:
     """Open and fstat one object. The fd is closed here if fstat fails, so no
     descriptor escapes before the caller owns it."""
+    # O_CLOEXEC explicitly (Python's default is non-inheritable too, but an
+    # injected opener may not be): no docker/CLI child the controller spawns
+    # can inherit a census descriptor. A child that somehow holds one counts
+    # as a holder in fact 2, which is the fail-safe reading.
+    flags |= os.O_CLOEXEC
     fd = opener(name, flags) if dir_fd is None else opener(name, flags, dir_fd=dir_fd)
     try:
         info = _fstat(fd)
@@ -258,7 +263,7 @@ def record_mountpoint(path: str | os.PathLike[str], *, generation: object,
 
 
 def _is_empty(dir_fd: int, opener: Opener) -> bool:
-    listing = opener('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    listing = opener('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
     try:
         with _scandir(listing) as entries:
             for _ in entries:
@@ -376,7 +381,7 @@ def _walk(census: Census, dir_fd: int, depth: int, max_entries: int, max_depth: 
         return False
     remaining = max_entries - len(census._entries)
     names: list[str] = []
-    listing = opener('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    listing = opener('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
     try:
         with _scandir(listing) as entries:
             for entry in entries:
