@@ -220,7 +220,7 @@ def audit(records: Mapping[str, Mapping[str, Any] | None],
     if set(records) != set(expected) or not expected:
         return False, ["audit-population-mismatch"], ""
     for principal in sorted(expected):
-        record, (cid, lease) = records[principal], expected[principal]
+        record, (cid, _) = records[principal], expected[principal]
         if not isinstance(record, Mapping):
             reasons.append(f"{principal}:inspect-unreadable")
             continue

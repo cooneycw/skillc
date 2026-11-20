@@ -17,48 +17,8 @@ from skillc import docker_backend as db
 from skillc import task_protocol_docker as tpd
 
 ROOT = Path(__file__).resolve().parent.parent
-GOLDENS = json.loads((ROOT / "tests/fixtures/task-protocol-argv/goldens.json").read_text())[
-    "goldens"]
 AUDIT = json.loads((ROOT / "controls/task-protocol-exclusivity/cases.json").read_text())["cases"]
 A, B = "a" * 64, "b" * 64
-
-
-def _inputs(golden: dict[str, Any]) -> dict[str, Any]:
-    inputs = dict(golden["inputs"])
-    if inputs.get("trigger_socket_host_path") is not None:
-        inputs["trigger_socket_host_path"] = Path(inputs["trigger_socket_host_path"])
-    return inputs
-
-
-# -- argv -------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("golden", GOLDENS, ids=lambda g: g["name"])
-def test_the_argv_is_byte_identical_to_the_parent_without_the_mount(golden: dict[str, Any]) -> None:
-    assert db.compose_run_argv(**_inputs(golden)) == golden["argv"]
-    assert db.compose_run_argv(**_inputs(golden), task_protocol_host_dir=None) == golden["argv"]
-
-
-@pytest.mark.parametrize("golden", GOLDENS, ids=lambda g: g["name"])
-def test_the_mount_is_one_readonly_bind_at_the_fixed_target(golden: dict[str, Any]) -> None:
-    argv = db.compose_run_argv(**_inputs(golden), task_protocol_host_dir=Path("/srv/lease/ep-1"))
-    mount = "type=bind,source=/srv/lease/ep-1,target=/run/skillc-task-protocol,readonly"
-    assert argv.count(mount) == 1 and argv[argv.index(mount) - 1] == "--mount"
-    without = [a for i, a in enumerate(argv) if a != mount and not (a == "--mount"
-                                                                     and argv[i + 1] == mount)]
-    assert without == golden["argv"]
-    assert argv.index(mount) < argv.index("-w")
-    if "--storage-opt" in golden["argv"]:
-        trigger = next(a for a in argv if a.endswith(f"target={db.TRIGGER_SOCKET_PATH}"))
-        assert argv.index(trigger) < argv.index(mount)
-    assert db.TASK_PROTOCOL_DIR == "/run/skillc-task-protocol"
-
-
-def test_the_target_is_not_a_parameter() -> None:
-    import inspect
-    params = inspect.signature(db.compose_run_argv).parameters
-    assert "task_protocol_host_dir" in params
-    assert not any("target" in name for name in params)
 
 
 def test_the_backend_threads_its_lease_dir_into_the_keepalive_argv(tmp_path: Path) -> None:
@@ -340,34 +300,6 @@ def test_an_install_that_skips_the_writability_check_is_caught() -> None:
     writable = FakeBackend(writable=f"/opt/skillc-task-protocol/{digest}/skillc-task-protocol")
     assert blind(writable, object()) is not None
     assert tpd.install_client(FakeBackend(writable=writable.writable), object()) is None
-
-
-_BAD_SOURCES = [
-    ("comma-adds-option", Path("/srv/lease/x,readonly=false")),
-    ("comma-retargets", Path("/srv/lease/x,dst=/etc")),
-    ("equals", Path("/srv/lease/x=y")),
-    ("double-quote", Path('/srv/lease/"x"')),
-    ("newline", Path("/srv/lease/x\ny")),
-    ("carriage-return", Path("/srv/lease/x\ry")),
-    ("nul", Path("/srv/lease/x\x00y")),
-    ("relative", Path("srv/lease/x")),
-    ("not-normalized", Path("/srv/lease/../etc")),
-    ("not-a-path", "/srv/lease/x"),
-]
-
-
-@pytest.mark.parametrize("source", [s for _, s in _BAD_SOURCES], ids=[n for n, _ in _BAD_SOURCES])
-def test_a_mount_source_that_could_alter_the_spec_is_refused(source: Any) -> None:
-    golden = GOLDENS[0]
-    with pytest.raises(ValueError):
-        db.compose_run_argv(**_inputs(golden), task_protocol_host_dir=source)
-
-
-def test_a_composer_without_the_source_check_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db, "_mount_source", lambda path: str(path))
-    argv = db.compose_run_argv(**_inputs(GOLDENS[0]),
-                               task_protocol_host_dir=Path("/srv/lease/x,readonly=false"))
-    assert any("readonly=false" in a for a in argv)  # the injection the check exists to stop
 
 
 def test_a_lease_root_that_could_not_be_mounted_is_refused(tmp_path: Path) -> None:

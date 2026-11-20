@@ -296,7 +296,7 @@ def _mount_source(path: Path) -> str:
     normalized path with no mount-spec metacharacter is the only accepted
     shape."""
     if not isinstance(path, Path):
-        raise ValueError("a mount source must be a Path")
+        raise TypeError("a mount source must be a Path")
     text = str(path)
     if not path.is_absolute() or os.path.normpath(text) != text:
         raise ValueError("a mount source must be an absolute, normalized path")

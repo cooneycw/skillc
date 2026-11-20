@@ -127,7 +127,7 @@ def test_shape_b_audit_verifier_and_client_meet_a_real_daemon(image: str, tmp_pa
             {"p-a": (ids["p-a"], real["p-a"]), "p-m": (ids["p-m"], str(short / "unused"))})
         assert not mis_ok and any("reaches-lease-of" in r for r in mis_reasons), mis_reasons
 
-        for principal, lease in (("p-a", lease_a), ("p-b", lease_b)):
+        for principal in ("p-a", "p-b"):
             journal.append("binding", **leases.bind(principal, runtime_instance=ids[principal],
                                                      session_id=f"sess-{principal}",
                                                      evidence_digest=digest))
