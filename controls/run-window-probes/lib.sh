@@ -429,22 +429,27 @@ _upper_pid_same() {
 # RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS: it cannot leave the
 # held directory, follow any symlink, or cross a mount (a bind of another
 # tree's tmp over this one), and no path can be swapped between a test and
-# the read. A kernel without openat2 (before 5.6) fails closed. python3 -I
-# with ctypes (stdlib only); the held FD is inherited by the child.
+# the read. A kernel without openat2 (before 5.6) fails closed. The syscall
+# number is 437 on x86-64 and AArch64 only (other ABIs differ: MIPS n64 is
+# 5437), so any other machine exits 3, which the caller refuses by name.
+# python3 -I with ctypes (stdlib only); the held FD is inherited by the child.
 marker_matches() {
     python3 -I -c '
-import ctypes, os, stat, sys
+import ctypes, os, platform, stat, sys
+if platform.machine() not in ("x86_64", "aarch64") or ctypes.sizeof(ctypes.c_void_p) != 8:
+    sys.exit(3)
 fd, tok = int(sys.argv[1]), sys.argv[2]
 if not tok or "/" in tok:
     sys.exit(1)
 class OpenHow(ctypes.Structure):
     _fields_ = [("flags", ctypes.c_uint64), ("mode", ctypes.c_uint64), ("resolve", ctypes.c_uint64)]
 RESOLVE_NO_XDEV, RESOLVE_NO_SYMLINKS, RESOLVE_BENEATH = 0x01, 0x04, 0x08
-SYS_OPENAT2 = 437  # the same number on every Linux architecture
+SYS_OPENAT2 = 437  # x86-64 and AArch64 (checked above)
 how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,
               RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)
 libc = ctypes.CDLL(None, use_errno=True)
 libc.syscall.restype = ctypes.c_long
+libc.syscall.argtypes = (ctypes.c_long,)
 m = libc.syscall(ctypes.c_long(SYS_OPENAT2), ctypes.c_int(fd), ("tmp/" + tok).encode(),
                  ctypes.byref(how), ctypes.c_size_t(ctypes.sizeof(how)))
 if m < 0:
@@ -503,7 +508,13 @@ upper_dir_of() {
     _tok=skillc-dev-probe-id-$_tok
     docker exec "$1" sh -c 'printf "%s" "$1" >"/tmp/$1"' sh "$_tok" >/dev/null 2>&1 \
         || probe_die 'upperdir-mark-failed'
-    marker_matches "$2" "$_tok" || probe_die 'upperdir-unverified'
+    _mm=0
+    marker_matches "$2" "$_tok" || _mm=$?
+    case $_mm in
+        0) ;;
+        3) probe_die 'marker-arch-unsupported' ;;
+        *) probe_die 'upperdir-unverified' ;;
+    esac
     _upper_pid_same "$1" "$_pid" "$_ident" || probe_die 'container-pid-changed'
     PROBE_UPPER=$_held
 }

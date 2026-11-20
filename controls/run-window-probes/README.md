@@ -77,7 +77,9 @@ FD`:
    cannot leave the directory, follow a symlink, or cross a mount (another
    tree's `tmp` bound over this one), and no path can be swapped between a
    check and the read (`marker_matches`, `python3 -I` with `ctypes`, stdlib
-   only). A kernel without `openat2` (before 5.6) refuses;
+   only). A kernel without `openat2` (before 5.6) refuses, and a machine other
+   than x86-64 or AArch64 refuses by name (`marker-arch-unsupported`), because
+   the syscall number differs by ABI;
 7. revalidates the init pid again after the proof.
 
 Any failed step refuses by name (`upperdir-unreadable`, `container-pid-changed`,

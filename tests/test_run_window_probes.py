@@ -672,8 +672,7 @@ UPPER_TWINS = [
      "overlay2-disagrees"),
     ("start-time-unchecked", '[ "$_n" = "$3" ] && [ "$_p" = "$2" ]', '[ "$_p" = "$2" ]',
      "start-time-changes"),
-    ("marker-content-unchecked",
-     "marker_matches \"$2\" \"$_tok\" || probe_die 'upperdir-unverified'", ":",
+    ("marker-content-unchecked", "*) probe_die 'upperdir-unverified' ;;", "*) ;;",
      "marker-wrong-content"),
     ("marker-resolve-unrestricted",
      "how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,\n"
