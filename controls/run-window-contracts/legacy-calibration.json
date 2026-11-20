@@ -1,0 +1,22 @@
+{
+  "credential-window": {
+    "data_unchanged": true,
+    "parse": "ok"
+  },
+  "credential-window-without-scan": {
+    "parse": "refused",
+    "reason": "calibration declaration: credential_window requires the closed custody and scan policy"
+  },
+  "discrimination-with-credential-window": {
+    "parse": "refused",
+    "reason": "calibration declaration: credential_window is supported only for calibration-declaration"
+  },
+  "plain": {
+    "data_unchanged": true,
+    "parse": "ok"
+  },
+  "remnant-scan": {
+    "data_unchanged": true,
+    "parse": "ok"
+  }
+}

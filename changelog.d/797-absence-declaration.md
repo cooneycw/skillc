@@ -1,0 +1,1 @@
+- Add the opt-in `run_window_contracts` declaration (version 1, census limits at or below the scan ceilings, dispositions fixed by class, no paths). It is validated at parse and at execution, refused for discrimination declarations, and bound by the existing approval digest. A declaration without the key behaves exactly as before; no blocker is lifted (Refs #797).
