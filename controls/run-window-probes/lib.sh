@@ -548,8 +548,9 @@ SCAN_LIB='
 # other find error returns 1. If anything was pruned, the scan identity must
 # also be plain: a non-root uid, real, effective, saved and filesystem ids
 # equal, and no effective or permitted capability (so access(2) answers for
-# the lookups it stands for). It is read by an exec of awk, whose post-exec
-# credentials are those find had, find being an exec of the same kind.
+# the lookups it stands for). It is read from this shell process status,
+# the credentials find is started from; a set-id or file-capability find
+# binary is outside the scan scope.
 # XDEV is "xdev" or "all". The verdict this supports is scoped to fresh
 # pathname lookup from ROOT under this identity, at the observation instant.
 scan() {
@@ -590,10 +591,12 @@ scan_identity_plain() {
          \$1 == \"CapEff:\" { c = (\$2 ~ /^0+\$/); nc++ }
          \$1 == \"CapPrm:\" { p = (\$2 ~ /^0+\$/); np++ }
          END { exit (nu == 1 && ng == 1 && nc == 1 && np == 1 && u && g && c && p) ? 0 : 1 }" \
-        /proc/self/status
+        "/proc/$$/status"
 }
 # scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
-# "DEV INO PATH") must still be the same inode, list with a plain mode string
+# "DEV INO PATH") must sit in a parent this uid cannot write (so this uid can
+# rename nothing there and cannot substitute the entry), must still be the
+# same inode, list with a plain mode string
 # ("d" and nine permission characters, optionally "." for an SELinux context,
 # never "+" for an ACL), and then still match the prune predicate: not
 # searchable, no search bit in its class, not owned by U. Listing then
@@ -601,7 +604,14 @@ scan_identity_plain() {
 # another uid changes the directory and changes it back in between, which is
 # outside the scan scope.
 scan_recheck() {
-    while read -r _d _i _p; do
+    while IFS= read -r _rec; do
+        _d=${_rec%% *}
+        _r=${_rec#* }
+        _i=${_r%% *}
+        _p=${_r#* }
+        case $_p in /*) ;; *) return 1 ;; esac
+        _w=$(find "${_p%/*}/" -maxdepth 0 -writable) || return 1
+        [ -z "$_w" ] || return 1
         _l=$(ls -ld -- "$_p") || return 1
         case ${_l%% *} in d?????????  | d?????????.) ;; *) return 1 ;; esac
         eval "_m=\$(find \"\$_p\" -maxdepth 0 -type d ! -executable ! -uid $2 \\( \\( \\( $3 \\) ! -perm -g+x \\) -o \\( ! \\( $3 \\) ! -perm -o+x \\) \\) -printf \"%D %i\")" \

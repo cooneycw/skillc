@@ -835,6 +835,8 @@ SCAN_TREES: dict[str, list[tuple[str, str, str]]] = {
     "write-without-search": [("spool", "dir", "wnx"), ("spool/inner", "dir", "open-w")],
     "probe-owned-unsearchable": [("home", "dir", "open"),
                                  ("home/mine", "nobody-dir", "owner-noexec")],
+    # The uid may write the parent, so it could substitute the entry.
+    "parent-writable": [("pub", "dir", "open-w"), ("pub/locked", "dir", "noexec")],
     # The newline is in an ANCESTOR; the pruned directory's own name is plain.
     "newline-name": [(NL_DIR, "dir", "open"), (f"{NL_DIR}/locked", "dir", "noexec")],
 }
@@ -852,6 +854,7 @@ SCAN_EXPECT: dict[str, ScanResult] = {
     "write-without-search": (True, True, [], [], ["PRUNED-W spool"]),
     "probe-owned-unsearchable": (False, False, [], [], []),
     "newline-name": (False, False, [], [], []),
+    "parent-writable": (False, False, [], [], []),
 }
 
 SCAN_SCRIPT = """
@@ -1074,6 +1077,7 @@ SCAN_TWINS = [
     ("pruned-dirs-unrecorded", 'cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":",
      "image-shape"),
     ("ambiguity-ignored", '[ ! -s "$_pr.amb" ] || return 1', ":", "probe-owned-unsearchable"),
+    ("writable-parent-unchecked", '[ -z "$_w" ] || return 1', ":", "parent-writable"),
     ("ownership-unchecked", AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o ',
      "probe-owned-unsearchable"),
 ]
