@@ -270,7 +270,7 @@
    ]
   },
   {
-   "name": "runtime-instance-reused-across-slots",
+   "name": "runtime-instance-collision-within-attempt",
    "ops": [
     {
      "op": "issue",
@@ -307,10 +307,30 @@
      "op": "barrier",
      "expect": "ok",
      "states": [
-      "bound",
+      "unavailable",
       "unavailable",
       "unstarted"
      ]
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-x",
+     "expect": null
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-2",
+     "runtime_instance": "inst-x",
+     "expect": null
+    },
+    {
+     "op": "sessions",
+     "expect": {
+      "worker-a": null,
+      "worker-b": null,
+      "integrator": null
+     }
     }
    ]
   },
@@ -355,7 +375,7 @@
    ]
   },
   {
-   "name": "session-held-by-another-slot",
+   "name": "session-collision-within-attempt",
    "ops": [
     {
      "op": "issue",
@@ -392,10 +412,82 @@
      "op": "barrier",
      "expect": "ok",
      "states": [
+      "unavailable",
+      "unavailable",
+      "unstarted"
+     ]
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": null
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-2",
+     "runtime_instance": "inst-b",
+     "expect": null
+    }
+   ]
+  },
+  {
+   "name": "earlier-attempt-reuse-marks-only-the-newcomer",
+   "used_instances": [
+    "inst-old"
+   ],
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-b",
+     "runtime_instance": "inst-old",
+     "session_id": "sess-b",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
       "bound",
       "unavailable",
       "unstarted"
      ]
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": "p-a"
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-2",
+     "runtime_instance": "inst-old",
+     "expect": null
     }
    ]
   },
