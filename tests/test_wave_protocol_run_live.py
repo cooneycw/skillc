@@ -26,7 +26,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -122,12 +122,28 @@ class _Census:
         return report
 
 
-def _run(image: str, tmp_path: Path, short: Path, mode: str) -> tuple[dict[str, Any], float]:
+def _recording(errors: list[str], name: str, call: Callable[..., Any]) -> Callable[..., Any]:
+    """Test-side diagnostics only: ProtocolWave records just an exception's
+    class (B7: no participant or private text in product reports), so a live
+    failure would otherwise lose its cause. Re-raises unchanged."""
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return call(*args, **kwargs)
+        except Exception as exc:
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+            raise
+    return wrapped
+
+
+def _run(image: str, tmp_path: Path, short: Path, mode: str,
+         errors: list[str]) -> tuple[dict[str, Any], float]:
     roles = [dw.Role(r, ("python3", ACTOR.name, r, mode if r == "worker" else "clean"), "start",
                      90, ("offer", "ack", "complete")) for r in ROLES]
     wave = dw.DockerWave(attempt_id="tp-live-" + uuid.uuid4().hex[:10], image=image,
                          root=tmp_path / "evidence", fixture=_fixture(tmp_path / "fixture"),
                          roles=roles, seconds=SECONDS, daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT)
+    wave.prepare = _recording(errors, "prepare", wave.prepare)  # type: ignore[method-assign]
+    wave.turn = _recording(errors, "turn", wave.turn)  # type: ignore[method-assign]
     slots = [Slot("slot-" + r, r, "task-" + r, 0, 1, "nonce-" + r) for r in ROLES]
     run = wpr.ProtocolWave(wave, slots=slots, declaration_digest=DECL, deadline_digest=DEADLINE,
                            deadline_seconds=SECONDS, lease_root=short / "leases",
@@ -160,10 +176,11 @@ def short() -> Iterator[Path]:
 @pytest.mark.parametrize("mode", ["clean", "residue"])
 def test_the_producer_lifecycle_on_a_real_daemon(image: str, tmp_path: Path, short: Path,
                                                  mode: str) -> None:
-    report, seconds = _run(image, tmp_path, short, mode)
-    print(json.dumps({"mode": mode, "wall_seconds": round(seconds, 1)}))  # for the PR body
+    errors: list[str] = []
+    report, seconds = _run(image, tmp_path, short, mode, errors)
+    print(json.dumps({"mode": mode, "wall_seconds": round(seconds, 1), "errors": errors}))
     # 1. The lifecycle order, with nothing unknown on the protocol side.
-    assert report["events"] == HEALTHY_EVENTS, report["unknown"]
+    assert report["events"] == HEALTHY_EVENTS, (report["unknown"], errors)
     assert report["unknown"] == []
     # 2. The audit passed on the daemon's own inspect records.
     assert report["audit"]["ok"] is True and report["audit"]["digest"].startswith("sha256:")
