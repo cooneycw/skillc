@@ -1,0 +1,517 @@
+{
+ "requests": [
+  {
+   "name": "offer",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1}",
+   "expect": "accepted",
+   "canonical": "{\"op\":\"offer\",\"request\":1,\"version\":1}"
+  },
+  {
+   "name": "offer-framed",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1}\n",
+   "expect": "accepted",
+   "canonical": "{\"op\":\"offer\",\"request\":1,\"version\":1}"
+  },
+  {
+   "name": "ack",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o-1\",\"op\":\"ack\",\"request\":2,\"version\":1}"
+  },
+  {
+   "name": "complete",
+   "raw": "{\"version\":1,\"op\":\"complete\",\"request\":3,\"offer_id\":\"o-1\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o-1\",\"op\":\"complete\",\"request\":3,\"version\":1}"
+  },
+  {
+   "name": "refuse-cannot-complete",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":\"cannot-complete\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o-1\",\"op\":\"refuse\",\"reason\":\"cannot-complete\",\"request\":4,\"version\":1}"
+  },
+  {
+   "name": "refuse-blocked",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":\"blocked\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o-1\",\"op\":\"refuse\",\"reason\":\"blocked\",\"request\":4,\"version\":1}"
+  },
+  {
+   "name": "refuse-not-my-task",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":\"not-my-task\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o-1\",\"op\":\"refuse\",\"reason\":\"not-my-task\",\"request\":4,\"version\":1}"
+  },
+  {
+   "name": "refuse-other",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":\"other\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o-1\",\"op\":\"refuse\",\"reason\":\"other\",\"request\":4,\"version\":1}"
+  },
+  {
+   "name": "reordered-whitespace-max-number",
+   "raw": " { \"op\" : \"ack\", \"offer_id\":\"o.2_x-Y\", \"request\": 2147483647, \"version\": 1 } ",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"o.2_x-Y\",\"op\":\"ack\",\"request\":2147483647,\"version\":1}"
+  },
+  {
+   "name": "offer-id-64-chars",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":5,\"offer_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "expect": "accepted",
+   "canonical": "{\"offer_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"op\":\"ack\",\"request\":5,\"version\":1}"
+  },
+  {
+   "name": "exactly-4096-bytes",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          ",
+   "expect": "accepted",
+   "canonical": "{\"op\":\"offer\",\"request\":1,\"version\":1}"
+  },
+  {
+   "name": "4097-bytes",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           ",
+   "expect": "rejected:oversize"
+  },
+  {
+   "name": "oversize-beats-unknown-field",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1,\"pad\":\"CANARY-oversizexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "expect": "rejected:oversize"
+  },
+  {
+   "name": "not-utf8",
+   "raw_hex": "ff",
+   "expect": "rejected:not-utf8"
+  },
+  {
+   "name": "not-utf8-inside-string",
+   "raw_hex": "7b2276657273696f6e223a312c226f70223a226f66666572222c2272657175657374223a312c2278223a22c328227d",
+   "expect": "rejected:not-utf8"
+  },
+  {
+   "name": "empty",
+   "raw": "",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "unclosed",
+   "raw": "{",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "two-objects",
+   "raw": "{\"version\":1}{\"x\":1}",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "nan",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":NaN}",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "infinity",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":Infinity}",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "integer-21-digits",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":123456789012345678901}",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "two-lines",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1}\n{\"version\":1,\"op\":\"offer\",\"request\":1}\n",
+   "expect": "rejected:malformed-json"
+  },
+  {
+   "name": "duplicate-key",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"op\":\"ack\",\"request\":1}",
+   "expect": "rejected:duplicate-key"
+  },
+  {
+   "name": "duplicate-version",
+   "raw": "{\"version\":1,\"version\":1,\"op\":\"offer\",\"request\":1}",
+   "expect": "rejected:duplicate-key"
+  },
+  {
+   "name": "not-object-array",
+   "raw": "[1]",
+   "expect": "rejected:not-object"
+  },
+  {
+   "name": "not-object-string",
+   "raw": "\"CANARY-string\"",
+   "expect": "rejected:not-object"
+  },
+  {
+   "name": "not-object-null",
+   "raw": "null",
+   "expect": "rejected:not-object"
+  },
+  {
+   "name": "not-object-number",
+   "raw": "1",
+   "expect": "rejected:not-object"
+  },
+  {
+   "name": "identity-role",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"role\":\"CANARY-role\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-session_id",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"session_id\":\"CANARY-session_id\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-attempt_id",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"attempt_id\":\"CANARY-attempt_id\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-nonce",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"nonce\":\"CANARY-nonce\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-wave_id",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"wave_id\":\"CANARY-wave_id\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-task",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"task\":\"CANARY-task\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-sender",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"sender\":\"CANARY-sender\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-generation",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"generation\":\"CANARY-generation\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "identity-beats-controller",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"seq\":1,\"role\":\"CANARY-r\"}",
+   "expect": "rejected:identity-field-supplied"
+  },
+  {
+   "name": "controller-seq",
+   "raw": "{\"version\":1,\"op\":\"complete\",\"request\":3,\"offer_id\":\"o-1\",\"seq\":1}",
+   "expect": "rejected:controller-field-supplied"
+  },
+  {
+   "name": "controller-elapsed",
+   "raw": "{\"version\":1,\"op\":\"complete\",\"request\":3,\"offer_id\":\"o-1\",\"elapsed\":1}",
+   "expect": "rejected:controller-field-supplied"
+  },
+  {
+   "name": "controller-success",
+   "raw": "{\"version\":1,\"op\":\"complete\",\"request\":3,\"offer_id\":\"o-1\",\"success\":1}",
+   "expect": "rejected:controller-field-supplied"
+  },
+  {
+   "name": "controller-timestamp",
+   "raw": "{\"version\":1,\"op\":\"complete\",\"request\":3,\"offer_id\":\"o-1\",\"timestamp\":1}",
+   "expect": "rejected:controller-field-supplied"
+  },
+  {
+   "name": "controller-decision",
+   "raw": "{\"version\":1,\"op\":\"complete\",\"request\":3,\"offer_id\":\"o-1\",\"decision\":1}",
+   "expect": "rejected:controller-field-supplied"
+  },
+  {
+   "name": "unknown-field",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1,\"note\":\"CANARY-note\"}",
+   "expect": "rejected:unknown-field"
+  },
+  {
+   "name": "unknown-field-uppercase-op",
+   "raw": "{\"version\":1,\"OP\":\"offer\",\"request\":1}",
+   "expect": "rejected:unknown-field"
+  },
+  {
+   "name": "version-2",
+   "raw": "{\"version\":2,\"op\":\"offer\",\"request\":1}",
+   "expect": "rejected:unsupported-version"
+  },
+  {
+   "name": "version-true",
+   "raw": "{\"version\":true,\"op\":\"offer\",\"request\":1}",
+   "expect": "rejected:unsupported-version"
+  },
+  {
+   "name": "version-string",
+   "raw": "{\"version\":\"1\",\"op\":\"offer\",\"request\":1}",
+   "expect": "rejected:unsupported-version"
+  },
+  {
+   "name": "version-float",
+   "raw": "{\"version\":1.0,\"op\":\"offer\",\"request\":1}",
+   "expect": "rejected:unsupported-version"
+  },
+  {
+   "name": "version-missing",
+   "raw": "{\"op\":\"offer\",\"request\":1}",
+   "expect": "rejected:unsupported-version"
+  },
+  {
+   "name": "version-beats-op",
+   "raw": "{\"version\":2,\"op\":\"fetch\",\"request\":1}",
+   "expect": "rejected:unsupported-version"
+  },
+  {
+   "name": "op-fetch",
+   "raw": "{\"version\":1,\"op\":\"fetch\",\"request\":1}",
+   "expect": "rejected:unknown-op"
+  },
+  {
+   "name": "op-int",
+   "raw": "{\"version\":1,\"op\":1,\"request\":1}",
+   "expect": "rejected:unknown-op"
+  },
+  {
+   "name": "op-upper",
+   "raw": "{\"version\":1,\"op\":\"ACK\",\"request\":1}",
+   "expect": "rejected:unknown-op"
+  },
+  {
+   "name": "op-null",
+   "raw": "{\"version\":1,\"op\":null,\"request\":1}",
+   "expect": "rejected:unknown-op"
+  },
+  {
+   "name": "op-missing",
+   "raw": "{\"version\":1,\"request\":1}",
+   "expect": "rejected:unknown-op"
+  },
+  {
+   "name": "request-zero",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":0}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-negative",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":-1}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-too-large",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":2147483648}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-float",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1.0}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-true",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":true}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-string",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":\"1\"}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-null",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":null}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "request-missing",
+   "raw": "{\"version\":1,\"op\":\"offer\"}",
+   "expect": "rejected:bad-request-number"
+  },
+  {
+   "name": "ack-without-offer",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2}",
+   "expect": "rejected:missing-offer-id"
+  },
+  {
+   "name": "refuse-without-offer",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":2,\"reason\":\"blocked\"}",
+   "expect": "rejected:missing-offer-id"
+  },
+  {
+   "name": "offer-with-offer-id",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1,\"offer_id\":\"o-1\"}",
+   "expect": "rejected:unexpected-offer-id"
+  },
+  {
+   "name": "offer-id-empty",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-leading-dash",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"-a\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-65-chars",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-non-ascii",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"\\u00e9\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-int",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":5}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-space",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"a b\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-slash",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"a/b\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-null",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":null}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "offer-id-newline",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"a\\n\"}",
+   "expect": "rejected:bad-offer-id"
+  },
+  {
+   "name": "refuse-without-reason",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\"}",
+   "expect": "rejected:missing-reason"
+  },
+  {
+   "name": "ack-with-reason",
+   "raw": "{\"version\":1,\"op\":\"ack\",\"request\":2,\"offer_id\":\"o-1\",\"reason\":\"blocked\"}",
+   "expect": "rejected:unexpected-reason"
+  },
+  {
+   "name": "offer-with-reason",
+   "raw": "{\"version\":1,\"op\":\"offer\",\"request\":1,\"reason\":\"blocked\"}",
+   "expect": "rejected:unexpected-reason"
+  },
+  {
+   "name": "reason-free-text",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":\"CANARY-because I said so\"}",
+   "expect": "rejected:unknown-reason"
+  },
+  {
+   "name": "reason-int",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":1}",
+   "expect": "rejected:unknown-reason"
+  },
+  {
+   "name": "reason-null",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":null}",
+   "expect": "rejected:unknown-reason"
+  },
+  {
+   "name": "reason-upper",
+   "raw": "{\"version\":1,\"op\":\"refuse\",\"request\":4,\"offer_id\":\"o-1\",\"reason\":\"BLOCKED\"}",
+   "expect": "rejected:unknown-reason"
+  }
+ ],
+ "receipts": [
+  {
+   "name": "offered",
+   "raw": "{\"decision\":\"offered\",\"offer_id\":\"o-1\",\"request\":1,\"version\":1}\n",
+   "expect": true
+  },
+  {
+   "name": "acknowledged",
+   "raw": "{\"decision\":\"acknowledged\",\"offer_id\":\"o-1\",\"request\":2,\"version\":1}\n",
+   "expect": true
+  },
+  {
+   "name": "completion-claimed",
+   "raw": "{\"decision\":\"completion-claimed\",\"offer_id\":\"o-1\",\"request\":3,\"version\":1}\n",
+   "expect": true
+  },
+  {
+   "name": "refusal-retained",
+   "raw": "{\"decision\":\"refusal-retained\",\"offer_id\":\"o-1\",\"request\":4,\"version\":1}\n",
+   "expect": true
+  },
+  {
+   "name": "rejected-schema",
+   "raw": "{\"decision\":\"rejected\",\"reason\":\"oversize\",\"request\":null,\"version\":1}\n",
+   "expect": true
+  },
+  {
+   "name": "rejected-state",
+   "raw": "{\"decision\":\"rejected\",\"offer_id\":\"o-1\",\"reason\":\"protocol-conflict\",\"request\":3,\"version\":1}\n",
+   "expect": true
+  },
+  {
+   "name": "rejected-without-reason",
+   "raw": "{\"decision\":\"rejected\",\"request\":null,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "offered-without-offer-id",
+   "raw": "{\"decision\":\"offered\",\"request\":1,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "acknowledged-with-reason",
+   "raw": "{\"decision\":\"acknowledged\",\"offer_id\":\"o-1\",\"reason\":\"late\",\"request\":2,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "unknown-decision",
+   "raw": "{\"decision\":\"passed\",\"request\":1,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "unknown-rejection",
+   "raw": "{\"decision\":\"rejected\",\"reason\":\"CANARY-text\",\"request\":1,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "decision-without-request",
+   "raw": "{\"decision\":\"acknowledged\",\"offer_id\":\"o-1\",\"request\":null,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "not-canonical",
+   "raw": "{\"version\":1,\"decision\":\"offered\",\"offer_id\":\"o-1\",\"request\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "extra-field",
+   "raw": "{\"decision\":\"offered\",\"extra\":1,\"offer_id\":\"o-1\",\"request\":1,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "no-newline",
+   "raw": "{\"decision\":\"offered\",\"offer_id\":\"o-1\",\"request\":1,\"version\":1}",
+   "expect": false
+  },
+  {
+   "name": "version-2",
+   "raw": "{\"decision\":\"offered\",\"offer_id\":\"o-1\",\"request\":1,\"version\":2}\n",
+   "expect": false
+  },
+  {
+   "name": "request-true",
+   "raw": "{\"decision\":\"offered\",\"offer_id\":\"o-1\",\"request\":true,\"version\":1}\n",
+   "expect": false
+  },
+  {
+   "name": "not-json",
+   "raw": "ok\n",
+   "expect": false
+  }
+ ]
+}
