@@ -72,6 +72,40 @@ def test_invalid_opt_in_is_refused(fault: str) -> None:
         calibration.parse_declaration(stamp_approval(raw))
 
 
+class Sneaky(str):
+    """A str subclass that compares equal to a declared key."""
+
+
+class Exploding:
+    """A key that hashes like a declared key but whose equality raises with
+    supplied text, so building a set of keys would raise it."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError('supplied-marker-text')
+
+
+@pytest.mark.parametrize('where', ['top', 'limits'])
+@pytest.mark.parametrize('key', ['subclass', 'exploding'])
+def test_non_string_keys_are_refused_with_fixed_text(where: str, key: str) -> None:
+    """Directly against the validator, so no serialization can mask it."""
+    plan = contracts()
+    target = plan if where == 'top' else plan['limits']
+    name = 'version' if where == 'top' else 'max_entries'
+    value = target.pop(name)
+    target[Sneaky(name) if key == 'subclass' else Exploding(name)] = value
+    with pytest.raises(rc.ContractsRefused) as info:
+        rc.validate_plan({**data(), rc.KEY: plan})
+    assert 'supplied-marker-text' not in str(info.value)
+    assert str(info.value) in ('run_window_contracts: invalid declared contracts',
+                               'run_window_contracts: invalid census limits')
+
+
 def test_ceilings_are_the_scan_limits_and_the_maximum_is_accepted() -> None:
     raw = data()
     raw[rc.KEY]['limits'] = {'max_entries': remnant_scan.LIMITS['entries'],
@@ -110,10 +144,14 @@ def test_discrimination_approval_checks_refuse_the_key() -> None:
 
 
 def test_an_opt_in_injected_after_parsing_is_revalidated_at_execution() -> None:
+    """A complete plan whose ONLY fault is the version, so the execution-time
+    check is the version check and nothing else."""
     decl = calibration.parse_declaration(window_data())
-    cast(dict[str, Any], decl.data)[rc.KEY] = {'version': 2}
-    with pytest.raises(calibration.DeclarationRefused, match='run_window_contracts'):
+    cast(dict[str, Any], decl.data)[rc.KEY] = {**contracts(), 'version': 2}
+    with pytest.raises(calibration.DeclarationRefused) as info:
         calibration.require_approved(decl, ROOT)
+    assert str(info.value) == ('calibration declaration: run_window_contracts: '
+                               'unsupported contracts version')
 
 
 def test_the_key_joins_the_approval_digest_with_no_digest_change() -> None:
@@ -123,6 +161,16 @@ def test_the_key_joins_the_approval_digest_with_no_digest_change() -> None:
     assert calibration.declaration_digest(changed) != approved['approval']['declaration_digest']
     with pytest.raises(calibration.DeclarationRefused, match='declaration_digest'):
         calibration._require_whole_declaration_approval(changed, changed['approval'])
+
+
+def test_a_limit_changed_after_approval_is_refused_through_require_approved() -> None:
+    """The same binding through the public execution path: a valid limit,
+    changed on a parsed and approved declaration, is refused by the digest."""
+    decl = calibration.parse_declaration(data())
+    cast(dict[str, Any], decl.data)[rc.KEY] = {**contracts(),
+                                               'limits': {'max_entries': 2048, 'max_depth': 16}}
+    with pytest.raises(calibration.DeclarationRefused, match='declaration_digest'):
+        calibration.require_approved(decl, ROOT)
 
 
 def test_census_budget_is_checked_at_admission(monkeypatch: pytest.MonkeyPatch) -> None:

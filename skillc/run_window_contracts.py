@@ -60,11 +60,16 @@ def _require(ok: object, reason: str) -> None:
 def validate_plan(data: Mapping[str, object]) -> dict[str, Any]:
     """The closed v1 object, or a fixed refusal. Returns a normalized copy."""
     raw = data.get(KEY)
-    _require(type(raw) is dict and set(raw) == {'version', 'limits'}, 'invalid declared contracts')
+    # Key types are checked BEFORE any set is built: a str subclass could
+    # compare equal to a declared key, and a custom key's hash or equality
+    # could raise with supplied text.
+    _require(type(raw) is dict and all(type(k) is str for k in raw)
+             and set(raw) == {'version', 'limits'}, 'invalid declared contracts')
     assert isinstance(raw, dict)
     _require(type(raw['version']) is int and raw['version'] == 1, 'unsupported contracts version')
     limits = raw['limits']
-    _require(type(limits) is dict and set(limits) == set(CEILINGS), 'invalid census limits')
+    _require(type(limits) is dict and all(type(k) is str for k in limits)
+             and set(limits) == set(CEILINGS), 'invalid census limits')
     assert isinstance(limits, dict)
     for name, ceiling in CEILINGS.items():
         value = limits[name]

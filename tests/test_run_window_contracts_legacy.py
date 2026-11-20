@@ -12,6 +12,7 @@ declarations. No bytes travel through mail or a helper's output.
 """
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable
 from typing import Any
@@ -50,16 +51,33 @@ CASES: dict[str, tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], 
 }
 
 
+def _approval_outcome(parsed: Any) -> str:
+    """Only for calibration declarations; the execution gate's verdict."""
+    try:
+        calibration.require_approved(parsed, ROOT)
+    except calibration.DeclarationRefused:
+        return 'refused'
+    return 'ok'
+
+
 def legacy_report() -> dict[str, Any]:
     report: dict[str, Any] = {}
     for name, (build, parse) in CASES.items():
         raw = build()
+        before = copy.deepcopy(raw)
         try:
             parsed = parse(raw)
         except calibration.DeclarationRefused as exc:
-            report[name] = {'parse': 'refused', 'reason': str(exc)}
-        else:
-            report[name] = {'parse': 'ok', 'data_unchanged': parsed.data == raw}
+            report[name] = {'parse': 'refused', 'reason': str(exc),
+                            'input_unmutated': raw == before}
+            continue
+        row: dict[str, Any] = {'parse': 'ok', 'input_unmutated': raw == before,
+                               'data_is_the_input': parsed.data == before}
+        if parse is calibration.parse_declaration:
+            row['digest_binds'] = (calibration.declaration_digest(parsed.data)
+                                   == before['approval']['declaration_digest'])
+            row['require_approved'] = _approval_outcome(parsed)
+        report[name] = row
     return report
 
 
