@@ -121,6 +121,13 @@ BLIND_TWINS = [
      'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ] && [ "$v" -eq 0 ]',
      'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ]', "p8", "visible-socket-only",
      "clean"),
+    ("planted-consistency-unchecked", "p7.sh",
+     'if { [ "$d" -eq 1 ] && [ "${e% *}" -lt 1 ]; } ||', "if false &&", "p7",
+     "clean-planted-inconsistent", "clean"),
+    ("hostnet-signal-unchecked", "p8.sh", 'if [ "$s" -ge 1 ]; then printf', "if true; then printf",
+     "p8", "hostnet-socket-fd-only", "hostnet"),
+    ("sockbind-signal-unchecked", "p8.sh", 'if [ "$b" -ge 2 ] && [ "$v" -ge 2 ]; then',
+     "if true; then", "p8", "sockbind-one-bind", "sockbind"),
     ("queue-reading-ignored", "p8.sh", 'if [ "$q" -eq 0 ] && [ "$g" -eq 1 ]', 'if [ "$g" -eq 1 ]',
      "p8", "zerobyte-queue-nonzero", "zerobyte"),
 ]

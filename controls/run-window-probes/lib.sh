@@ -29,6 +29,7 @@ PROBE_MISMATCH=0
 PROBE_PIDS=
 PROBE_CONTAINERS=
 PROBE_NAMES=
+PROBE_VOLUMES=
 PROBE_MOUNTS=
 PROBE_SCRATCH=
 PROBE_KEEP=0
@@ -166,11 +167,22 @@ track_container() { PROBE_CONTAINERS="$PROBE_CONTAINERS $1"; }
 track_name() { PROBE_NAMES="$PROBE_NAMES $1"; }
 track_mount() { PROBE_MOUNTS="$1 $PROBE_MOUNTS"; }
 
-# is_mounted PATH: exit 0 if PATH is a mountpoint in this namespace, 1 if not,
-# 2 if the mount table could not be read.
+# is_mounted PATH: exit 0 if PATH is a mountpoint in this namespace, 1 if it
+# is not, 2 if the mount table could not be read completely. Absence is only
+# reported from a successful read that printed its own answer token.
 is_mounted() {
-    [ -r /proc/self/mountinfo ] || return 2
-    awk -v m="$1" '$5 == m { f = 1 } END { exit f ? 0 : 1 }' /proc/self/mountinfo
+    _r=$(awk -v m="$1" '$5 == m { f = 1 } END { if (NR < 1) exit 3; print f ? "FOUND" : "ABSENT" }' \
+        /proc/self/mountinfo 2>/dev/null) || return 2
+    case $_r in FOUND) return 0 ;; ABSENT) return 1 ;; *) return 2 ;; esac
+}
+
+# proc_identity PID: "STARTTIME" of a live, non-zombie process, or fail. The
+# comm field may contain spaces, so fields are counted after its last ")".
+proc_identity() {
+    _s=$(cat -- "/proc/$1/stat" 2>/dev/null) || return 1
+    _s=${_s##*) }
+    case $_s in Z* | X* | x*) return 1 ;; esac
+    printf '%s\n' "$_s" | awk 'NF >= 20 { print $20; ok = 1 } END { exit ok ? 0 : 1 }'
 }
 
 # container_absent ID: 0 only when the daemon answered and listed nothing.
@@ -209,6 +221,14 @@ probe_cleanup() {
         fi
     done
     PROBE_NAMES=$_left
+    _left=
+    for _v in $PROBE_VOLUMES; do
+        docker volume rm -f "$_v" >/dev/null 2>&1 || true
+        if ! _out=$(docker volume ls -q --filter "name=^$_v\$") || [ -n "$_out" ]; then
+            _ok=1; _left="$_left $_v"
+        fi
+    done
+    PROBE_VOLUMES=$_left
     _left=
     for _m in $PROBE_MOUNTS; do
         if is_mounted "$_m"; then umount "$_m" 2>/dev/null || true; fi
@@ -280,4 +300,9 @@ create_container() {
     cid=$(docker create --name "$_name" "$@") || probe_die 'create-failed'
     printf '%s\n' "$cid" | grep -Eq '^[0-9a-f]{64}$' || probe_die 'create-id-malformed'
     track_container "$cid"
+    # Any volume the image declares is created with the container: track it so
+    # cleanup removes and verifies it, rather than trusting `rm -v`.
+    _vols=$(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}' \
+        "$cid") || probe_die 'volume-inspect-failed'
+    for _v in $_vols; do PROBE_VOLUMES="$PROBE_VOLUMES $_v"; done
 }

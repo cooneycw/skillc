@@ -144,15 +144,22 @@ extras() {
     printf '%s %s\n' "$d" "$f"
 }
 
+# verdict ARM: all four readings must be valid and consistent (a planted path
+# found must also be counted as an extra of its type).
 verdict() {
     e=$(extras "$1") || { printf '%s\n' "$PROBE_FAIL"; return; }
+    d=$(rd_bool "$1" planted_dir) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    f=$(rd_bool "$1" planted_file) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if { [ "$d" -eq 1 ] && [ "${e% *}" -lt 1 ]; } || { [ "$f" -eq 1 ] && [ "${e#* }" -lt 1 ]; }; then
+        printf '%s\n' "$PROBE_FAIL"; return
+    fi
     if [ "$e" = "0 0" ]; then printf '%s\n' "$PROBE_NEG"; else printf '%s\n' "$PROBE_SURV"; fi
 }
 
 # v_survivor: each planted path must be observed on its own, so a broken
 # file-bind check cannot hide behind the directory hit.
 v_survivor() {
-    extras survivor >/dev/null || { printf '%s\n' "$PROBE_FAIL"; return; }
+    [ "$(verdict survivor)" != "$PROBE_FAIL" ] || { printf '%s\n' "$PROBE_FAIL"; return; }
     d=$(rd_bool survivor planted_dir) || { printf '%s\n' "$PROBE_FAIL"; return; }
     f=$(rd_bool survivor planted_file) || { printf '%s\n' "$PROBE_FAIL"; return; }
     if [ "$d" -eq 1 ] && [ "$f" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"

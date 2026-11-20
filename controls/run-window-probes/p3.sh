@@ -40,10 +40,18 @@ sb_listed() {
     for p in "$1"/[0-9]*; do
         [ -d "$p" ] || continue
         if t=$(cat -- "$p/mountinfo" 2>/dev/null); then
-            n=$(printf '%s\n' "$t" | awk -v d="$2" '$3 == d { c++ } END { print c + 0 }') || return 1
-            is_uint "$n" || return 1
-            listed=$((listed + n))
-            scanned=$((scanned + 1))
+            # Usable only if nonempty and every line has the " - " separator
+            # after at least six fields; otherwise the table is unreadable.
+            if n=$(printf '%s\n' "$t" | awk -v d="$2" '
+                NF == 0 { next }
+                { r++; sep = 0; for (i = 7; i <= NF; i++) if ($i == "-") sep = 1; if (!sep) bad = 1 }
+                $3 == d { c++ }
+                END { if (r < 1 || bad) exit 1; print c + 0 }') && is_uint "$n"; then
+                listed=$((listed + n))
+                scanned=$((scanned + 1))
+            else
+                unreadable=$((unreadable + 1))
+            fi
         elif [ -d "$p" ]; then
             unreadable=$((unreadable + 1))
         fi

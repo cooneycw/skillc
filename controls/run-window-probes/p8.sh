@@ -25,7 +25,8 @@ parse_common "$@"
 # socket_binds ID: count bind mounts whose source is a socket or a directory
 # containing one. Structured inspect output; any unreadable source fails.
 socket_binds() {
-    docker inspect --format '{{json .Mounts}}' "$1" | python3 -I -c '
+    _j=$(docker inspect --format '{{json .Mounts}}' "$1") || return 1
+    printf '%s\n' "$_j" | python3 -I -c '
 import json, os, stat, sys
 count = 0
 for m in json.load(sys.stdin):
@@ -55,8 +56,10 @@ isolation() {
         record "$1" socket_fds ERR
         return
     fi
+    ident=$(proc_identity "$pid") || ident=
     shared=0
     ok=1
+    [ -n "$ident" ] || ok=0
     for ns in net ipc mnt pid; do
         if c=$(readlink "/proc/$pid/ns/$ns") && h=$(readlink "/proc/1/ns/$ns"); then
             if [ "$c" = "$h" ]; then shared=$((shared + 1)); fi
@@ -93,7 +96,8 @@ printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }"' 2>/dev/null) && i
             fi
         done
         running=$(docker inspect --format '{{.State.Running}}' "$2" 2>/dev/null) || running=
-        if [ "$bad" = 0 ] && [ "$running" = true ]; then
+        now=$(proc_identity "$pid") || now=gone
+        if [ "$bad" = 0 ] && [ "$running" = true ] && [ -n "$ident" ] && [ "$now" = "$ident" ]; then
             record "$1" socket_fds "$sockets"
         else
             record "$1" socket_fds ERR
@@ -180,6 +184,23 @@ v_iso() {
     fi
 }
 
+# v_sockbind: both planted binds must be seen, from the host and inside.
+v_sockbind() {
+    base=$(v_iso sockbind)
+    [ "$base" != "$PROBE_FAIL" ] || { printf '%s\n' "$PROBE_FAIL"; return; }
+    b=$(rd_uint sockbind socket_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    v=$(rd_uint sockbind visible_sockets) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$b" -ge 2 ] && [ "$v" -ge 2 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
+}
+
+# v_hostnet: the survivor must be the shared namespace itself.
+v_hostnet() {
+    base=$(v_iso hostnet)
+    [ "$base" != "$PROBE_FAIL" ] || { printf '%s\n' "$PROBE_FAIL"; return; }
+    s=$(rd_uint hostnet shared_ns) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$s" -ge 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi
+}
+
 v_zero() {
     q=$(rd_uint zerobyte inq) || { printf '%s\n' "$PROBE_FAIL"; return; }
     g=$(rd_bool zerobyte fd_received) || { printf '%s\n' "$PROBE_FAIL"; return; }
@@ -191,8 +212,8 @@ v_zero() {
 
 classify() {
     arm clean "$PROBE_NEG" "$(v_iso clean)"
-    arm sockbind "$PROBE_SURV" "$(v_iso sockbind)"
-    arm hostnet "$PROBE_SURV" "$(v_iso hostnet)"
+    arm sockbind "$PROBE_SURV" "$(v_sockbind)"
+    arm hostnet "$PROBE_SURV" "$(v_hostnet)"
     arm zerobyte "$PROBE_SURV" "$(v_zero)"
     arm fault "$PROBE_FAIL" "$(v_iso fault)"
     finish

@@ -89,3 +89,16 @@ sets the container uid for P5 and P7. P2, P3, P4 and P8 use `python3 -I`
 | P6 | QUALIFIED | records the mechanism only |
 | P7 | QUALIFIED, unless the image exposes an extra writable mount (for example `/dev/mqueue`), which PR-1 must then close | PR-1 containment must close the listed extra |
 | P8 | QUALIFIED | channel isolation does not hold; fact 2b fails closed. If the `clean` arm's only survivor is a socket on fd 0–2 of the container's init (container-runtime stdio), record it: PR-1 must decide that case explicitly, not dismiss it |
+
+## Review record
+
+These scripts run as root and against Docker on the runner VM, so they were
+reviewed by a different model family (Codex CLI, `gpt-6.2-sol`, read-only, with
+the files supplied on stdin) before any run.
+
+| Pass | Reviewed | Verdict | Outcome |
+|---|---|---|---|
+| 1 | `7c326416` | REQUEST-CHANGES (11 findings, 3 blockers) | P7 surface/file/word-split gaps; P8 nested socket binds; cleanup by name and unverified; P2 `mmap` kept an fd; P3 lazy arm; P4 and reader validation; runner unit existence; P8 receive validation; test pairing and twin validity. All addressed in `c4c9dfab` |
+| 2 | `c4c9dfab` | REQUEST-CHANGES (4 closed, 6 partial, 1 new major) | escaped mountpoints; container-visible sockets; lost create responses; holder identity; P4 parsing; per-path survivors; arm-specific twins. Addressed in `461e96d1` |
+| 3 | `461e96d1` | REQUEST-CHANGES (5 open, 1 new blocker) | the probes PR, unit identity and propagation were accepted as stated limits; pre-registered names; zombies; multi-line `core_pattern`; planted-path flags; `find \| wc` status. Addressed in `4f3ce389` |
+| 4 | `4f3ce389` | REQUEST-CHANGES (4 of 5 fixed, plus residual false-verdict and cleanup paths) | P8 inspect status, pid revalidation and arm-specific signals; P7 four-reading consistency; P3 unusable tables; volume tracking; mount-read failure vs absence. Addressed in the commit that adds this record |
