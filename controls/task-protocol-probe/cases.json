@@ -1,0 +1,2197 @@
+[
+ {
+  "expect": "holds",
+  "fact": "environment",
+  "name": "environment-readable",
+  "readings": {
+   "cgroup_driver": "systemd",
+   "cgroup_version": "2",
+   "daemon_endpoint_scheme": "unix",
+   "daemon_kernel": "6.8.0-test",
+   "daemon_local": true,
+   "docker_host_scheme": null,
+   "image_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "image_repo_digests": [],
+   "kernel": "6.8.0-test",
+   "security_options": [
+    "name=apparmor",
+    "name=seccomp,profile=builtin"
+   ],
+   "server_version": "27.0.0"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "environment",
+  "name": "environment-image-unreadable",
+  "readings": {
+   "cgroup_driver": "systemd",
+   "cgroup_version": "2",
+   "daemon_endpoint_scheme": "unix",
+   "daemon_kernel": "6.8.0-test",
+   "daemon_local": true,
+   "docker_host_scheme": null,
+   "image_id": null,
+   "image_repo_digests": [],
+   "kernel": "6.8.0-test",
+   "security_options": [
+    "name=apparmor",
+    "name=seccomp,profile=builtin"
+   ],
+   "server_version": "27.0.0"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "environment",
+  "name": "environment-security-options-unreadable",
+  "readings": {
+   "cgroup_driver": "systemd",
+   "cgroup_version": "2",
+   "daemon_endpoint_scheme": "unix",
+   "daemon_kernel": "6.8.0-test",
+   "daemon_local": true,
+   "docker_host_scheme": null,
+   "image_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "image_repo_digests": [],
+   "kernel": "6.8.0-test",
+   "security_options": null,
+   "server_version": "27.0.0"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "environment",
+  "name": "environment-remote-daemon",
+  "readings": {
+   "cgroup_driver": "systemd",
+   "cgroup_version": "2",
+   "daemon_endpoint_scheme": "tcp",
+   "daemon_kernel": "6.8.0-test",
+   "daemon_local": false,
+   "docker_host_scheme": null,
+   "image_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "image_repo_digests": [],
+   "kernel": "6.8.0-test",
+   "security_options": [
+    "name=apparmor",
+    "name=seccomp,profile=builtin"
+   ],
+   "server_version": "27.0.0"
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "ro-mount:file",
+  "name": "file-healthy",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EBUSY",
+     "create-file": "EBUSY",
+     "mkdir": "EBUSY",
+     "rename-away": "EBUSY",
+     "rename-over": "EBUSY",
+     "unlink": "EBUSY"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "ro-mount:dir",
+  "name": "dir-healthy",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "ro-mount:file",
+  "name": "file-replace-succeeded-under-ro",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "ok",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": false,
+    "reply": "m",
+    "reply_after": null
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "ro-mount:dir",
+  "name": "dir-mount-rw",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EACCES",
+     "create-file": "EACCES",
+     "mkdir": "EACCES",
+     "rename-away": "EACCES",
+     "rename-over": "EACCES",
+     "unlink": "EACCES"
+    },
+    "connect": true,
+    "mount": "rw",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "ro-mount:dir",
+  "name": "dir-connect-refused-with-mount",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": false,
+    "mount": "ro",
+    "reconnect": false,
+    "reply": null,
+    "reply_after": null
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "ro-mount:file",
+  "name": "file-reached-another-listener",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "w",
+    "reply_after": "w"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "ro-mount:dir",
+  "name": "dir-endpoint-lost-after-attempts",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": false,
+    "reply": "m",
+    "reply_after": null
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "ro-mount:file",
+  "name": "control-blind-absent-endpoint-seen",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "EROFS",
+      "create-file": "EROFS",
+      "mkdir": "EROFS",
+      "rename-away": "EROFS",
+      "rename-over": "EROFS",
+      "unlink": "EROFS"
+     },
+     "connect": true,
+     "mount": "absent",
+     "reconnect": true,
+     "reply": "m",
+     "reply_after": "m"
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "ro-mount:dir",
+  "name": "control-blind-writable-not-replaceable",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "EACCES",
+      "create-file": "EACCES",
+      "mkdir": "EACCES",
+      "rename-away": "EACCES",
+      "rename-over": "EACCES",
+      "unlink": "EACCES"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": true,
+     "reply": "m",
+     "reply_after": "m"
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "ro-mount:dir",
+  "name": "control-unreadable",
+  "readings": {
+   "control": {
+    "absent": null,
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "ro-mount:file",
+  "name": "measured-unreadable",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": null,
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "ro-mount:dir",
+  "name": "measured-mount-not-in-mountinfo",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "bind-socket": "EROFS",
+     "create-file": "EROFS",
+     "mkdir": "EROFS",
+     "rename-away": "EROFS",
+     "rename-over": "EROFS",
+     "unlink": "EROFS"
+    },
+    "connect": true,
+    "mount": "absent",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "ro-mount:file",
+  "name": "measured-attempts-truncated",
+  "readings": {
+   "control": {
+    "absent": {
+     "attempts": {
+      "bind-socket": "ENOENT",
+      "create-file": "ENOENT",
+      "mkdir": "ENOENT",
+      "rename-away": "ENOENT",
+      "rename-over": "ENOENT",
+      "unlink": "ENOENT"
+     },
+     "connect": false,
+     "mount": "absent",
+     "reconnect": false,
+     "reply": null,
+     "reply_after": null
+    },
+    "writable": {
+     "attempts": {
+      "bind-socket": "ok",
+      "create-file": "ok",
+      "mkdir": "ok",
+      "rename-away": "EXDEV",
+      "rename-over": "EXDEV",
+      "unlink": "ok"
+     },
+     "connect": true,
+     "mount": "rw",
+     "reconnect": false,
+     "reply": "m",
+     "reply_after": null
+    }
+   },
+   "measured": {
+    "attempts": {
+     "unlink": "EBUSY"
+    },
+    "connect": true,
+    "mount": "ro",
+    "reconnect": true,
+    "reply": "m",
+    "reply_after": "m"
+   },
+   "tag": "m"
+  }
+ },
+ {
+  "expect": "dead-end",
+  "fact": "recreate:file",
+  "name": "recreate-file-dead-end",
+  "readings": {
+   "after": {
+    "connect": false,
+    "reply": null
+   },
+   "before": "m",
+   "host_after": "m2"
+  }
+ },
+ {
+  "expect": "reaches-new",
+  "fact": "recreate:dir",
+  "name": "recreate-dir-reaches-new",
+  "readings": {
+   "after": {
+    "connect": true,
+    "reply": "m2"
+   },
+   "before": "m",
+   "host_after": "m2"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "recreate:dir",
+  "name": "recreate-control-new-listener-down",
+  "readings": {
+   "after": {
+    "connect": false,
+    "reply": null
+   },
+   "before": "m",
+   "host_after": null
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "recreate:file",
+  "name": "recreate-control-never-reached-original",
+  "readings": {
+   "after": {
+    "connect": false,
+    "reply": null
+   },
+   "before": null,
+   "host_after": "m2"
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "recreate:dir",
+  "name": "recreate-after-unreadable",
+  "readings": {
+   "after": null,
+   "before": "m",
+   "host_after": "m2"
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "peercred",
+  "name": "peercred-healthy",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "peercred",
+  "name": "peercred-host-peer-with-candidate-uid",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 10001,
+    "ns_inode": 4026531836,
+    "pid": 813,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "peercred",
+  "name": "peercred-sibling-shares-pid-namespace",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "peercred",
+  "name": "peercred-owned-uid-remapped",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 231072,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 231072
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-control-host-peer-identifies",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-owned-pid-invisible",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 0,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-owned-start-unstable",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": false,
+    "uid": 10001
+   },
+   "sibling_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-sibling-missing",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_peer": null,
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "exclusive:file",
+  "name": "exclusive-file-healthy",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol/channel.sock",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a/channel.sock",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol/channel.sock",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b/channel.sock",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a/channel.sock",
+     "b": "/tmp/skillc-tp-x/b/channel.sock"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol/channel.sock",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a/channel.sock",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol/channel.sock",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b/channel.sock",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced.sock",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a/channel.sock",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a/channel.sock",
+     "b": "/tmp/skillc-tp-x/b/channel.sock"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "exclusive:dir",
+  "name": "exclusive-dir-healthy",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "exclusive:dir",
+  "name": "exclusive-control-audit-blind-to-mismount",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "exclusive:dir",
+  "name": "exclusive-control-reach-scan-missed-mismount",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "exclusive:dir",
+  "name": "exclusive-healthy-b-reaches-a",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "exclusive:dir",
+  "name": "exclusive-healthy-audit-refuses-privileged",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": true,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "exclusive:dir",
+  "name": "exclusive-healthy-shared-ancestor",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/srv/x",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "exclusive:dir",
+  "name": "exclusive-healthy-docker-socket",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/var/run/docker.sock",
+        "RW": true,
+        "Source": "/var/run/docker.sock",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "exclusive:dir",
+  "name": "exclusive-healthy-reach-unreadable",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": null,
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "exclusive:dir",
+  "name": "exclusive-healthy-inspect-unreadable",
+  "readings": {
+   "healthy": {
+    "inspect": {
+     "a": null,
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "b"
+     ]
+    }
+   },
+   "mismount": {
+    "inspect": {
+     "a": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     },
+     "b": {
+      "HostConfig": {
+       "IpcMode": "private",
+       "NetworkMode": "none",
+       "PidMode": "",
+       "Privileged": false,
+       "UsernsMode": ""
+      },
+      "Mounts": [
+       {
+        "Destination": "/run/skillc-task-protocol",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/b",
+        "Type": "bind"
+       },
+       {
+        "Destination": "/run/probe-misplaced",
+        "RW": false,
+        "Source": "/tmp/skillc-tp-x/a",
+        "Type": "bind"
+       }
+      ]
+     }
+    },
+    "leases": {
+     "a": "/tmp/skillc-tp-x/a",
+     "b": "/tmp/skillc-tp-x/b"
+    },
+    "reached": {
+     "a": [
+      "a"
+     ],
+     "b": [
+      "a",
+      "b"
+     ]
+    }
+   }
+  }
+ }
+]
