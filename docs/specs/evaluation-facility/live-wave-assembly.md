@@ -42,6 +42,36 @@ manifest; its path, size and digest must match the catalogue entry and the
 actual bounded bytes. Artifact maps bind logical artifact paths to references.
 These expectations must come from the controller, never an arriving listing.
 
+## Startup phase for the task-protocol stream (#620 PR-B)
+
+The accepted task-protocol design ([task-protocol-stream.md](task-protocol-stream.md),
+section 2 and decision 4) adds one producer phase before `freeze_plan`. It does
+not change `freeze_plan`, its held bytes or any existing reader.
+
+1. Before launch, the controller freezes a `task_protocol_lease.Inventory`. It
+   holds the attempt, the declaration digest, every planned slot's role, task,
+   generation, revision and nonce, and the attempt's one clock origin. Nonstarts
+   stay in it. Its digest is the protocol journal's population digest.
+2. The controller launches, then binds each slot to its runtime instance and to
+   the session taken from the trusted startup channel. A missing, ambiguous or
+   conflicting startup identity resolves the slot `unavailable`. It never
+   accepts a replacement identity from an agent.
+3. One startup barrier resolves every planned slot as `bound`, `unstarted` or
+   `unavailable` and freezes them. Its record goes into the protocol journal
+   before any offer.
+4. Only then does the controller call `freeze_plan`. Each role's session is the
+   barrier's bound session, or none for an unstarted or unavailable slot. The
+   role population, tasks, generations, revisions and nonces must equal the
+   inventory's, and the clock is the inventory's origin.
+5. The first task offer follows. After it, neither the plan nor any binding can
+   change. A role whose sandbox is replaced does not rebind: its lease is
+   revoked, and the replacement is a new runtime instance this attempt cannot
+   lease.
+
+A `freeze_plan` call before the barrier, or a plan whose population differs
+from the inventory, means the startup phase was not followed. The protocol
+stream for that wave is then UNKNOWN.
+
 ## Producer inputs and unavailable coverage
 
 | Input | Existing producer and assembler contract |
