@@ -664,6 +664,65 @@ def test_the_encoded_exemption_through_the_REAL_account_listing(
     assert kinds == (["encoded-home-path"] if fires else [])
 
 
+def _fake_account_db(
+    monkeypatch: pytest.MonkeyPatch, *, listed: list[str], resolvable: set[str], current: str,
+) -> None:
+    """#730: drive `pwd` itself. `listed` is what `getpwall()` enumerates;
+    `resolvable` is what `getpwnam()` answers, which on an NSS/SSSD host with
+    enumeration disabled is a SUPERSET of the listing; `current` is the name
+    `getpwuid()` gives the scanning process."""
+    import os
+    import types
+
+    def getpwnam(name: str) -> types.SimpleNamespace:
+        if name in resolvable or name in listed or name == current:
+            return types.SimpleNamespace(pw_name=name)
+        raise KeyError(name)
+
+    def getpwuid(uid: int) -> types.SimpleNamespace:
+        if uid == os.getuid():
+            return types.SimpleNamespace(pw_name=current)
+        raise KeyError(uid)
+
+    monkeypatch.setattr(leak.pwd, "getpwall", lambda: [types.SimpleNamespace(pw_name=n) for n in listed])
+    monkeypatch.setattr(leak.pwd, "getpwnam", getpwnam)
+    monkeypatch.setattr(leak.pwd, "getpwuid", getpwuid)
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+@pytest.mark.parametrize("account", [
+    "user.operator", "user-operator", "user_operator", "user.ops-team", "user--operator", "user._op",
+])
+def test_a_directory_account_the_listing_OMITS_keeps_the_encoded_home_a_finding(
+    account: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#730: NSS/SSSD can disable enumeration while lookup by name still
+    works, so `getpwall()` lists only `root` while `getpwnam()` resolves a real
+    directory account the placeholder prefixes. Its encoded home must fire."""
+    _fake_account_db(monkeypatch, listed=["root"], resolvable={account}, current="root")
+    encoded = account.replace(".", "-").replace("_", "-")
+    kinds = [k for _l, k, _d in leak.scan_text(f"-home-{encoded}-Projects/x.jsonl", frozenset())]
+    assert kinds == ["encoded-home-path"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_the_scanning_accounts_own_encoded_home_is_never_exempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#730: the account running the scan is checked by uid, so even an
+    incomplete listing and an unprobeable path cannot hide its own home."""
+    _fake_account_db(monkeypatch, listed=["root"], resolvable=set(), current="user.x")
+    kinds = [k for _l, k, _d in leak.scan_text("-home-user-Projects/x.jsonl", frozenset())]
+    assert kinds == ["encoded-home-path"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_no_resolvable_collision_keeps_the_placeholder_exempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#730 negative control: with nothing resolvable by name, the redacted
+    placeholder home stays exempt, so the new probe is not a blanket refusal."""
+    _fake_account_db(monkeypatch, listed=["root"], resolvable=set(), current="root")
+    assert list(leak.scan_text('"transcript": "-home-user-Projects/x.jsonl"', frozenset())) == []
+    assert list(leak.scan_text("-home-user-operator-Projects/x.jsonl", frozenset())) == []
+
+
 def test_leak_module_source_carries_no_home_path_of_its_own() -> None:
     """Counter-model review on #729, pass 2: the detector's own docstrings
     must pass the repository's leak gate, which scans skillc/leak.py."""
@@ -688,8 +747,10 @@ def test_a_host_with_an_account_named_user_keeps_its_ENCODED_home_a_finding(monk
 @pytest.fixture
 def _fresh_exemptions() -> object:
     leak.conditional_exemptions.cache_clear()
+    leak._encoded_tail_names_account.cache_clear()
     yield
     leak.conditional_exemptions.cache_clear()
+    leak._encoded_tail_names_account.cache_clear()
 
 
 @pytest.mark.usefixtures("_fresh_exemptions")
