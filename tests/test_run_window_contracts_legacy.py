@@ -52,11 +52,12 @@ CASES: dict[str, tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], 
 
 
 def _approval_outcome(parsed: Any) -> str:
-    """Only for calibration declarations; the execution gate's verdict."""
+    """Only for calibration declarations: the execution gate's verdict, with
+    the exact refusal text, so a change of reason or precedence shows."""
     try:
         calibration.require_approved(parsed, ROOT)
-    except calibration.DeclarationRefused:
-        return 'refused'
+    except calibration.DeclarationRefused as exc:
+        return str(exc)
     return 'ok'
 
 

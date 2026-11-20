@@ -4,7 +4,7 @@
     "digest_binds": true,
     "input_unmutated": true,
     "parse": "ok",
-    "require_approved": "refused"
+    "require_approved": "calibration declaration: execution_environment: VM/install observation is required"
   },
   "credential-window-without-scan": {
     "input_unmutated": true,
@@ -28,6 +28,6 @@
     "digest_binds": true,
     "input_unmutated": true,
     "parse": "ok",
-    "require_approved": "refused"
+    "require_approved": "calibration declaration: execution_environment: VM/install observation is required"
   }
 }
