@@ -42,7 +42,12 @@ census() {
     map_hits=0
     unreadable=0
     scanned=0
-    for p in "$1"/[0-9]*; do
+    # Enumerate pids from ONE checked listing; a failed listing fails the
+    # whole census rather than yielding a partial, clean-looking population.
+    _pids=$(ls -1A -- "$1" 2>/dev/null) || return 1
+    for _name in $_pids; do
+        case $_name in '' | *[!0-9]*) continue ;; esac
+        p="$1/$_name"
         if [ ! -d "$p" ]; then
             # Skip only a pid a fresh listing proves gone; a lookup error is not absence.
             if listed "$1" "${p##*/}"; then unreadable=$((unreadable + 1)); else [ $? -eq 1 ] || unreadable=$((unreadable + 1)); fi

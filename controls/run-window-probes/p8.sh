@@ -218,7 +218,9 @@ v_iso() {
     f=$(rd_uint "$1" socket_fds) || { printf '%s\n' "$PROBE_FAIL"; return; }
     v=$(rd_uint "$1" visible_sockets) || { printf '%s\n' "$PROBE_FAIL"; return; }
     vp=$(rd_uint "$1" visible_planted) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$n" -gt "$s" ] || [ "$pb" -gt "$b" ] || [ "$pb" -gt 2 ] || [ "$vp" -gt "$v" ] || [ "$vp" -gt 2 ]; then
+    # Four namespaces are compared, one of them net.
+    if [ "$s" -gt 4 ] || [ "$n" -gt "$s" ] || [ $((s - n)) -gt 3 ] || [ "$pb" -gt "$b" ] \
+        || [ "$pb" -gt 2 ] || [ "$vp" -gt "$v" ] || [ "$vp" -gt 2 ]; then
         printf '%s\n' "$PROBE_FAIL"; return
     fi
     if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ] && [ "$v" -eq 0 ]; then

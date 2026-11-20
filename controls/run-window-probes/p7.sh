@@ -39,33 +39,54 @@ INVENTORY='
 set -euf
 mi=/proc/self/mountinfo
 [ -r "$mi" ] || exit 3
-# Exit 4 means exactly "a declared surface is missing or not writable", so the
-# fault arm can prove it reached this check rather than failing elsewhere.
+# Validate the WHOLE table first: every row needs the "-" separator after at
+# least six fields and three fields after it. Prints "FSTYPE OPTIONS MOUNTPOINT".
+mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 3) bad = 1; else print \$(s + 1), \$6, \$5; n++ } END { exit (bad || n < 1) ? 1 : 0 }" "$mi") || exit 3
+case $mounts in *\\*) exit 3 ;; esac
+# Exit 4 with "MISSING-SURFACE <path>" means exactly that a declared surface is
+# not mounted, after the table read above succeeded. Any other failure is 3.
 for s in $DECLARED; do
-    r=$(awk -v m="$s" "\$5 == m { f = 1 } END { if (NR < 1) exit 1; print f ? \"FOUND\" : \"ABSENT\" }" "$mi") || exit 3
-    case $r in
-        FOUND) ;;
-        ABSENT) printf "MISSING-SURFACE\n"; exit 4 ;;
-        *) exit 3 ;;
-    esac
+    found=0
+    while IFS=" " read -r fstype opts mp; do
+        if [ "$mp" = "$s" ]; then found=1; fi
+    done <<EOT
+$mounts
+EOT
+    if [ "$found" != 1 ]; then printf "MISSING-SURFACE %s\n" "$s"; exit 4; fi
     w="$s/.skillc-dev-probe-write"
     printf "x\n" > "$w" || exit 3
     rm "$w" || exit 3
 done
-mounts=$(awk "NF == 0 { next } { s = 0; for (i = 7; i <= NF; i++) if (\$i == \"-\") { s = i; break }; if (!s || NF < s + 3) bad = 1; else print \$(s + 1), \$5 } END { exit bad ? 1 : 0 }" "$mi") || exit 3
-[ -n "$mounts" ] || exit 3
-case $mounts in *\\*) exit 3 ;; esac
+# Writable = access(2) says so, OR (on an rw mount) the mode bits say so for
+# this uid or one of its groups. The union means an access(2) error cannot
+# hide a path that the bits show writable. find(1) fails on unreadable paths.
+uid=$(id -u) || exit 3
+gids=$(id -G) || exit 3
+set -- \( -writable -o -perm -0002 -o \( -uid "$uid" -perm -0200 \)
+for g in $gids; do set -- "$@" -o \( -gid "$g" -perm -0020 \); done
+set -- "$@" \)
 dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
-printf "%s\n" "$mounts" | while IFS=" " read -r fstype mp; do
+while IFS=" " read -r fstype opts mp; do
     case $fstype in proc | sysfs | cgroup | cgroup2) continue ;; esac
+    case ,$opts, in *,ro,*) ro=1 ;; *) ro=0 ;; esac
     if [ -d "$mp" ]; then
-        find "$mp" -xdev -type d -writable -print >>"$dirs/dirs" || { : >"$dirs/failed"; continue; }
+        if [ "$ro" = 1 ]; then
+            find "$mp" -xdev -type d -writable -print >>"$dirs/dirs" || : >"$dirs/failed"
+        else
+            find "$mp" -xdev -type d "$@" -print >>"$dirs/dirs" || : >"$dirs/failed"
+        fi
     elif [ -e "$mp" ] || [ -L "$mp" ]; then
-        if [ -w "$mp" ]; then printf "%s\n" "$mp" >>"$dirs/files"; fi
+        if [ "$ro" = 1 ]; then
+            find "$mp" -maxdepth 0 -writable -print >>"$dirs/files" || : >"$dirs/failed"
+        else
+            find "$mp" -maxdepth 0 "$@" -print >>"$dirs/files" || : >"$dirs/failed"
+        fi
     else
         : >"$dirs/failed"
     fi
-done
+done <<EOT
+$mounts
+EOT
 [ ! -e "$dirs/failed" ] || exit 3
 outside() {
     c=0
@@ -127,7 +148,9 @@ observe() {
         if [ "$_arm" = fault ]; then
             # The fault arm must fail exactly at the declared-surface check:
             # exit 4 with the MISSING-SURFACE token, after a good table read.
-            if [ "$_rc" -ne 4 ] || [ "$out" != MISSING-SURFACE ]; then probe_die 'fault-arm-not-exercised'; fi
+            if [ "$_rc" -ne 4 ] || [ "$out" != "MISSING-SURFACE /probe-home" ]; then
+                probe_die 'fault-arm-not-exercised'
+            fi
             set --
         elif [ "$_rc" -eq 0 ]; then
             # shellcheck disable=SC2086  # four space-separated numbers

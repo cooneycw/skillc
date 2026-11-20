@@ -49,7 +49,12 @@ sb_listed() {
     listed=0
     unreadable=0
     scanned=0
-    for p in "$1"/[0-9]*; do
+    # Enumerate pids from ONE checked listing; a failed listing fails the
+    # whole census rather than yielding a partial, clean-looking population.
+    _pids=$(ls -1A -- "$1" 2>/dev/null) || return 1
+    for _name in $_pids; do
+        case $_name in '' | *[!0-9]*) continue ;; esac
+        p="$1/$_name"
         if [ ! -d "$p" ]; then
             if listed "$1" "${p##*/}"; then unreadable=$((unreadable + 1)); else [ $? -eq 1 ] || unreadable=$((unreadable + 1)); fi
             continue
@@ -165,7 +170,7 @@ v_lazy() {
     base=$(v_table lazy)
     r=$(rd_bool lazy fd_reads) || { printf '%s\n' "$PROBE_FAIL"; return; }
     case $base in
-        "$PROBE_NEG") if [ "$r" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_NEG"; fi ;;
+        "$PROBE_NEG") if [ "$r" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_FAIL"; fi ;;
         *) printf '%s\n' "$PROBE_FAIL" ;;
     esac
 }
