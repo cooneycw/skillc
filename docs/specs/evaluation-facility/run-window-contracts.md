@@ -1,10 +1,10 @@
 # Run-window contracts: removed-root absence and in-memory reference retention (Refs #797, parent #630, Refs #624)
 
-**Status: DRAFT DESIGN, revision 6, not approved.** This note is the design for
+**Status: DRAFT DESIGN, revision 7, not approved.** This note is the design for
 the two real-window blockers recorded with the slice 3 design approval on #630
 (2026-11-09): "a trusted absence-evidence contract for deleted roots" and "a
 lawful in-memory reference-retention bridge for the scan". They are tracked as
-#797. Revisions 2 to 6 take in reviews by a different model family, recorded in
+#797. Revisions 2 to 7 take in reviews by a different model family, recorded in
 Appendix R.
 
 This note carries no code and authorizes nothing. It does not authorize a
@@ -177,14 +177,16 @@ below is new.
 
 1. Stop dispatch. Take slice 3's pre-stop inventory and steward facts while the
    stewards are still accessible.
-2. Stop the role writers. The owner logs out provider-side, and that yields
-   the logout receipt. There are two qualified routes, chosen at admission
-   (P9): (a) the client's own logout inside the login container, if it works
-   with refresh still blocked, using only a separately admitted revocation
-   endpoint; or (b) an account-level session revocation by the owner outside
-   the VM, recorded through the slice 2 `credential-logout` collector after
-   step 3. If neither route is qualified, admission refuses. The owner then
-   leaves the login container.
+2. Stop the role writers. The owner then revokes provider-side, **before
+   teardown**, by one of two routes. The route is declared at admission.
+   (b) is the default and is admissible with no prior qualification: an
+   account-level session revocation by the owner, outside the VM. (a) is the
+   client's own logout inside the login container, using only a separately
+   admitted revocation endpoint while refresh stays blocked. (a) is
+   admissible only after P9 has qualified it in an earlier approved window.
+   For (b), the receipt is collected through the slice 2 `credential-logout`
+   collector after step 3 and before acceptance. For (a), it is collected
+   here. The owner then leaves the login container.
 3. **Teardown boundary.** The holder domain is every process in a role
    container or in the login container. The controller confirms that the
    domain is empty in three ways: no `/proc` entry in any of those containers'
@@ -289,8 +291,9 @@ these hold:
   COMPLETE and CLEAN, bound to this window's capture and held roots;
 - every declared removed surface is `ABSENT`;
 - the Contract B capture is `SEALED` and no latch is set;
-- a window-bound provider-side **logout receipt** exists, obtained in step 2
-  after the last turn and before teardown (Q5);
+- a window-bound provider-side **logout receipt** exists. Its revocation
+  must be dated after the last turn and before teardown (2.2 step 2), and the
+  receipt itself must be collected before acceptance (Q5);
 - the 1.2 preconditions held at admission and again at close;
 - the evidence set matches the declared surface set exactly, with none
   missing and none extra, and every item matches the context.
@@ -430,8 +433,9 @@ Dispatch refuses until the capture is `SEALED`.
      seen. It **drains** the watch at the teardown boundary (2.2 step 3),
      before its own deletions. Each event triggers an immediate byte
      comparison against the seal. The controller's own restore-and-rearm
-     writes are **atomic**: written in a controller-owned staging tmpfs, then
-     `rename`d into place. A comparison therefore never sees a half-written
+     writes are **atomic**: written to a controller-named staging file **on
+     the same mount** as the destination (the role's credential tmpfs), then
+     `rename`d into place. A same-mount rename never fails with `EXDEV`. A comparison therefore never sees a half-written
      file. Sealed bytes compare equal and do not latch; any difference does
      latch. A queue overflow (`IN_Q_OVERFLOW`), or a
      watch removed before the drain, latches as a gap. inotify does not see
@@ -443,14 +447,15 @@ Dispatch refuses until the capture is `SEALED`.
      reason to refresh.
 
    **Refresh is prevented, not only detected.** Precondition 1.2.4 blocks the
-   token endpoint from seal through the confirmed teardown boundary, so no
+   token endpoint from login completion (before the capture read) through the
+   confirmed teardown boundary, so no
    new value can be minted by any role or the login container, even by a
    writer still alive after dispatch stops. Anything
    that would have refreshed fails, and the steward's stop-on-refresh holds
    the window. This closes the route of a value minted, copied into a
    retained output and overwritten between checks, which detection alone
    could not close. **Acceptance also requires the owner's provider-side
-   logout receipt**, obtained in 2.2 step 2 and part of the 2.3 predicate,
+   logout receipt**, revoked in 2.2 step 2 and part of the 2.3 predicate,
    before the quarantined arrival is accepted (2.2 step 10). Revocation is
    therefore always attempted before acceptance. Whether the native
    client's logout revokes server-side is a fact for the first approved
@@ -759,5 +764,18 @@ fixes:
 | 29 | The logout receipt might be unobtainable under the refresh block | **Accepted.** Two qualified logout routes, chosen at admission (P9); admission refuses if neither is qualified |
 | 26 | PARTIAL: a non-atomic restore could latch a clean window (implementation detail) | **Accepted.** Atomic staged rename; B7c covers the interleaving |
 
-Revision 6 has not been re-reviewed. Pass 6's SOUND-WITH-FIXES verdict
-applies to revision 5 plus exactly these four fixes.
+Revision 6 was re-reviewed (pass 7, below).
+
+**Pass 7** was a confirm-only pass on revision 6. **Verdict:
+SOUND-WITH-FIXES.** No new route from UNKNOWN to CLEAN or ABSENT. Fixes 21
+and 28 were judged APPLIED. Fixes 29 and 26 were judged NOT APPLIED. Revision
+7 applies only these minimum fixes:
+
+| # | Pass 7 finding | Revision 7 disposition |
+|---|---|---|
+| 29 | The logout route was "chosen at admission" by P9, which runs only inside a window, and the external receipt's timing contradicted 2.3 | **Applied.** Route (b) is the default and needs no prior qualification; route (a) is admissible only after P9 qualifies it in an earlier window. Revocation happens before teardown, and the receipt is collected before acceptance (2.2 step 2, 2.3) |
+| 26 | Staging the restore on another tmpfs breaks the rename (`EXDEV`) | **Applied.** The staging file is on the destination mount; B7c is retained |
+| 28 | The 3.2.6 "from seal" wording did not match 1.2.4 | **Applied.** Now "from login completion (before the capture read)" |
+
+Revision 7 has not been re-reviewed. The orchestrator ruled that no eighth
+pass is required unless pass 7 had said UNSOUND.
