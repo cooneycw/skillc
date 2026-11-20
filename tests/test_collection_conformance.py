@@ -2124,7 +2124,7 @@ def test_task_surface_refuses_unsupported_entries(tmp_path: Path, damage: str) -
 
 def test_task_surface_never_delivers_pycache(tmp_path: Path) -> None:
     """#267 review finding: the unified walk must keep pruning `__pycache__`
-    the way `_fixture_surface` always did. A host-local test run can leave
+    the way the retired src-only walk always did. A host-local test run can leave
     stray, gitignored bytecode under a fixture's own tree; delivering it
     would widen the surface past the declared task with no refusal to catch
     it (bytecode is a regular file, so the unsupported-file-type check does

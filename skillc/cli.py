@@ -1371,13 +1371,9 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
     try:
         demo.print_paste_back(demo.redact_known_host_paths("\n".join(lines), base=run_root))
     except demo.PasteBackRefused as exc:
-        # Categories only: each finding reads "<line>: <category>: <value>",
-        # and the value is exactly what must not be shown (#26 re-review).
-        categories = sorted({
-            parts[1] for parts in (line.split(": ", 2) for line in str(exc).splitlines()[1:]) if len(parts) == 3
-        })
+        # Categories only (#26 re-review); the exception carries no value (#555).
         print(f"skillc: the selection-probe output failed its own leak check and was NOT printed "
-              f"({', '.join(categories) or 'unclassified'}); the verdict was {'ok' if ok else 'NOT ok'}",
+              f"({', '.join(exc.categories) or 'unclassified'}); the verdict was {'ok' if ok else 'NOT ok'}",
               file=sys.stderr)
         return 2
     return 0 if ok else 1
@@ -3092,13 +3088,55 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     # run against the same --base never finds this run's staging behind it.
     import shutil
 
+    # `receipt.json` is published LAST, and only once `skills/` is persisted
+    # (#555): a receipt describing a tree that was never written would be a
+    # false statement about `out/`. A failure removes only what THIS call
+    # created - never a sweep of `out/`, which another writer that also
+    # passed the emptiness pre-check may share (counter-model review) - and
+    # the receipt is published by hard link, which refuses, never replaces,
+    # one that is already there.
+    created_out = not out.exists()
+    skills_dir = out / "skills"
+    created_skills = False
+    partial: Path | None = None
     try:
         payload = degrade.receipt(degraded, pinned_revision=subject.revision)
         out.mkdir(parents=True, exist_ok=True)
-        (out / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
-        skills_dir = degrade.persist_skills(degraded, out)
+        try:
+            # Exclusive: `skills/` is this call's only once this mkdir made it
+            # (counter-model review pass 3 - copytree reads its source before
+            # creating the target, so its failure never proved ownership).
+            skills_dir.mkdir()
+        except FileExistsError:
+            print(f"skillc: {skills_dir} appeared while this run built; refusing to write into it", file=sys.stderr)
+            return 2
+        created_skills = True
+        degrade.persist_skills(degraded, out, claimed=True)
+        fd, name = tempfile.mkstemp(prefix=".receipt.json.partial-", dir=out)
+        partial = Path(name)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, indent=1) + "\n")
+        umask = os.umask(0)
+        os.umask(umask)
+        partial.chmod(0o666 & ~umask)  # what `write_text` used to create, not mkstemp's 0600
+        try:
+            os.link(partial, out / "receipt.json")
+        except FileExistsError:
+            print(f"skillc: {out / 'receipt.json'} appeared while this run built; refusing to replace it",
+                  file=sys.stderr)
+            return 2
+        created_skills = False  # published: no longer this call's to remove
     finally:
-        shutil.rmtree(degraded.staging, ignore_errors=True)
+        if partial is not None:
+            partial.unlink(missing_ok=True)
+        if created_skills:
+            shutil.rmtree(skills_dir, ignore_errors=True)
+        shutil.rmtree(degraded.staging, ignore_errors=True)  # may live under `out` (--base == --out)
+        if created_out:
+            try:
+                out.rmdir()  # only if empty: whatever else is there is not ours
+            except OSError:
+                pass
 
     locations = mutation.locations() if mutation is not None else ()
     print(f"subject       {degraded.subject_name}")

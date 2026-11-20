@@ -107,9 +107,6 @@ from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALU
 from .fixture_attempt import AttemptFixture
 from .runtime_supply import RuntimeSupply
 
-#: `_fixture_surface`'s own src-only convention (#267's deprecated shim below).
-_FIXTURE_SRC_DIRNAME = "src"
-
 #: The AGENT container's network policy (#442, reversing the owner's #11 ruling
 #: of open egress for agent containers). A hosted-model client must reach its
 #: provider - `DockerBackend`'s own `network="none"` made every real attempt
@@ -576,8 +573,8 @@ def task_surface(fixture_dir: Path) -> list[tuple[str, bytes, bool]]:
         for dirpath, dirnames, filenames in os.walk(fixture_dir, onerror=walk_error, followlinks=False):
             # Never delivered (issue #267 review): a host-local test run can
             # leave stray bytecode under a fixture's own src tree even though
-            # it is gitignored - `_fixture_surface` always pruned it, and the
-            # unified walk must keep doing so rather than silently widening
+            # it is gitignored - the retired src-only walk always pruned it
+            # (#267, removed in #555), and this walk keeps doing so rather than silently widening
             # what a fixture delivers.
             dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
             for name in sorted([*dirnames, *filenames]):
@@ -603,27 +600,6 @@ def surface_mapping(files: list[tuple[str, bytes, bool]]) -> dict[str, object]:
     """Adapt declared files to the backend's bytes and executable metadata."""
     surface: dict[str, object] = {rel: data for rel, data, _ in files}
     surface[verify.SURFACE_EXECUTABLE_KEY] = [rel for rel, _, executable in files if executable]
-    return surface
-
-
-def _fixture_surface(fixture_dir: Path) -> dict[str, bytes]:
-    """DEPRECATED (#267): `fixture_dir/src/**` only, keyed by its path
-    relative to `fixture_dir`. `task_surface`/`surface_mapping` replace this
-    everywhere else in the codebase; this copy exists ONLY because
-    `uptake_study.run_study` - the runner for the live #237 study - must stay
-    byte-identical while that study is in progress. Byte-for-byte the same
-    walk `_fixture_surface` always was, never derived from `task_surface`, so
-    nothing about #267 can change what this returns. Do not add a new
-    caller - migrate `uptake_study.py` to `surface_mapping(task_surface(...))`
-    once #237 is done (tracked on skillc#20), then delete this."""
-    src_dir = fixture_dir / _FIXTURE_SRC_DIRNAME
-    surface: dict[str, bytes] = {}
-    for dirpath, dirnames, filenames in os.walk(src_dir, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            rel = path.relative_to(fixture_dir).as_posix()
-            surface[rel] = path.read_bytes()
     return surface
 
 

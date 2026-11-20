@@ -860,18 +860,31 @@ def build_paste_back(
 
 class PasteBackRefused(Exception):
     """The assembled paste-back block failed its own leak-check and was
-    never printed."""
+    never printed.
+
+    The message names finding CATEGORIES and a count, never a finding's
+    value (#555): each `leak_check_text` finding reads
+    `<line>: <category>: <value>`, and the value is exactly what was withheld.
+    Every CLI site prints `str(exc)`, so the message itself must be safe to
+    print - a per-site strip only ever got applied to some of them."""
+
+    def __init__(self, categories: Sequence[str], count: int) -> None:
+        self.categories: tuple[str, ...] = tuple(sorted(set(categories)))
+        self.count = count
+        super().__init__(
+            "paste-back block failed its own leak-check and was NOT printed "
+            f"({count} finding(s): {', '.join(self.categories) or 'unclassified'})"
+        )
 
 
 def print_paste_back(text: str) -> None:
     """Leak-check `text`, refuse (raise, print nothing) if anything is
     found, otherwise print it verbatim - the operator redacts nothing
     because nothing reaches them that this check did not already clear."""
-    findings = leak_check_text(text)
+    denylist = leak.load_denylist()
+    findings = list(leak.scan_text(text, denylist))
     if findings:
-        raise PasteBackRefused(
-            "paste-back block failed its own leak-check and was NOT printed:\n" + "\n".join(findings)
-        )
+        raise PasteBackRefused([kind for _, kind, _ in findings], len(findings))
     print(text)
 
 

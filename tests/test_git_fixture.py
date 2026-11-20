@@ -254,6 +254,33 @@ def test_root_and_date_boundaries(tmp_path: Path) -> None:
     assert g.build(declaration(), empty).repo.is_dir()
 
 
+@pytest.mark.parametrize('stash', [
+    {'staged': {}, 'unstaged': {}},
+    # Non-empty, but identical to HEAD: `git stash push` saves nothing either.
+    {'staged': {}, 'unstaged': {'tracked': file('second')}},
+])
+def test_a_stash_that_saves_nothing_is_refused_cleanly(tmp_path: Path, stash: dict[str, Any]) -> None:
+    """#555: `git stash push` with nothing to save exits 0 and creates no
+    refs/stash, and build() then crashed with a raw CalledProcessError
+    reading it. Negative control: the root-refusal test above builds the ordinary
+    non-empty stash declaration successfully."""
+    bad = declaration()
+    bad['stash'] = stash
+    with pytest.raises(g.Refused, match='empty-stash'):
+        g.build(bad, tmp_path)
+
+
+def test_a_declared_refs_stash_is_refused(tmp_path: Path) -> None:
+    """Counter-model review of #555: `refs={'refs/stash': 0}` with an empty
+    stash created refs/stash before the push, so the empty-stash check saw a
+    stash that was really an ordinary commit."""
+    bad = declaration()
+    bad['stash'] = {'staged': {}, 'unstaged': {}}
+    bad['refs'] = {'refs/stash': 0}
+    with pytest.raises(g.Refused, match='ref-name'):
+        g.build(bad, tmp_path)
+
+
 def test_pointer_shape_and_repository_shape(setup: tuple[g.BuildResult, trial.Experiment, str]) -> None:
     result = setup[0]
     pointer = result.worktree / '.git'

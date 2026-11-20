@@ -180,8 +180,9 @@ def _rewrite_manifests(
     this point is refused exactly as before. Only a line whose listed path
     resolves to an overridden file changes; its layout (`*` marker, spacing,
     line ending) is kept. A skill whose manifest the operator edited
-    explicitly is left alone: the operator owns it. Deletions are not
-    re-pinned; a deleted listed file is still refused at preparation."""
+    explicitly is left alone: the operator owns it. Deletions are never
+    re-pinned: `_refuse_listed_deletions` refuses a deleted listed file
+    before this runs (#555)."""
     manifest_rel = acquire_subject.checksum_manifest
     if not manifest_rel:
         return ()
@@ -217,6 +218,47 @@ def _rewrite_manifests(
     return tuple(rewrites)
 
 
+def _listed_paths(manifest: Path) -> set[Path]:
+    """Every path `manifest` lists, resolved - the same line grammar
+    `materialize._verify_checksums` reads; malformed lines are its to refuse."""
+    listed: set[Path] = set()
+    for line in manifest.read_bytes().decode("utf-8").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2 or line.startswith("#") or not re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+            continue
+        listed.add((manifest.parent / parts[1].strip().lstrip("*")).resolve())
+    return listed
+
+
+def _refuse_listed_deletions(
+    mutated_dir: Path, acquire_subject: materialize.Subject, skill_dirs: dict[str, str], mutation: Mutation,
+) -> None:
+    """Refuse a `--remove-file` of a file the skill's declared checksum
+    manifest lists (#555), BEFORE anything is applied. Accepted, the tree
+    could never prepare - `materialize._verify_checksums` refuses "checksum
+    lists a missing file" - but only after degrade-subject had built and
+    receipted it: the late-refusal shape #198 fixed for overrides. Dropping
+    the line instead could leave a manifest listing nothing, which
+    preparation also refuses. An operator who edits that skill's manifest
+    explicitly owns it, and the deletion is theirs to reconcile."""
+    manifest_rel = acquire_subject.checksum_manifest
+    if not manifest_rel:
+        return
+    owned = {(e.skill, posixpath.normpath(e.path)) for e in mutation.edits}
+    for edit in mutation.edits:
+        if edit.content is not None or (edit.skill, posixpath.normpath(manifest_rel)) in owned:
+            continue
+        if edit.skill not in skill_dirs:
+            continue  # `_apply_mutation` names the absent skill
+        skill_dir = mutated_dir / skill_dirs[edit.skill]
+        manifest = skill_dir / manifest_rel
+        if manifest.is_file() and (skill_dir / edit.path).resolve() in _listed_paths(manifest):
+            raise DegradationRefused(
+                f"mutation removes {edit.skill}/{edit.path}, which {edit.skill}/{manifest_rel} lists: the "
+                "degraded tree could never prepare; also edit the manifest, or override the file instead"
+            )
+
+
 def _apply_mutation(
     mutated_dir: Path, acquire_subject: materialize.Subject, base_source: materialize.Source, mutation: Mutation,
 ) -> tuple[str, ...]:
@@ -226,7 +268,8 @@ def _apply_mutation(
     is empty; a removal or edit names a skill absent from the collection (or
     excluded by `subject.select` - `inventory()` already scopes to it); a
     skill is both wholly removed and separately edited; an edit's `path`
-    escapes its skill's own directory, is absent, or is a directory; or an
+    escapes its skill's own directory, is absent, or is a directory; a
+    removal deletes a file the skill's checksum manifest lists (#555); or an
     override's content is byte-identical to what is already there (a no-op
     edit an operator almost certainly did not intend)."""
     if not mutation.remove_skills and not mutation.edits:
@@ -238,6 +281,7 @@ def _apply_mutation(
         )
     entries = materialize.inventory(acquire_subject, base_source)
     names = {e.name: e.directory for e in entries}
+    _refuse_listed_deletions(mutated_dir, acquire_subject, names, mutation)
 
     for skill in mutation.remove_skills:
         if skill not in names:
@@ -372,15 +416,20 @@ def receipt(degraded: DegradedSource, *, pinned_revision: str) -> dict[str, obje
     }
 
 
-def persist_skills(degraded: DegradedSource, out: Path) -> Path:
+def persist_skills(degraded: DegradedSource, out: Path, *, claimed: bool = False) -> Path:
     """Copy the degraded surface tree to `out/skills` - the tree a runner
     will later install. Before this, `degrade-subject --out DIR` wrote only
     `receipt.json`: the degraded tree itself lived under the disposable
     staging root and was discarded with it, so the receipt described a tree
     nothing kept and nothing could ever run (orchestrator review of #155).
+    `claimed=True` copies into an EMPTY `out/skills` the caller already
+    created exclusively (#555), so the caller knows that directory is its own
+    whatever the copy does; it is refused if anything is already in it.
     Returns the copied directory."""
     target = out / "skills"
-    shutil.copytree(degraded.source.surface_dir, target)
+    if claimed and any(target.iterdir()):
+        raise DegradationRefused(f"{target} was claimed empty but is not")
+    shutil.copytree(degraded.source.surface_dir, target, dirs_exist_ok=claimed)
     return target
 
 
