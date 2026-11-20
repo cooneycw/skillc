@@ -977,6 +977,16 @@ def acl_unavailable(reason: str, env: Mapping[str, str] | None = None) -> NoRetu
     pytest.skip(reason)
 
 
+def require_root_drop(root: bool = ROOT_RUN, find: str | None = "default",
+                      env: Mapping[str, str] | None = None) -> None:
+    """The ACL cases' root gate, routed through acl_unavailable: under CI a
+    missing root (or find) fails, so a green CI still proves they ran."""
+    if find == "default":
+        find = shutil.which("find")
+    if not root or find is None:
+        acl_unavailable("needs root (to build root-owned trees and drop to nobody) and find", env)
+
+
 def require_setfacl() -> None:
     if shutil.which("setfacl") is None:
         acl_unavailable("setfacl is required")
@@ -1004,10 +1014,31 @@ def test_acl_gate_fails_under_ci_and_skips_elsewhere(env: dict[str, str], outcom
     assert got == outcome
 
 
-@needs_root_drop
+@pytest.mark.parametrize(("root", "find", "env", "outcome"), [
+    (False, "/usr/bin/find", {"CI": "woodpecker"}, "failed"),
+    (True, None, {"CI": "woodpecker"}, "failed"),
+    (False, "/usr/bin/find", {}, "skipped"),
+    (True, "/usr/bin/find", {"CI": "woodpecker"}, "returned"),
+    (True, "/usr/bin/find", {}, "returned"),
+])
+def test_acl_root_gate_fails_under_ci_and_skips_elsewhere(root: bool, find: str | None,
+                                                          env: dict[str, str],
+                                                          outcome: str) -> None:
+    try:
+        require_root_drop(root, find, env)
+    except pytest.fail.Exception:
+        got = "failed"
+    except pytest.skip.Exception:
+        got = "skipped"
+    else:
+        got = "returned"
+    assert got == outcome
+
+
 def test_scan_fails_on_a_denial_the_mode_bits_do_not_explain() -> None:
     """The mode bits grant nobody search, but a named-user ACL entry denies
     it: access(2) and the mode disagree, so the scan must fail, not prune."""
+    require_root_drop()
     require_setfacl()
     tree = short_dir("sa-")
     work = short_dir("so-")
@@ -1043,8 +1074,8 @@ def acl_scan(lib: Path) -> str:
     return run.stdout.strip()
 
 
-@needs_root_drop
 def test_scan_fails_on_a_pruned_directory_that_carries_an_acl(tmp_path: Path) -> None:
+    require_root_drop()
     require_setfacl()
     old = 'scan_recheck "$_pr.new" "$_u" "$_g" || return 1'
     source = LIB.read_text()
