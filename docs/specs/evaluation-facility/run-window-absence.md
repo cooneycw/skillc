@@ -167,95 +167,118 @@ code.
 
 ## A-2: teardown boundary, facts 2, 2b and 3 (`run_window_teardown`)
 
-**Launch-identity capture (`capture_launch_identity`)** is read-only and
-runs once per role or login container, after `prepare()` has started it. It
-records:
-- from `docker inspect`, through the handle's own environment (the #85 rule):
-  the full container ID, the init pid and its start time;
-- the cgroup paths;
-- the PID, mount, network and IPC namespace links, and PID 1's for
-  comparison;
-- the bind sources, validated from the inspect JSON;
-- the socket fds in init.
+**Preconditions.** The controller establishes these and this module does
+not re-prove them:
+- **The controller runs as root in the initial PID namespace, with an
+  unfiltered procfs.** `procfs_ok` checks the visible parts: a nonempty
+  population, the same PID namespace as pid 1, and no `hidepid` or `subset`
+  option on `/proc`. Every fact refuses without it.
+- **The holder domain is empty,** so the only processes left are the declared
+  host workload. A descriptor transfer between surviving host processes during
+  a scan is outside that workload's behaviour. Fact 2's second pass narrows
+  that race; it cannot exclude it.
 
-The start time is re-read last, so a pid reused mid-capture makes the identity
-unusable. `docker_backend` is unchanged: no argv builder is touched, and the
-Docker reader permits only `inspect` and `ps`. A test asserts `compose_run_argv`
-is byte-identical with the capture in play.
+**Launch-identity capture (`capture_launch_identity`)** is read-only. It runs
+once per role or login container, after `prepare()` starts it and before any
+dispatch. It binds the inspected full container ID to a live task in **this
+host's** procfs. The task's cgroup must name the ID; its start time is read
+before and after the other reads; and Docker must report the same ID and pid
+again at the end. A pid reused before the first read, or a pid from another
+daemon's host, therefore makes the identity unusable. It records:
+- the cgroup entries as `(hierarchy, controllers, path)`;
+- validated namespace links, and pid 1's for comparison;
+- sockets counted at each bind's **destination** in the task's own root,
+  without following any link, rather than at the host source path, which
+  could have been replaced;
+- the init socket fds, read twice and compared.
+
+`docker_backend` is unchanged, and the Docker reader permits only `inspect`
+and `ps`.
 
 **Teardown boundary (`confirm_teardown`).** CONFIRMED_NEGATIVE only when all
 of these hold:
-- Docker answered for every captured ID and listed none;
-- no process sits at or under a captured cgroup path;
-- no process shares a captured namespace.
+- Docker answered with an empty list for every captured ID; any other output
+  is no answer;
+- no **task** (every `/proc/<pid>/task/<tid>`) sits at or under a captured
+  cgroup path in the same hierarchy;
+- no task shares a captured namespace.
 
-A process that cannot be read is skipped only if a fresh listing omits it.
-Any other unreadable observation, an unanswered Docker, or an unusable or
-mixed-generation identity set is OBSERVATION_FAILED. A zombie is still listed
-and read; its unreadable namespace links fail the boundary, the fail-safe
-reading. A container that shared a host namespace keeps the boundary from ever
-reading negative, which is also fail-safe.
+An empty or failed population, a malformed record, a reader exception, or an
+unusable or mixed-generation identity set (compared by identity, never
+equality or hashing) is OBSERVATION_FAILED. A task that cannot be read is
+skipped only if a fresh listing omits its process. A zombie is still listed
+and read; if it cannot be read the boundary fails, the fail-safe reading.
 
 **Fact 2 (`fact_no_holder`)** is corroboration and runs while the census
-entries are held. Over every surviving pid except the controller's own, it
-checks each `/proc/<pid>/fd` and `map_files` entry for the census entries **and
-root**. Including the root catches a process that holds a lazily detached
-tmpfs through its root directory alone. Census descriptors are `O_CLOEXEC`, so
-a child the controller spawns cannot inherit one. A child that somehow holds
-one counts as a holder; the exclusion is the controller's pid only, never its
-children.
+entries are held. It checks:
+- every surviving **task's** fd table, since a task can own its own after
+  `unshare(CLONE_FILES)`;
+- every process's `map_files`.
+
+The targets are the census entries **and the census root**, which catches a
+holder that keeps a lazily detached tmpfs through its root alone. Each task's
+start time is pinned across its reads, and a replaced task is FAILED. Two
+passes must agree. The controller's own tasks are excluded, never its
+children. Census descriptors are `O_CLOEXEC` explicitly.
 
 **Fact 2b (`fact_channel_isolated`)** judges the LAUNCH captures and returns
-a `ScopedObservation` with `scope == 'launch-only'`. To be negative, every
-holder must have had all four namespaces different from PID 1's, no bind
-source that is or contains a socket, and no socket fd in init.
+a `ScopedObservation` with `scope == 'launch-only'`.
 
 **Rule for A-3 (binding):** a `launch-only` 2b is **not sufficient for
-ABSENT**. The design's precondition 1.2.5 is a lifetime invariant, which
-needs PR-1's fd sampler (A23). Until a lifetime-scoped 2b exists, A-3's
-composition must keep every removed surface UNKNOWN whatever the other facts
-say. `tests/test_run_window_teardown.py::test_a3_composition_refuses_a_launch_only_isolation_for_absent`
-is a strict xfail that turns red when A-3 lands, so this rule cannot be
-silently skipped.
+ABSENT**. The design's precondition 1.2.5 is a lifetime invariant, which needs
+PR-1's fd sampler (A23). Until a lifetime-scoped 2b exists, A-3's composition
+must keep every removed surface UNKNOWN. Two further rules hold whatever
+fact 2 says:
+- a non-empty domain vetoes ABSENT;
+- a SURVIVOR from fact 2 vetoes ABSENT.
+
+`tests/test_run_window_teardown.py::test_a3_composition_refuses_a_launch_only_isolation_for_absent`
+is skipped only while A-3's module does not exist. From the moment it exists
+the test runs, and it must be adapted to A-3's entry point, never deleted.
 
 **Fact 3 (`fact_superblock_gone`)** runs after the census entries are
-released and the caller has unmounted the tmpfs non-lazily. It turns the
-census root's recorded device into `major:minor` and requires that no
-process's mount table lists it, which catches bind aliases with another
-mount ID and copies in other namespaces. Every row must be a well-formed
-mountinfo record. An unusable or unreadable table, or an empty population,
-is OBSERVATION_FAILED.
+released and the caller has unmounted the tmpfs non-lazily. It reads every
+task's mount table, each parsed as complete kernel records. Every mount
+namespace must be read through a task whose root is the namespace root (its
+record mounted at `/` has root `/`). A namespace seen only through chrooted
+tasks is OBSERVATION_FAILED, because such a table omits mounts outside the
+chroot. Fact 3 is negative only if no table lists the census root's
+`major:minor`, which catches aliases under another mount ID and copies in
+other namespaces.
+
+**Reader errors** are sanitised to fixed text, with no filename, payload or
+exception context. A Docker reader that raises counts as unanswered.
 
 **Qualification.**
 
-Fake `/proc` and Docker readers drive these cases, so they run as root or not:
-- A5: a process left in the cgroup;
-- A6: a non-empty domain that a clean fd census cannot rescue;
-- A7: failed reads at the stat, cgroup and namespace sites;
-- a vanished pid, versus a lookup error;
-- unanswered Docker;
-- A10: an alias with a different mount ID, and another namespace's table;
-- A21: shared namespaces and init socket fds;
-- unusable identity sets.
+Fake `/proc` cases, which run under any user:
+- per-task views: a worker task alone in the cgroup, and a holder only in a
+  worker's fd table;
+- a container root view: a replaced bind source, and a link on the
+  destination path;
+- chrooted and other-namespace tables;
+- the cases from the plan: A5, A6, A7, A10 and A21;
+- pid reuse before the first read; another daemon's host; a container
+  changed during capture;
+- a same path in another v1 hierarchy; malformed links and records;
+- empty, failed and unreadable populations; a raising Docker reader;
+  malformed `ps` output;
+- an unhashable, always-equal generation.
 
-Each is paired with a blind twin: a Docker-only teardown, a mount-ID-only
-fact 3, and a fact 2 that counts the controller itself.
+Blind twins: a Docker-only teardown, a mount-ID-only fact 3, and a fact 2
+that counts the controller itself.
 
-Fact 2 also runs against **real** child processes: one holding a descriptor,
-and one holding only a mapping, whose descriptor it closed. The population is
-bounded to those pids so an unprivileged run is not failed by other users;
-root CI also runs the full census. Socket binds use real socket files. The
-`O_CLOEXEC` assertion covers every census descriptor.
+**Real** fact 2 uses child processes: an fd holder, and a mapping-only holder
+with its fd closed. These are gated on the kernel granting `map_files` access,
+and are otherwise qualified by VM probe P2. A recording opener asserts that
+every census open requests `O_CLOEXEC`, and `F_GETFD` confirms it on every
+descriptor.
 
-`tests/test_run_window_argv_unchanged.py` asserts three things:
-- `compose_run_argv` is byte-identical with the capture in play;
-- `docker_backend` does not reference the teardown module;
-- the Docker reader issues only `inspect` and `ps`, and refuses another verb
-  before any process starts.
-
-`tests/test_run_window_teardown_noleak.py` plants a marker in a cgroup path
-and a bind source name. No repr, observation or refusal may disclose it or the
-container ID, and a leaking twin must fail the oracle.
+`tests/test_run_window_argv_unchanged.py` compares `compose_run_argv` with a
+**reviewed literal baseline** and asserts the exact `inspect` and `ps`
+commands and environment. `tests/test_run_window_teardown_noleak.py` plants a
+marker in a cgroup path and a bind name, and a leaking twin must fail the
+oracle.
 
 The physical facts are P2 as root, P3 and P8 from #803. A MISMATCH blocks
 **use**, not merge.

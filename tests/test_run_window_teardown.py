@@ -1,18 +1,20 @@
 """Contract A part 2 (#797 A-2): teardown boundary, facts 2, 2b and 3.
 
-These qualify NEW instruments; none claims a red run on the parent. Fake
-`/proc` and Docker readers drive the boundary logic (A5, A6, A7, A10, A21),
-so every case runs as root or not. Fact 2 also runs against REAL child
-processes: one holding a descriptor, and one holding only a mapping whose
-descriptor it closed. Each case a blind checker could pass is paired with
-that checker (`blind_*`), and the blind one must give a different verdict.
+These qualify NEW instruments; none claims a red run on the parent. A fake
+/proc (`FakeProc`) drives the boundary logic: per-task views, a container root
+view, and hidden or chrooted tables. Every case therefore runs as root or not.
+Fact 2 also runs against REAL child processes, gated on the kernel actually
+granting the access it needs; production turns a denial into
+OBSERVATION_FAILED. Each case a blind checker could pass is paired with that
+checker (`blind_*`), which must give a different verdict.
 """
 from __future__ import annotations
 
 import errno
 import fcntl
+import importlib.util
 import os
-import socket
+import stat
 import subprocess
 import sys
 import time
@@ -30,88 +32,121 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith('linux') or not hasa
 
 NEG, SURV, FAIL = ra.NEG, ra.SURV, ra.FAIL
 CID = 'a' * 64
-HOST_NS = {k: f'{k}:[1000]' for k in rt.NAMESPACES}
-CONTAINER_NS = {k: f'{k}:[2000]' for k in rt.NAMESPACES}
+HOST_NS = {k: f'{k}:[1000{i}]' for i, k in enumerate(rt.NAMESPACES)}
+CONTAINER_NS = {k: f'{k}:[2000{i}]' for i, k in enumerate(rt.NAMESPACES)}
 CGROUP = '/system.slice/docker-' + CID + '.scope'
+ROOT_ROW = '1 0 8:1 / / rw - ext4 /dev/sda1 rw'
+PROC_ROW = '2 1 0:5 / /proc rw - proc proc rw'
+SOCK = stat.S_IFSOCK | 0o600
+DIR = stat.S_IFDIR | 0o755
+REG = stat.S_IFREG | 0o644
+LNK = stat.S_IFLNK | 0o777
 
 
 def stat_line(pid: str, start: str = '12345', state: str = 'S', comm: str = 'sleep') -> bytes:
     return f'{pid} ({comm}) {state} '.encode() + ' '.join(['0'] * 18 + [start]).encode()
 
 
+def table(*rows: str) -> bytes:
+    return ('\n'.join(rows) + '\n').encode()
+
+
 def proc_entry(pid: str, *, cgroup: str = '/user.slice', ns: Mapping[str, str] = HOST_NS,
-               start: str = '12345', mountinfo: bytes = b'', fd: dict[str, Any] | None = None,
-               map_files: dict[str, Any] | None = None) -> dict[str, Any]:
+               start: str = '12345', mountinfo: bytes | None = None, fd: dict[str, Any] | None = None,
+               map_files: dict[str, Any] | None = None, root_view: dict[str, Any] | None = None,
+               tasks: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     return {'stat': stat_line(pid, start), 'cgroup': f'0::{cgroup}\n'.encode('utf-8', 'surrogateescape'),
-            'ns': dict(ns),
-            'mountinfo': mountinfo or b'1 0 8:1 / / rw - ext4 /dev/sda1 rw\n',
-            'fd': fd or {}, 'map_files': map_files or {}}
+            'ns': dict(ns), 'mountinfo': table(ROOT_ROW, PROC_ROW) if mountinfo is None else mountinfo,
+            'fd': fd or {}, 'map_files': map_files or {}, 'root_view': root_view or {'/': DIR},
+            'tasks': tasks or {}}
+
+
+def fake_stat(mode: int, *, dev: int = 1, ino: int = 1) -> os.stat_result:
+    return os.stat_result((mode, ino, dev, 1, 0, 0, 0, 0, 0, 0))
 
 
 class FakeProc:
-    """A /proc tree from dicts. `errors[(pid, what)]` raises OSError there;
-    `vanish` makes a pid disappear from later listings once it is read."""
+    """A /proc tree from dicts. A node is a pid or 'pid/task/tid'; a task
+    uses its own dict where one is given, otherwise its process's. 'self' is
+    the controller. `errors[(node, what)]` raises there; `vanish` hides a pid
+    from later listings once it fails."""
 
-    def __init__(self, procs: dict[str, dict[str, Any]]) -> None:
+    def __init__(self, procs: dict[str, dict[str, Any]], self_ns: str = HOST_NS['pid']) -> None:
         self.procs = procs
+        self.self_ns = self_ns
+        self.self_mountinfo = table(ROOT_ROW, PROC_ROW)
         self.errors: dict[tuple[str, str], OSError] = {}
         self.vanish: set[str] = set()
         self.listing_fails = False
         self.hidden: set[str] = set()
 
+    def _entry(self, node: str) -> dict[str, Any]:
+        pid, _, rest = node.partition('/task/')
+        entry = self.procs[pid]
+        if rest and rest in entry['tasks']:
+            return {**entry, **entry['tasks'][rest]}
+        return entry
+
+    def _check(self, node: str, what: str) -> None:
+        if (node, what) in self.errors:
+            if node.partition('/task/')[0] in self.vanish:
+                self.hidden.add(node.partition('/task/')[0])
+            raise self.errors[(node, what)]
+
     def pids(self) -> list[str]:
         if self.listing_fails:
-            raise OSError(errno.EIO, 'io')
+            raise rt._sanitised()
         return [p for p in self.procs if p not in self.hidden]
 
-    def _check(self, pid: str, what: str) -> None:
-        if (pid, what) in self.errors:
-            if pid in self.vanish:
-                self.hidden.add(pid)
-            raise self.errors[(pid, what)]
+    def tasks(self, pid: str) -> list[str]:
+        self._check(pid, 'task')
+        names = list(self.procs[pid]['tasks']) or [pid]
+        return [f'{pid}/task/{t}' for t in names]
 
-    def read(self, pid: str, name: str) -> bytes:
-        self._check(pid, name)
-        value: bytes = self.procs[pid][name]
+    def read(self, node: str, name: str) -> bytes:
+        if node == 'self' and name == 'mountinfo':
+            return self.self_mountinfo
+        self._check(node, name)
+        value: bytes = self._entry(node)[name]
         return value
 
-    def readlink(self, pid: str, name: str) -> str:
-        self._check(pid, name)
+    def readlink(self, node: str, name: str) -> str:
+        if node == 'self' and name == 'ns/pid':
+            return self.self_ns
+        self._check(node, name)
         kind, _, rest = name.partition('/')
         if kind == 'ns':
-            value: str = self.procs[pid]['ns'][rest]
+            value: str = self._entry(node)['ns'][rest]
             return value
-        target = self.procs[pid]['fd'][rest]
+        target = self._entry(node)['fd'][rest]
         return target if isinstance(target, str) else 'anon_inode:[x]'
 
-    def listdir(self, pid: str, sub: str) -> list[str]:
-        self._check(pid, sub)
-        return list(self.procs[pid][sub])
+    def listdir(self, node: str, sub: str) -> list[str]:
+        self._check(node, sub)
+        return list(self._entry(node)[sub])
 
-    def stat_entry(self, pid: str, sub: str, name: str) -> os.stat_result:
-        self._check(pid, f'{sub}/{name}')
-        value = self.procs[pid][sub][name]
+    def stat_entry(self, node: str, sub: str, name: str) -> os.stat_result:
+        self._check(node, f'{sub}/{name}')
+        value = self._entry(node)[sub][name]
         if isinstance(value, os.stat_result):
             return value
-        raise OSError(errno.ENOENT, 'not a file')
+        raise rt._sanitised()
 
+    def lstat_under_root(self, pid: str, path: str) -> os.stat_result:
+        self._check(pid, f'root{path}')
+        view = self.procs[pid]['root_view']
+        if path not in view:
+            raise rt._sanitised()
+        return fake_stat(view[path])
 
-class ScopedProc(rt.RealProc):
-    """The REAL /proc, limited to the named pids that still exist. Kernel
-    reads are real; the population is bounded so an unprivileged run is not
-    failed by other users' processes (the full census is what root CI and the
-    VM run)."""
-
-    def __init__(self, pids: list[int]) -> None:
-        super().__init__()
-        self._only = {str(p) for p in pids}
-
-    def pids(self) -> list[str]:
-        return [p for p in super().pids() if p in self._only]
+    def listdir_under_root(self, pid: str, path: str) -> list[str]:
+        view = self.procs[pid]['root_view']
+        prefix = path.rstrip('/') + '/'
+        return sorted({p[len(prefix):].split('/')[0] for p in view if p.startswith(prefix) and p != path})
 
 
 class FakeDocker:
-    def __init__(self, info: Mapping[str, Any] | None = None, present: bool | None = False) -> None:
+    def __init__(self, info: Any = None, present: bool | None = False) -> None:
         self.info = info if info is not None else {
             'Id': CID, 'State': {'Pid': 4242, 'Running': True}, 'Mounts': []}
         self._present = present
@@ -121,16 +156,18 @@ class FakeDocker:
         self.verbs.append('inspect')
         if isinstance(self.info, Exception):
             raise self.info
-        return self.info
+        info: Mapping[str, Any] = self.info
+        return info
 
     def present(self, container_id: str) -> bool | None:
         self.verbs.append('ps')
         return self._present
 
 
-def container_proc() -> FakeProc:
-    return FakeProc({'1': proc_entry('1'), '4242': proc_entry('4242', cgroup=CGROUP, ns=CONTAINER_NS,
-                                                              fd={'0': 'pipe:[1]', '1': 'pipe:[2]'})})
+def container_proc(**overrides: Any) -> FakeProc:
+    entry = proc_entry('4242', cgroup=CGROUP, ns=CONTAINER_NS, fd={'0': 'pipe:[1]', '1': 'pipe:[2]'})
+    entry.update(overrides)
+    return FakeProc({'1': proc_entry('1'), '4242': entry})
 
 
 def captured(generation: object, docker: FakeDocker | None = None,
@@ -144,6 +181,21 @@ def after_teardown() -> FakeProc:
     return FakeProc({'1': proc_entry('1'), '77': proc_entry('77')})
 
 
+# ------------------------------------------------------------- procfs view
+
+
+def test_procfs_view_is_checked() -> None:
+    assert rt.procfs_ok(after_teardown())
+    other_ns = after_teardown()
+    other_ns.self_ns = 'pid:[99999]'
+    assert not rt.procfs_ok(other_ns)
+    hidden = after_teardown()
+    hidden.self_mountinfo = table(ROOT_ROW, '2 1 0:5 / /proc rw - proc proc rw,hidepid=invisible')
+    assert not rt.procfs_ok(hidden)
+    empty = FakeProc({})
+    assert not rt.procfs_ok(empty)
+
+
 # ---------------------------------------------------------------- capture
 
 
@@ -154,13 +206,14 @@ def test_capture_is_usable_and_issues_only_read_verbs() -> None:
 
 
 @pytest.mark.parametrize('case', ['inspect-error', 'bad-id', 'pid-zero', 'not-running', 'cgroup-unreadable',
-                                  'ns-unreadable', 'zombie', 'bad-mounts', 'unknown-mount-type'])
+                                  'ns-unreadable', 'ns-malformed', 'zombie', 'bad-mounts',
+                                  'unknown-mount-type', 'relative-destination'])
 def test_capture_failure_is_unusable(case: str) -> None:
     docker = FakeDocker()
     proc = container_proc()
     info = dict(docker.info)
     if case == 'inspect-error':
-        docker.info = OSError(errno.EIO, 'io')  # type: ignore[assignment]
+        docker.info = rt._sanitised()
     elif case == 'bad-id':
         docker.info = {**info, 'Id': 'short'}
     elif case == 'pid-zero':
@@ -168,47 +221,76 @@ def test_capture_failure_is_unusable(case: str) -> None:
     elif case == 'not-running':
         docker.info = {**info, 'State': {'Pid': 4242, 'Running': False}}
     elif case == 'cgroup-unreadable':
-        proc.errors[('4242', 'cgroup')] = OSError(errno.EACCES, 'denied')
+        proc.errors[('4242', 'cgroup')] = rt._sanitised()
     elif case == 'ns-unreadable':
-        proc.errors[('4242', 'ns/net')] = OSError(errno.EACCES, 'denied')
+        proc.errors[('4242', 'ns/net')] = rt._sanitised()
+    elif case == 'ns-malformed':
+        proc.procs['4242']['ns']['net'] = ''
     elif case == 'zombie':
         proc.procs['4242']['stat'] = stat_line('4242', state='Z')
     elif case == 'bad-mounts':
         docker.info = {**info, 'Mounts': {}}
     elif case == 'unknown-mount-type':
         docker.info = {**info, 'Mounts': [{'Type': '', 'Source': '/x', 'Destination': '/y'}]}
+    elif case == 'relative-destination':
+        docker.info = {**info, 'Mounts': [{'Type': 'bind', 'Source': '/x', 'Destination': 'y'}]}
     assert not captured(object(), docker=docker, proc=proc).usable
 
 
-def test_capture_detects_pid_reuse_while_reading() -> None:
-    proc = container_proc()
-    reads = []
-    real_read = proc.read
+def test_pid_reused_before_the_first_read_is_unusable() -> None:
+    # Docker says pid 4242, but that pid is now another host process: its
+    # cgroup does not name the container id.
+    proc = FakeProc({'1': proc_entry('1'), '4242': proc_entry('4242', ns=CONTAINER_NS)})
+    assert not captured(object(), proc=proc).usable
 
-    def changing(pid: str, name: str) -> bytes:
-        reads.append(name)
-        if name == 'stat' and pid == '4242' and reads.count('stat') > 1:
+
+def test_pid_from_another_daemon_host_is_unusable() -> None:
+    # A remote daemon's pid that happens to exist locally: same story.
+    proc = FakeProc({'1': proc_entry('1'), '4242': proc_entry('4242', cgroup='/docker/' + 'b' * 64)})
+    assert not captured(object(), proc=proc).usable
+
+
+def test_capture_detects_pid_reuse_or_container_change_during_reads() -> None:
+    proc = container_proc()
+    calls = []
+    real = proc.read
+
+    def changing(node: str, name: str) -> bytes:
+        calls.append(name)
+        if name == 'stat' and node == '4242' and calls.count('stat') > 1:
             return stat_line('4242', start='99999')
-        return real_read(pid, name)
+        return real(node, name)
 
     proc.read = changing  # type: ignore[method-assign]
     assert not captured(object(), proc=proc).usable
 
+    class Flipping(FakeDocker):
+        def inspect(self, container: str) -> Mapping[str, Any]:
+            first = super().inspect(container)
+            if self.verbs.count('inspect') > 1:
+                return {**first, 'State': {'Pid': 4343, 'Running': True}}
+            return first
 
-def test_capture_counts_socket_binds_and_sockets_inside_bound_dirs(tmp_path: Path) -> None:
-    tmp = tmp_path.resolve()
-    (tmp / 'dir').mkdir()
-    for path in (tmp / 'host.sock', tmp / 'dir' / 'inner.sock'):
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.bind(str(path))
-        sock.close()
+    assert not captured(object(), docker=Flipping()).usable
+
+
+def test_bind_sockets_are_counted_at_the_destination_not_the_source() -> None:
+    # The host source was replaced by an empty directory, but the container's
+    # view of the destination still holds a socket.
     docker = FakeDocker()
     docker.info = {**docker.info, 'Mounts': [
-        {'Type': 'bind', 'Source': str(tmp / 'host.sock'), 'Destination': '/probe-host.sock'},
-        {'Type': 'bind', 'Source': str(tmp / 'dir'), 'Destination': '/probe-dir'}]}
-    ident = captured(object(), docker=docker)
-    assert ident.usable and ident._bind_sockets == 2
+        {'Type': 'bind', 'Source': '/host/replaced-empty', 'Destination': '/work/run'}]}
+    proc = container_proc(root_view={'/': DIR, '/work': DIR, '/work/run': DIR, '/work/run/agent.sock': SOCK})
+    ident = captured(object(), docker=docker, proc=proc)
+    assert ident.usable and ident._bind_sockets == 1
     assert rt.fact_channel_isolated([ident]) == rt.ScopedObservation(SURV, rt.LAUNCH_ONLY)
+
+
+def test_bind_destination_through_a_link_is_unusable() -> None:
+    docker = FakeDocker()
+    docker.info = {**docker.info, 'Mounts': [{'Type': 'bind', 'Source': '/x', 'Destination': '/work/run'}]}
+    proc = container_proc(root_view={'/': DIR, '/work': LNK, '/work/run': DIR})
+    assert not captured(object(), docker=docker, proc=proc).usable
 
 
 def test_capture_needs_a_generation() -> None:
@@ -232,13 +314,31 @@ def test_empty_domain_is_confirmed_negative() -> None:
 
 # A5: Docker says gone, but a process is still in the container's cgroup.
 def test_surviving_container_process_blocks_teardown() -> None:
-    gen = object()
-    ident = captured(gen)
+    ident = captured(object())
     proc = after_teardown()
     proc.procs['88'] = proc_entry('88', cgroup=CGROUP + '/child')
     docker = FakeDocker(present=False)
     assert blind_docker_only(ident, docker) is NEG
     assert rt.confirm_teardown([ident], docker=docker, proc=proc) is SURV
+
+
+def test_a_worker_task_alone_in_the_cgroup_blocks_teardown() -> None:
+    ident = captured(object())
+    proc = after_teardown()
+    proc.procs['88'] = proc_entry('88', tasks={'88': {}, '89': {
+        'cgroup': f'0::{CGROUP}\n'.encode()}})
+    assert rt.confirm_teardown([ident], docker=FakeDocker(present=False), proc=proc) is SURV
+
+
+def test_same_path_in_another_v1_hierarchy_is_not_a_survivor() -> None:
+    proc = container_proc()
+    proc.procs['4242']['cgroup'] = f'4:memory:{CGROUP}\n'.encode()
+    ident = captured(object(), proc=proc)
+    assert ident.usable
+    after = after_teardown()
+    after.procs['90'] = proc_entry('90')
+    after.procs['90']['cgroup'] = f'5:cpu:{CGROUP}\n'.encode()
+    assert rt.confirm_teardown([ident], docker=FakeDocker(present=False), proc=after) is NEG
 
 
 def test_process_sharing_a_captured_namespace_blocks_teardown() -> None:
@@ -257,18 +357,20 @@ def test_teardown_requires_docker_to_answer_absent() -> None:
     ident = captured(object())
     assert rt.confirm_teardown([ident], docker=FakeDocker(present=None), proc=after_teardown()) is FAIL
 
+    class Raising(FakeDocker):
+        def present(self, container_id: str) -> bool | None:
+            raise RuntimeError('reader broke')
 
-# A6: a clean fd census cannot rescue a domain that is not empty.
-def test_census_cannot_rescue_a_nonempty_domain(tmp_path: Path) -> None:
+    assert rt.confirm_teardown([ident], docker=Raising(), proc=after_teardown()) is FAIL
+
+
+# A6: a clean fd census cannot rescue a domain that is not empty. The two are
+# independent observations here; their composition is A-3's (spec, A-2).
+def test_nonempty_domain_is_a_survivor_whatever_the_fd_census(tmp_path: Path) -> None:
     ident = captured(object())
     proc = after_teardown()
     proc.procs['90'] = proc_entry('90', cgroup=CGROUP)
     assert rt.confirm_teardown([ident], docker=FakeDocker(present=False), proc=proc) is SURV
-    root = tmp_path.resolve() / 'r'
-    root.mkdir()
-    (root / 'f').write_bytes(b'x')
-    with ra.take_census(root, generation=object(), max_entries=8) as census:
-        assert rt.fact_no_holder(census, proc=proc) is NEG  # The corroboration alone says clean.
 
 
 # A7: an unreadable read whose pid is still listed is never absence.
@@ -276,40 +378,53 @@ def test_census_cannot_rescue_a_nonempty_domain(tmp_path: Path) -> None:
 def test_failed_proc_read_is_never_absence(what: str) -> None:
     ident = captured(object())
     proc = after_teardown()
-    proc.errors[('77', what)] = OSError(errno.EACCES, 'denied')
+    proc.errors[('77/task/77', what)] = rt._sanitised()
     assert rt.confirm_teardown([ident], docker=FakeDocker(present=False), proc=proc) is FAIL
 
 
 def test_vanished_pid_is_skipped_only_when_relisting_omits_it() -> None:
     ident = captured(object())
     proc = after_teardown()
-    proc.errors[('77', 'cgroup')] = OSError(errno.ENOENT, 'gone')
+    proc.errors[('77/task/77', 'cgroup')] = rt._sanitised()
     proc.vanish.add('77')
     assert rt.confirm_teardown([ident], docker=FakeDocker(present=False), proc=proc) is NEG
 
 
-def test_failed_pid_listing_is_failed() -> None:
+@pytest.mark.parametrize('case', ['listing-fails', 'listing-empty', 'tasks-unreadable'])
+def test_failed_or_empty_population_is_failed(case: str) -> None:
     ident = captured(object())
     proc = after_teardown()
-    proc.listing_fails = True
+    if case == 'listing-fails':
+        proc.listing_fails = True
+    elif case == 'listing-empty':
+        proc.procs.clear()
+    else:
+        proc.errors[('77', 'task')] = rt._sanitised()
     assert rt.confirm_teardown([ident], docker=FakeDocker(present=False), proc=proc) is FAIL
 
 
-@pytest.mark.parametrize('case', ['empty', 'unusable', 'mixed-generations', 'wrong-generation'])
+class EqualToEverything:
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    __hash__ = None  # type: ignore[assignment]  # Unhashable on purpose.
+
+
+@pytest.mark.parametrize('case', ['empty', 'unusable', 'mixed-generations', 'wrong-generation',
+                                  'equal-but-distinct'])
 def test_teardown_refuses_unusable_identity_sets(case: str) -> None:
-    gen = object()
+    gen: object = EqualToEverything() if case == 'equal-but-distinct' else object()
     good = captured(gen)
+    other: object | None = None
     if case == 'empty':
         idents: list[rt.LaunchIdentity] = []
     elif case == 'unusable':
-        bad = FakeDocker()
-        bad.info = OSError(errno.EIO, 'io')  # type: ignore[assignment]
-        idents = [good, captured(gen, docker=bad)]
-    elif case == 'mixed-generations':
-        idents = [good, captured(object())]
+        idents = [good, captured(gen, docker=FakeDocker(info=rt._sanitised()))]
+    elif case in ('mixed-generations', 'equal-but-distinct'):
+        idents = [good, captured(EqualToEverything() if case == 'equal-but-distinct' else object())]
     else:
         idents = [good]
-    other = object() if case == 'wrong-generation' else None
+        other = object()
     assert rt.confirm_teardown(idents, docker=FakeDocker(present=False), proc=after_teardown(),
                                generation=other) is FAIL
 
@@ -328,13 +443,50 @@ def held_tree(tmp_path: Path) -> Iterator[tuple[Path, ra.Census]]:
     census.close()
 
 
-def test_census_descriptors_are_close_on_exec(held_tree: tuple[Path, ra.Census]) -> None:
-    _, census = held_tree
-    fds = [i.fd for i in census._ancestors] + [census._root.fd if census._root else -1]
-    fds += [i.fd for i in census._entries]
-    assert fds and all(fd >= 0 for fd in fds)
-    for fd in fds:
-        assert fcntl.fcntl(fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC
+def test_every_census_open_requests_close_on_exec(tmp_path: Path) -> None:
+    root = tmp_path.resolve() / 'declared' / 'removed-root'
+    root.mkdir(parents=True)
+    gen = object()
+    flags_seen: list[int] = []
+
+    def recording(name: str, flags: int, *args: Any, **kwargs: Any) -> int:
+        flags_seen.append(flags)
+        return os.open(name, flags, *args, **kwargs)
+
+    m0 = ra.record_mountpoint(root, generation=gen, opener=recording)
+    assert m0 is not None
+    (root / 'd').mkdir()
+    (root / 'd' / 'f').write_bytes(b'x')
+    with m0, ra.take_census(root, generation=gen, max_entries=8, opener=recording) as census:
+        assert census.complete
+        for item in [*census._ancestors, *census._entries]:
+            assert fcntl.fcntl(item.fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC
+        os.unlink(root / 'd' / 'f')
+        os.rmdir(root / 'd')
+        census.release_entries()
+        assert ra.fact_reresolved(census, m0, opener=recording).observation is NEG
+    assert flags_seen and all(f & os.O_CLOEXEC for f in flags_seen)
+
+
+class ScopedProc(rt.RealProc):
+    """The REAL /proc, limited to the named pids that still exist."""
+
+    def __init__(self, pids: list[int]) -> None:
+        super().__init__()
+        self._only = {str(p) for p in pids}
+
+    def pids(self) -> list[str]:
+        return [p for p in super().pids() if p in self._only]
+
+
+def kernel_grants_map_files(pid: int) -> bool:
+    try:
+        for name in os.listdir(f'/proc/{pid}/map_files'):
+            os.stat(f'/proc/{pid}/map_files/{name}')
+            return True
+    except OSError:
+        return False
+    return False
 
 
 def wait_ready(path: Path) -> None:
@@ -345,19 +497,21 @@ def wait_ready(path: Path) -> None:
     raise AssertionError('holder not ready')
 
 
-def test_real_fd_holder_is_seen(held_tree: tuple[Path, ra.Census], tmp_path: Path) -> None:
+def test_real_fd_holder_is_seen(held_tree: tuple[Path, ra.Census]) -> None:
     root, census = held_tree
     fd = os.open(root / 'secret', os.O_RDONLY)
     os.set_inheritable(fd, True)
     child = subprocess.Popen(['sleep', '30'], pass_fds=(fd,))
     os.close(fd)
-    scope = ScopedProc([child.pid, os.getpid()])
     try:
+        if not kernel_grants_map_files(child.pid):
+            pytest.skip('this kernel/runner denies map_files; the VM probe P2 qualifies it')
+        scope = ScopedProc([child.pid, os.getpid()])
         assert rt.fact_no_holder(census, proc=scope) is SURV
     finally:
         child.kill()
         child.wait()
-    assert rt.fact_no_holder(census, proc=scope) is NEG
+    assert rt.fact_no_holder(census, proc=ScopedProc([os.getpid()])) is NEG
 
 
 MAP_HOLDER = '''
@@ -381,6 +535,8 @@ def test_real_mapping_only_holder_is_seen(held_tree: tuple[Path, ra.Census], tmp
     child = subprocess.Popen([sys.executable, '-I', '-c', MAP_HOLDER, str(root / 'secret'), str(ready)])
     try:
         wait_ready(ready)
+        if not kernel_grants_map_files(child.pid):
+            pytest.skip('this kernel/runner denies map_files; the VM probe P2 qualifies it')
         assert not any(os.path.realpath(f'/proc/{child.pid}/fd/{n}') == str(root / 'secret')
                        for n in os.listdir(f'/proc/{child.pid}/fd'))
         assert rt.fact_no_holder(census, proc=ScopedProc([child.pid, os.getpid()])) is SURV
@@ -407,30 +563,52 @@ def test_controller_own_census_fds_are_not_holders(held_tree: tuple[Path, ra.Cen
     assert rt.fact_no_holder(census, proc=ScopedProc([os.getpid()])) is NEG
 
 
-@pytest.mark.skipif(os.geteuid() != 0, reason='the unbounded census reads every process; root CI runs it')
-def test_full_real_census_runs_as_root(held_tree: tuple[Path, ra.Census]) -> None:
+def fake_holder(census: ra.Census, where: str) -> FakeProc:
+    """A fake process 91 holding the census root's object in its fd table
+    ('process') or only in a worker task's own fd table ('worker')."""
+    root_stat = os.fstat(census._root.fd) if census._root else None
+    assert root_stat is not None
+    if where == 'process':
+        return FakeProc({'1': proc_entry('1'), '91': proc_entry('91', fd={'5': root_stat})})
+    return FakeProc({'1': proc_entry('1'), '91': proc_entry('91', tasks={
+        '91': {}, '92': {'fd': {'5': root_stat}}})})
+
+
+@pytest.mark.parametrize('where', ['process', 'worker'])
+def test_holder_of_the_root_is_seen_even_in_a_worker_task(held_tree: tuple[Path, ra.Census],
+                                                           where: str) -> None:
     _, census = held_tree
-    assert rt.fact_no_holder(census) is NEG
+    assert rt.fact_no_holder(census, proc=fake_holder(census, where)) is SURV
 
 
-def test_holder_of_the_root_alone_is_seen(held_tree: tuple[Path, ra.Census]) -> None:
-    root, census = held_tree
-    assert census._root is not None
-    root_stat = os.stat(root)
-    proc = FakeProc({'1': proc_entry('1'), '91': proc_entry('91', fd={'5': root_stat})})
-    assert rt.fact_no_holder(census, proc=proc) is SURV  # e.g. a lazily detached, held tmpfs (A11)
+def test_task_replaced_during_the_census_is_failed(held_tree: tuple[Path, ra.Census]) -> None:
+    _, census = held_tree
+    proc = FakeProc({'1': proc_entry('1'), '95': proc_entry('95')})
+    reads = []
+    real = proc.read
+
+    def replacing(node: str, name: str) -> bytes:
+        if node == '95/task/95' and name == 'stat':
+            reads.append(1)
+            if len(reads) == 2:
+                return stat_line('95', start='77777')
+        return real(node, name)
+
+    proc.read = replacing  # type: ignore[method-assign]
+    assert rt.fact_no_holder(census, proc=proc) is FAIL
 
 
 @pytest.mark.parametrize('case', ['listing', 'entry'])
 def test_unreadable_holder_census_is_failed(held_tree: tuple[Path, ra.Census], case: str) -> None:
     _, census = held_tree
     proc = FakeProc({'1': proc_entry('1'), '92': proc_entry('92', fd={'3': 'x'})})
-    proc.errors[('92', 'fd' if case == 'listing' else 'fd/3')] = OSError(errno.EACCES, 'denied')
+    proc.errors[('92/task/92', 'fd' if case == 'listing' else 'fd/3')] = rt._sanitised()
     assert rt.fact_no_holder(census, proc=proc) is FAIL
 
 
-def test_fact2_requires_held_entries(held_tree: tuple[Path, ra.Census]) -> None:
+def test_fact2_requires_held_entries_and_a_population(held_tree: tuple[Path, ra.Census]) -> None:
     _, census = held_tree
+    assert rt.fact_no_holder(census, proc=FakeProc({})) is FAIL
     census.release_entries()
     assert rt.fact_no_holder(census) is FAIL
 
@@ -439,8 +617,7 @@ def test_fact2_requires_held_entries(held_tree: tuple[Path, ra.Census]) -> None:
 
 
 def test_isolated_capture_is_negative_and_launch_scoped() -> None:
-    result = rt.fact_channel_isolated([captured(object())])
-    assert result == rt.ScopedObservation(NEG, rt.LAUNCH_ONLY)
+    assert rt.fact_channel_isolated([captured(object())]) == rt.ScopedObservation(NEG, rt.LAUNCH_ONLY)
 
 
 @pytest.mark.parametrize('case', ['shared-net', 'shared-ipc', 'init-socket-fd'])
@@ -456,29 +633,25 @@ def test_channel_isolation_breach_is_a_survivor(case: str) -> None:
 
 
 def test_channel_isolation_unknown_is_failed_and_still_scoped() -> None:
-    bad = FakeDocker()
-    bad.info = OSError(errno.EIO, 'io')  # type: ignore[assignment]
-    result = rt.fact_channel_isolated([captured(object(), docker=bad)])
+    result = rt.fact_channel_isolated([captured(object(), docker=FakeDocker(info=rt._sanitised()))])
     assert result == rt.ScopedObservation(FAIL, rt.LAUNCH_ONLY)
     assert rt.fact_channel_isolated([]) == rt.ScopedObservation(FAIL, rt.LAUNCH_ONLY)
 
 
-@pytest.mark.xfail(strict=True, reason='A-3 composition does not exist yet. When it lands this test must '
-                   'pass, and then this marker must be removed: a launch-only 2b may never satisfy ABSENT '
-                   'until PR-1 supplies a lifetime 2b (spec, A-2 section).')
 def test_a3_composition_refuses_a_launch_only_isolation_for_absent() -> None:
-    import importlib
-    compose = importlib.import_module('skillc.run_window_compose')  # A-3
-    verdict = compose.removed_surface_verdict(
-        isolation=rt.ScopedObservation(NEG, rt.LAUNCH_ONLY))
+    """Binding rule (spec, A-2): a launch-only 2b never satisfies ABSENT.
+
+    Skipped only while A-3's composition module does not exist. Once it
+    exists, this runs and must pass; adapt the call to A-3's real entry point,
+    never delete the assertion."""
+    if importlib.util.find_spec('skillc.run_window_compose') is None:
+        pytest.skip('A-3 composition not implemented yet')
+    compose = importlib.import_module('skillc.run_window_compose')
+    verdict = compose.removed_surface_verdict(isolation=rt.ScopedObservation(NEG, rt.LAUNCH_ONLY))
     assert verdict != 'ABSENT'
 
 
 # ------------------------------------------------------------------ fact 3
-
-
-def table(*rows: str) -> bytes:
-    return ('\n'.join(rows) + '\n').encode()
 
 
 def majmin_of(root: Path) -> str:
@@ -495,8 +668,7 @@ def released(held_tree: tuple[Path, ra.Census]) -> tuple[Path, ra.Census]:
 
 def test_superblock_in_no_table_is_negative(released: tuple[Path, ra.Census]) -> None:
     _, census = released
-    proc = FakeProc({'1': proc_entry('1', mountinfo=table('1 0 999:999 / / rw - ext4 /dev/x rw'))})
-    assert rt.fact_superblock_gone(census, proc=proc) is NEG
+    assert rt.fact_superblock_gone(census, proc=after_teardown()) is NEG
 
 
 def blind_mount_id_only(data: bytes, mount_id: str) -> ra.Observation:
@@ -506,8 +678,7 @@ def blind_mount_id_only(data: bytes, mount_id: str) -> ra.Observation:
 # A10: the original mount id is gone, but a bind alias of the same superblock remains.
 def test_superblock_alias_is_listed(released: tuple[Path, ra.Census]) -> None:
     root, census = released
-    mm = majmin_of(root)
-    alias = table('1 0 999:999 / / rw - ext4 /dev/x rw', f'57 1 {mm} / /elsewhere rw - tmpfs tmpfs rw')
+    alias = table(ROOT_ROW, PROC_ROW, f'57 1 {majmin_of(root)} / /elsewhere rw - tmpfs tmpfs rw')
     proc = FakeProc({'1': proc_entry('1', mountinfo=alias)})
     assert blind_mount_id_only(alias, '42') is NEG  # The original mount id 42 is gone.
     assert rt.fact_superblock_gone(census, proc=proc) is SURV
@@ -515,35 +686,82 @@ def test_superblock_alias_is_listed(released: tuple[Path, ra.Census]) -> None:
 
 def test_superblock_listed_only_in_another_namespace_is_seen(released: tuple[Path, ra.Census]) -> None:
     root, census = released
-    mm = majmin_of(root)
-    proc = FakeProc({'1': proc_entry('1'),
-                     '93': proc_entry('93', mountinfo=table(f'60 1 {mm} / /in-container rw - tmpfs t rw'))})
+    proc = after_teardown()
+    proc.procs['93'] = proc_entry('93', ns={**HOST_NS, 'mnt': 'mnt:[30003]'}, mountinfo=table(
+        ROOT_ROW, f'60 1 {majmin_of(root)} / /in-container rw - tmpfs t rw'))
     assert rt.fact_superblock_gone(census, proc=proc) is SURV
 
 
+def test_namespace_seen_only_through_a_chrooted_task_is_failed(released: tuple[Path, ra.Census]) -> None:
+    _, census = released
+    proc = after_teardown()
+    # The only task in mount namespace 30004 is chrooted: its '/' record has
+    # root '/jail', so its table omits anything mounted outside the jail.
+    proc.procs['94'] = proc_entry('94', ns={**HOST_NS, 'mnt': 'mnt:[30004]'}, mountinfo=table(
+        '70 1 8:1 /jail / rw - ext4 /dev/sda1 rw'))
+    assert rt.fact_superblock_gone(census, proc=proc) is FAIL
+
+
 @pytest.mark.parametrize('bad', ['garbage', '1 0 8:1 / / rw tmpfs t rw', 'x y 8:1 / / rw - tmpfs t rw',
-                                 '1 0 8:1 / / rw - tmpfs t', ''])
+                                 '1 0 8:1 / / rw - tmpfs t', '1 0 8:1 / / rw - tmpfs t rw extra',
+                                 'NO-NEWLINE', ''])
 def test_unusable_mount_table_is_failed(released: tuple[Path, ra.Census], bad: str) -> None:
     _, census = released
-    proc = FakeProc({'1': proc_entry('1')})
-    proc.procs['1']['mountinfo'] = bad.encode()
+    proc = after_teardown()
+    proc.procs['77']['mountinfo'] = (ROOT_ROW.encode() if bad == 'NO-NEWLINE' else bad.encode() + b'\n')
     assert rt.fact_superblock_gone(census, proc=proc) is FAIL
 
 
 def test_unreadable_mount_table_is_failed(released: tuple[Path, ra.Census]) -> None:
     _, census = released
-    proc = FakeProc({'1': proc_entry('1'), '94': proc_entry('94')})
-    proc.errors[('94', 'mountinfo')] = OSError(errno.EACCES, 'denied')
+    proc = after_teardown()
+    proc.errors[('77/task/77', 'mountinfo')] = rt._sanitised()
     assert rt.fact_superblock_gone(census, proc=proc) is FAIL
 
 
 def test_fact3_requires_released_entries(held_tree: tuple[Path, ra.Census]) -> None:
     _, census = held_tree
-    assert rt.fact_superblock_gone(census, proc=FakeProc({'1': proc_entry('1')})) is FAIL
+    assert rt.fact_superblock_gone(census, proc=after_teardown()) is FAIL
 
 
-def test_real_mount_tables_do_not_list_a_plain_tree_as_gone(released: tuple[Path, ra.Census]) -> None:
-    # The tree lives on the test filesystem, which IS mounted: fact 3 must say
-    # SURVIVOR on the real tables, so the real reader is not blind.
+def test_real_mount_table_lists_a_live_filesystem(released: tuple[Path, ra.Census]) -> None:
+    # The tree lives on a mounted filesystem, so the real reader must say
+    # SURVIVOR: it is not blind.
     _, census = released
     assert rt.fact_superblock_gone(census, proc=ScopedProc([os.getpid()])) is SURV
+
+
+# ------------------------------------------------------- reader sanitising
+
+
+def test_real_proc_errors_carry_no_path_or_context(tmp_path: Path) -> None:
+    reader = rt.RealProc(str(tmp_path.resolve() / 'marker-proc-root'))
+    for call in (reader.pids, lambda: reader.read('9', 'marker-name'), lambda: reader.readlink('9', 'x'),
+                 lambda: reader.listdir('9', 'fd'), lambda: reader.stat_entry('9', 'fd', 'marker-name')):
+        with pytest.raises(OSError) as caught:
+            call()
+        exc = caught.value
+        assert exc.filename is None and exc.__context__ is None and 'marker' not in str(exc)
+
+
+def test_real_docker_reader_is_sanitised_and_strict(monkeypatch: pytest.MonkeyPatch) -> None:
+    outputs = iter(['not json marker-payload', 'garbage-line\n', ''])
+
+    def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout=next(outputs), stderr='')
+
+    monkeypatch.setattr(rt.subprocess, 'run', fake_run)
+    reader = rt.RealDocker(['docker'], env={})
+    with pytest.raises(OSError) as caught:
+        reader.inspect('marker-container')
+    assert 'marker' not in str(caught.value) and caught.value.__context__ is None
+    assert reader.present(CID) is None  # Malformed nonempty output is no answer.
+    assert reader.present(CID) is False
+
+    def timing_out(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(argv, 30)
+
+    monkeypatch.setattr(rt.subprocess, 'run', timing_out)
+    with pytest.raises(OSError) as caught:
+        reader.inspect('marker-container')
+    assert 'marker' not in str(caught.value) and caught.value.__context__ is None

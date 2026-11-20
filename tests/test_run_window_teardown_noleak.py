@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from test_remnant_scan import audit_captured_output, no_marker, references  # noqa: F401
-from test_run_window_teardown import CID, CONTAINER_NS, FakeDocker, FakeProc, proc_entry
+from test_run_window_teardown import CID, CONTAINER_NS, DIR, FakeDocker, FakeProc, proc_entry
 
 from skillc import run_window_absence as ra
 from skillc import run_window_teardown as rt
@@ -35,7 +35,8 @@ def marked_capture(tmp_path: Path) -> tuple[rt.LaunchIdentity, References]:
     docker = FakeDocker()
     docker.info = {**docker.info, 'Mounts': [{'Type': 'bind', 'Source': str(bind), 'Destination': '/w'}]}
     proc = FakeProc({'1': proc_entry('1'),
-                     '4242': proc_entry('4242', cgroup='/docker/' + marker, ns=CONTAINER_NS)})
+                     '4242': proc_entry('4242', cgroup=f'/docker/{CID}/' + marker, ns=CONTAINER_NS,
+                                        root_view={'/': DIR, '/w': DIR})})
     ident = rt.capture_launch_identity('skillc-attempt', generation=object(), docker=docker, proc=proc)
     assert ident.usable
     return ident, refs
@@ -46,6 +47,7 @@ def test_identity_and_observations_disclose_nothing(tmp_path: Path) -> None:
     results = [ident, rt.fact_channel_isolated([ident]),
                rt.confirm_teardown([ident], docker=FakeDocker(present=False),
                                    proc=FakeProc({'1': proc_entry('1')}))]
+    assert results[2] is ra.NEG
     out = '\n'.join(f'{r!r}\n{r!s}' for r in results).encode('utf-8', 'surrogateescape')
     no_marker(out, refs)
     no_marker(out, References((CID.encode(),)))
