@@ -84,11 +84,17 @@ def parse_inventory(value: object) -> Inventory:
     slots = value["slots"]
     if type(slots) is not list:
         raise AdapterRefused("inventory slots required")
+    inventory: Inventory | None
     try:
-        return Inventory(value["attempt_id"], value["declaration_digest"],
-                         tuple(Slot(**s) for s in slots), value["clock_origin_ns"])
-    except (TypeError, ValueError) as exc:
-        raise AdapterRefused("inventory outside its contract") from exc
+        inventory = Inventory(value["attempt_id"], value["declaration_digest"],
+                              tuple(Slot(**s) for s in slots), value["clock_origin_ns"])
+    except (TypeError, ValueError):
+        inventory = None
+    # Raised OUTSIDE the handler, so neither __cause__ nor __context__ carries
+    # the underlying error, which can name participant-chosen keys (B7).
+    if inventory is None:
+        raise AdapterRefused("inventory outside its contract")
+    return inventory
 
 
 def parse_clock_join(value: object) -> ClockJoin:
