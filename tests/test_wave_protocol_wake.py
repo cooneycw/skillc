@@ -107,7 +107,7 @@ def _wake_world(root: Path, short_dir: Path, monkeypatch: pytest.MonkeyPatch,
     # verifies it against the independently held digest.
     approved = wave_wake.bind_declaration(json.loads(declaration),
                                           "sha256:" + hashlib.sha256(declaration).hexdigest())
-    setattr(world.wave, "approved_wake", approved)  # noqa: B010 - DockerWave declares no field
+    vars(world.wave)["approved_wake"] = approved  # DockerWave declares no such field
     assert "measured" in inspect.signature(wpr.ProtocolWave).parameters, \
         "ProtocolWave has no wake mode"
     slots = [Slot("slot-" + r, r, "task-" + r, 0, 1, "nonce-" + r) for r in ROLES]
