@@ -73,8 +73,12 @@ outside() {
 }
 nd=$(outside "$dirs/dirs")
 nf=$(outside "$dirs/files")
+pd=0
+pf=0
+if [ -e "$dirs/dirs" ] && grep -qx /probe-extra "$dirs/dirs"; then pd=1; fi
+if [ -e "$dirs/files" ] && grep -qx /probe-extra-file "$dirs/files"; then pf=1; fi
 rm -rf "$dirs"
-printf "%s %s\n" "$nd" "$nf"
+printf "%s %s %s %s\n" "$nd" "$nf" "$pd" "$pf"
 '
 
 observe() {
@@ -108,12 +112,19 @@ observe() {
         create_container --read-only --network none --ipc private --log-driver none \
             --user "$user" $_m -e "DECLARED=$DECLARED" \
             -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
-        if out=$(docker start -a "$cid" 2>/dev/null) && is_uint "${out%% *}" && is_uint "${out#* }"; then
-            record "$_arm" extra_dirs "${out%% *}"
-            record "$_arm" extra_files "${out#* }"
+        if out=$(docker start -a "$cid" 2>/dev/null); then
+            # shellcheck disable=SC2086  # four space-separated numbers
+            set -- $out
         else
-            record "$_arm" extra_dirs ERR
-            record "$_arm" extra_files ERR
+            set --
+        fi
+        if [ "$#" -eq 4 ]; then
+            record "$_arm" extra_dirs "$1"
+            record "$_arm" extra_files "$2"
+            record "$_arm" planted_dir "$3"
+            record "$_arm" planted_file "$4"
+        else
+            for k in extra_dirs extra_files planted_dir planted_file; do record "$_arm" "$k" ERR; done
         fi
         docker rm -v "$cid" >/dev/null || probe_die 'rm-failed'
         container_absent "$cid" || probe_die 'rm-unverified'
@@ -141,8 +152,10 @@ verdict() {
 # v_survivor: each planted path must be observed on its own, so a broken
 # file-bind check cannot hide behind the directory hit.
 v_survivor() {
-    e=$(extras survivor) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "${e% *}" -ge 1 ] && [ "${e#* }" -ge 1 ]; then printf '%s\n' "$PROBE_SURV"
+    extras survivor >/dev/null || { printf '%s\n' "$PROBE_FAIL"; return; }
+    d=$(rd_bool survivor planted_dir) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    f=$(rd_bool survivor planted_file) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$d" -eq 1 ] && [ "$f" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"
     else printf '%s\n' "$PROBE_FAIL"; fi
 }
 

@@ -47,9 +47,15 @@ read_state() {
         record "$1" swap_devices ERR
     fi
     # core_pattern must be exactly one nonempty line.
+    nl='
+'
     if [ -r "$3" ] && n=$(wc -l <"$3" 2>/dev/null) && [ "$n" -eq 1 ] \
-        && c=$(head -c 1 -- "$3" 2>/dev/null) && [ -n "$c" ] && [ "$c" != "$(printf '\n')" ]; then
-        if [ "$c" = '|' ]; then record "$1" core_piped 1; else record "$1" core_piped 0; fi
+        && v=$(cat -- "$3" 2>/dev/null) && [ -n "$v" ]; then
+        case $v in
+            *"$nl"*) record "$1" core_piped ERR ;;
+            '|'*) record "$1" core_piped 1 ;;
+            *) record "$1" core_piped 0 ;;
+        esac
     else
         record "$1" core_piped ERR
     fi

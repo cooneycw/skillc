@@ -28,6 +28,7 @@ PROBE_FAIL=OBSERVATION_FAILED
 PROBE_MISMATCH=0
 PROBE_PIDS=
 PROBE_CONTAINERS=
+PROBE_NAMES=
 PROBE_MOUNTS=
 PROBE_SCRATCH=
 PROBE_KEEP=0
@@ -159,6 +160,10 @@ scratch_make() {
 # track_pid PID / track_container ID / track_mount PATH: register for cleanup.
 track_pid() { PROBE_PIDS="$PROBE_PIDS $1"; }
 track_container() { PROBE_CONTAINERS="$PROBE_CONTAINERS $1"; }
+# track_name NAME: a random, probe-unique container name registered BEFORE its
+# create runs, so a container the daemon made after the client lost the
+# response is still found and removed.
+track_name() { PROBE_NAMES="$PROBE_NAMES $1"; }
 track_mount() { PROBE_MOUNTS="$1 $PROBE_MOUNTS"; }
 
 # is_mounted PATH: exit 0 if PATH is a mountpoint in this namespace, 1 if not,
@@ -192,6 +197,18 @@ probe_cleanup() {
         if ! container_absent "$_c"; then _ok=1; _left="$_left $_c"; fi
     done
     PROBE_CONTAINERS=$_left
+    _left=
+    for _n in $PROBE_NAMES; do
+        if _ids=$(docker ps -a -q --no-trunc --filter "name=^/$_n\$"); then
+            for _c in $_ids; do docker rm -f -v "$_c" >/dev/null 2>&1 || true; done
+            if ! _ids=$(docker ps -a -q --no-trunc --filter "name=^/$_n\$") || [ -n "$_ids" ]; then
+                _ok=1; _left="$_left $_n"
+            fi
+        else
+            _ok=1; _left="$_left $_n"
+        fi
+    done
+    PROBE_NAMES=$_left
     _left=
     for _m in $PROBE_MOUNTS; do
         if is_mounted "$_m"; then umount "$_m" 2>/dev/null || true; fi
@@ -258,8 +275,9 @@ mount_tmpfs() {
 # create_container ARGS...: `docker create`, then track the returned full ID in
 # $cid. Cleanup removes only IDs this probe created, never a name match.
 create_container() {
-    cid=$(docker create --name "skillc-dev-probe-$PROBE_NAME-$(probe_uuid)" "$@") \
-        || probe_die 'create-failed'
+    _name="skillc-dev-probe-$PROBE_NAME-$(probe_uuid)"
+    track_name "$_name"
+    cid=$(docker create --name "$_name" "$@") || probe_die 'create-failed'
     printf '%s\n' "$cid" | grep -Eq '^[0-9a-f]{64}$' || probe_die 'create-id-malformed'
     track_container "$cid"
 }

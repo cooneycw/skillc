@@ -65,6 +65,13 @@ starttime() {
     printf '%s\n' "$_s" | awk '{ print $20 }'
 }
 
+# alive PID: the process is not a zombie or dead (state field after comm).
+alive() {
+    _s=$(cat -- "/proc/$1/stat" 2>/dev/null) || return 1
+    _s=${_s##*) }
+    case $_s in Z* | X* | x*) return 1 ;; *) return 0 ;; esac
+}
+
 # record_census ARM ROOT IDENTITY [PID:STARTTIME...]: record one census. Its
 # `unreadable` is ERR unless every named holder is the same live process after
 # it (pid and start time) and at least one pid was scanned.
@@ -80,7 +87,7 @@ record_census() {
         _scan=${_rest#* }
         for h in "$@"; do
             _now=$(starttime "${h%%:*}") || _now=gone
-            if [ "$_now" != "${h#*:}" ]; then _unr=ERR; fi
+            if [ "$_now" != "${h#*:}" ] || ! alive "${h%%:*}"; then _unr=ERR; fi
         done
         if ! is_uint "$_scan" || [ "$_scan" -lt 1 ]; then _unr=ERR; fi
         record "$_arm" fd_hits "$_fd"

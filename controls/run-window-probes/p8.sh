@@ -71,9 +71,12 @@ isolation() {
         record "$1" socket_binds ERR
     fi
     # The container's own view: socket files it can see outside /proc and /sys.
-    if v=$(docker exec "$2" sh -c \
-        'find / \( -path /proc -o -path /sys \) -prune -o -type s -print | wc -l' 2>/dev/null) \
-        && v=$(printf '%s' "$v" | tr -d ' ') && is_uint "$v"; then
+    # `set -e` plus a plain assignment: a find(1) that fails, or is missing,
+    # fails the whole scan rather than counting zero.
+    # shellcheck disable=SC2016
+    if v=$(docker exec "$2" sh -c 'set -e
+o=$(find / \( -path /proc -o -path /sys \) -prune -o -type s -print)
+printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }"' 2>/dev/null) && is_uint "$v"; then
         record "$1" visible_sockets "$v"
     else
         record "$1" visible_sockets ERR
@@ -89,7 +92,8 @@ isolation() {
                 bad=1
             fi
         done
-        if [ "$bad" = 0 ] && [ -d "/proc/$pid" ]; then
+        running=$(docker inspect --format '{{.State.Running}}' "$2" 2>/dev/null) || running=
+        if [ "$bad" = 0 ] && [ "$running" = true ]; then
             record "$1" socket_fds "$sockets"
         else
             record "$1" socket_fds ERR
