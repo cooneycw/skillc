@@ -128,9 +128,9 @@ def _mutate(name: str, root: Path) -> tuple[tj.Reference, Context]:
         return _store(root, _encode(rows)), CONTEXT
     if name == "capacity-closed-rechained":
         fence = next(i for i, r in enumerate(rows) if r["kind"] == "fence")
-        capacity = {"seq": 0, "prev_hash": "0" * 64, "kind": "capacity",
-                    "elapsed_ns": rows[fence - 1]["elapsed_ns"], "principal": None,
-                    "scope": "records"}
+        capacity: dict[str, Any] = {"seq": 0, "prev_hash": "0" * 64, "kind": "capacity",
+                                    "elapsed_ns": rows[fence - 1]["elapsed_ns"],
+                                    "principal": None, "scope": "records"}
         return _store(root, _encode(rows[:fence] + [capacity] + rows[fence:])), CONTEXT
     if name == "unknown-coverage-rechained":
         rows[-1]["coverage"]["role-c"] = "unknown"
