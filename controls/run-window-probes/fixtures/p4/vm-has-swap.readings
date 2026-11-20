@@ -1,0 +1,12 @@
+live swap_devices 1
+live core_piped 0
+live resume_set 0
+swap swap_devices 1
+swap core_piped 0
+swap resume_set 0
+pipe swap_devices 0
+pipe core_piped 1
+pipe resume_set 0
+fault swap_devices ERR
+fault core_piped ERR
+fault resume_set ERR

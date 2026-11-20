@@ -1,0 +1,14 @@
+held errno 0
+clean errno 0
+clean listed 0
+clean unreadable 0
+alias errno 0
+alias listed 1
+alias unreadable 0
+lazy errno 0
+lazy listed 0
+lazy unreadable 0
+lazy fd_reads 1
+fault errno 0
+fault listed 0
+fault unreadable 1

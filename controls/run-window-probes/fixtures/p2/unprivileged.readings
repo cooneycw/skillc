@@ -1,0 +1,8 @@
+fd found 1
+fd unreadable 37
+mmap found 0
+mmap unreadable 37
+reaped found 0
+reaped unreadable 37
+fault found 0
+fault unreadable 1

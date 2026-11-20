@@ -1,0 +1,10 @@
+rmdir fstype ext4
+rmdir nlink 0
+last fstype ext4
+last nlink 0
+rename fstype ext4
+rename nlink 2
+hardlink fstype ext4
+hardlink nlink 1
+fault fstype ext4
+fault nlink ERR
