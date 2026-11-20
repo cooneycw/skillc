@@ -1,0 +1,696 @@
+{
+ "inventory": {
+  "attempt_id": "attempt-1",
+  "declaration_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "clock_origin_ns": 1000,
+  "slots": [
+   {
+    "principal": "p-a",
+    "role": "worker-a",
+    "task": "task-a",
+    "generation": 0,
+    "revision": 1,
+    "nonce": "n-a"
+   },
+   {
+    "principal": "p-b",
+    "role": "worker-b",
+    "task": "task-b",
+    "generation": 0,
+    "revision": 1,
+    "nonce": "n-b"
+   },
+   {
+    "principal": "p-c",
+    "role": "integrator",
+    "task": "task-c",
+    "generation": 0,
+    "revision": 1,
+    "nonce": "n-c"
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "healthy-with-a-nonstart",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-b",
+     "runtime_instance": "inst-b",
+     "session_id": "sess-b",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "bound",
+      "bound",
+      "unstarted"
+     ]
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": "p-a"
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-2",
+     "runtime_instance": "inst-b",
+     "expect": "p-b"
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-b",
+     "expect": null
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-9",
+     "runtime_instance": "inst-a",
+     "expect": null
+    },
+    {
+     "op": "resume",
+     "principal": "p-a",
+     "session_id": "sess-a",
+     "expect": true
+    },
+    {
+     "op": "resume",
+     "principal": "p-a",
+     "session_id": "sess-x",
+     "expect": false
+    },
+    {
+     "op": "sessions",
+     "expect": {
+      "worker-a": "sess-a",
+      "worker-b": "sess-b",
+      "integrator": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "barrier-refused-while-unresolved",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "refused",
+     "states": null
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "refused",
+     "states": null
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "bound",
+      "unstarted",
+      "unstarted"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "missing-startup-session",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": null,
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "unavailable",
+      "unstarted",
+      "unstarted"
+     ]
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": null
+    },
+    {
+     "op": "sessions",
+     "expect": {
+      "worker-a": null,
+      "worker-b": null,
+      "integrator": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "conflicting-second-bind",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a2",
+     "session_id": "sess-a2",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "unavailable",
+      "unstarted",
+      "unstarted"
+     ]
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": null
+    }
+   ]
+  },
+  {
+   "name": "runtime-instance-reused-across-slots",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-x",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-b",
+     "runtime_instance": "inst-x",
+     "session_id": "sess-b",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "bound",
+      "unavailable",
+      "unstarted"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "runtime-instance-from-earlier-attempt",
+   "used_instances": [
+    "inst-old"
+   ],
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-old",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "unavailable",
+      "unstarted",
+      "unstarted"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "session-held-by-another-slot",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-1",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-b",
+     "runtime_instance": "inst-b",
+     "session_id": "sess-1",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "bound",
+      "unavailable",
+      "unstarted"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "endpoint-id-from-earlier-attempt",
+   "used_endpoints": [
+    "ep-1"
+   ],
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "frozen-after-barrier",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-b",
+     "runtime_instance": "inst-b",
+     "session_id": "sess-b",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "bound",
+      "bound",
+      "unstarted"
+     ]
+    },
+    {
+     "op": "issue",
+     "principal": "p-c",
+     "expect": "refused"
+    },
+    {
+     "op": "bind",
+     "principal": "p-c",
+     "runtime_instance": "inst-c",
+     "session_id": "sess-c",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    },
+    {
+     "op": "unavailable",
+     "principal": "p-c",
+     "reason": "launch-failed",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "refused"
+    },
+    {
+     "op": "barrier",
+     "expect": "refused",
+     "states": null
+    }
+   ]
+  },
+  {
+   "name": "revocation-is-one-way",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-b",
+     "runtime_instance": "inst-b",
+     "session_id": "sess-b",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "bound",
+      "bound",
+      "unstarted"
+     ]
+    },
+    {
+     "op": "revoke",
+     "principal": "p-a",
+     "reason": "closed",
+     "expect": "ok"
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": null
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-2",
+     "runtime_instance": "inst-b",
+     "expect": "p-b"
+    },
+    {
+     "op": "revoke",
+     "principal": "p-a",
+     "reason": "closed",
+     "expect": "refused"
+    },
+    {
+     "op": "resume",
+     "principal": "p-a",
+     "session_id": "sess-a",
+     "expect": false
+    }
+   ]
+  },
+  {
+   "name": "no-lookup-before-barrier",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "lookup",
+     "endpoint": "ep-1",
+     "runtime_instance": "inst-a",
+     "expect": null
+    }
+   ]
+  },
+  {
+   "name": "bind-without-lease",
+   "ops": [
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "a-bound-slot-is-never-unbound",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "bind",
+     "principal": "p-a",
+     "runtime_instance": "inst-a",
+     "session_id": "sess-a",
+     "evidence_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "expect": "ok"
+    },
+    {
+     "op": "unavailable",
+     "principal": "p-a",
+     "reason": "launch-failed",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-a",
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "unplanned-principal",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-z",
+     "expect": "refused"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-z",
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "double-issue",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "refused"
+    }
+   ]
+  },
+  {
+   "name": "unavailable-launch-keeps-its-place",
+   "ops": [
+    {
+     "op": "issue",
+     "principal": "p-a",
+     "expect": "ok"
+    },
+    {
+     "op": "unavailable",
+     "principal": "p-a",
+     "reason": "launch-failed",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-b",
+     "expect": "ok"
+    },
+    {
+     "op": "unstarted",
+     "principal": "p-c",
+     "expect": "ok"
+    },
+    {
+     "op": "barrier",
+     "expect": "ok",
+     "states": [
+      "unavailable",
+      "unstarted",
+      "unstarted"
+     ]
+    }
+   ]
+  }
+ ]
+}
