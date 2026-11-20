@@ -10,7 +10,6 @@ checker (`blind_*`), which must give a different verdict.
 """
 from __future__ import annotations
 
-import errno
 import fcntl
 import importlib.util
 import os
@@ -35,9 +34,9 @@ CID = 'a' * 64
 HOST_NS = {k: f'{k}:[1000{i}]' for i, k in enumerate(rt.NAMESPACES)}
 CONTAINER_NS = {k: f'{k}:[2000{i}]' for i, k in enumerate(rt.NAMESPACES)}
 CGROUP = '/system.slice/docker-' + CID + '.scope'
-ROOT_ROW = '1 0 8:1 / / rw - ext4 /dev/sda1 rw'
+ROOT_ROW = '1 0 254:4091 / / rw - ext4 /dev/fake-root rw'
 BIND_ROW = '80 1 0:1 / /work/run rw - ext4 /dev/sdb1 rw'
-PROC_ROW = '2 1 0:5 / /proc rw - proc proc rw'
+PROC_ROW = '2 1 0:4093 / /proc rw - proc proc rw'
 SOCK = stat.S_IFSOCK | 0o600
 DIR = stat.S_IFDIR | 0o755
 REG = stat.S_IFREG | 0o644
@@ -537,6 +536,21 @@ def test_every_census_open_requests_close_on_exec(tmp_path: Path) -> None:
     assert flags_seen and all(f & os.O_CLOEXEC for f in flags_seen)
 
 
+#: The real procfs precondition is root in the initial PID namespace (spec,
+#: A-2): as another user, reading /proc/1/ns/pid is denied and every fact
+#: correctly refuses. Real-kernel fact tests therefore run as root only (root
+#: CI and the VM's root probes); the fake-reader twins below run everywhere.
+needs_root = pytest.mark.skipif(os.geteuid() != 0, reason='real procfs facts need root (A-2 precondition 1)')
+
+
+def test_real_procfs_precondition_fails_closed_without_root() -> None:
+    reader = rt.RealProc()
+    if os.geteuid() == 0:
+        assert rt.procfs_ok(reader)
+    else:
+        assert not rt.procfs_ok(reader)  # Refused, never a partial clean view.
+
+
 class ScopedProc(rt.RealProc):
     """The REAL /proc, limited to the named pids that still exist."""
 
@@ -567,6 +581,7 @@ def wait_ready(path: Path) -> None:
     raise AssertionError('holder not ready')
 
 
+@needs_root
 def test_real_fd_holder_is_seen(held_tree: tuple[Path, ra.Census]) -> None:
     root, census = held_tree
     fd = os.open(root / 'secret', os.O_RDONLY)
@@ -599,6 +614,7 @@ time.sleep(30)
 '''
 
 
+@needs_root
 def test_real_mapping_only_holder_is_seen(held_tree: tuple[Path, ra.Census], tmp_path: Path) -> None:
     root, census = held_tree
     ready = tmp_path.resolve() / 'ready'
@@ -627,6 +643,20 @@ def blind_counts_self(census: ra.Census) -> ra.Observation:
     return NEG
 
 
+def test_controller_pid_is_excluded_but_its_children_are_not(held_tree: tuple[Path, ra.Census]) -> None:
+    # The fake reader twin of the self-exclusion rule, so it runs as any user.
+    _, census = held_tree
+    assert census._root is not None
+    root_stat = os.fstat(census._root.fd)
+    me = str(os.getpid())
+    own = FakeProc({'1': proc_entry('1'), me: proc_entry(me, fd={'5': root_stat})})
+    assert rt.fact_no_holder(census, proc=own) is NEG
+    child = FakeProc({'1': proc_entry('1'), me: proc_entry(me, fd={'5': root_stat}),
+                      '99991': proc_entry('99991', fd={'5': root_stat})})
+    assert rt.fact_no_holder(census, proc=child) is SURV
+
+
+@needs_root
 def test_controller_own_census_fds_are_not_holders(held_tree: tuple[Path, ra.Census]) -> None:
     _, census = held_tree
     assert blind_counts_self(census) is SURV
@@ -719,9 +749,10 @@ def test_channel_isolation_unknown_is_failed_and_still_scoped() -> None:
 #: Every Contract A input A-3 composes, each at its passing value except the one
 #: under test. A-3 must expose `removed_surface_verdict(**SUFFICIENT)` (spec,
 #: A-2) or adapt these guards to its real entry point; never delete them.
-SUFFICIENT: dict[str, Any] = dict(census_complete=True, unlinked=NEG, reresolved=NEG, teardown=NEG,
-                                  no_holder=NEG, superblock_gone=NEG, tmpfs=True,
-                                  isolation=rt.ScopedObservation(NEG, 'lifetime'))
+SUFFICIENT: dict[str, Any] = {
+    'census_complete': True, 'unlinked': NEG, 'reresolved': NEG, 'teardown': NEG, 'no_holder': NEG,
+    'superblock_gone': NEG, 'tmpfs': True, 'isolation': rt.ScopedObservation(NEG, 'lifetime'),
+}
 
 
 def a3_compose() -> Any:
@@ -759,7 +790,10 @@ def released(held_tree: tuple[Path, ra.Census]) -> tuple[Path, ra.Census]:
 
 
 def test_superblock_in_no_table_is_negative(released: tuple[Path, ra.Census]) -> None:
-    _, census = released
+    root, census = released
+    # The fake tables must not carry the real census device, or this case is
+    # testing a collision rather than absence.
+    assert majmin_of(root) not in (ROOT_ROW.split()[2], PROC_ROW.split()[2])
     assert rt.fact_superblock_gone(census, proc=after_teardown()) is NEG
 
 
@@ -854,6 +888,7 @@ def test_fact3_requires_released_entries(held_tree: tuple[Path, ra.Census]) -> N
     assert rt.fact_superblock_gone(census, proc=after_teardown()) is FAIL
 
 
+@needs_root
 def test_real_mount_table_lists_a_live_filesystem(released: tuple[Path, ra.Census]) -> None:
     # The tree lives on a mounted filesystem, so the real reader must say
     # SURVIVOR: it is not blind.

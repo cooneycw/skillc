@@ -12,12 +12,23 @@ from __future__ import annotations
 import copy
 import os
 import pickle
+import secrets
 import sys
 from pathlib import Path
 
 import pytest
-from test_remnant_scan import audit_captured_output, no_marker, references  # noqa: F401
-from test_run_window_teardown import CID, CONTAINER_NS, DIR, PROC_ROW, ROOT_ROW, FakeDocker, FakeProc, proc_entry, table
+from test_remnant_scan import ACTIVE_AUDIT, audit_captured_output, no_marker  # noqa: F401
+from test_run_window_teardown import (
+    CID,
+    CONTAINER_NS,
+    DIR,
+    PROC_ROW,
+    ROOT_ROW,
+    FakeDocker,
+    FakeProc,
+    proc_entry,
+    table,
+)
 
 from skillc import run_window_absence as ra
 from skillc import run_window_teardown as rt
@@ -27,9 +38,21 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith('linux') or not hasa
                                 reason='Contract A requires Linux O_PATH and /proc')
 
 
+def ascii_marker() -> References:
+    """A synthetic marker that is plain ASCII. The cgroup parser decodes with
+    'replace', so a marker with non-UTF-8 bytes would be rewritten before it
+    could leak, and the leaking twin below would go undetected: a blind
+    control. Registered with the autouse output audit like `references()`."""
+    refs = References((b'SYNTHETIC_ONLY_' + secrets.token_hex(20).encode(),))
+    audit = ACTIVE_AUDIT.get()
+    if audit is not None:
+        audit.refs.append(refs)
+    return refs
+
+
 def marked_capture(tmp_path: Path) -> tuple[rt.LaunchIdentity, References]:
-    refs = references(filename=True)
-    marker = os.fsdecode(refs._values[0])
+    refs = ascii_marker()
+    marker = refs._values[0].decode('ascii')
     bind = tmp_path.resolve() / marker
     bind.mkdir()
     docker = FakeDocker()
@@ -75,6 +98,9 @@ class LeakingIdentity(rt.LaunchIdentity):
 
 def test_oracle_rejects_a_leaking_identity_twin(tmp_path: Path) -> None:
     ident, refs = marked_capture(tmp_path)
+    # The marker must survive into the identity's private state, or the twin
+    # below cannot leak it and this control is blind.
+    assert any(refs._values[0].decode('ascii') in path for _, _, path in ident._cgroups)
     leaking = LeakingIdentity(object())
     leaking._cgroups = ident._cgroups
     with pytest.raises(AssertionError):
