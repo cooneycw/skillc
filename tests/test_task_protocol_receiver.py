@@ -368,3 +368,15 @@ def test_a_receiver_that_blames_the_owner_is_caught(make_world: Callable[..., Wo
     client.call(client.request_fields("offer", 1), world.paths["p-a"])
     result = world.finish()
     assert any(r["principal"] == "p-a" for r in _rows(result, "rejection"))
+
+
+def test_peer_authority_has_one_implementation() -> None:
+    """The receiver must take kernel credentials from the same helper the
+    decide/reply channel gate uses, never a second SO_PEERCRED reader."""
+    from skillc import decide_reply_channel, task_protocol_receiver
+    receiver_source = Path(task_protocol_receiver.__file__).read_text()
+    channel_source = Path(decide_reply_channel.__file__).read_text()
+    assert "SO_PEERCRED" not in receiver_source.replace("`SO_PEERCRED`", "")
+    assert "peer_credentials(conn)" in receiver_source
+    assert channel_source.count("socket.SO_PEERCRED") == 1
+    assert "peer_credentials(self.request)" in channel_source
