@@ -123,12 +123,16 @@ class Identity(_NoCopy):
         return '<Identity redacted>'
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class _Held:
     fd: int
     identity: Identity
     mode: int
     nlink: int
+    dev: int
+
+    def __repr__(self) -> str:
+        return '<Held redacted>'
 
 
 def _components(path: str | os.PathLike[str]) -> list[str]:
@@ -167,7 +171,7 @@ def _open_held(opener: Opener, name: str, flags: int, dir_fd: int | None) -> _He
     except BaseException:
         _close(fd)
         raise
-    return _Held(fd, Identity(info), info.st_mode, info.st_nlink)
+    return _Held(fd, Identity(info), info.st_mode, info.st_nlink, info.st_dev)
 
 
 def fd_budget_ok(entries: int, depth: int) -> bool:
@@ -241,13 +245,16 @@ def record_mountpoint(path: str | os.PathLike[str], *, generation: object,
     for item in held[:-1]:
         _close(item.fd)
     m0 = held[-1]
+    record: MountpointRecord | None = None
     try:
         if _is_empty(m0.fd, opener):
-            return MountpointRecord(generation, parts, m0)
+            record = MountpointRecord(generation, parts, m0)
     except (OSError, ValueError):
         pass
-    _close(m0.fd)
-    return None
+    finally:
+        if record is None:
+            _close(m0.fd)  # Ownership moves to the record only when one is returned.
+    return record
 
 
 def _is_empty(dir_fd: int, opener: Opener) -> bool:
@@ -304,8 +311,8 @@ class Census(_NoCopy):
             _close(item.fd)
         if self._root is not None:
             _close(self._root.fd)
-            self._root = _Held(-1, self._root.identity, self._root.mode, self._root.nlink)
-        self._entries = [_Held(-1, i.identity, i.mode, i.nlink) for i in self._entries]
+            self._root = _Held(-1, self._root.identity, self._root.mode, self._root.nlink, self._root.dev)
+        self._entries = [_Held(-1, i.identity, i.mode, i.nlink, i.dev) for i in self._entries]
         self._released = True
 
     def close(self) -> None:
@@ -314,7 +321,7 @@ class Census(_NoCopy):
         self.release_entries()
         for item in self._ancestors:
             _close(item.fd)
-        self._ancestors = [_Held(-1, i.identity, i.mode, i.nlink) for i in self._ancestors]
+        self._ancestors = [_Held(-1, i.identity, i.mode, i.nlink, i.dev) for i in self._ancestors]
         self._closed = True
 
     def __enter__(self) -> Census:
@@ -352,7 +359,7 @@ def take_census(path: str | os.PathLike[str], *, generation: object,
             return census
         census._ancestors = held[:-1]
         census._root = held[-1]
-        census._root_dev = _fstat(held[-1].fd).st_dev
+        census._root_dev = held[-1].dev
         try:
             census._complete = _walk(census, held[-1].fd, 0, max_entries, max_depth, opener)
         except (OSError, ValueError):
@@ -518,24 +525,31 @@ class HeldTree(_NoCopy, BoundedTree):
             pass
         raise Unreadable('held root: unreadable')
 
+    def _require_open(self) -> None:
+        if self._held < 0:
+            raise Unreadable('held root: closed')
+
     def kind(self, rel: str) -> str:
+        self._require_open()
         try:
             return super().kind(rel)
-        except Unreadable:
+        except (Unreadable, OSError):
             pass
         raise Unreadable('held root: unreadable entry')
 
     def read(self, rel: str, limit: int = MAX_FILE_BYTES) -> tuple[bytes, int]:
+        self._require_open()
         try:
             return super().read(rel, limit)
-        except Unreadable:
+        except (Unreadable, OSError):
             pass
         raise Unreadable('held root: unreadable entry')
 
     def listdir(self, rel: str) -> list[tuple[str, str]]:
+        self._require_open()
         try:
             return super().listdir(rel)
-        except Unreadable:
+        except (Unreadable, OSError):
             pass
         raise Unreadable('held root: unreadable entry')
 

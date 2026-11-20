@@ -282,6 +282,21 @@ def test_failed_m0_recording_is_none(tmp_path: Path) -> None:
     assert open_fds() == before
 
 
+def test_unexpected_error_while_recording_m0_leaks_nothing(tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve() / 'declared' / 'removed-root'
+    root.mkdir(parents=True)
+
+    def exploding(fd: int) -> Any:
+        raise RuntimeError('unexpected')
+
+    before = open_fds()
+    monkeypatch.setattr(ra, '_scandir', exploding)
+    with pytest.raises(RuntimeError):
+        ra.record_mountpoint(root, generation=object())
+    assert open_fds() == before
+
+
 def test_closed_m0_record_is_failed(window: Window) -> None:
     with window.census() as census:
         remove_entries(window.root)
@@ -295,6 +310,33 @@ def test_census_over_entry_bound_is_incomplete(window: Window) -> None:
     with window.census(max_entries=2) as census:
         assert not census.complete
         assert ra.fact_unlinked(census) is FAIL
+
+
+def test_listing_stops_at_the_budget_instead_of_draining(window: Window,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    for index in range(50):
+        (window.root / f'extra-{index:02d}').write_bytes(b'x')
+    consumed = []
+    real = os.scandir
+
+    class Recording:
+        def __init__(self, fd: int) -> None:
+            self.inner = real(fd)
+
+        def __enter__(self) -> Iterator[Any]:
+            def gen() -> Iterator[Any]:
+                for entry in self.inner:
+                    consumed.append(entry.name)
+                    yield entry
+            return gen()
+
+        def __exit__(self, *exc: object) -> None:
+            self.inner.close()
+
+    monkeypatch.setattr(ra, '_scandir', Recording)
+    with window.census(max_entries=2) as census:
+        assert not census.complete
+    assert len(consumed) == 3  # The budget (2) plus the one entry that exceeds it.
 
 
 def test_census_over_depth_bound_is_incomplete(window: Window) -> None:
@@ -335,11 +377,12 @@ def test_emfile_partway_through_a_census_fails_and_leaks_nothing(window: Window)
     assert open_fds() == before
 
 
-@pytest.mark.parametrize('where', ['slash', 'root', 'first-entry'])
+@pytest.mark.parametrize('where', ['slash', 'ancestor', 'root', 'first-entry'])
 def test_fstat_failure_after_open_leaks_nothing(window: Window, monkeypatch: pytest.MonkeyPatch,
                                                 where: str) -> None:
     # fstat order: `/`, each component (the last is the root), then entries.
-    nth = {'slash': 1, 'root': len(window.root.parts), 'first-entry': len(window.root.parts) + 1}[where]
+    nth = {'slash': 1, 'ancestor': 2, 'root': len(window.root.parts),
+           'first-entry': len(window.root.parts) + 1}[where]
     calls = []
     real = os.fstat
 
@@ -518,10 +561,22 @@ def test_held_tree_reads_the_held_root_after_the_path_moves(tmp_path: Path) -> N
         (root / 'out.txt').write_bytes(b'decoy')
         assert tree.listdir('') == [('out.txt', 'file')]
         assert tree.read('out.txt')[0] == b'held-bytes'
+        held_number = tree._held
         tree.close()
-        tree.close()
-        with pytest.raises(Unreadable):
-            tree.listdir('')
+        # Put a new owner in the freed slot; a second close must not touch it.
+        reused: list[int] = []
+        while held_number not in reused and len(reused) < 512:
+            reused.append(os.open(str(tmp), os.O_RDONLY))
+        try:
+            tree.close()
+            for number in reused:
+                os.fstat(number)
+        finally:
+            for number in reused:
+                os.close(number)
+        for call in (lambda: tree.listdir(''), lambda: tree.kind(''), lambda: tree.read('out.txt')):
+            with pytest.raises(Unreadable):
+                call()
     finally:
         os.close(fd)
 

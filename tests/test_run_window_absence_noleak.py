@@ -109,6 +109,48 @@ def test_held_tree_errors_disclose_no_entry_name(tmp_path: Path) -> None:
         os.close(held[0])
 
 
+def test_held_tree_os_errors_naming_an_entry_are_translated(tmp_path: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    import errno
+    root, refs = marked_root(tmp_path)
+    name = os.fsdecode(refs._values[0])
+    (root / 'plain').write_bytes(b'x')
+    held = ra.open_held_root(root)
+    assert held is not None
+    real = os.scandir
+
+    class Entry:
+        def __init__(self, inner: os.DirEntry[str]) -> None:
+            self.name = inner.name
+
+        def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+            raise OSError(errno.EIO, 'io', name)
+
+    class Hostile:
+        def __init__(self, fd: int) -> None:
+            self.inner = real(fd)
+
+        def __enter__(self) -> list[Entry]:
+            return [Entry(e) for e in self.inner]
+
+        def __exit__(self, *exc: object) -> None:
+            self.inner.close()
+
+    try:
+        tree = ra.HeldTree(held[0])
+        monkeypatch.setattr(os, 'scandir', Hostile)
+        with pytest.raises(Unreadable) as caught:
+            tree.listdir('')
+        monkeypatch.setattr(os, 'scandir', real)
+        exc = caught.value
+        assert exc.__cause__ is None and exc.__context__ is None
+        assert_private(rendered(exc), root, refs)
+        tree.close()
+    finally:
+        monkeypatch.setattr(os, 'scandir', real)
+        os.close(held[0])
+
+
 def test_every_evidence_object_refuses_pickle_and_copy(tmp_path: Path) -> None:
     root, _ = marked_root(tmp_path)
     gen = object()
