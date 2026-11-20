@@ -7,6 +7,9 @@
 # while FIONREAD reads 0. ROOT REQUIRED. TOUCHES DOCKER.
 # Usage: p8.sh --image-id sha256:<64 hex> --runner-unit <unit>
 #
+# Each docker arm prints `INFO diag <arm> binds|scan exit <status>` and up to
+# 2 KiB of that step's stderr (lib.sh step_diag); no verdict reads them.
+#
 # Arms and expected verdicts:
 #   clean     private namespaces, no socket bind or fd, and
 #             no socket file visible inside the container   CONFIRMED_NEGATIVE
@@ -24,6 +27,7 @@ parse_common "$@"
 
 # socket_binds ID: count bind mounts whose source is a socket or a directory
 # containing one. Structured inspect output; any unreadable source fails.
+# shellcheck disable=SC2317  # invoked through step_capture
 socket_binds() {
     _j=$(docker inspect --format '{{json .Mounts}}' "$1") || return 1
     printf '%s\n' "$_j" | python3 -I -c '
@@ -82,6 +86,7 @@ isolation() {
             fi
         else
             ok=0
+            info "diag $1 ns-$ns unreadable"
         fi
     done
     if [ "$ok" = 1 ]; then
@@ -91,7 +96,10 @@ isolation() {
         record "$1" shared_ns ERR
         record "$1" shared_net ERR
     fi
-    if b=$(socket_binds "$2" 2>/dev/null) && is_uint "${b% *}" && is_uint "${b#* }"; then
+    _rc=0
+    b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?
+    step_diag "$1" binds "$_rc" "$PROBE_SCRATCH/$1.binds.err"
+    if [ "$_rc" -eq 0 ] && is_uint "${b% *}" && is_uint "${b#* }"; then
         record "$1" socket_binds "${b% *}"
         record "$1" planted_binds "${b#* }"
     else
@@ -104,7 +112,9 @@ isolation() {
     # shellcheck disable=SC2016
     # Prints the total and how many of the two planted destinations show a
     # socket (the file bind itself; anything beneath the directory bind).
-    if v=$(docker exec "$2" sh -c 'set -e
+    _rc=0
+    # shellcheck disable=SC2016  # expands inside the container
+    v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c 'set -e
 o=$(find / \( -path /proc -o -path /sys \) -prune -o -type s -print)
 n=$(printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }")
 p=0
@@ -113,7 +123,11 @@ if [ -d /probe-sockdir ]; then
     d=$(find /probe-sockdir -type s -print)
     if [ -n "$d" ]; then p=$((p + 1)); fi
 fi
-printf "%s %s\n" "$n" "$p"' 2>/dev/null) && is_uint "${v% *}" && is_uint "${v#* }"; then
+printf "%s %s\n" "$n" "$p"') || _rc=$?
+    # Bounded stderr and the exit status of the in-container scan, so a failed
+    # scan names its cause. Diagnostic only: the readings are unchanged.
+    step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"
+    if [ "$_rc" -eq 0 ] && is_uint "${v% *}" && is_uint "${v#* }"; then
         record "$1" visible_sockets "${v% *}"
         record "$1" visible_planted "${v#* }"
     else

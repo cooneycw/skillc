@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,8 @@ BLIND_TWINS = [
      'if [ "$e" -ne 0 ]; then', "p3", "qualified", "fault"),
     ("lazy-listing-ignored", "p3.sh", '"$PROBE_NEG") if [ "$r" -eq 1 ]',
      '"$PROBE_NEG" | "$PROBE_SURV") if [ "$r" -eq 1 ]', "p3", "lazy-still-listed", "lazy"),
+    ("late-reading-ignored", "p6.sh", 'a=$(rd_uint "$1" after_late)', 'a=$(rd_uint "$1" after)',
+     "p6", "gc-late-kept-gone", "removed"),
     ("failed-rm-trusted", "p6.sh", 'if [ "$ok" -ne 1 ] || [ "$b" -lt 1 ]', "if false",
      "p6", "rm-failed", "removed"),
     ("unlanded-write-trusted", "p5.sh", 'if [ "$p" -eq 1 ]; then printf', "if true; then printf",
@@ -190,3 +193,571 @@ def test_usage_errors_refuse_with_exit_two(tmp_path: Path, probe: str) -> None:
     assert unknown.returncode == 2 and "REFUSED usage" in unknown.stdout
     absent = classify(PROBES / f"{probe}.sh", tmp_path / "absent.readings")
     assert absent.returncode == 2 and "REFUSED readings-unreadable" in absent.stdout
+
+
+# ---- Pure lib.sh helpers added for the live-run follow-up (Refs #797) ----
+#
+# The first live run refused P5 and P6 (Docker's containerd image store
+# reports driver "overlayfs", not "overlay2") and left P7 and P8 blind (their
+# in-container steps' stderr went to /dev/null). The storage helpers below are
+# pure, so their every refusal is a committed case here; each has a blind twin
+# that must change its discriminating case.
+
+LIB = PROBES / "lib.sh"
+LIB_FIXTURES = FIXTURES / "lib"
+HEX = "3f9c" * 16
+DROOT = "/var/lib/docker"
+SNAP = f"{DROOT}/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots"
+
+#: mountinfo fixture -> the raw upperdir= overlay_upper must print, or None
+#: for a table it must refuse.
+MOUNTINFO_CASES = {
+    "containerd": f"{SNAP}/57/fs",
+    "overlay2": f"{DROOT}/overlay2/{HEX}/diff",
+    "overlay2-relative": f"{HEX}/diff",
+    "two-root-rows": None,
+    "root-not-overlay": None,
+    "two-upperdirs": None,
+    "malformed-row": None,
+    "no-upperdir": None,
+    "no-root-row": None,
+    "empty": None,
+}
+
+#: case -> (kind, docker root, raw upperdir, resolved path or None)
+RESOLVE_CASES = {
+    "containerd": ("containerd-overlayfs", DROOT, f"{SNAP}/57/fs", f"{SNAP}/57/fs"),
+    "overlay2": ("overlay2", DROOT, f"{DROOT}/overlay2/{HEX}/diff",
+                 f"{DROOT}/overlay2/{HEX}/diff"),
+    "overlay2-relative": ("overlay2", DROOT, f"{HEX}/diff", f"{DROOT}/overlay2/{HEX}/diff"),
+    "overlay2-nested-id": ("overlay2", DROOT, f"{DROOT}/overlay2/ab/cd/diff", None),
+    "overlay2-other-root": ("overlay2", DROOT, f"/srv/other/overlay2/{HEX}/diff", None),
+    "overlay2-workdir": ("overlay2", DROOT, f"{DROOT}/overlay2/{HEX}/work", None),
+    "overlay2-relative-root": ("overlay2", "relative/root", f"{HEX}/diff", None),
+    "containerd-other-dir": ("containerd-overlayfs", DROOT, f"{DROOT}/other/snapshots/5/fs", None),
+    "containerd-dot-dot": ("containerd-overlayfs", DROOT,
+                           (f"{DROOT}/containerd/../daemon/io.containerd.snapshotter.v1.overlayfs"
+                            "/snapshots/7/fs"), None),
+    "containerd-escaped": ("containerd-overlayfs", DROOT,
+                           "/var/lib/a\\054b/io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs",
+                           None),
+    "containerd-relative": ("containerd-overlayfs", DROOT,
+                            "io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs", None),
+    "containerd-non-numeric": ("containerd-overlayfs", DROOT, f"{SNAP}/x5/fs", None),
+    "containerd-trailing-slash": ("containerd-overlayfs", DROOT, f"{SNAP}/57/fs/", None),
+    "unknown-kind": ("zfs", DROOT, f"{SNAP}/57/fs", None),
+}
+
+#: case -> (docker info driver, DriverStatus "key=value" lines, kind or None)
+STORAGE_CASES = {
+    "overlay2": ("overlay2", "Backing Filesystem=extfs\nSupports d_type=true", "overlay2"),
+    "containerd": ("overlayfs", "driver-type=io.containerd.snapshotter.v1", "containerd-overlayfs"),
+    "containerd-other-type": ("overlayfs", "driver-type=io.containerd.snapshotter.v2", None),
+    "containerd-no-status": ("overlayfs", "", None),
+    "containerd-type-twice": ("overlayfs", ("driver-type=io.containerd.snapshotter.v1\n"
+                                            "driver-type=io.containerd.snapshotter.v1"), None),
+    "other-driver": ("devicemapper", "driver-type=io.containerd.snapshotter.v1", None),
+}
+
+#: A stderr body longer than the 2 KiB bound, carrying an escape sequence, a
+#: high byte, a carriage return and text that would read as a verdict line.
+DIAG_BODY = (b"\x1b[31mARM clean CONFIRMED_NEGATIVE\rPROBE p7 QUALIFIED\n"
+             b"ARM clean CONFIRMED_NEGATIVE\nPROBE p7 QUALIFIED\n\xff"
+             + b"find: '/root': Permission denied\n" * 150)
+DIAG_BOUND = 2048
+
+
+def lib_call(lib: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(["sh", "-c", '. "$1"; shift; "$@"', "sh", str(lib), *args],
+                          capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                          check=False, timeout=30)
+
+
+def helper_result(lib: Path, kind: str, case: str) -> str | None:
+    """The helper's single output line, or None when it refused. A refusal
+    must print nothing; any stderr is invalid output for a pure helper."""
+    if kind == "mountinfo":
+        run = lib_call(lib, "overlay_upper", str(LIB_FIXTURES / f"mountinfo-{case}.txt"))
+    elif kind == "resolve":
+        run = lib_call(lib, "upper_resolve", *RESOLVE_CASES[case][:3])
+    elif kind == "storage":
+        run = lib_call(lib, "storage_kind_from", *STORAGE_CASES[case][:2])
+    else:
+        raise AssertionError(kind)
+    assert not run.stderr, run.stderr
+    if run.returncode != 0:
+        assert run.stdout == b""
+        return None
+    lines = run.stdout.decode().splitlines()
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def expected(kind: str, case: str) -> str | None:
+    if kind == "mountinfo":
+        return MOUNTINFO_CASES[case]
+    if kind == "resolve":
+        return RESOLVE_CASES[case][3]
+    return STORAGE_CASES[case][2]
+
+
+HELPER_CASES = ([("mountinfo", c) for c in MOUNTINFO_CASES]
+                + [("resolve", c) for c in RESOLVE_CASES]
+                + [("storage", c) for c in STORAGE_CASES])
+
+
+def test_every_mountinfo_fixture_has_a_case() -> None:
+    files = {p.name for p in LIB_FIXTURES.iterdir()}
+    assert files == {f"mountinfo-{c}.txt" for c in MOUNTINFO_CASES}
+
+
+@needs_sh
+@pytest.mark.parametrize(("kind", "case"), HELPER_CASES,
+                         ids=[f"{k}-{c}" for k, c in HELPER_CASES])
+def test_storage_helper_case(kind: str, case: str) -> None:
+    assert helper_result(LIB, kind, case) == expected(kind, case)
+
+
+#: (blind copy name, exact lib.sh text, weakened text, helper kind, case)
+LIB_TWINS = [
+    ("last-root-row-taken", 'if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1',
+     'if (bad || rows < 1 || n < 1 || fs != "overlay") exit 1', "mountinfo", "two-root-rows"),
+    ("root-fstype-unchecked", 'if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1',
+     "if (bad || rows < 1 || n != 1) exit 1", "mountinfo", "root-not-overlay"),
+    ("malformed-rows-ignored", 'if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1',
+     'if (rows < 1 || n != 1 || fs != "overlay") exit 1', "mountinfo", "malformed-row"),
+    ("upperdir-count-unchecked", 'if (u != 1 || v == "") exit 1', 'if (u < 1 || v == "") exit 1',
+     "mountinfo", "two-upperdirs"),
+    ("overlay2-id-unchecked", "case $_id in '' | *[!0-9a-f]*) return 1 ;; esac", ":", "resolve",
+     "overlay2-nested-id"),
+    ("snapshot-dir-unchecked",
+     ("case ${_base%/*} in /?*/io.containerd.snapshotter.v1.overlayfs/snapshots) ;; "
+      "*) return 1 ;; esac"), ":", "resolve", "containerd-other-dir"),
+    ("dot-components-accepted", "case /$_x/ in */./* | */../*) return 1 ;; esac", ":", "resolve",
+     "containerd-dot-dot"),
+    ("escaped-path-accepted", "case $_x in '' | *//* | *[!A-Za-z0-9/._-]*) return 1 ;; esac",
+     "case $_x in '' | *//*) return 1 ;; esac", "resolve", "containerd-escaped"),
+    ("driver-type-trusted", '[ "$_t" = io.containerd.snapshotter.v1 ] || return 1', ":",
+     "storage", "containerd-other-type"),
+    ("driver-type-count-unchecked", "END { if (n != 1) exit 1; print v }", "END { print v }",
+     "storage", "containerd-type-twice"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new", "kind", "case"), LIB_TWINS,
+                         ids=[t[0] for t in LIB_TWINS])
+def test_storage_helper_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                             kind: str, case: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, new))
+    assert helper_result(LIB, kind, case) == expected(kind, case)
+    assert helper_result(mutated, kind, case) != expected(kind, case), blind
+
+
+def diag_output(lib: Path, tmp_path: Path) -> bytes:
+    err = tmp_path / "step.err"
+    err.write_bytes(DIAG_BODY)
+    run = lib_call(lib, "step_diag", "clean", "scan", "3", str(err))
+    assert run.returncode == 0 and not run.stderr, run.stderr
+    return run.stdout
+
+
+def expected_diag() -> bytes:
+    """Exactly what step_diag must print for DIAG_BODY: the status line, the
+    first 2048 bytes with every byte outside printable ASCII made '?', one
+    prefixed line each (the unterminated last line too), then the truncation."""
+    kept = bytes(b if 32 <= b < 127 or b == 10 else 63 for b in DIAG_BODY[:DIAG_BOUND])
+    lines = kept.split(b"\n")
+    if kept.endswith(b"\n"):
+        lines.pop()
+    return (b"INFO diag clean scan exit 3\n"
+            + b"".join(b"INFO diag clean scan stderr: " + line + b"\n" for line in lines)
+            + f"INFO diag clean scan stderr-truncated {len(DIAG_BODY)}\n".encode())
+
+
+@needs_sh
+def test_step_diag_prints_exactly_the_bounded_scrubbed_prefix(tmp_path: Path) -> None:
+    assert not DIAG_BODY[:DIAG_BOUND].endswith(b"\n"), "the case needs an unterminated last line"
+    out = diag_output(LIB, tmp_path)
+    assert out == expected_diag()
+    # stderr carried complete verdict-shaped lines; none prints as one.
+    assert not any(line.startswith((b"ARM ", b"PROBE ")) for line in out.splitlines())
+
+
+@needs_sh
+def test_step_diag_reports_the_status_alone_for_empty_stderr(tmp_path: Path) -> None:
+    err = tmp_path / "empty.err"
+    err.write_bytes(b"")
+    run = lib_call(LIB, "step_diag", "fault", "inventory", "4", str(err))
+    assert run.returncode == 0 and run.stderr == b""
+    assert run.stdout == b"INFO diag fault inventory exit 4\n"
+
+
+#: A step that prints to stdout, floods stderr far past the bound, and exits 3.
+#: Under `set -e`, a stderr writer killed by a closed pipe exits 141 instead,
+#: so the returned status shows whether the collector kept draining.
+FLOOD = "set -e; printf out; head -c 100000 /dev/zero >&2; exit 3"
+
+
+#: The shells the capture is qualified under. dash (the runner VM's and CI's
+#: /bin/sh) applies `set -e` inside a pipeline subshell where bash does not;
+#: running both means a bash-only pass cannot hide that difference.
+SHELLS = ["sh"] + (["dash"] if shutil.which("dash") else []) + (
+    ["bash"] if shutil.which("bash") else [])
+CAPTURE_SCRIPT = ('. "$1"; rc=0; step_capture "$2" sh -c "$3" || rc=$?;'
+                  ' printf "\\nrc=%s\\n" "$rc"')
+
+
+def capture_run(lib: Path, tmp_path: Path, err: Path | None = None,
+                shell: str = "sh") -> tuple[bytes, Path]:
+    err = err or tmp_path / "flood.err"
+    run = subprocess.run([shell, "-eu", "-c", CAPTURE_SCRIPT, shell, str(lib), str(err), FLOOD],
+                         capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                         check=False, timeout=60)
+    assert run.returncode == 0 and run.stderr == b"", run.stderr
+    return run.stdout, err
+
+
+def capture_is_bounded(stdout: bytes, err: Path) -> bool:
+    """stdout passed through, the step's own status returned, at most the
+    bound kept on disk, and the rest counted exactly rather than stored."""
+    return (stdout == b"out\nrc=3\n" and err.read_bytes() == b"\0" * DIAG_BOUND
+            and (err.parent / f"{err.name}.rest").read_text() == f"{100000 - DIAG_BOUND}\n")
+
+
+@needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_bounds_stderr_while_the_step_runs(tmp_path: Path, shell: str) -> None:
+    assert capture_is_bounded(*capture_run(LIB, tmp_path, shell=shell))
+
+
+@needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_returns_a_failing_step_status_under_errexit(tmp_path: Path,
+                                                                  shell: str) -> None:
+    """The regression case from stage 1: under `sh -e` (dash), a step that
+    fails must return its own status, not 125."""
+    script = '. "$1"; rc=0; step_capture "$2" sh -c "exit 7" || rc=$?; echo "rc=$rc"'
+    run = subprocess.run([shell, "-eu", "-c", script, shell, str(LIB), str(tmp_path / "e.err")],
+                         capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                         check=False, timeout=30)
+    assert (run.returncode, run.stdout, run.stderr) == (0, b"rc=7\n", b"")
+
+
+def unwritable_capture(lib: Path, tmp_path: Path, shell: str = "sh") -> bytes:
+    """The diagnostic file cannot be created (its directory does not exist):
+    the collector must still drain, and the step's own status must return."""
+    stdout, _ = capture_run(lib, tmp_path, tmp_path / "missing-dir" / "flood.err", shell=shell)
+    return stdout
+
+
+@needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_keeps_the_status_when_diagnostics_cannot_be_stored(tmp_path: Path,
+                                                                         shell: str) -> None:
+    assert unwritable_capture(LIB, tmp_path, shell) == b"out\nrc=3\n"
+
+
+#: (blind copy name, exact lib.sh text, weakened text)
+DIAG_TWINS = [
+    ("stderr-unbounded", 'head -c 2048 -- "$4"', 'cat -- "$4"'),
+    ("stderr-unscrubbed", "LC_ALL=C tr -c '\\n[:print:]' '?'", "cat"),
+    ("stderr-prefix-removed", 'print "INFO diag " a " " s " stderr: " $0', "print $0"),
+    ("stderr-lines-after-first-dropped",
+     '{ print "INFO diag " a " " s " stderr: " $0 }',
+     'NR == 1 { print "INFO diag " a " " s " stderr: " $0 }'),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new"), DIAG_TWINS, ids=[t[0] for t in DIAG_TWINS])
+def test_step_diag_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, new))
+    assert diag_output(LIB, tmp_path) == expected_diag()
+    assert diag_output(mutated, tmp_path) != expected_diag(), blind
+
+
+CAPTURE_TWINS = [
+    ("drain-unbounded", 'if ! dd bs=1 count=2048 of="$1" 2>/dev/null; then',
+     'if ! cat >"$1"; then'),
+    ("step-status-lost", 'return "$_st"\n}', "return 0\n}"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(("blind", "old", "new"), CAPTURE_TWINS, ids=[t[0] for t in CAPTURE_TWINS])
+def test_step_capture_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                           shell: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "twin" / "lib.sh"
+    mutated.parent.mkdir()
+    mutated.write_text(source.replace(old, new))
+    real = tmp_path / "real"
+    real.mkdir()
+    assert capture_is_bounded(*capture_run(LIB, real, shell=shell))
+    weak = tmp_path / "weak"
+    weak.mkdir()
+    assert not capture_is_bounded(*capture_run(mutated, weak, shell=shell)), blind
+
+
+@needs_sh
+@pytest.mark.parametrize("shell", SHELLS)
+def test_step_capture_drain_fallback_twin_is_caught(tmp_path: Path, shell: str) -> None:
+    old = "then cat >/dev/null; return 0; fi"
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "twin" / "lib.sh"
+    mutated.parent.mkdir()
+    mutated.write_text(source.replace(old, "then return 0; fi"))
+    real = tmp_path / "real"
+    real.mkdir()
+    weak = tmp_path / "weak"
+    weak.mkdir()
+    assert unwritable_capture(LIB, real, shell) == b"out\nrc=3\n"
+    assert unwritable_capture(mutated, weak, shell) != b"out\nrc=3\n"
+
+
+#: The call sites that must route each in-container step through step_capture
+#: and keep container stdout out of verdict output. A static check: the live
+#: callers need root and Docker, so CI pins their exact wiring text instead.
+WIRING = {
+    "p5.sh": ['step_capture "$PROBE_SCRATCH/writes.err" docker exec "$cid" sh -c',
+              '        sh "$disk" >/dev/null || _rc=$?',
+              'upper_dir_of "$cid" 9'],
+    "p6.sh": ['upper_dir_of "$c1" 9', 'upper_dir_of "$c2" 8'],
+    "p7.sh": ['out=$(step_capture "$PROBE_SCRATCH/$_arm.err" docker start -a "$cid") || _rc=$?',
+              'step_diag "$_arm" inventory "$_rc" "$PROBE_SCRATCH/$_arm.err"'],
+    "p8.sh": ['b=$(step_capture "$PROBE_SCRATCH/$1.binds.err" socket_binds "$2") || _rc=$?',
+              'v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c',
+              'step_diag "$1" binds "$_rc" "$PROBE_SCRATCH/$1.binds.err"',
+              'step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"'],
+}
+
+
+@pytest.mark.parametrize("script", sorted(WIRING))
+def test_live_steps_are_wired_through_the_bounded_capture(script: str) -> None:
+    text = (PROBES / script).read_text()
+    for line in WIRING[script]:
+        assert text.count(line) == 1, line
+    assert "2>/dev/null) && is_uint" not in text, "an in-container step is blind again"
+
+
+# ---- upper_dir_of against a stubbed docker and procfs ----
+#
+# The live guards (pid revalidation before and after the proof, the graph
+# driver cross-check, the marker read back through the held handle) run here
+# against a stub `docker` on PATH and a stub procfs (PROBE_PROC), so removing
+# any of them turns a case. No Docker, root or VM is used.
+
+FAKE_DOCKER = r"""#!/bin/sh
+s=$FAKE_STATE
+case $1 in
+inspect)
+    case $3 in
+    *State.Pid*)
+        n=$(cat "$s/pid-calls" 2>/dev/null || echo 0)
+        n=$((n + 1))
+        echo "$n" >"$s/pid-calls"
+        if [ "$n" -ge "${FAKE_STAT_CHANGES_AT:-99}" ]; then
+            sed 's/ 19 / 1919 /' "$PROBE_PROC/4242/stat" >"$s/stat"
+            cat "$s/stat" >"$PROBE_PROC/4242/stat"
+        fi
+        if [ "$n" -ge "${FAKE_PID_CHANGES_AT:-99}" ]; then echo 4343; else echo 4242; fi ;;
+    *UpperDir*) cat "$s/graph-upper" ;;
+    *) exit 1 ;;
+    esac ;;
+exec)
+    [ -n "${FAKE_MARK_DIR:-}" ] || exit 0
+    printf '%s%s' "${FAKE_MARK_CONTENT:-$7}" "${FAKE_MARK_SUFFIX:-}" >"$FAKE_MARK_DIR/tmp/$7" ;;
+*) exit 1 ;;
+esac
+"""
+
+#: case -> (storage kind, options). Options: pid_changes_at (the inspect call
+#: that first reports another pid), stat_changes_at (the inspect call at which
+#: pid 4242 becomes a different process: same pid, new start time), mark
+#: ("upper", "other" or "none"), content (a wrong marker body), suffix (bytes
+#: after the token), tmp_link (upper's tmp is a symlink to other's), graph
+#: ("same" or "other"), layout ("snapshot" or "elsewhere"), fd ("8" or "9").
+UPPER_CASES: dict[str, tuple[str, dict[str, str]]] = {
+    "verified": ("containerd-overlayfs", {}),
+    "verified-fd8": ("containerd-overlayfs", {"fd": "8"}),
+    "start-time-changes": ("containerd-overlayfs", {"stat_changes_at": "2"}),
+    "marker-trailing-newline": ("containerd-overlayfs", {"suffix": "\n"}),
+    "marker-tmp-symlink": ("containerd-overlayfs", {"mark": "other", "tmp_link": "1"}),
+    "overlay2-agrees": ("overlay2", {"graph": "same"}),
+    "overlay2-disagrees": ("overlay2", {"graph": "other"}),
+    "pid-changes-before-proof": ("containerd-overlayfs", {"pid_changes_at": "2"}),
+    "pid-changes-after-proof": ("containerd-overlayfs", {"pid_changes_at": "3"}),
+    "marker-elsewhere": ("containerd-overlayfs", {"mark": "other"}),
+    "marker-absent": ("containerd-overlayfs", {"mark": "none"}),
+    "marker-wrong-content": ("containerd-overlayfs", {"content": "stale"}),
+    "shape-refused": ("containerd-overlayfs", {"layout": "elsewhere"}),
+}
+
+UPPER_EXPECT = {
+    "verified": "UPPER-HELD",
+    "verified-fd8": "UPPER-HELD",
+    "start-time-changes": "PROBE t REFUSED container-pid-changed",
+    "marker-trailing-newline": "PROBE t REFUSED upperdir-unverified",
+    "marker-tmp-symlink": "PROBE t REFUSED upperdir-unverified",
+    "overlay2-agrees": "UPPER-HELD",
+    "overlay2-disagrees": "PROBE t REFUSED upperdir-disagrees",
+    "pid-changes-before-proof": "PROBE t REFUSED container-pid-changed",
+    "pid-changes-after-proof": "PROBE t REFUSED container-pid-changed",
+    "marker-elsewhere": "PROBE t REFUSED upperdir-unverified",
+    "marker-absent": "PROBE t REFUSED upperdir-unverified",
+    "marker-wrong-content": "PROBE t REFUSED upperdir-unverified",
+    "shape-refused": "PROBE t REFUSED upperdir-shape",
+}
+
+
+def upper_call(lib: Path, tmp_path: Path, case: str) -> str:
+    kind, opt = UPPER_CASES[case]
+    base = tmp_path / "host"
+    root = base / "docker"
+    if kind == "overlay2":
+        upper = root / "overlay2" / HEX / "diff"
+    elif opt.get("layout") == "elsewhere":
+        upper = base / "elsewhere" / "57" / "fs"
+    else:
+        upper = base / "cd" / "io.containerd.snapshotter.v1.overlayfs" / "snapshots" / "57" / "fs"
+    other = base / "other"
+    for d in (upper, other / "tmp", root):
+        d.mkdir(parents=True, exist_ok=True)
+    if opt.get("tmp_link"):
+        (upper / "tmp").symlink_to(other / "tmp")
+    else:
+        (upper / "tmp").mkdir()
+    proc = base / "proc" / "4242"
+    proc.mkdir(parents=True)
+    (proc / "stat").write_text("4242 (sleep) S " + " ".join(str(n) for n in range(1, 50)) + "\n")
+    (proc / "mountinfo").write_text(
+        f"1012 900 0:142 / / rw,relatime - overlay overlay rw,lowerdir=/l,upperdir={upper},"
+        f"workdir=/w\n1013 1012 0:145 / /proc rw,nosuid - proc proc rw\n")
+    state = base / "state"
+    state.mkdir()
+    (state / "graph-upper").write_text(f"{upper if opt.get('graph') != 'other' else other}\n")
+    bindir = base / "bin"
+    bindir.mkdir()
+    (bindir / "docker").write_text(FAKE_DOCKER)
+    (bindir / "docker").chmod(0o755)
+    # marker_matches runs python3 -I; the interpreter running this test is one.
+    pydir = base / "py"
+    pydir.mkdir()
+    (pydir / "python3").symlink_to(sys.executable)
+    env = {"PATH": f"{bindir}:{pydir}:/usr/bin:/bin", "LC_ALL": "C", "FAKE_STATE": str(state),
+           "PROBE_PROC": str(base / "proc")}
+    mark = opt.get("mark", "upper")
+    if mark != "none":
+        env["FAKE_MARK_DIR"] = str(upper if mark == "upper" else other)
+    if "content" in opt:
+        env["FAKE_MARK_CONTENT"] = opt["content"]
+    if "pid_changes_at" in opt:
+        env["FAKE_PID_CHANGES_AT"] = opt["pid_changes_at"]
+    if "stat_changes_at" in opt:
+        env["FAKE_STAT_CHANGES_AT"] = opt["stat_changes_at"]
+    if "suffix" in opt:
+        env["FAKE_MARK_SUFFIX"] = opt["suffix"]
+    fd = opt.get("fd", "9")
+    script = ('. "$1"; PROBE_NAME=t; PROBE_STORAGE=$2; PROBE_DOCKER_ROOT=$3;'
+              ' upper_dir_of cid "$5";'
+              ' if [ "$PROBE_UPPER" = "/proc/$$/fd/$5" ] && [ "$PROBE_UPPER" -ef "$4" ];'
+              ' then echo UPPER-HELD; else echo UPPER-OTHER; fi')
+    run = subprocess.run(["sh", "-eu", "-c", script, "sh", str(lib), kind, str(root), str(upper),
+                          fd],
+                         capture_output=True, text=True, env=env, check=False, timeout=30)
+    lines = run.stdout.splitlines()
+    assert lines and not run.stderr, (run.returncode, run.stdout, run.stderr)
+    assert run.returncode == (0 if lines[-1].startswith("UPPER") else 2)
+    return lines[-1]
+
+
+def test_upper_cases_have_expectations() -> None:
+    assert set(UPPER_CASES) == set(UPPER_EXPECT)
+
+
+@needs_sh
+@pytest.mark.parametrize("case", sorted(UPPER_CASES))
+def test_upper_dir_of_case(tmp_path: Path, case: str) -> None:
+    assert upper_call(LIB, tmp_path, case) == UPPER_EXPECT[case]
+
+
+#: (blind copy name, exact lib.sh text, weakened text, case)
+UPPER_TWINS = [
+    ("pid-revalidation-blind", '[ "$_n" = "$3" ] && [ "$_p" = "$2" ]', ":",
+     "pid-changes-before-proof"),
+    ("final-pid-recheck-removed",
+     ("    _upper_pid_same \"$1\" \"$_pid\" \"$_ident\" || probe_die 'container-pid-changed'\n"
+      "    PROBE_UPPER=$_held"), "    PROBE_UPPER=$_held", "pid-changes-after-proof"),
+    ("graph-driver-unchecked", "[ \"$_gd\" = \"$_up\" ] || probe_die 'upperdir-disagrees'", ":",
+     "overlay2-disagrees"),
+    ("start-time-unchecked", '[ "$_n" = "$3" ] && [ "$_p" = "$2" ]', '[ "$_p" = "$2" ]',
+     "start-time-changes"),
+    ("marker-content-unchecked", "*) probe_die 'upperdir-unverified' ;;", "*) ;;",
+     "marker-wrong-content"),
+    ("marker-resolve-unrestricted",
+     ("how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,\n"
+      "              RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)"),
+     "how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK, 0, 0)", "marker-tmp-symlink"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new", "case"), UPPER_TWINS,
+                         ids=[t[0] for t in UPPER_TWINS])
+def test_upper_dir_of_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                           case: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "twin-lib.sh"
+    mutated.write_text(source.replace(old, new))
+    real = tmp_path / "real"
+    real.mkdir()
+    weak = tmp_path / "weak"
+    weak.mkdir()
+    assert upper_call(LIB, real, case) == UPPER_EXPECT[case]
+    assert upper_call(mutated, weak, case) != UPPER_EXPECT[case], blind
+
+
+#: The mount-crossing twin: the same lookup with RESOLVE_NO_XDEV dropped.
+XDEV_TWIN = ("RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)",
+             "RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)")
+
+
+@needs_sh
+def test_marker_proof_refuses_a_bind_mounted_tmp(tmp_path: Path) -> None:
+    """Another tree's tmp, bind-mounted over the held upper's tmp, must not
+    authenticate it. Needs a mount, so it runs only where one can be made
+    (root with CAP_SYS_ADMIN: the runner VM's stage-1 root run)."""
+    held = tmp_path / "held"
+    (held / "tmp").mkdir(parents=True)
+    real = tmp_path / "real-tmp"
+    real.mkdir()
+    tok = "skillc-dev-probe-id-" + "ab" * 16
+    (real / tok).write_text(tok)
+    mounted = subprocess.run(["mount", "--bind", str(real), str(held / "tmp")],
+                             capture_output=True, check=False, timeout=30)
+    if mounted.returncode != 0:
+        pytest.skip("cannot bind-mount here (needs root with CAP_SYS_ADMIN)")
+    try:
+        source = LIB.read_text()
+        assert source.count(XDEV_TWIN[0]) == 1, "the mutation anchor moved; update the twin"
+        twin = tmp_path / "twin-lib.sh"
+        twin.write_text(source.replace(*XDEV_TWIN))
+        script = '. "$1"; exec 9<"$2"; if marker_matches 9 "$3"; then echo MATCH; else echo NO; fi'
+        env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "LC_ALL": "C"}
+        results = [subprocess.run(["sh", "-eu", "-c", script, "sh", str(lib), str(held), tok],
+                                  capture_output=True, text=True, env=env, check=False,
+                                  timeout=30).stdout.strip() for lib in (LIB, twin)]
+    finally:
+        subprocess.run(["umount", str(held / "tmp")], check=False, timeout=30)
+    assert results == ["NO", "MATCH"]

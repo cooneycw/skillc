@@ -4,6 +4,14 @@
 # ABSENT_UNLINKED (VM disk, not erased), which the owner ruled never releases
 # (Q1). This probe records the mechanism, not a release path.
 # ROOT REQUIRED. TOUCHES DOCKER.
+# Storage: overlay2, or the containerd image store's overlayfs snapshotter
+# (lib.sh, "Container storage"). Each container runs so its upper directory
+# can be read from the kernel and proven to be its own by a marker.
+# Each link count is read twice: once immediately (`after`, kept as evidence)
+# and again PROBE_GC_WAIT seconds later (`after_late`, default 10, at most
+# 300), on which the verdict rests. Under the containerd store a snapshot may
+# be removed by asynchronous garbage collection, so an immediate positive
+# count followed by a late 0 is GC timing; a late positive count is retention.
 # Usage: p6.sh --image-id sha256:<64 hex> --runner-unit <unit>
 #
 # Arms and expected verdicts:
@@ -22,39 +30,42 @@ nlink_of_fd() {
     stat -L -c %h "/proc/$$/fd/$1" 2>/dev/null || printf 'ERR\n'
 }
 
-upper_of() {
-    docker inspect --format '{{.GraphDriver.Data.UpperDir}}' "$1"
-}
-
 observe() {
     require_root
     require_runner_idle
     require_image
-    require_overlay2
+    require_overlay_storage
+    wait_s=${PROBE_GC_WAIT:-10}
+    if ! is_uint "$wait_s" || [ "$wait_s" -gt 300 ]; then probe_die 'gc-wait-invalid'; fi
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
 
-    create_container --log-driver none -- "$PROBE_IMAGE_ID" true
+    create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c1=$cid
-    up1=$(upper_of "$c1") || probe_die 'inspect-failed'
-    [ -d "$up1" ] || probe_die 'upperdir-missing'
-    exec 9<"$up1"
+    docker start "$c1" >/dev/null || probe_die 'start-failed'
+    # Held on fd 9 before it is proven; nlink is read through that handle.
+    upper_dir_of "$c1" 9
     record removed baseline "$(nlink_of_fd 9)"
-    if docker rm -v "$c1" >/dev/null && container_absent "$c1"; then
+    if docker rm -f -v "$c1" >/dev/null && container_absent "$c1"; then
         record removed rm_ok 1
     else
         record removed rm_ok 0
     fi
     record removed after "$(nlink_of_fd 9)"
-    exec 9<&-
 
-    create_container --log-driver none -- "$PROBE_IMAGE_ID" true
+    create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c2=$cid
-    up2=$(upper_of "$c2") || probe_die 'inspect-failed'
-    [ -d "$up2" ] || probe_die 'upperdir-missing'
-    exec 8<"$up2"
+    docker start "$c2" >/dev/null || probe_die 'start-failed'
+    upper_dir_of "$c2" 8
     record kept baseline "$(nlink_of_fd 8)"
     record kept rm_ok 1
     record kept after "$(nlink_of_fd 8)"
+
+    # The late readings, through the same held descriptors.
+    info "gc-wait $wait_s"
+    sleep "$wait_s"
+    record removed after_late "$(nlink_of_fd 9)"
+    record kept after_late "$(nlink_of_fd 8)"
+    exec 9<&-
     exec 8<&-
 
     # Fault: removing an ID this probe never created fails; fd 7 is closed
@@ -64,13 +75,15 @@ observe() {
     if docker rm "$absent_id" >/dev/null 2>&1; then record fault rm_ok 1; else record fault rm_ok 0; fi
     record fault baseline "$(nlink_of_fd 7)"
     record fault after "$(nlink_of_fd 7)"
+    record fault after_late "$(nlink_of_fd 7)"
     recheck_runner
 }
 
 verdict() {
     b=$(rd_uint "$1" baseline) || { printf '%s\n' "$PROBE_FAIL"; return; }
     ok=$(rd_bool "$1" rm_ok) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    a=$(rd_uint "$1" after) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    # The verdict rests on the late reading; the immediate one is evidence.
+    a=$(rd_uint "$1" after_late) || { printf '%s\n' "$PROBE_FAIL"; return; }
     # A failed removal, or a held dir that never had a positive link count, is
     # not evidence of anything.
     if [ "$ok" -ne 1 ] || [ "$b" -lt 1 ]; then printf '%s\n' "$PROBE_FAIL"; return; fi

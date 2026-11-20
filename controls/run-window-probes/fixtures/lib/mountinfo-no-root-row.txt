@@ -1,0 +1,2 @@
+1013 1012 0:145 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
+1014 1012 0:146 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755

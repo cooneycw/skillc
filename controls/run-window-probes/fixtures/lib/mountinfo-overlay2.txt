@@ -1,0 +1,3 @@
+1012 900 0:142 / / rw,relatime - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/ABCDEFGH:/var/lib/docker/overlay2/l/IJKLMNOP,upperdir=/var/lib/docker/overlay2/3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c/diff,workdir=/var/lib/docker/overlay2/3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c3f9c/work
+1013 1012 0:145 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
+1014 1012 0:146 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755

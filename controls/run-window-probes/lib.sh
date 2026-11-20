@@ -179,7 +179,7 @@ is_mounted() {
 # proc_identity PID: "STARTTIME" of a live, non-zombie process, or fail. The
 # comm field may contain spaces, so fields are counted after its last ")".
 proc_identity() {
-    _s=$(cat -- "/proc/$1/stat" 2>/dev/null) || return 1
+    _s=$(cat -- "${PROBE_PROC:-/proc}/$1/stat" 2>/dev/null) || return 1
     _s=${_s##*) }
     case $_s in Z* | X* | x*) return 1 ;; esac
     printf '%s\n' "$_s" | awk 'NF >= 20 { print $20; ok = 1 } END { exit ok ? 0 : 1 }'
@@ -308,9 +308,269 @@ recheck_runner() {
     runner_idle || probe_die 'runner-became-active'
 }
 
-require_overlay2() {
+# ---- Container storage (P5, P6) ----
+#
+# Two storage kinds are supported, and each is identified by more than its
+# driver name:
+#   overlay2              the classic graph driver
+#   containerd-overlayfs  the containerd image store: driver "overlayfs" with
+#                         exactly one DriverStatus driver-type of
+#                         io.containerd.snapshotter.v1
+# Anything else refuses by name (driver-unsupported). A container's upper
+# directory is then read from the KERNEL, not from `docker inspect`: the one
+# overlay mount at "/" in its init process's mountinfo (overlay_upper), resolved
+# and shape-checked for its kind (upper_resolve), cross-checked against the
+# graph driver's own record on overlay2, and finally proven to be this
+# container's by a random marker written inside it appearing there.
+
+# storage_kind_from DRIVER STATUS: the storage kind for a `docker info` driver
+# name and its DriverStatus pairs (one "key=value" per line). Prints overlay2
+# or containerd-overlayfs, or exits 1. Pure.
+storage_kind_from() {
+    case $1 in
+        overlay2) printf 'overlay2\n' ;;
+        overlayfs)
+            _t=$(printf '%s\n' "$2" | awk -F= '
+                $1 == "driver-type" { n++; v = substr($0, 13) }
+                END { if (n != 1) exit 1; print v }') || return 1
+            [ "$_t" = io.containerd.snapshotter.v1 ] || return 1
+            printf 'containerd-overlayfs\n'
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+# overlay_upper MOUNTINFO: the raw upperdir= value of the one overlay mount at
+# "/" in a mountinfo table. Exits 1 unless every row is well formed (the "-"
+# separator after at least six fields, exactly three fields after it, numeric
+# ids, major:minor, absolute root and mountpoint), exactly one row is mounted
+# at "/", that row is overlay, and its super options carry exactly one
+# non-empty upperdir=. Pure.
+overlay_upper() {
+    awk '
+        NF == 0 { next }
+        {
+            s = 0
+            for (i = 7; i <= NF; i++) if ($i == "-") { s = i; break }
+            if (!s || NF != s + 3 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ \
+                || $3 !~ /^[0-9]+:[0-9]+$/ || $4 !~ /^\// || $5 !~ /^\//) { bad = 1; next }
+            rows++
+            if ($5 != "/") next
+            n++
+            fs = $(s + 1)
+            so = $(s + 3)
+        }
+        END {
+            if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1
+            c = split(so, o, ",")
+            u = 0
+            for (i = 1; i <= c; i++) if (substr(o[i], 1, 9) == "upperdir=") { u++; v = substr(o[i], 10) }
+            if (u != 1 || v == "") exit 1
+            print v
+        }' "$1"
+}
+
+# upper_resolve KIND DOCKER-ROOT RAW: the absolute upper directory for a raw
+# upperdir= value, or exit 1. Only plain path characters are accepted, so an
+# escaped (backslash) value fails closed; no "." or ".." component and no
+# empty component. overlay2 must be DOCKER-ROOT/overlay2/<hex id>/diff; the
+# driver passes "<hex id>/diff" relative to DOCKER-ROOT/overlay2 when its mount
+# options are long, so that one relative shape is resolved. The containerd
+# snapshotter must be absolute .../io.containerd.snapshotter.v1.overlayfs/
+# snapshots/<number>/fs. Pure.
+upper_resolve() {
+    _p=$3
+    case $2 in /?* ) ;; *) return 1 ;; esac
+    for _x in "$2" "$_p"; do
+        case $_x in '' | *//* | *[!A-Za-z0-9/._-]*) return 1 ;; esac
+        case /$_x/ in */./* | */../*) return 1 ;; esac
+    done
+    case $1 in
+        overlay2)
+            case $_p in /*) ;; *) _p=$2/overlay2/$_p ;; esac
+            _rest=${_p#"$2"/overlay2/}
+            [ "$_rest" != "$_p" ] || return 1
+            _id=${_rest%/diff}
+            [ "$_id" != "$_rest" ] || return 1
+            case $_id in '' | *[!0-9a-f]*) return 1 ;; esac
+            ;;
+        containerd-overlayfs)
+            _base=${_p%/fs}
+            [ "$_base" != "$_p" ] || return 1
+            is_uint "${_base##*/}" || return 1
+            case ${_base%/*} in /?*/io.containerd.snapshotter.v1.overlayfs/snapshots) ;; *) return 1 ;; esac
+            ;;
+        *) return 1 ;;
+    esac
+    printf '%s\n' "$_p"
+}
+
+# require_overlay_storage: set PROBE_STORAGE and PROBE_DOCKER_ROOT, or refuse.
+require_overlay_storage() {
     _driver=$(docker info --format '{{.Driver}}') || probe_die 'driver-unreadable'
-    [ "$_driver" = overlay2 ] || probe_die 'driver-not-overlay2'
+    _status=$(docker info --format '{{range .DriverStatus}}{{index . 0}}={{index . 1}}{{println}}{{end}}') \
+        || probe_die 'driver-unreadable'
+    PROBE_STORAGE=$(storage_kind_from "$_driver" "$_status") || probe_die 'driver-unsupported'
+    PROBE_DOCKER_ROOT=$(docker info --format '{{.DockerRootDir}}') || probe_die 'driver-unreadable'
+    info "storage $PROBE_STORAGE"
+}
+
+# _upper_pid_same ID PID IDENT: the container still reports PID as its init,
+# and PID is still the same process (same start time).
+_upper_pid_same() {
+    _n=$(proc_identity "$2") || return 1
+    _p=$(docker inspect --format '{{.State.Pid}}' "$1") || return 1
+    [ "$_n" = "$3" ] && [ "$_p" = "$2" ]
+}
+
+# marker_matches FD TOKEN: exit 0 only if "tmp/TOKEN", resolved relative to
+# the directory held on FD, is a regular file whose bytes are exactly TOKEN
+# (no trailing newline). The whole lookup is ONE openat2(2) call with
+# RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS: it cannot leave the
+# held directory, follow any symlink, or cross a mount (a bind of another
+# tree's tmp over this one), and no path can be swapped between a test and
+# the read. A kernel without openat2 (before 5.6) fails closed. The syscall
+# number is 437 on x86-64 and AArch64 only (other ABIs differ: MIPS n64 is
+# 5437), so any other machine exits 3, which the caller refuses by name.
+# python3 -I with ctypes (stdlib only); the held FD is inherited by the child.
+marker_matches() {
+    python3 -I -c '
+import ctypes, os, platform, stat, sys
+if platform.machine() not in ("x86_64", "aarch64") or ctypes.sizeof(ctypes.c_void_p) != 8:
+    sys.exit(3)
+fd, tok = int(sys.argv[1]), sys.argv[2]
+if not tok or "/" in tok:
+    sys.exit(1)
+class OpenHow(ctypes.Structure):
+    _fields_ = [("flags", ctypes.c_uint64), ("mode", ctypes.c_uint64), ("resolve", ctypes.c_uint64)]
+RESOLVE_NO_XDEV, RESOLVE_NO_SYMLINKS, RESOLVE_BENEATH = 0x01, 0x04, 0x08
+SYS_OPENAT2 = 437  # x86-64 and AArch64 (checked above)
+how = OpenHow(os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, 0,
+              RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+libc.syscall.argtypes = (ctypes.c_long,)
+m = libc.syscall(ctypes.c_long(SYS_OPENAT2), ctypes.c_int(fd), ("tmp/" + tok).encode(),
+                 ctypes.byref(how), ctypes.c_size_t(ctypes.sizeof(how)))
+if m < 0:
+    sys.exit(1)
+try:
+    if not stat.S_ISREG(os.fstat(m).st_mode):
+        sys.exit(1)
+    want = tok.encode()
+    sys.exit(0 if os.read(m, len(want) + 1) == want else 1)
+finally:
+    os.close(m)
+' "$1" "$2" 2>/dev/null
+}
+
+# upper_dir_of ID FD: open a RUNNING container's upper directory on FD (8 or
+# 9) and set PROBE_UPPER to /proc/$$/fd/FD, or refuse by name. Called directly
+# (never in a command substitution), so a refusal ends the probe. The
+# directory is HELD before it is proven, and the proof and every later read go
+# through that handle, so renaming or re-linking any ancestor afterwards
+# cannot substitute another directory. The init pid is revalidated after the
+# mountinfo read and again after the proof. PROBE_PROC (default /proc) is the
+# procfs the container's pid is read from; the self-test points it at a stub.
+upper_dir_of() {
+    PROBE_UPPER=
+    case $2 in 8 | 9) ;; *) probe_die 'upper-fd-invalid' ;; esac
+    _pid=$(docker inspect --format '{{.State.Pid}}' "$1") || probe_die 'inspect-failed'
+    if ! is_uint "$_pid" || [ "$_pid" -eq 0 ]; then probe_die 'container-pid-invalid'; fi
+    _ident=$(proc_identity "$_pid") || probe_die 'container-pid-gone'
+    _raw=$(overlay_upper "${PROBE_PROC:-/proc}/$_pid/mountinfo") || probe_die 'upperdir-unreadable'
+    _upper_pid_same "$1" "$_pid" "$_ident" || probe_die 'container-pid-changed'
+    if ! _up=$(upper_resolve "$PROBE_STORAGE" "$PROBE_DOCKER_ROOT" "$_raw"); then
+        # The refused value, scrubbed and bounded, so a new runtime shape is
+        # recorded rather than only refused.
+        info "diag setup upperdir-raw $(printf '%s' "$_raw" | head -c 512 | LC_ALL=C tr -c '[:print:]' '?')"
+        probe_die 'upperdir-shape'
+    fi
+    if [ "$PROBE_STORAGE" = overlay2 ]; then
+        _gd=$(docker inspect --format '{{.GraphDriver.Data.UpperDir}}' "$1") || probe_die 'inspect-failed'
+        [ "$_gd" = "$_up" ] || probe_die 'upperdir-disagrees'
+    fi
+    if [ ! -d "$_up" ] || [ -L "$_up" ]; then probe_die 'upperdir-missing'; fi
+    # `command` keeps a failed redirection from ending the shell (exec is a
+    # special builtin), so a vanished directory refuses by name.
+    if [ "$2" = 9 ]; then
+        command exec 9<"$_up" || probe_die 'upperdir-open-failed'
+    else
+        command exec 8<"$_up" || probe_die 'upperdir-open-failed'
+    fi
+    _held=/proc/$$/fd/$2
+    # Proof of identity: a fresh random token, written by this container into
+    # its own /tmp, must read back exactly through the held handle
+    # (marker_matches, descriptor-relative throughout).
+    _tok=$(probe_uuid) || probe_die 'uuid-failed'
+    case $_tok in '' | *[!0-9a-f]*) probe_die 'uuid-failed' ;; esac
+    [ "${#_tok}" -eq 32 ] || probe_die 'uuid-failed'
+    _tok=skillc-dev-probe-id-$_tok
+    docker exec "$1" sh -c 'printf "%s" "$1" >"/tmp/$1"' sh "$_tok" >/dev/null 2>&1 \
+        || probe_die 'upperdir-mark-failed'
+    _mm=0
+    marker_matches "$2" "$_tok" || _mm=$?
+    case $_mm in
+        0) ;;
+        3) probe_die 'marker-arch-unsupported' ;;
+        *) probe_die 'upperdir-unverified' ;;
+    esac
+    _upper_pid_same "$1" "$_pid" "$_ident" || probe_die 'container-pid-changed'
+    PROBE_UPPER=$_held
+}
+
+# ---- Step diagnostics (P5, P7, P8) ----
+
+# step_drain FILE: read stdin to EOF, keeping only its first 2048 bytes in
+# FILE and the count of the rest in FILE.rest. dd reads one byte at a time, so
+# nothing past the bound is ever written to disk, whatever the input size. If
+# FILE cannot be written, the input is still drained (to /dev/null), so the
+# writer never blocks or dies on a closed pipe. Never fails its caller.
+step_drain() {
+    if ! dd bs=1 count=2048 of="$1" 2>/dev/null; then cat >/dev/null; return 0; fi
+    _r=$(wc -c | tr -d ' ') || _r=
+    printf '%s\n' "$_r" >"$1.rest" 2>/dev/null || :
+}
+
+# step_capture FILE CMD...: run CMD (a command or a function) with its stdout
+# passed through unchanged and its stderr drained through step_drain into
+# FILE. Returns CMD's own exit status, which travels through a pipe into a
+# shell variable, never through a file, so no storage failure (a full or
+# unwritable scratch) can replace it. 125 only if the status cannot be read.
+step_capture() {
+    _ef=$1
+    shift
+    # The step runs as an `if` condition: under `set -e` (dash applies it in
+    # this pipeline subshell) a failing step would otherwise end the subshell
+    # before its status is written.
+    { _st=$( { { if "$@" 2>&1 1>&4 4>&- 5>&-; then _s=0; else _s=$?; fi
+        printf '%s' "$_s" >&5; } \
+        | step_drain "$_ef" >/dev/null 2>&1 4>&- 5>&-; } 5>&1 ); } 4>&1
+    is_uint "$_st" || return 125
+    return "$_st"
+}
+
+# step_diag ARM STEP STATUS FILE: report a live step's exit status and the
+# kept stderr (at most 2048 bytes) as INFO lines, so an OBSERVATION_FAILED
+# names its cause. Every byte outside printable ASCII becomes '?', and every
+# line gets the INFO prefix and its own newline, so no stderr text can print
+# as an ARM or PROBE line or run into the next line. Diagnostic only: nothing
+# here is recorded as a reading, no verdict depends on it, and it never fails
+# its caller.
+step_diag() {
+    printf 'INFO diag %s %s exit %s\n' "$1" "$2" "$3"
+    [ -s "$4" ] || return 0
+    head -c 2048 -- "$4" | LC_ALL=C tr -c '\n[:print:]' '?' \
+        | LC_ALL=C awk -v a="$1" -v s="$2" '{ print "INFO diag " a " " s " stderr: " $0 }' || :
+    _bytes=$(wc -c <"$4" | tr -d ' ') || _bytes=
+    if [ -f "$4.rest" ]; then
+        _rest=$(cat -- "$4.rest") || _rest=
+        if is_uint "$_rest" && is_uint "$_bytes"; then _bytes=$((_bytes + _rest)); else _bytes=; fi
+    fi
+    if is_uint "$_bytes" && [ "$_bytes" -gt 2048 ]; then
+        printf 'INFO diag %s %s stderr-truncated %s\n' "$1" "$2" "$_bytes"
+    fi
+    return 0
 }
 
 # scratch_private: make the scratch directory its own PRIVATE mountpoint

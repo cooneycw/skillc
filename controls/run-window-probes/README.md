@@ -40,6 +40,90 @@ login, spend or host action beyond the probe itself.
   (`LoadState=loaded`) and be `inactive` or `failed`, at start and again
   before the verdicts. A typo'd unit refuses.
 
+## Container storage (P5, P6)
+
+The first live run refused P5 and P6 by name (`driver-not-overlay2`): Docker's
+containerd image store reports the driver `overlayfs` with DriverStatus
+`driver-type=io.containerd.snapshotter.v1`, and `docker inspect` carries no
+graph-driver upper directory for it. Both probes now support exactly two
+storage kinds and refuse anything else by name (`driver-unsupported`):
+
+| Kind | Identified by | Upper directory shape |
+|---|---|---|
+| `overlay2` | driver `overlay2` | `<DockerRootDir>/overlay2/<hex id>/diff`; the relative `<hex id>/diff` the driver passes for long mount options is resolved against `<DockerRootDir>/overlay2` |
+| `containerd-overlayfs` | driver `overlayfs` **and** exactly one `driver-type=io.containerd.snapshotter.v1` | absolute `…/io.containerd.snapshotter.v1.overlayfs/snapshots/<number>/fs` |
+
+The driver name is never trusted alone, and the upper directory is never
+taken from `docker inspect` alone. Each container runs, and `upper_dir_of ID
+FD`:
+
+1. reads the one `overlay` mount at `/` in its init process's
+   `/proc/<pid>/mountinfo`. Every row must be well formed, exactly one row is
+   at `/`, and its super options carry exactly one `upperdir=`;
+2. revalidates the init pid (same pid, same start time) after that read;
+3. accepts only plain path characters, so an escaped value fails closed, with
+   no `.`, `..` or empty component, and requires the shape for its kind. A
+   refused value is printed, scrubbed and bounded, as `INFO diag setup
+   upperdir-raw …`, so a new runtime shape is recorded, not only refused;
+4. on `overlay2`, requires it to equal the graph driver's own `UpperDir`;
+5. **holds** the directory on file descriptor FD before proving it, so every
+   later read (the proof, P5's search, P6's link count) goes through
+   `/proc/$$/fd/FD`. Renaming or re-linking an ancestor afterwards cannot
+   substitute another directory;
+6. proves it is this container's: a fresh random token, written by the
+   container into its own `/tmp/<token>`, must read back byte for byte as a
+   regular file. The lookup is one `openat2(2)` relative to the held handle
+   with `RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS`, so it
+   cannot leave the directory, follow a symlink, or cross a mount (another
+   tree's `tmp` bound over this one), and no path can be swapped between a
+   check and the read (`marker_matches`, `python3 -I` with `ctypes`, stdlib
+   only). A kernel without `openat2` (before 5.6) refuses, and a machine other
+   than x86-64 or AArch64 refuses by name (`marker-arch-unsupported`), because
+   the syscall number differs by ABI;
+7. revalidates the init pid again after the proof.
+
+Any failed step refuses by name (`upperdir-unreadable`, `container-pid-changed`,
+`upperdir-shape`, `upperdir-disagrees`, `upperdir-missing`,
+`upperdir-unverified`, `upperdir-open-failed`). P5's survivor marker now has a
+random name too, so a stale file in another snapshot cannot answer for it.
+The pure helpers (`storage_kind_from`, `overlay_upper`, `upper_resolve`) are
+qualified in CI over committed mountinfo fixtures (`fixtures/lib/`) and inline
+cases. `upper_dir_of` itself runs in CI under `sh -eu` against a stub `docker`
+on `PATH` and a stub procfs (`PROBE_PROC`). Every one has blind twins the
+cases must catch: a pid recheck removed, the start-time comparison removed,
+the graph-driver comparison removed, the marker read-back removed, and a
+symlinked `tmp` followed. A root-only case bind-mounts another tree's `tmp`
+over the held one and requires refusal, with a twin that drops
+`RESOLVE_NO_XDEV`; it skips where no mount can be made. The callers in P5–P8 need root and Docker, so CI
+pins their wiring text (each in-container step through `step_capture`;
+container stdout discarded) rather than running them.
+
+The containerd fixtures are modelled on the snapshotter's documented layout.
+No capture from the runner VM is committed yet. The stage-2 run records the
+real value (`INFO diag setup upperdir-raw` on refusal), and a relative
+`upperdir=` under containerd is refused rather than guessed.
+
+## Step diagnostics (P5, P7, P8)
+
+The first live run left P7 and P8 blind: every failed in-container step read
+`OBSERVATION_FAILED` with its stderr sent to `/dev/null`. Each such step now
+prints `INFO diag <arm> <step> exit <status>`, then up to the first 2048 bytes
+of its stderr as `INFO diag <arm> <step> stderr: …` lines, and
+`stderr-truncated <bytes>` when there was more (`lib.sh` `step_diag`). The
+bound applies while the step runs: `step_capture` drains stderr to EOF
+through `dd bs=1 count=2048` and only counts the rest, so a flooding step can
+never fill the scratch filesystem. The step's own status travels through a
+pipe into a shell variable, never a file, and the collector drains to
+`/dev/null` if its file cannot be written. A full or unwritable scratch
+therefore cannot change a status or a reading. Steps:
+P7 `inventory`; P8 `binds` and `scan`, plus `ns-<name> unreadable`; P5's
+`writes` on refusal, whose stdout is discarded along with that of the
+identity-marker exec. Every byte outside printable ASCII becomes `?`, and
+every line carries the `INFO` prefix and its own newline, so stderr text can
+never print as an `ARM` or `PROBE` line. These are diagnostics only. Nothing
+is recorded as a reading, no classifier reads them, and no verdict changed.
+The containers hold no credential, so the text is not scrubbed beyond that.
+
 ## Stated limits
 
 - The scripts cannot prove that the unit named by `--runner-unit` IS the
@@ -62,6 +146,13 @@ login, spend or host action beyond the probe itself.
   can over-report a path whose ACL mask sets a group bit the uid cannot use.
   That direction is fail-safe: a MISMATCH to investigate, never a false clean.
   Neither is excluded by the script.
+- P5 and P6 accept a `DockerRootDir` reached through a symlink only if the
+  kernel's mount options name the same string; otherwise they refuse
+  (`upperdir-shape` or `upperdir-disagrees`) rather than resolve links.
+- P5 and P6 need `sleep` and a writable `/tmp` in the image, for the running
+  container and the identity marker, and `python3` on the host (as P8
+  already does) for the descriptor-relative marker read. Without them they
+  refuse by name.
 - P2 identifies each planted holder by pid plus start time. Other pids
   are enumerated from one listing of `/proc`; a pid that exits mid-census is
   skipped, not counted as unreadable.
@@ -97,7 +188,7 @@ sets the container uid for P5 and P7. P2, P3, P4 and P8 use `python3 -I`
 | P3 | QUALIFIED | fact 3 or 4 needs redesign for this kernel |
 | P4 | QUALIFIED | the `live` arm shows swap, a piped core handler or a resume device: windows stay blocked until fixed |
 | P5 | QUALIFIED | home bind leaks to VM disk or does not survive removal: PR-1 design must change |
-| P6 | QUALIFIED | records the mechanism only |
+| P6 | QUALIFIED | records the mechanism only. Each count is read immediately (`after`, evidence) and again after `PROBE_GC_WAIT` seconds (`after_late`, default 10, at most 300), and the verdict rests on the late one. An immediate positive count with a late 0 is asynchronous snapshot collection; a late positive count is retention |
 | P7 | QUALIFIED, unless the image exposes an extra writable mount (for example `/dev/mqueue`), which PR-1 must then close | PR-1 containment must close the listed extra |
 | P8 | QUALIFIED | channel isolation does not hold; fact 2b fails closed. If the `clean` arm's only survivor is a socket on fd 0–2 of the container's init (container-runtime stdio), record it: PR-1 must decide that case explicitly, not dismiss it |
 
@@ -117,3 +208,15 @@ the files supplied on stdin) before any run.
 | 6 | `b997cfd2` | REQUEST-CHANGES (9 of 12 fixed, plus residual paths) | mandatory mountinfo fields after the separator (P3, P7); P7 fault arm proven by an exit-4 `MISSING-SURFACE` token after a good table read; P8 mount-type validation, `shared_net`/`planted_binds` read and cross-checked on every arm, per-destination visibility; pid-lookup errors are not absence (P2, P3); an untracked new volume makes cleanup unverified (reported, never removed). Plus orchestrator hardening: scratch is a private self-bind before any probe mount (no propagation to peer namespaces), and scratch removal uses `--one-file-system`. Addressed in the commit that adds this row |
 | 7 | `d2983b62` | REQUEST-CHANGES (pass-6 items fixed except one; 3 blockers, 2 minor) | P7 validates the whole mount table before its fault token, which now names `/probe-home`; P7 writability is `access(2)` OR mode bits (on rw mounts), so an access error cannot hide a writable path; P2 and P3 enumerate pids from one checked listing; P8 namespace counts bounded (at most 4, at most 3 non-net); P3 `fd_reads 0` fails. Cleanup and the scratch self-bind found correct. Addressed in the commit that adds this row |
 | 8 | `10cf4c70` | REQUEST-CHANGES (3 of 5 fixed; the 2 remaining and 1 new item are ACL/row edge cases) | P7 mount rows now validated field by field (ids, `major:minor`, absolute roots and mountpoints), as in P3. The two ACL edge cases (named-user ACL hidden only by a concurrent `access(2)` I/O error; mode-bit over-report, which is fail-safe) are recorded under "Stated limits", not fixed. Review stopped here by the orchestrator's rule; the non-author review binds to the head that adds this row |
+
+### Follow-up (containerd storage, step diagnostics)
+
+| Pass | Reviewed | Verdict | Outcome |
+|---|---|---|---|
+| 1 | `7a1b15f8` | REQUEST-CHANGES (3 major, 3 minor) | upper dir proven through a path, not a handle; stderr bounded only after an unbounded write; P5 exec stdout on the verdict stream; live guards untested. Addressed in `b6a42ae3` |
+| 2 | `b6a42ae3` | REQUEST-CHANGES (2 major, 1 minor) | marker read by pathname after the checks; status stored in a file a full scratch could lose; stubs left the start-time comparison and caller wiring unqualified. Addressed in `219a1df5` |
+| 3 | `219a1df5` | REQUEST-CHANGES (1 new major) | the marker lookup could cross a bind mount. Addressed in `fea5a850` (one `openat2` with `RESOLVE_NO_XDEV`) |
+| 4 | `fea5a850` | REQUEST-CHANGES (1 new major) | syscall 437 is `openat2` only on some ABIs. Addressed in `bd4032f7` (x86-64 and AArch64 only; others refuse by name) |
+| 5 | `3ea04a69` | APPROVE-WITH-FIXES | arch gate confirmed fixed; P6's late re-read confirmed; the one major (an overflowing wait value) is already excluded by `is_uint`, which accepts at most 18 digits, inside the shell's integer range. No change |
+
+Still open, and stated: no committed runner-VM mountinfo capture (stage 2 records it); a failed directory open after the `-d` check has no committed case; the callers are pinned by wiring text, not run end to end.
