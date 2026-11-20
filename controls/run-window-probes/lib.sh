@@ -594,8 +594,9 @@ scan_identity_plain() {
         "/proc/$$/status"
 }
 # scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
-# "DEV INO PATH") must have no ancestor this uid can write, up to / (so this
-# uid can substitute no path component), must still be the
+# "DEV INO PATH") must have no ancestor up to / that lets this uid replace a
+# path component (writable, unless sticky over an entry it does not own),
+# must still be the
 # same inode, list (with its inode, which must match) with a plain mode string
 # ("d" and nine permission characters, optionally "." for an SELinux context,
 # never "+" for an ACL), and then still match the prune predicate: not
@@ -610,13 +611,22 @@ scan_recheck() {
         _i=${_r%% *}
         _p=${_r#* }
         case $_p in /*) ;; *) return 1 ;; esac
-        # No ancestor may be writable by this uid, up to /, so this uid can
-        # substitute no component of the path between the steps below.
+        # No ancestor up to / may let this uid replace the next component: it
+        # is not writable, or it is sticky and that component is not owned by
+        # this uid (a sticky directory lets only the owner rename or replace
+        # an entry). So no path component can be substituted between the
+        # steps below.
+        _c=$_p
         _a=${_p%/*}
         while :; do
             _w=$(find "$_a/" -maxdepth 0 -writable) || return 1
-            [ -z "$_w" ] || return 1
+            if [ -n "$_w" ]; then
+                _k=$(find "$_a/" -maxdepth 0 -perm -1000) || return 1
+                _o=$(find "$_c" -maxdepth 0 ! -uid "$2") || return 1
+                if [ -z "$_k" ] || [ -z "$_o" ]; then return 1; fi
+            fi
             [ -n "$_a" ] || break
+            _c=$_a
             _a=${_a%/*}
         done
         # The listing carries its inode, which must be the walk inode, so the

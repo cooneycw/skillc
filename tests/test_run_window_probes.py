@@ -1077,7 +1077,7 @@ SCAN_TWINS = [
     ("pruned-dirs-unrecorded", 'cut -d " " -f 3- "$_pr.new" >>"$_pr" || return 1', ":",
      "image-shape"),
     ("ambiguity-ignored", '[ ! -s "$_pr.amb" ] || return 1', ":", "probe-owned-unsearchable"),
-    ("writable-parent-unchecked", '[ -z "$_w" ] || return 1', ":", "parent-writable"),
+    ("writable-parent-unchecked", 'if [ -n "$_w" ]; then', "if false; then", "parent-writable"),
     ("ownership-unchecked", AMBIGUOUS_HEAD, '-path \\"\\$_nlpat\\" -o ',
      "probe-owned-unsearchable"),
 ]
