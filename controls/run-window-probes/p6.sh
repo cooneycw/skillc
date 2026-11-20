@@ -4,6 +4,11 @@
 # ABSENT_UNLINKED (VM disk, not erased), which the owner ruled never releases
 # (Q1). This probe records the mechanism, not a release path.
 # ROOT REQUIRED. TOUCHES DOCKER.
+# Storage: overlay2, or the containerd image store's overlayfs snapshotter
+# (lib.sh, "Container storage"). Each container runs so its upper directory
+# can be read from the kernel and proven to be its own by a marker. Under the
+# containerd store, a SURVIVOR on `removed` can mean the snapshot is removed
+# later by garbage collection: that is a finding, not a script error.
 # Usage: p6.sh --image-id sha256:<64 hex> --runner-unit <unit>
 #
 # Arms and expected verdicts:
@@ -22,24 +27,21 @@ nlink_of_fd() {
     stat -L -c %h "/proc/$$/fd/$1" 2>/dev/null || printf 'ERR\n'
 }
 
-upper_of() {
-    docker inspect --format '{{.GraphDriver.Data.UpperDir}}' "$1"
-}
-
 observe() {
     require_root
     require_runner_idle
     require_image
-    require_overlay2
+    require_overlay_storage
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
 
-    create_container --log-driver none -- "$PROBE_IMAGE_ID" true
+    create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c1=$cid
-    up1=$(upper_of "$c1") || probe_die 'inspect-failed'
-    [ -d "$up1" ] || probe_die 'upperdir-missing'
+    docker start "$c1" >/dev/null || probe_die 'start-failed'
+    upper_dir_of "$c1"
+    up1=$PROBE_UPPER
     exec 9<"$up1"
     record removed baseline "$(nlink_of_fd 9)"
-    if docker rm -v "$c1" >/dev/null && container_absent "$c1"; then
+    if docker rm -f -v "$c1" >/dev/null && container_absent "$c1"; then
         record removed rm_ok 1
     else
         record removed rm_ok 0
@@ -47,10 +49,11 @@ observe() {
     record removed after "$(nlink_of_fd 9)"
     exec 9<&-
 
-    create_container --log-driver none -- "$PROBE_IMAGE_ID" true
+    create_container --log-driver none -- "$PROBE_IMAGE_ID" sleep 120
     c2=$cid
-    up2=$(upper_of "$c2") || probe_die 'inspect-failed'
-    [ -d "$up2" ] || probe_die 'upperdir-missing'
+    docker start "$c2" >/dev/null || probe_die 'start-failed'
+    upper_dir_of "$c2"
+    up2=$PROBE_UPPER
     exec 8<"$up2"
     record kept baseline "$(nlink_of_fd 8)"
     record kept rm_ok 1

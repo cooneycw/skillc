@@ -40,6 +40,54 @@ login, spend or host action beyond the probe itself.
   (`LoadState=loaded`) and be `inactive` or `failed`, at start and again
   before the verdicts. A typo'd unit refuses.
 
+## Container storage (P5, P6)
+
+The first live run refused P5 and P6 by name (`driver-not-overlay2`): Docker's
+containerd image store reports the driver `overlayfs` with DriverStatus
+`driver-type=io.containerd.snapshotter.v1`, and `docker inspect` carries no
+graph-driver upper directory for it. Both probes now support exactly two
+storage kinds and refuse anything else by name (`driver-unsupported`):
+
+| Kind | Identified by | Upper directory shape |
+|---|---|---|
+| `overlay2` | driver `overlay2` | `<DockerRootDir>/overlay2/<hex id>/diff`; the relative `<hex id>/diff` the driver passes for long mount options is resolved against `<DockerRootDir>/overlay2` |
+| `containerd-overlayfs` | driver `overlayfs` **and** exactly one `driver-type=io.containerd.snapshotter.v1` | absolute `…/io.containerd.snapshotter.v1.overlayfs/snapshots/<number>/fs` |
+
+The driver name is never trusted alone, and the upper directory is never
+taken from `docker inspect` alone. Each container runs, and `upper_dir_of`:
+
+1. reads the one `overlay` mount at `/` in its init process's
+   `/proc/<pid>/mountinfo`. Every row must be well formed, exactly one row is
+   at `/`, and its super options carry exactly one `upperdir=`;
+2. revalidates the init pid (same pid, same start time) after that read;
+3. accepts only plain path characters, so an escaped value fails closed, with
+   no `.`, `..` or empty component, and requires the shape for its kind;
+4. on `overlay2`, requires it to equal the graph driver's own `UpperDir`;
+5. proves it is this container's: a random marker written inside the
+   container at `/tmp/<token>` must appear at `<upper>/tmp/<token>`.
+
+Any failed step refuses by name (`upperdir-unreadable`, `container-pid-changed`,
+`upperdir-shape`, `upperdir-disagrees`, `upperdir-missing`,
+`upperdir-unverified`). P5's survivor marker now has a random name too, so a
+stale file in another snapshot cannot answer for it. The pure helpers
+(`storage_kind_from`, `overlay_upper`, `upper_resolve`) are qualified in CI
+over committed mountinfo fixtures (`fixtures/lib/`) and inline cases, each
+with blind twins the cases must catch.
+
+## Step diagnostics (P5, P7, P8)
+
+The first live run left P7 and P8 blind: every failed in-container step read
+`OBSERVATION_FAILED` with its stderr sent to `/dev/null`. Each such step now
+prints `INFO diag <arm> <step> exit <status>`, then up to the first 2048 bytes
+of its stderr as `INFO diag <arm> <step> stderr: …` lines, and
+`stderr-truncated <bytes>` when there was more (`lib.sh` `step_diag`). Steps:
+P7 `inventory`; P8 `binds` and `scan`, plus `ns-<name> unreadable`; P5's
+`writes` on refusal. Every byte outside printable ASCII becomes `?`, and
+every line carries the `INFO` prefix and its own newline, so stderr text can
+never print as an `ARM` or `PROBE` line. These are diagnostics only. Nothing
+is recorded as a reading, no classifier reads them, and no verdict changed.
+The containers hold no credential, so the text is not scrubbed beyond that.
+
 ## Stated limits
 
 - The scripts cannot prove that the unit named by `--runner-unit` IS the
@@ -62,6 +110,11 @@ login, spend or host action beyond the probe itself.
   can over-report a path whose ACL mask sets a group bit the uid cannot use.
   That direction is fail-safe: a MISMATCH to investigate, never a false clean.
   Neither is excluded by the script.
+- P5 and P6 accept a `DockerRootDir` reached through a symlink only if the
+  kernel's mount options name the same string; otherwise they refuse
+  (`upperdir-shape` or `upperdir-disagrees`) rather than resolve links.
+- P5 and P6 need `sleep` and a writable `/tmp` in the image, for the running
+  container and the identity marker. Without them they refuse by name.
 - P2 identifies each planted holder by pid plus start time. Other pids
   are enumerated from one listing of `/proc`; a pid that exits mid-census is
   skipped, not counted as unreadable.
@@ -97,7 +150,7 @@ sets the container uid for P5 and P7. P2, P3, P4 and P8 use `python3 -I`
 | P3 | QUALIFIED | fact 3 or 4 needs redesign for this kernel |
 | P4 | QUALIFIED | the `live` arm shows swap, a piped core handler or a resume device: windows stay blocked until fixed |
 | P5 | QUALIFIED | home bind leaks to VM disk or does not survive removal: PR-1 design must change |
-| P6 | QUALIFIED | records the mechanism only |
+| P6 | QUALIFIED | records the mechanism only. Under the containerd store, a SURVIVOR on `removed` can mean the snapshot is removed later by garbage collection: record it as a finding, not a script error |
 | P7 | QUALIFIED, unless the image exposes an extra writable mount (for example `/dev/mqueue`), which PR-1 must then close | PR-1 containment must close the listed extra |
 | P8 | QUALIFIED | channel isolation does not hold; fact 2b fails closed. If the `clean` arm's only survivor is a socket on fd 0–2 of the container's init (container-runtime stdio), record it: PR-1 must decide that case explicitly, not dismiss it |
 

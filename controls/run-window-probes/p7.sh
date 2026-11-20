@@ -17,6 +17,9 @@
 # (OBSERVATION_FAILED), never reads as clean. /dev/mqueue is searched, so a
 # writable IPC filesystem shows as an extra, which PR-1 must then close.
 #
+# Each arm prints `INFO diag <arm> inventory exit <status>` and up to 2 KiB of
+# the in-container step's stderr (lib.sh step_diag); no verdict reads them.
+#
 # Arms and expected verdicts:
 #   clean     only the declared surfaces are writable       CONFIRMED_NEGATIVE
 #   survivor  a planted writable directory bind and a
@@ -146,7 +149,10 @@ observe() {
             --user "$user" $_m -e "DECLARED=$DECLARED" \
             -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
         _rc=0
-        out=$(docker start -a "$cid" 2>/dev/null) || _rc=$?
+        out=$(docker start -a "$cid" 2>"$PROBE_SCRATCH/$_arm.err") || _rc=$?
+        # Bounded stderr and the exit status, so a failed inventory names its
+        # cause. Diagnostic only: the readings below are unchanged.
+        step_diag "$_arm" inventory "$_rc" "$PROBE_SCRATCH/$_arm.err"
         if [ "$_arm" = fault ]; then
             # The fault arm must fail exactly at the declared-surface check:
             # exit 4 with the MISSING-SURFACE token, after a good table read.

@@ -1,0 +1,2 @@
+1012 900 0:142 / / rw,relatime - fuse.overlayfs fuse-overlayfs rw,lowerdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/41/fs,upperdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/57/fs,workdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/57/work
+1013 1012 0:145 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw

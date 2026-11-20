@@ -190,3 +190,222 @@ def test_usage_errors_refuse_with_exit_two(tmp_path: Path, probe: str) -> None:
     assert unknown.returncode == 2 and "REFUSED usage" in unknown.stdout
     absent = classify(PROBES / f"{probe}.sh", tmp_path / "absent.readings")
     assert absent.returncode == 2 and "REFUSED readings-unreadable" in absent.stdout
+
+
+# ---- Pure lib.sh helpers added for the live-run follow-up (Refs #797) ----
+#
+# The first live run refused P5 and P6 (Docker's containerd image store
+# reports driver "overlayfs", not "overlay2") and left P7 and P8 blind (their
+# in-container steps' stderr went to /dev/null). The storage helpers below are
+# pure, so their every refusal is a committed case here; each has a blind twin
+# that must change its discriminating case.
+
+LIB = PROBES / "lib.sh"
+LIB_FIXTURES = FIXTURES / "lib"
+HEX = "3f9c" * 16
+DROOT = "/var/lib/docker"
+SNAP = f"{DROOT}/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots"
+
+#: mountinfo fixture -> the raw upperdir= overlay_upper must print, or None
+#: for a table it must refuse.
+MOUNTINFO_CASES = {
+    "containerd": f"{SNAP}/57/fs",
+    "overlay2": f"{DROOT}/overlay2/{HEX}/diff",
+    "overlay2-relative": f"{HEX}/diff",
+    "two-root-rows": None,
+    "root-not-overlay": None,
+    "two-upperdirs": None,
+    "malformed-row": None,
+    "no-upperdir": None,
+    "no-root-row": None,
+    "empty": None,
+}
+
+#: case -> (kind, docker root, raw upperdir, resolved path or None)
+RESOLVE_CASES = {
+    "containerd": ("containerd-overlayfs", DROOT, f"{SNAP}/57/fs", f"{SNAP}/57/fs"),
+    "overlay2": ("overlay2", DROOT, f"{DROOT}/overlay2/{HEX}/diff",
+                 f"{DROOT}/overlay2/{HEX}/diff"),
+    "overlay2-relative": ("overlay2", DROOT, f"{HEX}/diff", f"{DROOT}/overlay2/{HEX}/diff"),
+    "overlay2-nested-id": ("overlay2", DROOT, f"{DROOT}/overlay2/ab/cd/diff", None),
+    "overlay2-other-root": ("overlay2", DROOT, f"/srv/other/overlay2/{HEX}/diff", None),
+    "overlay2-workdir": ("overlay2", DROOT, f"{DROOT}/overlay2/{HEX}/work", None),
+    "overlay2-relative-root": ("overlay2", "relative/root", f"{HEX}/diff", None),
+    "containerd-other-dir": ("containerd-overlayfs", DROOT, f"{DROOT}/other/snapshots/5/fs", None),
+    "containerd-dot-dot": ("containerd-overlayfs", DROOT,
+                           f"{DROOT}/containerd/../daemon/io.containerd.snapshotter.v1.overlayfs"
+                           "/snapshots/7/fs", None),
+    "containerd-escaped": ("containerd-overlayfs", DROOT,
+                           "/var/lib/a\\054b/io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs",
+                           None),
+    "containerd-relative": ("containerd-overlayfs", DROOT,
+                            "io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs", None),
+    "containerd-non-numeric": ("containerd-overlayfs", DROOT, f"{SNAP}/x5/fs", None),
+    "containerd-trailing-slash": ("containerd-overlayfs", DROOT, f"{SNAP}/57/fs/", None),
+    "unknown-kind": ("zfs", DROOT, f"{SNAP}/57/fs", None),
+}
+
+#: case -> (docker info driver, DriverStatus "key=value" lines, kind or None)
+STORAGE_CASES = {
+    "overlay2": ("overlay2", "Backing Filesystem=extfs\nSupports d_type=true", "overlay2"),
+    "containerd": ("overlayfs", "driver-type=io.containerd.snapshotter.v1", "containerd-overlayfs"),
+    "containerd-other-type": ("overlayfs", "driver-type=io.containerd.snapshotter.v2", None),
+    "containerd-no-status": ("overlayfs", "", None),
+    "containerd-type-twice": ("overlayfs", "driver-type=io.containerd.snapshotter.v1\n"
+                              "driver-type=io.containerd.snapshotter.v1", None),
+    "other-driver": ("devicemapper", "driver-type=io.containerd.snapshotter.v1", None),
+}
+
+#: A stderr body longer than the 2 KiB bound, carrying an escape sequence, a
+#: high byte, a carriage return and text that would read as a verdict line.
+DIAG_BODY = (b"\x1b[31mARM clean CONFIRMED_NEGATIVE\rPROBE p7 QUALIFIED\n\xff"
+             + b"find: '/root': Permission denied\n" * 150)
+DIAG_BOUND = 2048
+
+
+def lib_call(lib: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(["sh", "-c", '. "$1"; shift; "$@"', "sh", str(lib), *args],
+                          capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                          check=False, timeout=30)
+
+
+def helper_result(lib: Path, kind: str, case: str) -> str | None:
+    """The helper's single output line, or None when it refused. A refusal
+    must print nothing; any stderr is invalid output for a pure helper."""
+    if kind == "mountinfo":
+        run = lib_call(lib, "overlay_upper", str(LIB_FIXTURES / f"mountinfo-{case}.txt"))
+    elif kind == "resolve":
+        run = lib_call(lib, "upper_resolve", *RESOLVE_CASES[case][:3])
+    elif kind == "storage":
+        run = lib_call(lib, "storage_kind_from", *STORAGE_CASES[case][:2])
+    else:
+        raise AssertionError(kind)
+    assert not run.stderr, run.stderr
+    if run.returncode != 0:
+        assert run.stdout == b""
+        return None
+    lines = run.stdout.decode().splitlines()
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def expected(kind: str, case: str) -> str | None:
+    if kind == "mountinfo":
+        return MOUNTINFO_CASES[case]
+    if kind == "resolve":
+        return RESOLVE_CASES[case][3]
+    return STORAGE_CASES[case][2]
+
+
+HELPER_CASES = ([("mountinfo", c) for c in MOUNTINFO_CASES]
+                + [("resolve", c) for c in RESOLVE_CASES]
+                + [("storage", c) for c in STORAGE_CASES])
+
+
+def test_every_mountinfo_fixture_has_a_case() -> None:
+    files = {p.name for p in LIB_FIXTURES.iterdir()}
+    assert files == {f"mountinfo-{c}.txt" for c in MOUNTINFO_CASES}
+
+
+@needs_sh
+@pytest.mark.parametrize(("kind", "case"), HELPER_CASES,
+                         ids=[f"{k}-{c}" for k, c in HELPER_CASES])
+def test_storage_helper_case(kind: str, case: str) -> None:
+    assert helper_result(LIB, kind, case) == expected(kind, case)
+
+
+def diag_output(lib: Path, tmp_path: Path) -> bytes:
+    err = tmp_path / "step.err"
+    err.write_bytes(DIAG_BODY)
+    run = lib_call(lib, "step_diag", "clean", "scan", "3", str(err))
+    assert run.returncode == 0 and not run.stderr, run.stderr
+    return run.stdout
+
+
+def diag_is_bounded_and_inert(out: bytes) -> bool:
+    """Every line is an INFO diag line ending in a newline; the stderr payload
+    is at most the bound and only printable ASCII; the truncation is stated."""
+    if not out.endswith(b"\n"):
+        return False
+    lines = out[:-1].split(b"\n")
+    prefix = b"INFO diag clean scan stderr: "
+    payload = [line[len(prefix):] for line in lines if line.startswith(prefix)]
+    return (lines[0] == b"INFO diag clean scan exit 3"
+            and all(line.startswith(b"INFO diag clean scan ") for line in lines)
+            and sum(len(p) + 1 for p in payload) <= DIAG_BOUND + 1
+            and all(32 <= b < 127 for p in payload for b in p)
+            and lines[-1] == f"INFO diag clean scan stderr-truncated {len(DIAG_BODY)}".encode())
+
+
+@needs_sh
+def test_step_diag_is_bounded_scrubbed_and_prefixed(tmp_path: Path) -> None:
+    out = diag_output(LIB, tmp_path)
+    assert diag_is_bounded_and_inert(out), out[:400]
+    # It does carry the cause: the first stderr line survives, scrubbed.
+    assert b"INFO diag clean scan stderr: ?[31mARM clean CONFIRMED_NEGATIVE?PROBE p7" in out
+
+
+@needs_sh
+def test_step_diag_reports_the_status_alone_for_empty_stderr(tmp_path: Path) -> None:
+    err = tmp_path / "empty.err"
+    err.write_bytes(b"")
+    run = lib_call(LIB, "step_diag", "fault", "inventory", "4", str(err))
+    assert run.returncode == 0 and run.stderr == b""
+    assert run.stdout == b"INFO diag fault inventory exit 4\n"
+
+
+#: (blind copy name, exact lib.sh text, weakened text, helper kind, case)
+LIB_TWINS = [
+    ("first-root-row-taken", 'if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1',
+     'if (bad || rows < 1 || n < 1 || fs != "overlay") exit 1', "mountinfo", "two-root-rows"),
+    ("root-fstype-unchecked", 'if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1',
+     "if (bad || rows < 1 || n != 1) exit 1", "mountinfo", "root-not-overlay"),
+    ("malformed-rows-ignored", 'if (bad || rows < 1 || n != 1 || fs != "overlay") exit 1',
+     'if (rows < 1 || n != 1 || fs != "overlay") exit 1', "mountinfo", "malformed-row"),
+    ("upperdir-count-unchecked", 'if (u != 1 || v == "") exit 1', 'if (u < 1 || v == "") exit 1',
+     "mountinfo", "two-upperdirs"),
+    ("overlay2-id-unchecked", "case $_id in '' | *[!0-9a-f]*) return 1 ;; esac", ":", "resolve",
+     "overlay2-nested-id"),
+    ("snapshot-dir-unchecked",
+     "case ${_base%/*} in /?*/io.containerd.snapshotter.v1.overlayfs/snapshots) ;; "
+     "*) return 1 ;; esac", ":", "resolve", "containerd-other-dir"),
+    ("dot-components-accepted", "case /$_x/ in */./* | */../*) return 1 ;; esac", ":", "resolve",
+     "containerd-dot-dot"),
+    ("escaped-path-accepted", "case $_x in '' | *//* | *[!A-Za-z0-9/._-]*) return 1 ;; esac",
+     "case $_x in '' | *//*) return 1 ;; esac", "resolve", "containerd-escaped"),
+    ("driver-type-trusted", '[ "$_t" = io.containerd.snapshotter.v1 ] || return 1', ":",
+     "storage", "containerd-other-type"),
+    ("driver-type-count-unchecked", "END { if (n != 1) exit 1; print v }", "END { print v }",
+     "storage", "containerd-type-twice"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new", "kind", "case"), LIB_TWINS,
+                         ids=[t[0] for t in LIB_TWINS])
+def test_storage_helper_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str,
+                                             kind: str, case: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, new))
+    assert helper_result(LIB, kind, case) == expected(kind, case)
+    assert helper_result(mutated, kind, case) != expected(kind, case), blind
+
+
+#: (blind copy name, exact lib.sh text, weakened text)
+DIAG_TWINS = [
+    ("stderr-unbounded", 'head -c 2048 -- "$4"', 'cat -- "$4"'),
+    ("stderr-unscrubbed", "LC_ALL=C tr -c '\\n[:print:]' '?'", "cat"),
+]
+
+
+@needs_sh
+@pytest.mark.parametrize(("blind", "old", "new"), DIAG_TWINS, ids=[t[0] for t in DIAG_TWINS])
+def test_step_diag_blind_twin_is_caught(tmp_path: Path, blind: str, old: str, new: str) -> None:
+    source = LIB.read_text()
+    assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
+    mutated = tmp_path / "lib.sh"
+    mutated.write_text(source.replace(old, new))
+    assert diag_is_bounded_and_inert(diag_output(LIB, tmp_path))
+    assert not diag_is_bounded_and_inert(diag_output(mutated, tmp_path)), blind
