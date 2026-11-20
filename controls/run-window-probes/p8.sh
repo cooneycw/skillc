@@ -118,6 +118,7 @@ isolation() {
     # fails on one it can search but not list.
     v=$(step_capture "$PROBE_SCRATCH/$1.scan.err" docker exec "$2" sh -c "$SCAN_LIB"'set -e
 t=$(mktemp -d)
+trap "rm -rf \"$t\"" EXIT
 o=$(scan "$t/pruned" / all "/proc /sys" -type s)
 n=$(printf "%s\n" "$o" | awk "NF > 0 { c++ } END { print c + 0 }")
 p=0
@@ -127,8 +128,7 @@ if [ -d /probe-sockdir ]; then
     if [ -n "$d" ]; then p=$((p + 1)); fi
 fi
 printf "%s %s\n" "$n" "$p"
-pruned_lines "$t/pruned"
-rm -rf "$t"') || _rc=$?
+pruned_lines "$t/pruned"') || _rc=$?
     # Bounded stderr and the exit status of the in-container scan, so a failed
     # scan names its cause. Diagnostic only: the readings are unchanged.
     step_diag "$1" scan "$_rc" "$PROBE_SCRATCH/$1.scan.err"

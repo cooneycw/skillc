@@ -529,34 +529,60 @@ SCAN_LIB='
 # scan PRUNED ROOT XDEV EXCLUDES TEST...: GNU find over ROOT printing every
 # path that matches TEST (find primaries), with two kinds of pruning:
 # - each absolute path in EXCLUDES (space-separated) is pruned unexamined;
-# - each directory this uid cannot SEARCH is pruned, and its path is
-#   appended to PRUNED. Searchability is access(2) X_OK as this uid
-#   (`! -executable`), never an error message. Nothing at or below such a
-#   directory can be created, renamed or unlinked by this uid, and nothing
-#   inside it (a socket included) can be opened by path, because each of
-#   those needs search permission on the directory. That holds for a
-#   directory with write but not search permission too: write alone permits
-#   no entry change, so such a directory is never counted as writable (it is
-#   reported as PRUNED-W, see pruned_lines).
-# A directory the uid CAN search but cannot read is NOT pruned: find fails to
-# list it, scan returns 1, and the caller reads that as an observation
-# failure, so an unlistable subtree is never read as empty. Any other find
-# error also returns 1. XDEV is "xdev" or "all".
+# - a directory this uid cannot SEARCH is pruned, and its path is appended to
+#   PRUNED, but ONLY when three independent facts agree: access(2) X_OK as
+#   this uid says no (`! -executable`); the mode bits of the class that
+#   applies to this uid (group if the directory group is one of its groups,
+#   else other) grant no search; and the directory is not owned by this uid,
+#   which could otherwise make it searchable later in the window. Without
+#   search permission nothing at or below the directory can be created,
+#   renamed, unlinked or opened (a socket included) by a fresh path lookup
+#   from this root. That holds for write without search too: write alone
+#   permits no entry change, so such a directory is never counted writable.
+# A denial the mode bits do not explain (an ACL, an I/O error), a directory
+# owned by this uid, or a directory name containing a newline is AMBIGUOUS:
+# it is not descended, and scan returns 1. A directory the uid can search
+# but not read is not pruned: find fails to list it and scan returns 1. Any
+# other find error returns 1. If anything was pruned, the scan identity must
+# also be plain: real, effective, saved and filesystem ids equal, and no
+# effective capability (so access(2) answers for the lookups it stands for).
+# XDEV is "xdev" or "all". The verdict this supports is scoped to fresh
+# pathname lookup from ROOT under this identity, at the observation instant.
 scan() {
     _pr=$1
     _root=$2
     _xd=$3
     _ex=$4
     shift 4
-    set -- \( -type d ! -executable -fprint "$_pr.new" -prune \) -o \( "$@" \) -print
+    _u=$(id -u) || return 1
+    _gs=$(id -G) || return 1
+    case "$_u $_gs" in *[!0-9\ ]*) return 1 ;; esac
+    _g=
+    for _x in $_gs; do _g="$_g${_g:+ -o} -gid $_x"; done
+    [ -n "$_g" ] || return 1
+    _nlpat=$(printf "*\n*_")
+    _nlpat=${_nlpat%_}
+    : >"$_pr.amb" || return 1
+    eval "set -- \\( -type d ! -executable \\( -name \"\$_nlpat\" -o -uid $_u -o ! \\( \\( \\( $_g \\) ! -perm -g+x \\) -o \\( ! \\( $_g \\) ! -perm -o+x \\) \\) \\) -fprint \"\$_pr.amb\" -prune \\) -o \\( -type d ! -executable -fprint \"\$_pr.new\" -prune \\) -o \\( \"\$@\" \\) -print"
     for _e in $_ex; do set -- \( -path "$_e" -prune \) -o "$@"; done
     if [ "$_xd" = xdev ]; then set -- -xdev "$@"; fi
     find "$_root" "$@" || return 1
+    [ ! -s "$_pr.amb" ] || return 1
+    if [ -s "$_pr.new" ]; then scan_identity_plain || return 1; fi
     cat "$_pr.new" >>"$_pr" || return 1
-    rm -f "$_pr.new"
+    rm -f "$_pr.new" "$_pr.amb"
+}
+# scan_identity_plain: real, effective, saved and filesystem uids and gids
+# equal, and an all-zero effective capability set, read from /proc/self.
+scan_identity_plain() {
+    awk "\$1 == \"Uid:\" { u = (\$2 == \$3 && \$3 == \$4 && \$4 == \$5); nu++ }
+         \$1 == \"Gid:\" { g = (\$2 == \$3 && \$3 == \$4 && \$4 == \$5); ng++ }
+         \$1 == \"CapEff:\" { c = (\$2 ~ /^0+\$/); nc++ }
+         END { exit (nu == 1 && ng == 1 && nc == 1 && u && g && c) ? 0 : 1 }" /proc/self/status
 }
 # pruned_lines PRUNED: one "PRUNED <path>" line per pruned directory, or
-# "PRUNED-W <path>" for one this uid may write but not search.
+# "PRUNED-W <path>" for one this uid may write but not search. Paths never
+# contain a newline (scan refuses those).
 pruned_lines() {
     [ -s "$1" ] || return 0
     while IFS= read -r _p; do
@@ -567,7 +593,8 @@ pruned_lines() {
 
 # scan_report ARM OUTPUT: split an in-container scan's output into its first
 # line, set as SCAN_HEAD, and its "PRUNED <path>" / "PRUNED-W <path>" lines.
-# Each is reported as `INFO pruned <arm> <path> unsearchable`, plus
+# A tag must be exact and its path absolute. Each is reported as
+# `INFO pruned <arm> <path> unsearchable`, plus
 # ` writable-without-search` for PRUNED-W. Bytes outside printable ASCII
 # become '?', and at most 64 are listed, then a count. Returns 1 if any other
 # line appears, so unexpected output is an observation failure. Pure.
@@ -575,10 +602,10 @@ scan_report() {
     SCAN_HEAD=$(printf '%s\n' "$2" | sed -n 1p)
     printf '%s\n' "$2" | LC_ALL=C awk -v a="$1" '
         NR == 1 { next }
-        $1 == "PRUNED" || $1 == "PRUNED-W" {
+        /^PRUNED \// || /^PRUNED-W \// {
             n++
             if (n <= 64) {
-                p = substr($0, length($1) + 2)
+                p = substr($0, index($0, " ") + 1)
                 gsub(/[^ -~]/, "?", p)
                 w = ($1 == "PRUNED-W") ? " writable-without-search" : ""
                 print "INFO pruned " a " " p " unsearchable" w

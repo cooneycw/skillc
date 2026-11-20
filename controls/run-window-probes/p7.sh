@@ -166,8 +166,11 @@ observe() {
             fi
             set --
         elif [ "$_rc" -eq 0 ] && scan_report "$_arm" "$out"; then
+            # Globbing off while splitting, so no field can expand to a file.
+            set -f
             # shellcheck disable=SC2086  # four space-separated numbers
             set -- $SCAN_HEAD
+            set +f
         else
             set --
         fi
