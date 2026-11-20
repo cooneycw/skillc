@@ -564,8 +564,8 @@ def test_cli_writes_no_receipt_when_persisting_the_tree_fails(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     out = tmp_path / "out"
 
-    def half_persist(degraded: degrade.DegradedSource, target: Path) -> Path:
-        (target / "skills").mkdir()
+    def half_persist(degraded: degrade.DegradedSource, target: Path, **kwargs: object) -> Path:
+        (target / "skills" / "half-written").write_text("x", encoding="utf-8")
         raise OSError("disk full")
 
     monkeypatch.setattr(degrade, "persist_skills", half_persist)
@@ -587,18 +587,31 @@ def test_cli_never_overwrites_or_deletes_an_out_populated_by_another_writer(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     real = degrade.persist_skills
 
-    def racing_receipt(degraded: degrade.DegradedSource, target: Path) -> Path:
+    real_receipt = degrade.receipt
+
+    def racing_receipt(degraded: degrade.DegradedSource, target: Path, **kwargs: object) -> Path:
         (target / "receipt.json").write_text("the other writer's\n", encoding="utf-8")
-        return real(degraded, target)
+        return real(degraded, target, **kwargs)  # type: ignore[arg-type]
 
-    def racing_skills(degraded: degrade.DegradedSource, target: Path) -> Path:
-        (target / "skills").mkdir()
-        (target / "skills" / "theirs").write_text("the other writer's\n", encoding="utf-8")
-        return real(degraded, target)
+    def failing_persist(degraded: degrade.DegradedSource, target: Path, **kwargs: object) -> Path:
+        # Codex's pass-3 red case: the source read fails before any target
+        # is touched - while ANOTHER writer owns skills/.
+        raise OSError("source enumeration failed")
 
-    for racing, theirs in ((racing_receipt, "receipt.json"), (racing_skills, "skills")):
+    def racing_skills_receipt(degraded: degrade.DegradedSource, **kwargs: object) -> dict[str, object]:
+        for out_dir in tmp_path.glob("out-skills"):
+            (out_dir / "skills").mkdir(parents=True)
+            (out_dir / "skills" / "theirs").write_text("the other writer's\n", encoding="utf-8")
+        return real_receipt(degraded, **kwargs)  # type: ignore[arg-type]
+
+    for theirs in ("receipt.json", "skills"):
         out = tmp_path / f"out-{theirs}"
-        monkeypatch.setattr(degrade, "persist_skills", racing)
+        if theirs == "receipt.json":
+            monkeypatch.setattr(degrade, "persist_skills", racing_receipt)
+        else:
+            out.mkdir()  # the glob above needs it; the pre-check still sees it empty
+            monkeypatch.setattr(degrade, "persist_skills", failing_persist)
+            monkeypatch.setattr(degrade, "receipt", racing_skills_receipt)
         code = cli.main([
             "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
             "--out", str(out), "--base", str(tmp_path / "base"),
@@ -760,7 +773,7 @@ def test_cli_cleans_up_staging_when_persist_skills_raises(tmp_path: Path, monkey
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     base = tmp_path / "base"
 
-    def _boom(degraded: object, out: Path) -> Path:
+    def _boom(degraded: object, out: Path, **kwargs: object) -> Path:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(degrade, "persist_skills", _boom)

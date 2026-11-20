@@ -416,15 +416,20 @@ def receipt(degraded: DegradedSource, *, pinned_revision: str) -> dict[str, obje
     }
 
 
-def persist_skills(degraded: DegradedSource, out: Path) -> Path:
+def persist_skills(degraded: DegradedSource, out: Path, *, claimed: bool = False) -> Path:
     """Copy the degraded surface tree to `out/skills` - the tree a runner
     will later install. Before this, `degrade-subject --out DIR` wrote only
     `receipt.json`: the degraded tree itself lived under the disposable
     staging root and was discarded with it, so the receipt described a tree
     nothing kept and nothing could ever run (orchestrator review of #155).
+    `claimed=True` copies into an EMPTY `out/skills` the caller already
+    created exclusively (#555), so the caller knows that directory is its own
+    whatever the copy does; it is refused if anything is already in it.
     Returns the copied directory."""
     target = out / "skills"
-    shutil.copytree(degraded.source.surface_dir, target)
+    if claimed and any(target.iterdir()):
+        raise DegradationRefused(f"{target} was claimed empty but is not")
+    shutil.copytree(degraded.source.surface_dir, target, dirs_exist_ok=claimed)
     return target
 
 

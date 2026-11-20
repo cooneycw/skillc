@@ -3103,15 +3103,15 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
         payload = degrade.receipt(degraded, pinned_revision=subject.revision)
         out.mkdir(parents=True, exist_ok=True)
         try:
-            degrade.persist_skills(degraded, out)
+            # Exclusive: `skills/` is this call's only once this mkdir made it
+            # (counter-model review pass 3 - copytree reads its source before
+            # creating the target, so its failure never proved ownership).
+            skills_dir.mkdir()
         except FileExistsError:
-            # copytree creates nothing when its target already exists.
             print(f"skillc: {skills_dir} appeared while this run built; refusing to write into it", file=sys.stderr)
             return 2
-        except BaseException:
-            created_skills = True  # copytree got past creating it, then failed
-            raise
         created_skills = True
+        degrade.persist_skills(degraded, out, claimed=True)
         fd, name = tempfile.mkstemp(prefix=".receipt.json.partial-", dir=out)
         partial = Path(name)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
