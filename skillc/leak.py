@@ -69,6 +69,7 @@ from __future__ import annotations
 import functools
 import grp
 import ipaddress
+import itertools
 import os
 import pwd
 import re
@@ -227,14 +228,53 @@ def _host_encoded_accounts() -> frozenset[str]:
     return frozenset(re.sub(r"[^A-Za-z0-9]", "-", name) for name in names)
 
 
+def _current_encoded_account() -> str | None:
+    """The scanning account's own name, encoded (#730). Looked up by uid, so it
+    is found even where the account listing leaves directory accounts out."""
+    try:
+        return re.sub(r"[^A-Za-z0-9]", "-", pwd.getpwuid(os.getuid()).pw_name)
+    except (KeyError, OSError):
+        return None
+
+
 def _encoded_exempt(name: str) -> bool:
     """`-home-<name>` may be exempt only when no host account encodes to
     `<name>` or to `<name>-...` (counter-model review on #729): otherwise a real
-    hyphenated or dotted account would hide behind the placeholder."""
+    hyphenated or dotted account would hide behind the placeholder. The
+    enumeration may be partial (NSS/SSSD with enumeration off, #730), so the
+    scanning account is checked by uid as well, and each match is still probed
+    by name in `_encoded_tail_names_account`."""
     encoded = _host_encoded_accounts()
     if "\0unenumerable" in encoded:
         return False
+    current = _current_encoded_account()
+    if current is not None:
+        encoded = encoded | {current}
     return not any(account == name or account.startswith(f"{name}-") for account in encoded)
+
+
+#: #730: how many dashed segments after the placeholder are probed as part of
+#: an account name. A directory account with more separators than this, and
+#: absent from the listing, is not found by the probe.
+_PROBE_SEGMENTS = 3
+_ENCODED_TAIL_RE = re.compile(r"-[A-Za-z0-9-]*")
+
+
+@functools.lru_cache(maxsize=4096)
+def _encoded_tail_names_account(name: str, tail: str) -> bool:
+    """#730: does `<name>` plus the first dashed segments of `tail` decode to
+    an account `getpwnam()` resolves? `getpwall()` can omit directory accounts
+    that lookup by name still finds, so an encoded placeholder match is
+    exempt only if no de-encoding of the text actually seen names one. Every
+    mix of `-`, `.` and `_` is tried for up to `_PROBE_SEGMENTS` segments."""
+    # Empty segments are kept: `user--operator` encodes with a doubled dash.
+    segments = tail.split("-")[1:][:_PROBE_SEGMENTS]
+    for count in range(1, len(segments) + 1):
+        for separators in itertools.product("-._", repeat=count):
+            candidate = name + "".join(sep + seg for sep, seg in zip(separators, segments[:count]))
+            if _host_has_account(candidate):
+                return True
+    return False
 
 
 @functools.lru_cache(maxsize=1)
@@ -434,8 +474,12 @@ def scan_text(
                 f"home-directory path for {match.group(1)!r}: {match.group(0)}",
             )
         for match in ENCODED_HOME_RE.finditer(line):
-            if match.group(0) in ALLOWLIST or match.group(0) in conditional:
+            if match.group(0) in ALLOWLIST:
                 continue
+            if match.group(0) in conditional:
+                tail = _ENCODED_TAIL_RE.match(line, match.end())
+                if not _encoded_tail_names_account(match.group(1), tail.group(0) if tail else ""):
+                    continue
             yield lineno, "encoded-home-path", f"encoded home path for {match.group(1)!r}: {match.group(0)}"
         for match in CLAUDE_SCRATCHPAD_RE.finditer(line):
             yield lineno, "claude-scratchpad", f"Claude scratchpad path (host uid): {match.group(0)}"
