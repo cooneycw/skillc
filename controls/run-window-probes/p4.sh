@@ -26,7 +26,11 @@ parse_common "$@"
 # have five fields; anything else fails.
 swap_devices() {
     awk '
-        NR == 1 { if ($1 != "Filename") bad = 1; next }
+        NR == 1 {
+            if (NF != 5 || $1 != "Filename" || $2 != "Type" || $3 != "Size" ||
+                $4 != "Used" || $5 != "Priority") bad = 1
+            next
+        }
         NF == 0 { next }
         NF != 5 { bad = 1 }
         { c++ }
@@ -42,7 +46,9 @@ read_state() {
     else
         record "$1" swap_devices ERR
     fi
-    if [ -r "$3" ] && c=$(head -c 1 -- "$3" 2>/dev/null) && [ -n "$c" ]; then
+    # core_pattern must be exactly one nonempty line.
+    if [ -r "$3" ] && n=$(wc -l <"$3" 2>/dev/null) && [ "$n" -eq 1 ] \
+        && c=$(head -c 1 -- "$3" 2>/dev/null) && [ -n "$c" ] && [ "$c" != "$(printf '\n')" ]; then
         if [ "$c" = '|' ]; then record "$1" core_piped 1; else record "$1" core_piped 0; fi
     else
         record "$1" core_piped ERR
@@ -54,7 +60,8 @@ read_state() {
         record "$1" resume_set ERR
     elif [ ! -e "$4/resume" ] && [ ! -L "$4/resume" ]; then
         record "$1" resume_set 0
-    elif r=$(cat -- "$4/resume" 2>/dev/null) && printf '%s\n' "$r" | grep -Eq '^[0-9]+:[0-9]+$'; then
+    elif n=$(wc -l <"$4/resume" 2>/dev/null) && [ "$n" -eq 1 ] \
+        && r=$(cat -- "$4/resume" 2>/dev/null) && printf '%s\n' "$r" | grep -Eq '^[0-9]+:[0-9]+$'; then
         if [ "$r" = 0:0 ]; then record "$1" resume_set 0; else record "$1" resume_set 1; fi
     else
         record "$1" resume_set ERR

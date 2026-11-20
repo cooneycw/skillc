@@ -56,9 +56,18 @@ census() {
     printf '%s %s %s %s\n' "$fd_hits" "$map_hits" "$unreadable" "$scanned"
 }
 
-# record_census ARM ROOT IDENTITY [HOLDER...]: record one census. Its
-# `unreadable` is ERR unless every named holder pid is still alive after it
-# and at least one pid was scanned.
+# starttime PID: the process start time (field 22 of /proc/<pid>/stat), which
+# with the pid identifies one process; fails if unreadable. The comm field may
+# contain spaces, so fields are counted after its closing parenthesis.
+starttime() {
+    _s=$(cat -- "/proc/$1/stat" 2>/dev/null) || return 1
+    _s=${_s##*) }
+    printf '%s\n' "$_s" | awk '{ print $20 }'
+}
+
+# record_census ARM ROOT IDENTITY [PID:STARTTIME...]: record one census. Its
+# `unreadable` is ERR unless every named holder is the same live process after
+# it (pid and start time) and at least one pid was scanned.
 record_census() {
     _arm=$1 _root=$2 _id=$3
     shift 3
@@ -70,7 +79,8 @@ record_census() {
         _unr=${_rest%% *}
         _scan=${_rest#* }
         for h in "$@"; do
-            if [ ! -d "/proc/$h" ]; then _unr=ERR; fi
+            _now=$(starttime "${h%%:*}") || _now=gone
+            if [ "$_now" != "${h#*:}" ]; then _unr=ERR; fi
         done
         if ! is_uint "$_scan" || [ "$_scan" -lt 1 ]; then _unr=ERR; fi
         record "$_arm" fd_hits "$_fd"
@@ -106,6 +116,7 @@ observe() {
     h1=$!
     track_pid "$h1"
     wait_for "/proc/$h1/fd/3" || probe_die 'fd-holder-not-ready'
+    st1=$(starttime "$h1") || probe_die 'fd-holder-unreadable'
     # libc mmap through ctypes: unlike Python's mmap.mmap, which dup()s the
     # descriptor, this leaves the mapping as the only reference once the fd
     # is closed.
@@ -126,9 +137,10 @@ time.sleep(600)
     h2=$!
     track_pid "$h2"
     wait_for "$PROBE_SCRATCH/map-ready" || probe_die 'map-holder-not-ready'
+    st2=$(starttime "$h2") || probe_die 'map-holder-unreadable'
     rm -- "$a" "$b"
-    record_census fd /proc "$ida" "$h1"
-    record_census mmap /proc "$idb" "$h2"
+    record_census fd /proc "$ida" "$h1:$st1"
+    record_census mmap /proc "$idb" "$h2:$st2"
     kill "$h1" "$h2" 2>/dev/null || true
     wait "$h1" 2>/dev/null || true
     wait "$h2" 2>/dev/null || true

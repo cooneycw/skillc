@@ -8,7 +8,8 @@
 # Usage: p8.sh --image-id sha256:<64 hex> --runner-unit <unit>
 #
 # Arms and expected verdicts:
-#   clean     private namespaces, no socket bind or fd      CONFIRMED_NEGATIVE
+#   clean     private namespaces, no socket bind or fd, and
+#             no socket file visible inside the container   CONFIRMED_NEGATIVE
 #   sockbind  a planted host socket bind, and a planted bind
 #             of a directory that contains a socket         SURVIVOR_OBSERVED
 #   hostnet   --network host shares the host netns          SURVIVOR_OBSERVED
@@ -69,6 +70,14 @@ isolation() {
     else
         record "$1" socket_binds ERR
     fi
+    # The container's own view: socket files it can see outside /proc and /sys.
+    if v=$(docker exec "$2" sh -c \
+        'find / \( -path /proc -o -path /sys \) -prune -o -type s -print | wc -l' 2>/dev/null) \
+        && v=$(printf '%s' "$v" | tr -d ' ') && is_uint "$v"; then
+        record "$1" visible_sockets "$v"
+    else
+        record "$1" visible_sockets ERR
+    fi
     # One listing; entry names in /proc/<pid>/fd never contain whitespace.
     if names=$(ls -1A -- "/proc/$pid/fd" 2>/dev/null) && [ -n "$names" ]; then
         sockets=0
@@ -99,10 +108,9 @@ observe() {
     run() {
         _arm=$1
         shift
-        cid=$(docker run -d --name "skillc-dev-probe-$PROBE_NAME-$_arm-$(probe_uuid)" \
-            --log-driver none "$@" -- "$PROBE_IMAGE_ID" sleep 120) || probe_die 'run-failed'
-        printf '%s\n' "$cid" | grep -Eq '^[0-9a-f]{64}$' || probe_die 'run-id-malformed'
-        track_container "$cid"
+        # Create (tracked by ID) before start, so no started container escapes.
+        create_container --log-driver none "$@" -- "$PROBE_IMAGE_ID" sleep 120
+        docker start "$cid" >/dev/null || probe_die 'start-failed'
     }
     run clean --network none --ipc private
     isolation clean "$cid"
@@ -160,7 +168,8 @@ v_iso() {
     s=$(rd_uint "$1" shared_ns) || { printf '%s\n' "$PROBE_FAIL"; return; }
     b=$(rd_uint "$1" socket_binds) || { printf '%s\n' "$PROBE_FAIL"; return; }
     f=$(rd_uint "$1" socket_fds) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ]; then
+    v=$(rd_uint "$1" visible_sockets) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ] && [ "$v" -eq 0 ]; then
         printf '%s\n' "$PROBE_NEG"
     else
         printf '%s\n' "$PROBE_SURV"

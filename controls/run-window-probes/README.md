@@ -38,9 +38,22 @@ login, spend or host action beyond the probe itself.
   `REFUSED cleanup-failed`, keeps the scratch for inspection and exits 2.
 - **Runner exclusion.** Docker probes require the named unit to exist
   (`LoadState=loaded`) and be `inactive` or `failed`, at start and again
-  before the verdicts. A typo'd unit refuses. A runner start between the two
-  checks is not excluded by the script, so the operator stops the runner's
-  timer for the probe run, as for a window.
+  before the verdicts. A typo'd unit refuses.
+
+## Stated limits
+
+- The scripts cannot prove that the unit named by `--runner-unit` IS the
+  runner, and a runner start between the two checks is not excluded. The
+  operator supplies the unit and stops the runner's timer for the probe run,
+  as for a window.
+- P7 fails closed (`OBSERVATION_FAILED`) on any mountpoint that mountinfo had
+  to escape (a backslash), rather than looking it up under the wrong name.
+- P8 checks binds from the host side (a socket, or a directory containing
+  one) **and** the socket files the container itself can see outside `/proc`
+  and `/sys`. It does not model mount propagation beyond those two readings.
+- P2 identifies each planted holder by pid plus start time. Other pids
+  are enumerated from one listing of `/proc`; a pid that exits mid-census is
+  skipped, not counted as unreadable.
 
 ## Running (runner VM, through the owner's CLI helper, outside any run window)
 

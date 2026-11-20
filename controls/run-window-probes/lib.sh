@@ -30,10 +30,11 @@ PROBE_PIDS=
 PROBE_CONTAINERS=
 PROBE_MOUNTS=
 PROBE_SCRATCH=
+PROBE_KEEP=0
 PROBE_MODE=classify
 
 probe_die() {
-    probe_cleanup || true
+    if ! probe_cleanup; then printf 'INFO cleanup-unverified\n'; fi
     printf 'PROBE %s REFUSED %s\n' "${PROBE_NAME:-unknown}" "$1"
     exit 2
 }
@@ -199,9 +200,12 @@ probe_cleanup() {
         if [ "$_st" != 1 ]; then _ok=1; _left="$_left $_m"; fi
     done
     PROBE_MOUNTS=$_left
-    if [ "$_ok" = 0 ] && [ -n "$PROBE_SCRATCH" ] && [ -e "$PROBE_SCRATCH" ]; then
+    # Once any cleanup could not be verified, the scratch directory is kept for
+    # inspection for the rest of the run, including the EXIT trap's retry.
+    if [ "$_ok" != 0 ]; then PROBE_KEEP=1; fi
+    if [ "$PROBE_KEEP" = 0 ] && [ -n "$PROBE_SCRATCH" ] && [ -e "$PROBE_SCRATCH" ]; then
         rm -rf -- "$PROBE_SCRATCH" 2>/dev/null || true
-        if [ -e "$PROBE_SCRATCH" ]; then _ok=1; else PROBE_SCRATCH=; fi
+        if [ -e "$PROBE_SCRATCH" ]; then _ok=1; PROBE_KEEP=1; else PROBE_SCRATCH=; fi
     fi
     return "$_ok"
 }
@@ -227,8 +231,10 @@ runner_idle() {
 }
 
 # require_runner_idle: checked at start and again before verdicts
-# (recheck_runner). A runner start between the two checks is not excluded;
-# the operator stops the runner's timer for the probe run, as for a window.
+# (recheck_runner). Stated limits: the script cannot prove the named unit IS
+# the runner (the operator supplies it), and a runner start between the two
+# checks is not excluded. The operator stops the runner's timer for the probe
+# run, as for a window.
 require_runner_idle() {
     runner_idle || probe_die 'runner-not-idle'
 }

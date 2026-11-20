@@ -66,12 +66,7 @@ def test_fixture_classifies_to_its_committed_expectation(probe: str, case: str) 
     expect = (FIXTURES / probe / f"{case}.expect").read_text()
     run = classify(PROBES / f"{probe}.sh", FIXTURES / probe / f"{case}.readings")
     assert run.stdout == expect
-    assert run.returncode == (0 if expect.rstrip().endswith("QUALIFIED") else 1)
-    for line in run.stdout.splitlines():
-        kind, *rest = line.split()
-        assert kind in {"ARM", "PROBE"}
-        if kind == "ARM":
-            assert len(rest) == 2 and rest[1] in VERDICTS
+    arm_verdicts(run, probe)
 
 
 @pytest.mark.parametrize("probe", NAMES)
@@ -92,49 +87,64 @@ def test_every_probe_has_a_qualified_fault_arm_and_a_red_case(probe: str) -> Non
     assert reds and all(p.read_text().rstrip().endswith("MISMATCH") for p in reds)
 
 
-#: (blind copy name, file to mutate, exact original text, weakened text, probe, fixture)
+#: (blind copy name, file to mutate, exact original text, weakened text, probe,
+#: fixture, the arm whose verdict the weakening must change on that fixture)
 BLIND_TWINS = [
     ("missing-is-zero", "lib.sh", 'if (n != 1 || bad || v == "" || v == "ERR") exit 1',
-     'if (n != 1 || bad || v == "" || v == "ERR") v = 0', probe, "qualified")
+     'if (n != 1 || bad || v == "" || v == "ERR") v = 0', probe, "qualified", "fault")
     for probe in ("p1", "p4", "p5", "p7", "p8")
 ] + [
     ("trailing-garbage-accepted", "lib.sh",
      "$1 == a && $2 == k { n++; if (NF != 3) bad = 1; v = $3 }",
-     "$1 == a && $2 == k { n++; v = $3 }", "p1", "trailing-garbage"),
-    ("unreadable-ignored", "p2.sh", '[ "$u" -eq 0 ] || return 1', ":", "p2", "qualified"),
+     "$1 == a && $2 == k { n++; v = $3 }", "p1", "trailing-garbage", "last"),
+    ("unreadable-ignored", "p2.sh", '[ "$u" -eq 0 ] || return 1', ":", "p2", "qualified",
+     "fault"),
     ("mmap-fd-trusted", "p2.sh", 'if [ "${h% *}" -ne 0 ]; then printf', "if false; then printf",
-     "p2", "mmap-holder-kept-fd"),
+     "p2", "mmap-holder-kept-fd", "mmap"),
     ("unreadable-ignored", "p3.sh", 'if [ "$e" -ne 0 ] || [ "$u" -ne 0 ]; then',
-     'if [ "$e" -ne 0 ]; then', "p3", "qualified"),
+     'if [ "$e" -ne 0 ]; then', "p3", "qualified", "fault"),
     ("lazy-listing-ignored", "p3.sh", '"$PROBE_NEG") if [ "$r" -eq 1 ]',
-     '"$PROBE_NEG" | "$PROBE_SURV") if [ "$r" -eq 1 ]', "p3", "lazy-still-listed"),
+     '"$PROBE_NEG" | "$PROBE_SURV") if [ "$r" -eq 1 ]', "p3", "lazy-still-listed", "lazy"),
     ("failed-rm-trusted", "p6.sh", 'if [ "$ok" -ne 1 ] || [ "$b" -lt 1 ]', "if false",
-     "p6", "rm-failed"),
+     "p6", "rm-failed", "removed"),
     ("unlanded-write-trusted", "p5.sh", 'if [ "$p" -eq 1 ]; then printf', "if true; then printf",
-     "p5", "write-never-landed"),
-    ("socket-fd-ignored", "p8.sh", 'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ]',
-     'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ]', "p8", "inherited-socket-fd"),
+     "p5", "write-never-landed", "clean"),
+    ("file-bind-unchecked", "p7.sh", 'if [ "${e% *}" -ge 1 ] && [ "${e#* }" -ge 1 ]; then',
+     'if [ "${e% *}" -ge 1 ]; then', "p7", "file-bind-missed", "survivor"),
+    ("socket-fd-ignored", "p8.sh",
+     'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ] && [ "$v" -eq 0 ]',
+     'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$v" -eq 0 ]', "p8", "inherited-socket-fd",
+     "clean"),
+    ("visible-socket-ignored", "p8.sh",
+     'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ] && [ "$v" -eq 0 ]',
+     'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ]', "p8", "visible-socket-only",
+     "clean"),
     ("queue-reading-ignored", "p8.sh", 'if [ "$q" -eq 0 ] && [ "$g" -eq 1 ]', 'if [ "$g" -eq 1 ]',
-     "p8", "zerobyte-queue-nonzero"),
+     "p8", "zerobyte-queue-nonzero", "zerobyte"),
 ]
 
 
-def assert_valid_output(run: subprocess.CompletedProcess[str], probe: str) -> list[str]:
+def arm_verdicts(run: subprocess.CompletedProcess[str], probe: str) -> dict[str, str]:
     """The run printed only ARM lines with known verdicts and one final PROBE
-    line, and exited 0 or 1: a crashed or shell-erroring script is not valid."""
+    line, wrote nothing to stderr, and exited 0 exactly when QUALIFIED: a
+    crashed or shell-erroring script is not valid output."""
     lines = run.stdout.splitlines()
-    assert lines and run.returncode in (0, 1), (run.returncode, run.stderr)
+    assert lines and not run.stderr, (run.returncode, run.stderr)
     assert lines[-1] in (f"PROBE {probe} QUALIFIED", f"PROBE {probe} MISMATCH")
+    assert run.returncode == (0 if lines[-1].endswith("QUALIFIED") else 1)
     arms = [line.split() for line in lines[:-1]]
     assert all(len(a) == 3 and a[0] == "ARM" and a[2] in VERDICTS for a in arms)
-    return lines[:-1]
+    verdicts = {a[1]: a[2] for a in arms}
+    assert len(verdicts) == len(arms), "an arm reported twice"
+    return verdicts
 
 
 @needs_sh
-@pytest.mark.parametrize(("blind", "target", "old", "new", "probe", "case"), BLIND_TWINS,
-                         ids=[f"{t[0]}-{t[4]}" for t in BLIND_TWINS])
+@pytest.mark.parametrize(("blind", "target", "old", "new", "probe", "case", "changed"),
+                         BLIND_TWINS, ids=[f"{t[0]}-{t[4]}" for t in BLIND_TWINS])
 def test_blind_twin_is_caught_by_its_fixture(tmp_path: Path, blind: str, target: str, old: str,
-                                             new: str, probe: str, case: str) -> None:
+                                             new: str, probe: str, case: str,
+                                             changed: str) -> None:
     source = (PROBES / target).read_text()
     assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
     mutated = tmp_path / target
@@ -145,9 +155,9 @@ def test_blind_twin_is_caught_by_its_fixture(tmp_path: Path, blind: str, target:
     real = classify(PROBES / f"{probe}.sh", FIXTURES / probe / f"{case}.readings")
     weakened = classify(script, FIXTURES / probe / f"{case}.readings", lib=lib)
     assert real.stdout == expect
-    real_arms = assert_valid_output(real, probe)
-    weak_arms = assert_valid_output(weakened, probe)
-    assert weak_arms != real_arms, f"blind twin {blind} reproduced the committed verdicts"
+    real_v = arm_verdicts(real, probe)
+    weak_v = arm_verdicts(weakened, probe)
+    assert weak_v[changed] != real_v[changed], f"blind twin {blind} left arm {changed} unchanged"
 
 
 @needs_sh

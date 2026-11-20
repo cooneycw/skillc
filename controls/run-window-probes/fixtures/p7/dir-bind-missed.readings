@@ -1,0 +1,6 @@
+clean extra_dirs 0
+clean extra_files 0
+survivor extra_dirs 0
+survivor extra_files 1
+fault extra_dirs ERR
+fault extra_files ERR

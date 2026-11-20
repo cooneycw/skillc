@@ -30,8 +30,10 @@ parse_common "$@"
 
 DECLARED='/probe-home /tmp /var/tmp /dev/shm'
 
-# Runs inside the container. Prints the number of writable places outside the
-# declared surfaces; exits 3 if any required observation failed.
+# Runs inside the container. Prints "DIRS FILES": writable directories and
+# writable non-directory mountpoints outside the declared surfaces. Exits 3 if
+# any required observation failed, including any mountpoint mountinfo had to
+# escape (a backslash), which fails closed rather than being looked up wrong.
 # shellcheck disable=SC2016
 INVENTORY='
 set -euf
@@ -43,30 +45,36 @@ for s in $DECLARED; do
     printf "x\n" > "$w" || exit 3
     rm "$w" || exit 3
 done
-extra=0
 mounts=$(awk "{ for (i = 7; i <= NF; i++) if (\$i == \"-\") { print \$(i + 1), \$5; break } }" "$mi") || exit 3
 [ -n "$mounts" ] || exit 3
+case $mounts in *\\*) exit 3 ;; esac
 dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
 printf "%s\n" "$mounts" | while IFS=" " read -r fstype mp; do
     case $fstype in proc | sysfs | cgroup | cgroup2) continue ;; esac
     if [ -d "$mp" ]; then
-        find "$mp" -xdev -type d -writable -print >>"$dirs/found" || { : >"$dirs/failed"; continue; }
+        find "$mp" -xdev -type d -writable -print >>"$dirs/dirs" || { : >"$dirs/failed"; continue; }
     elif [ -w "$mp" ]; then
-        printf "%s\n" "$mp" >>"$dirs/found"
+        printf "%s\n" "$mp" >>"$dirs/files"
     fi
 done
 [ ! -e "$dirs/failed" ] || exit 3
-if [ -e "$dirs/found" ]; then
-    while IFS= read -r d; do
-        inside=0
-        for s in $DECLARED; do
-            case $d in "$s" | "$s"/*) inside=1 ;; esac
-        done
-        [ "$inside" = 1 ] || extra=$((extra + 1))
-    done <"$dirs/found"
-fi
+outside() {
+    c=0
+    if [ -e "$1" ]; then
+        while IFS= read -r d; do
+            inside=0
+            for s in $DECLARED; do
+                case $d in "$s" | "$s"/*) inside=1 ;; esac
+            done
+            [ "$inside" = 1 ] || c=$((c + 1))
+        done <"$1"
+    fi
+    printf "%s" "$c"
+}
+nd=$(outside "$dirs/dirs")
+nf=$(outside "$dirs/files")
 rm -rf "$dirs"
-printf "%s\n" "$extra"
+printf "%s %s\n" "$nd" "$nf"
 '
 
 observe() {
@@ -100,10 +108,12 @@ observe() {
         create_container --read-only --network none --ipc private --log-driver none \
             --user "$user" $_m -e "DECLARED=$DECLARED" \
             -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
-        if n=$(docker start -a "$cid" 2>/dev/null) && is_uint "$n"; then
-            record "$_arm" extra "$n"
+        if out=$(docker start -a "$cid" 2>/dev/null) && is_uint "${out%% *}" && is_uint "${out#* }"; then
+            record "$_arm" extra_dirs "${out%% *}"
+            record "$_arm" extra_files "${out#* }"
         else
-            record "$_arm" extra ERR
+            record "$_arm" extra_dirs ERR
+            record "$_arm" extra_files ERR
         fi
         docker rm -v "$cid" >/dev/null || probe_die 'rm-failed'
         container_absent "$cid" || probe_die 'rm-unverified'
@@ -116,14 +126,29 @@ observe() {
     recheck_runner
 }
 
+# extras ARM: prints "DIRS FILES", or fails.
+extras() {
+    d=$(rd_uint "$1" extra_dirs) || return 1
+    f=$(rd_uint "$1" extra_files) || return 1
+    printf '%s %s\n' "$d" "$f"
+}
+
 verdict() {
-    n=$(rd_uint "$1" extra) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$n" -eq 0 ]; then printf '%s\n' "$PROBE_NEG"; else printf '%s\n' "$PROBE_SURV"; fi
+    e=$(extras "$1") || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "$e" = "0 0" ]; then printf '%s\n' "$PROBE_NEG"; else printf '%s\n' "$PROBE_SURV"; fi
+}
+
+# v_survivor: each planted path must be observed on its own, so a broken
+# file-bind check cannot hide behind the directory hit.
+v_survivor() {
+    e=$(extras survivor) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    if [ "${e% *}" -ge 1 ] && [ "${e#* }" -ge 1 ]; then printf '%s\n' "$PROBE_SURV"
+    else printf '%s\n' "$PROBE_FAIL"; fi
 }
 
 classify() {
     arm clean "$PROBE_NEG" "$(verdict clean)"
-    arm survivor "$PROBE_SURV" "$(verdict survivor)"
+    arm survivor "$PROBE_SURV" "$(v_survivor)"
     arm fault "$PROBE_FAIL" "$(verdict fault)"
     finish
 }
