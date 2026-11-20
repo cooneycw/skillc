@@ -596,7 +596,7 @@ scan_identity_plain() {
 # scan_recheck PRUNED U G: after the walk, each pruned directory (recorded as
 # "DEV INO PATH") must sit in a parent this uid cannot write (so this uid can
 # rename nothing there and cannot substitute the entry), must still be the
-# same inode, list with a plain mode string
+# same inode, list (with its inode, which must match) with a plain mode string
 # ("d" and nine permission characters, optionally "." for an SELinux context,
 # never "+" for an ACL), and then still match the prune predicate: not
 # searchable, no search bit in its class, not owned by U. Listing then
@@ -612,7 +612,11 @@ scan_recheck() {
         case $_p in /*) ;; *) return 1 ;; esac
         _w=$(find "${_p%/*}/" -maxdepth 0 -writable) || return 1
         [ -z "$_w" ] || return 1
-        _l=$(ls -ld -- "$_p") || return 1
+        # The listing carries its inode, which must be the walk inode, so the
+        # ACL observation is of the directory the two finds identify.
+        _l=$(ls -ldi -- "$_p") || return 1
+        [ "${_l%% *}" = "$_i" ] || return 1
+        _l=${_l#* }
         case ${_l%% *} in d?????????  | d?????????.) ;; *) return 1 ;; esac
         eval "_m=\$(find \"\$_p\" -maxdepth 0 -type d ! -executable ! -uid $2 \\( \\( \\( $3 \\) ! -perm -g+x \\) -o \\( ! \\( $3 \\) ! -perm -o+x \\) \\) -printf \"%D %i\")" \
             || return 1
