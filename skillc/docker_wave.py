@@ -147,6 +147,10 @@ class DockerWave:
         # Trusted caller handoff, separate from mutable JSON projections.
         self.wake_capture_reference: Reference | None = None
         self.wake_capture_context: Context | None = None
+        #: #620 PR-B B8b: per-role task-protocol lease directories, set by the
+        #: protocol run before prepare(). Empty (the default) changes nothing:
+        #: each role backend is constructed exactly as before.
+        self.task_protocol_dirs: dict[str, Path] = {}
         self._write("declaration.json", {"attempt_id": attempt_id, "roles": [asdict(r) for r in roles],
             "deadline": self.deadline.marker(attempt_id), "pid_namespaces": "separate",
             "shared_surfaces": ["wave-state-volume", "fixture-git-remote"],
@@ -225,8 +229,10 @@ class DockerWave:
              " except OSError:\n  assert time.monotonic()<end,'fixture git daemon unavailable';time.sleep(.02)\n")])
         for role in self.roles:
             guard = CodexGuardSession(self.attempt_id + "-" + role.name)
+            protocol = ({"task_protocol_host_dir": self.task_protocol_dirs[role.name]}
+                        if role.name in self.task_protocol_dirs else {})
             backend = self._backend(role.name, egress=True, wave_attachment=self.attachment,
-                                    trigger_decide=guard.decide)
+                                    trigger_decide=guard.decide, **protocol)
             handle = backend.prepare(guard.attempt_id)
             state = RoleState(role, backend, handle, guard)
             self.states[role.name] = state
