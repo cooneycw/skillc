@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from test_remnant_scan import audit_captured_output, no_marker, references  # noqa: F401
-from test_run_window_teardown import CID, CONTAINER_NS, DIR, FakeDocker, FakeProc, proc_entry
+from test_run_window_teardown import CID, CONTAINER_NS, DIR, PROC_ROW, ROOT_ROW, FakeDocker, FakeProc, proc_entry, table
 
 from skillc import run_window_absence as ra
 from skillc import run_window_teardown as rt
@@ -36,7 +36,8 @@ def marked_capture(tmp_path: Path) -> tuple[rt.LaunchIdentity, References]:
     docker.info = {**docker.info, 'Mounts': [{'Type': 'bind', 'Source': str(bind), 'Destination': '/w'}]}
     proc = FakeProc({'1': proc_entry('1'),
                      '4242': proc_entry('4242', cgroup=f'/docker/{CID}/' + marker, ns=CONTAINER_NS,
-                                        root_view={'/': DIR, '/w': DIR})})
+                                        root_view={'/': DIR, '/w': DIR},
+                                        mountinfo=table(ROOT_ROW, PROC_ROW, '81 1 0:1 / /w rw - ext4 /dev/x rw'))})
     ident = rt.capture_launch_identity('skillc-attempt', generation=object(), docker=docker, proc=proc)
     assert ident.usable
     return ident, refs
@@ -69,7 +70,7 @@ def test_identity_refuses_pickle_and_copy(tmp_path: Path) -> None:
 
 class LeakingIdentity(rt.LaunchIdentity):
     def __repr__(self) -> str:
-        return '<LaunchIdentity ' + ' '.join(self._cgroups) + '>'
+        return '<LaunchIdentity ' + ' '.join(path for _, _, path in self._cgroups) + '>'
 
 
 def test_oracle_rejects_a_leaking_identity_twin(tmp_path: Path) -> None:

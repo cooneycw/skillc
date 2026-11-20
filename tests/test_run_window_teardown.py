@@ -36,6 +36,7 @@ HOST_NS = {k: f'{k}:[1000{i}]' for i, k in enumerate(rt.NAMESPACES)}
 CONTAINER_NS = {k: f'{k}:[2000{i}]' for i, k in enumerate(rt.NAMESPACES)}
 CGROUP = '/system.slice/docker-' + CID + '.scope'
 ROOT_ROW = '1 0 8:1 / / rw - ext4 /dev/sda1 rw'
+BIND_ROW = '80 1 0:1 / /work/run rw - ext4 /dev/sdb1 rw'
 PROC_ROW = '2 1 0:5 / /proc rw - proc proc rw'
 SOCK = stat.S_IFSOCK | 0o600
 DIR = stat.S_IFDIR | 0o755
@@ -54,11 +55,11 @@ def table(*rows: str) -> bytes:
 def proc_entry(pid: str, *, cgroup: str = '/user.slice', ns: Mapping[str, str] = HOST_NS,
                start: str = '12345', mountinfo: bytes | None = None, fd: dict[str, Any] | None = None,
                map_files: dict[str, Any] | None = None, root_view: dict[str, Any] | None = None,
-               tasks: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+               tasks: dict[str, dict[str, Any]] | None = None, chrooted: bool = False) -> dict[str, Any]:
     return {'stat': stat_line(pid, start), 'cgroup': f'0::{cgroup}\n'.encode('utf-8', 'surrogateescape'),
             'ns': dict(ns), 'mountinfo': table(ROOT_ROW, PROC_ROW) if mountinfo is None else mountinfo,
             'fd': fd or {}, 'map_files': map_files or {}, 'root_view': root_view or {'/': DIR},
-            'tasks': tasks or {}}
+            'tasks': tasks or {}, 'chrooted': chrooted}
 
 
 def fake_stat(mode: int, *, dev: int = 1, ino: int = 1) -> os.stat_result:
@@ -138,6 +139,10 @@ class FakeProc:
         if path not in view:
             raise rt._sanitised()
         return fake_stat(view[path])
+
+    def root_is_ns_root(self, node: str) -> bool:
+        self._check(node, 'root')
+        return not self._entry(node)['chrooted']
 
     def listdir_under_root(self, pid: str, path: str) -> list[str]:
         view = self.procs[pid]['root_view']
@@ -250,6 +255,18 @@ def test_pid_from_another_daemon_host_is_unusable() -> None:
     assert not captured(object(), proc=proc).usable
 
 
+def test_cgroup_that_merely_contains_the_id_is_unusable() -> None:
+    proc = FakeProc({'1': proc_entry('1'), '4242': proc_entry('4242', cgroup=f'/user/{CID}-decoy/x')})
+    assert not captured(object(), proc=proc).usable
+
+
+@pytest.mark.parametrize('line', ['4:cpu,,memory:/x', '4::/x', '0:cpu:/x', 'x:cpu:/x', '4:cpu:x'])
+def test_malformed_cgroup_record_is_unusable(line: str) -> None:
+    proc = container_proc()
+    proc.procs['4242']['cgroup'] = f'{line}\n0::{CGROUP}\n'.encode()
+    assert not captured(object(), proc=proc).usable
+
+
 def test_capture_detects_pid_reuse_or_container_change_during_reads() -> None:
     proc = container_proc()
     calls = []
@@ -280,9 +297,47 @@ def test_bind_sockets_are_counted_at_the_destination_not_the_source() -> None:
     docker = FakeDocker()
     docker.info = {**docker.info, 'Mounts': [
         {'Type': 'bind', 'Source': '/host/replaced-empty', 'Destination': '/work/run'}]}
-    proc = container_proc(root_view={'/': DIR, '/work': DIR, '/work/run': DIR, '/work/run/agent.sock': SOCK})
+    proc = container_proc(root_view={'/': DIR, '/work': DIR, '/work/run': DIR, '/work/run/agent.sock': SOCK},
+                          mountinfo=table(ROOT_ROW, PROC_ROW, BIND_ROW))
     ident = captured(object(), docker=docker, proc=proc)
     assert ident.usable and ident._bind_sockets == 1
+
+
+@pytest.mark.parametrize('case', ['no-mount-record', 'device-mismatch', 'tree-changes', 'fd-table-changes'])
+def test_bind_and_fd_observations_must_be_the_effective_stable_view(case: str) -> None:
+    docker = FakeDocker()
+    docker.info = {**docker.info, 'Mounts': [{'Type': 'bind', 'Source': '/x', 'Destination': '/work/run'}]}
+    rows = [ROOT_ROW, PROC_ROW, BIND_ROW]
+    if case == 'no-mount-record':
+        rows = rows[:2]
+    elif case == 'device-mismatch':
+        rows = [ROOT_ROW, PROC_ROW, BIND_ROW.replace(' 0:1 ', ' 9:9 ')]
+    proc = container_proc(root_view={'/': DIR, '/work': DIR, '/work/run': DIR}, mountinfo=table(*rows))
+    if case == 'tree-changes':
+        real = proc.listdir_under_root
+        calls = []
+
+        def growing(pid: str, path: str) -> list[str]:
+            calls.append(path)
+            names = real(pid, path)
+            if path == '/work/run' and calls.count('/work/run') > 1:
+                proc.procs['4242']['root_view']['/work/run/late.sock'] = SOCK
+                return names + ['late.sock']
+            return names
+
+        proc.listdir_under_root = growing  # type: ignore[method-assign]
+    if case == 'fd-table-changes':
+        real_read = proc.readlink
+        seen = []
+
+        def swapping(node: str, name: str) -> str:
+            if name == 'fd/1':
+                seen.append(1)
+                return 'socket:[5]' if len(seen) > 1 else 'pipe:[2]'
+            return real_read(node, name)
+
+        proc.readlink = swapping  # type: ignore[method-assign]
+    assert not captured(object(), docker=docker, proc=proc).usable
     assert rt.fact_channel_isolated([ident]) == rt.ScopedObservation(SURV, rt.LAUNCH_ONLY)
 
 
@@ -480,13 +535,14 @@ class ScopedProc(rt.RealProc):
 
 
 def kernel_grants_map_files(pid: int) -> bool:
+    """Production stats EVERY mapping, so the gate does too."""
     try:
-        for name in os.listdir(f'/proc/{pid}/map_files'):
+        names = os.listdir(f'/proc/{pid}/map_files')
+        for name in names:
             os.stat(f'/proc/{pid}/map_files/{name}')
-            return True
     except OSError:
         return False
-    return False
+    return bool(names)
 
 
 def wait_ready(path: Path) -> None:
@@ -574,6 +630,14 @@ def fake_holder(census: ra.Census, where: str) -> FakeProc:
         '91': {}, '92': {'fd': {'5': root_stat}}})})
 
 
+def test_mapping_only_holder_is_seen_with_the_fake_reader(held_tree: tuple[Path, ra.Census]) -> None:
+    # The unconditional mapping positive: runs where the real probe is skipped.
+    root, census = held_tree
+    mapped = os.stat(root / 'secret')
+    proc = FakeProc({'1': proc_entry('1'), '96': proc_entry('96', map_files={'7f00-7f01': mapped})})
+    assert rt.fact_no_holder(census, proc=proc) is SURV
+
+
 @pytest.mark.parametrize('where', ['process', 'worker'])
 def test_holder_of_the_root_is_seen_even_in_a_worker_task(held_tree: tuple[Path, ra.Census],
                                                            where: str) -> None:
@@ -638,17 +702,31 @@ def test_channel_isolation_unknown_is_failed_and_still_scoped() -> None:
     assert rt.fact_channel_isolated([]) == rt.ScopedObservation(FAIL, rt.LAUNCH_ONLY)
 
 
-def test_a3_composition_refuses_a_launch_only_isolation_for_absent() -> None:
-    """Binding rule (spec, A-2): a launch-only 2b never satisfies ABSENT.
+#: Every Contract A input A-3 composes, each at its passing value except the one
+#: under test. A-3 must expose `removed_surface_verdict(**SUFFICIENT)` (spec,
+#: A-2) or adapt these guards to its real entry point; never delete them.
+SUFFICIENT: dict[str, Any] = dict(census_complete=True, unlinked=NEG, reresolved=NEG, teardown=NEG,
+                                  no_holder=NEG, superblock_gone=NEG, tmpfs=True,
+                                  isolation=rt.ScopedObservation(NEG, 'lifetime'))
 
-    Skipped only while A-3's composition module does not exist. Once it
-    exists, this runs and must pass; adapt the call to A-3's real entry point,
-    never delete the assertion."""
+
+def a3_compose() -> Any:
     if importlib.util.find_spec('skillc.run_window_compose') is None:
         pytest.skip('A-3 composition not implemented yet')
-    compose = importlib.import_module('skillc.run_window_compose')
-    verdict = compose.removed_surface_verdict(isolation=rt.ScopedObservation(NEG, rt.LAUNCH_ONLY))
-    assert verdict != 'ABSENT'
+    return importlib.import_module('skillc.run_window_compose')
+
+
+def test_a3_composition_reaches_absent_with_sufficient_evidence() -> None:
+    assert a3_compose().removed_surface_verdict(**SUFFICIENT) == 'ABSENT'
+
+
+@pytest.mark.parametrize('override', [
+    {'isolation': rt.ScopedObservation(NEG, rt.LAUNCH_ONLY)},  # launch-only 2b never suffices
+    {'teardown': SURV},  # a non-empty domain vetoes, whatever fact 2 says
+    {'no_holder': SURV},  # a holder vetoes
+], ids=['launch-only-isolation', 'domain-veto', 'holder-veto'])
+def test_a3_composition_refuses_absent_when_one_input_fails(override: dict[str, Any]) -> None:
+    assert a3_compose().removed_surface_verdict(**{**SUFFICIENT, **override}) != 'ABSENT'
 
 
 # ------------------------------------------------------------------ fact 3
@@ -692,19 +770,23 @@ def test_superblock_listed_only_in_another_namespace_is_seen(released: tuple[Pat
     assert rt.fact_superblock_gone(census, proc=proc) is SURV
 
 
-def test_namespace_seen_only_through_a_chrooted_task_is_failed(released: tuple[Path, ra.Census]) -> None:
+@pytest.mark.parametrize('record', ['70 1 8:1 /jail / rw - ext4 /dev/sda1 rw',
+                                    '71 1 9:2 / / rw - ext4 /dev/sdc1 rw'])
+def test_namespace_seen_only_through_a_chrooted_task_is_failed(released: tuple[Path, ra.Census],
+                                                               record: str) -> None:
+    # The only task in mount namespace 30004 is chrooted - into a directory,
+    # or onto the ROOT of a nested filesystem, whose record reads '/ /' just
+    # like a namespace root. Its table omits mounts outside the chroot.
     _, census = released
     proc = after_teardown()
-    # The only task in mount namespace 30004 is chrooted: its '/' record has
-    # root '/jail', so its table omits anything mounted outside the jail.
-    proc.procs['94'] = proc_entry('94', ns={**HOST_NS, 'mnt': 'mnt:[30004]'}, mountinfo=table(
-        '70 1 8:1 /jail / rw - ext4 /dev/sda1 rw'))
+    proc.procs['94'] = proc_entry('94', ns={**HOST_NS, 'mnt': 'mnt:[30004]'}, mountinfo=table(record),
+                                  chrooted=True)
     assert rt.fact_superblock_gone(census, proc=proc) is FAIL
 
 
 @pytest.mark.parametrize('bad', ['garbage', '1 0 8:1 / / rw tmpfs t rw', 'x y 8:1 / / rw - tmpfs t rw',
                                  '1 0 8:1 / / rw - tmpfs t', '1 0 8:1 / / rw - tmpfs t rw extra',
-                                 'NO-NEWLINE', ''])
+                                 '1 0 8:1 / /  - tmpfs t rw', 'NO-NEWLINE', ''])
 def test_unusable_mount_table_is_failed(released: tuple[Path, ra.Census], bad: str) -> None:
     _, census = released
     proc = after_teardown()
@@ -745,7 +827,7 @@ def test_real_proc_errors_carry_no_path_or_context(tmp_path: Path) -> None:
 
 
 def test_real_docker_reader_is_sanitised_and_strict(monkeypatch: pytest.MonkeyPatch) -> None:
-    outputs = iter(['not json marker-payload', 'garbage-line\n', ''])
+    outputs = iter(['not json marker-payload', 'garbage-line\n', '  \n', ''])
 
     def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 0, stdout=next(outputs), stderr='')
@@ -756,7 +838,16 @@ def test_real_docker_reader_is_sanitised_and_strict(monkeypatch: pytest.MonkeyPa
         reader.inspect('marker-container')
     assert 'marker' not in str(caught.value) and caught.value.__context__ is None
     assert reader.present(CID) is None  # Malformed nonempty output is no answer.
+    assert reader.present(CID) is None  # Whitespace is not an empty answer.
     assert reader.present(CID) is False
+
+    def undecodable(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise UnicodeDecodeError('utf-8', b'marker-bytes\xff', 12, 13, 'invalid')
+
+    monkeypatch.setattr(rt.subprocess, 'run', undecodable)
+    with pytest.raises(OSError) as caught:
+        reader.inspect('marker-container')
+    assert 'marker' not in str(caught.value) and caught.value.__context__ is None
 
     def timing_out(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(argv, 30)

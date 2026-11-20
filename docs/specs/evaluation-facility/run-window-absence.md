@@ -181,7 +181,9 @@ not re-prove them:
 **Launch-identity capture (`capture_launch_identity`)** is read-only. It runs
 once per role or login container, after `prepare()` starts it and before any
 dispatch. It binds the inspected full container ID to a live task in **this
-host's** procfs. The task's cgroup must name the ID; its start time is read
+host's** procfs. A cgroup entry's leaf must BE the container (`<id>` or
+`docker-<id>.scope`), so a path that merely contains the ID does not count.
+The task's start time is read
 before and after the other reads; and Docker must report the same ID and pid
 again at the end. A pid reused before the first read, or a pid from another
 daemon's host, therefore makes the identity unusable. It records:
@@ -189,8 +191,10 @@ daemon's host, therefore makes the identity unusable. It records:
 - validated namespace links, and pid 1's for comparison;
 - sockets counted at each bind's **destination** in the task's own root,
   without following any link, rather than at the host source path, which
-  could have been replaced;
-- the init socket fds, read twice and compared.
+  could have been replaced. The destination must be the mountpoint of the
+  task's effective (last-listed) mount there, with a matching device, and two
+  walks of the tree must agree exactly;
+- the init fd table, read twice and compared entry by entry.
 
 `docker_backend` is unchanged, and the Docker reader permits only `inspect`
 and `ps`.
@@ -225,7 +229,13 @@ children. Census descriptors are `O_CLOEXEC` explicitly.
 a `ScopedObservation` with `scope == 'launch-only'`.
 
 **Rule for A-3 (binding):** a `launch-only` 2b is **not sufficient for
-ABSENT**. The design's precondition 1.2.5 is a lifetime invariant, which needs
+ABSENT**. The guards in `tests/test_run_window_teardown.py` call
+`run_window_compose.removed_surface_verdict(**SUFFICIENT)`, where `SUFFICIENT`
+holds every Contract A input at its passing value. They assert two things:
+that it gives `ABSENT`, and that it does not give `ABSENT` when a single
+input is changed. The single-input cases are a launch-only 2b, a non-empty
+domain, and a holder. A-3 implements that entry point, or adapts the guards
+to its real one; it never deletes them. The design's precondition 1.2.5 is a lifetime invariant, which needs
 PR-1's fd sampler (A23). Until a lifetime-scoped 2b exists, A-3's composition
 must keep every removed surface UNKNOWN. Two further rules hold whatever
 fact 2 says:
@@ -239,15 +249,24 @@ the test runs, and it must be adapted to A-3's entry point, never deleted.
 **Fact 3 (`fact_superblock_gone`)** runs after the census entries are
 released and the caller has unmounted the tmpfs non-lazily. It reads every
 task's mount table, each parsed as complete kernel records. Every mount
-namespace must be read through a task whose root is the namespace root (its
-record mounted at `/` has root `/`). A namespace seen only through chrooted
+namespace must be read through a task whose root is the namespace root. That
+is decided by the kernel, not by the table: the task's root directory must be
+its own parent when looked up through `/proc/<task>/root/..`. This holds for
+a namespace root and never for a chroot, even one onto the root of a nested
+filesystem, whose record reads `/ /` like a namespace root. A namespace seen only through chrooted
 tasks is OBSERVATION_FAILED, because such a table omits mounts outside the
 chroot. Fact 3 is negative only if no table lists the census root's
 `major:minor`, which catches aliases under another mount ID and copies in
 other namespaces.
 
 **Reader errors** are sanitised to fixed text, with no filename, payload or
-exception context. A Docker reader that raises counts as unanswered.
+exception context; that includes undecodable Docker output. A Docker reader
+that raises counts as unanswered. Only an exactly empty `ps` answer means
+absent.
+
+**Parsing.** cgroup records are validated, including each v1 controller name
+and the v2 empty-controller form. Every mountinfo field must be nonempty.
+Teardown and fact 3 pin each task's start time across their related reads.
 
 **Qualification.**
 

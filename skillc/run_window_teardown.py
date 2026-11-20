@@ -64,6 +64,7 @@ LAUNCH_ONLY = 'launch-only'
 _ID = re.compile(r'[0-9a-f]{64}')
 _NS_LINK = re.compile(r'(pid|mnt|net|ipc):\[([0-9]+)\]')
 _MAJMIN = re.compile(r'[0-9]+:[0-9]+')
+_CONTROLLER = re.compile(r'[A-Za-z0-9_.=]+')
 _MOUNT_TYPES = frozenset({'bind', 'volume', 'tmpfs', 'npipe', 'cluster', 'image'})
 _DOCKER_TIMEOUT = 30.0
 _HIDING = ('hidepid=1', 'hidepid=2', 'hidepid=invisible', 'hidepid=noaccess', 'hidepid=ptraceable',
@@ -104,6 +105,7 @@ class ProcReader(Protocol):
     def stat_entry(self, node: str, sub: str, name: str) -> os.stat_result: ...
     def lstat_under_root(self, pid: str, path: str) -> os.stat_result: ...
     def listdir_under_root(self, pid: str, path: str) -> list[str]: ...
+    def root_is_ns_root(self, node: str) -> bool: ...
 
 
 class DockerReader(Protocol):
@@ -158,6 +160,16 @@ class RealProc:
     def listdir_under_root(self, pid: str, path: str) -> list[str]:
         return _checked(lambda: os.listdir(self._under_root(pid, path)))
 
+    def root_is_ns_root(self, node: str) -> bool:
+        """True only if the task's root directory is its own parent, which
+        holds for a mount namespace's root and never for a chroot (even one
+        onto the root of a nested filesystem): looking up '..' through
+        /proc/<task>/root is not confined by the task's chroot."""
+        base = self._path(node, 'root')
+        here = _checked(lambda: os.stat(base))
+        up = _checked(lambda: os.stat(os.path.join(base, '..')))
+        return (here.st_dev, here.st_ino) == (up.st_dev, up.st_ino)
+
 
 class RealDocker:
     """`docker inspect` and `docker ps` only, with the handle's own env (the
@@ -182,8 +194,8 @@ class RealDocker:
                                   timeout=_DOCKER_TIMEOUT, check=False)
             if proc.returncode == 0:
                 out = proc.stdout
-        except (OSError, subprocess.SubprocessError):
-            pass
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass  # ValueError covers a UnicodeDecodeError carrying output bytes.
         if out is None:
             raise _sanitised()
         return out
@@ -207,10 +219,12 @@ class RealDocker:
             out = self._run('ps', '-a', '-q', '--no-trunc', '--filter', f'id={container_id}')
         except OSError:
             return None
-        lines = [line.strip() for line in out.splitlines() if line.strip()]
-        if not lines:
-            return False
-        if all(line == container_id for line in lines):
+        if out == '':
+            return False  # Only an exactly empty answer means absent.
+        lines = out.split('\n')
+        if lines[-1] == '':
+            lines = lines[:-1]
+        if lines and all(line == container_id for line in lines):
             return True
         return None
 
@@ -270,8 +284,10 @@ def _cgroup_entries(data: bytes) -> tuple[tuple[str, str, str], ...]:
         if not line:
             continue
         parts = line.split(':', 2)
+        controllers = parts[1].split(',') if len(parts) == 3 and parts[1] else []
         if (len(parts) != 3 or not parts[0].isdigit() or not parts[2].startswith('/')
-                or (parts[0] == '0' and parts[1] != '')):
+                or (parts[0] == '0') != (parts[1] == '')
+                or any(not _CONTROLLER.fullmatch(c) for c in controllers)):
             raise _sanitised()
         entries.append((parts[0], parts[1], parts[2]))
     if not entries:
@@ -299,10 +315,12 @@ def _in_captured_cgroup(entries: Iterable[tuple[str, str, str]],
     return any(h == ch and c == cc and _under(p, cp) for h, c, p in entries for ch, cc, cp in captured)
 
 
-def _sockets_at(proc: ProcReader, pid: str, dest: str) -> int:
+def _sockets_at(proc: ProcReader, pid: str, dest: str, rows: list[tuple[str, str, str]]) -> int:
     """Sockets at a bind DESTINATION inside the task's root, counted without
-    following any link. A link anywhere on the way, or any read error,
-    raises."""
+    following any link. The destination must be the mountpoint of the task's
+    effective (last-listed) mount there, with a matching device, and two walks
+    of the tree must agree exactly. Any link, read error, missing mount or
+    change raises."""
     parts = [p for p in dest.split('/') if p]
     if not parts or any(p in ('.', '..') for p in parts):
         raise _sanitised()
@@ -311,19 +329,25 @@ def _sockets_at(proc: ProcReader, pid: str, dest: str) -> int:
         path = f'{path}/{part}'
         if stat.S_ISLNK(proc.lstat_under_root(pid, path).st_mode):
             raise _sanitised()
-    return _walk_sockets(proc, pid, path, 0)
+    mounted = [dev for dev, _, mountpoint in rows if mountpoint == path]
+    info = proc.lstat_under_root(pid, path)
+    if not mounted or mounted[-1] != f'{os.major(info.st_dev)}:{os.minor(info.st_dev)}':
+        raise _sanitised()  # Not the effective bind the container sees.
+    first = _walk_tree(proc, pid, path, 0)
+    if _walk_tree(proc, pid, path, 0) != first:
+        raise _sanitised()  # The tree changed while it was read.
+    return sum(1 for _, mode in first if stat.S_ISSOCK(mode))
 
 
-def _walk_sockets(proc: ProcReader, pid: str, path: str, depth: int) -> int:
+def _walk_tree(proc: ProcReader, pid: str, path: str, depth: int) -> list[tuple[str, int]]:
     if depth > ra.LIMITS['depth']:
         raise _sanitised()
     mode = proc.lstat_under_root(pid, path).st_mode
-    if stat.S_ISSOCK(mode):
-        return 1
-    if not stat.S_ISDIR(mode):
-        return 0
-    return sum(_walk_sockets(proc, pid, f'{path}/{name}', depth + 1)
-               for name in proc.listdir_under_root(pid, path))
+    out = [(path, mode)]
+    if stat.S_ISDIR(mode):
+        for name in sorted(proc.listdir_under_root(pid, path)):
+            out.extend(_walk_tree(proc, pid, f'{path}/{name}', depth + 1))
+    return out
 
 
 def _mounts(info: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -337,12 +361,8 @@ def _mounts(info: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return mounts
 
 
-def _init_sockets(proc: ProcReader, pid: str) -> int:
-    count = 0
-    for name in proc.listdir(pid, 'fd'):
-        if proc.readlink(pid, f'fd/{name}').startswith('socket:'):
-            count += 1
-    return count
+def _fd_table(proc: ProcReader, pid: str) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((name, proc.readlink(pid, f'fd/{name}')) for name in proc.listdir(pid, 'fd')))
 
 
 def _running_pid(info: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -396,16 +416,18 @@ def capture_launch_identity(container: str, *, generation: object, docker: Docke
             return ident
         cid, pid = bound
         start = _start_time(proc, pid)
-        cgroup_text = proc.read(pid, 'cgroup')
-        if cid.encode() not in cgroup_text:
-            return ident  # The task is not this container on this host.
-        cgroups = _cgroup_entries(cgroup_text)
+        cgroups = _cgroup_entries(proc.read(pid, 'cgroup'))
+        leaves = {cid, f'docker-{cid}.scope'}
+        if not any(path.rstrip('/').rsplit('/', 1)[-1] in leaves for _, _, path in cgroups):
+            return ident  # The task is not in this container's own cgroup on this host.
         ns = _namespaces(proc, pid)
         host = _namespaces(proc, '1')
-        binds = sum(_sockets_at(proc, pid, m['Destination']) for m in _mounts(info) if m['Type'] == 'bind')
-        sockets = _init_sockets(proc, pid)
-        if _init_sockets(proc, pid) != sockets:
+        rows = _table(proc.read(pid, 'mountinfo'))
+        binds = sum(_sockets_at(proc, pid, m['Destination'], rows) for m in _mounts(info) if m['Type'] == 'bind')
+        fds = _fd_table(proc, pid)
+        if _fd_table(proc, pid) != fds:
             return ident  # The fd table changed while it was read.
+        sockets = sum(1 for _, target in fds if target.startswith('socket:'))
         if _start_time(proc, pid) != start or _running_pid(docker.inspect(container)) != (cid, pid):
             return ident  # The pid was reused, or the container changed.
     except (OSError, KeyError, TypeError, ValueError):
@@ -486,9 +508,11 @@ def confirm_teardown(identities: Iterable[LaunchIdentity], *, docker: DockerRead
     survivor = False
     for pid, node in nodes:
         try:
-            _stat_fields(proc, node)
+            before = _stat_fields(proc, node)[19]
             entries = _cgroup_entries(proc.read(node, 'cgroup'))
             links = set(_namespaces(proc, node).values())
+            if _stat_fields(proc, node)[19] != before:
+                return FAIL  # The task was replaced between related reads.
         except OSError:
             if _still_listed(proc, pid) is False:
                 continue
@@ -593,7 +617,7 @@ def _table(data: bytes) -> list[tuple[str, str, str]]:
             continue
         f = line.split(b' ')
         sep = next((i for i in range(6, len(f)) if f[i] == b'-'), None)
-        if (sep is None or len(f) != sep + 4 or not f[0].isdigit() or not f[1].isdigit()
+        if (sep is None or len(f) != sep + 4 or not all(f) or not f[0].isdigit() or not f[1].isdigit()
                 or not _MAJMIN.fullmatch(f[2].decode('ascii', 'replace'))
                 or not f[3].startswith(b'/') or not f[4].startswith(b'/') or not all(f[sep + 1:])):
             raise _sanitised()
@@ -618,15 +642,18 @@ def fact_superblock_gone(census: ra.Census, *, proc: ProcReader | None = None) -
     listed = False
     for pid, node in nodes:
         try:
+            before = _stat_fields(proc, node)[19]
             mnt = _ns_link(proc.readlink(node, 'ns/mnt'), 'mnt')
             rows = _table(proc.read(node, 'mountinfo'))
+            # A table is complete only if this task's root is its mount
+            # namespace's root; a chrooted task's table omits outer mounts.
+            complete = proc.root_is_ns_root(node)
+            if _stat_fields(proc, node)[19] != before:
+                return FAIL
         except OSError:
             if _still_listed(proc, pid) is False:
                 continue
             return FAIL
-        # A table is complete only if this task's root is the namespace root:
-        # the record mounted at '/' must have root '/'.
-        complete = any(mountpoint == '/' and root == '/' for _, root, mountpoint in rows)
         covered[mnt] = covered.get(mnt, False) or complete
         if any(dev == majmin for dev, _, _ in rows):
             listed = True
