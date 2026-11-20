@@ -1,0 +1,1400 @@
+{
+ "plan": {
+  "offers": [
+   [
+    "role-a",
+    "o-a"
+   ],
+   [
+    "role-b",
+    "o-b"
+   ]
+  ],
+  "deadline_ns": 1000,
+  "retired_offer_ids": [
+   "o-old"
+  ]
+ },
+ "cases": [
+  {
+   "name": "healthy-order",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-b"
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-b"
+     }
+    }
+   ]
+  },
+  {
+   "name": "alternative-order-interleaved",
+   "steps": [
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-b"
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-b"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "retry-identical-completion",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 20,
+     "fenced": false,
+     "expect": {
+      "kind": "retry",
+      "violation": false,
+      "reason": null,
+      "retry_of": 2,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "retry-reordered-keys",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 20,
+     "fenced": false,
+     "expect": {
+      "kind": "retry",
+      "violation": false,
+      "reason": null,
+      "retry_of": 1,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "raw": "{\"offer_id\":\"o-a\",\"request\":2,\"op\":\"ack\",\"version\":1}"
+    }
+   ]
+  },
+  {
+   "name": "distinct-second-completion",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 20,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "after-complete",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 4,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "changed-content-same-number-then-original-retry",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 20,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "protocol-conflict",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 30,
+     "fenced": false,
+     "expect": {
+      "kind": "retry",
+      "violation": false,
+      "reason": null,
+      "retry_of": 1,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 40,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "protocol-conflict",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "ack-after-completion",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 20,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "after-complete",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 4,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "complete-before-ack",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "complete-before-ack",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "wrong-offer-attributed-to-sender",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-b"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "wrong-offer",
+      "principal_field": "role-a",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-b"
+     }
+    }
+   ]
+  },
+  {
+   "name": "stale-offer",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "stale-offer",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-old"
+     }
+    }
+   ]
+  },
+  {
+   "name": "unknown-offer-id",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "wrong-offer",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-zzz"
+     }
+    }
+   ]
+  },
+  {
+   "name": "ack-before-offer",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": "ack-before-offer",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 1,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "duplicate-ack-before-completion",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": "protocol-conflict",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "refusal-retained-not-terminal",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "refusal-retained",
+      "offer_id": "o-a",
+      "row_reason": "blocked"
+     },
+     "request": {
+      "version": 1,
+      "op": "refuse",
+      "request": 2,
+      "offer_id": "o-a",
+      "reason": "blocked"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 4,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "refusal-before-offer",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": "no-current-offer",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "refuse",
+      "request": 1,
+      "offer_id": "o-a",
+      "reason": "other"
+     }
+    }
+   ]
+  },
+  {
+   "name": "refusal-after-completion",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": "after-complete",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "refuse",
+      "request": 4,
+      "offer_id": "o-a",
+      "reason": "cannot-complete"
+     }
+    }
+   ]
+  },
+  {
+   "name": "deadline-boundary",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 1000,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 1001,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": "late",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 1001,
+     "fenced": false,
+     "expect": {
+      "kind": "retry",
+      "violation": false,
+      "reason": null,
+      "retry_of": 0,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 5000,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": "late",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "fenced-requests-and-retries",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 20,
+     "fenced": true,
+     "expect": {
+      "kind": "rejection",
+      "violation": false,
+      "reason": "fenced",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 30,
+     "fenced": true,
+     "expect": {
+      "kind": "rejection",
+      "violation": false,
+      "reason": "fenced",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    }
+   ]
+  },
+  {
+   "name": "malformed-and-identity-payloads",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "rejection",
+      "violation": false,
+      "reason": "malformed-json",
+      "decision": "rejected"
+     },
+     "raw": "{"
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "rejection",
+      "violation": false,
+      "reason": "identity-field-supplied",
+      "decision": "rejected",
+      "principal_field": "role-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 1,
+      "offer_id": "o-a",
+      "role": "role-b"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "rejection",
+      "violation": false,
+      "reason": "controller-field-supplied",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 1,
+      "offer_id": "o-a",
+      "seq": 7
+     }
+    }
+   ]
+  },
+  {
+   "name": "repeated-offer-request",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 2
+     }
+    }
+   ]
+  },
+  {
+   "name": "conflict-beats-late",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 2000,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "protocol-conflict",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "other-principal-state-is-independent",
+   "steps": [
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "offered",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "offer",
+      "request": 1
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "acknowledged",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "ack",
+      "request": 2,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-a",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": false,
+      "reason": null,
+      "decision": "completion-claimed",
+      "offer_id": "o-a"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 3,
+      "offer_id": "o-a"
+     }
+    },
+    {
+     "principal": "role-b",
+     "elapsed_ns": 10,
+     "fenced": false,
+     "expect": {
+      "kind": "decision",
+      "violation": true,
+      "reason": "complete-before-ack",
+      "decision": "rejected"
+     },
+     "request": {
+      "version": 1,
+      "op": "complete",
+      "request": 1,
+      "offer_id": "o-b"
+     }
+    }
+   ]
+  }
+ ]
+}
