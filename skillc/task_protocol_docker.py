@@ -48,7 +48,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from .backend import CANDIDATE_GID, CANDIDATE_UID
-from .docker_backend import TASK_PROTOCOL_DIR
+from .docker_backend import TASK_PROTOCOL_DIR, _mount_source
 
 SOCKET_NAME = "channel.sock"
 CLIENT_ROOT = "/opt/skillc-task-protocol"
@@ -72,6 +72,10 @@ def lease_dir(private_root: Path, endpoint_id: str) -> Path:
     a symlink is refused, never reused."""
     if not _TOKEN.fullmatch(endpoint_id):
         raise PlacementError("bounded endpoint id required")
+    try:
+        _mount_source(private_root / endpoint_id)
+    except ValueError as exc:
+        raise PlacementError(str(exc)) from None
     private_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = os.lstat(private_root)
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()

@@ -284,6 +284,26 @@ TRIGGER_SOCKET_PATH = "/run/skillc/trigger.sock"
 #: connects to `channel.sock` beneath it.
 TASK_PROTOCOL_DIR = "/run/skillc-task-protocol"
 
+#: Characters that would let a `--mount` source add or change options: the
+#: value is a comma-separated key=value list, so a source path may contain
+#: none of these (#809 review).
+_MOUNT_SPEC_FORBIDDEN = (",", "=", '"', "\n", "\r", "\x00")
+
+
+def _mount_source(path: Path) -> str:
+    """The `--mount source=` value for a controller path, or ValueError. The
+    closed flag set is structural, not caller-trusted: an absolute, already
+    normalized path with no mount-spec metacharacter is the only accepted
+    shape."""
+    if not isinstance(path, Path):
+        raise ValueError("a mount source must be a Path")
+    text = str(path)
+    if not path.is_absolute() or os.path.normpath(text) != text:
+        raise ValueError("a mount source must be an absolute, normalized path")
+    if any(ch in text for ch in _MOUNT_SPEC_FORBIDDEN):
+        raise ValueError("a mount source may not contain a mount-spec metacharacter")
+    return text
+
 #: Where the HOST side of #183's socket lives, by default - deliberately
 #: SHORT and independent of `base_dir` (a workspace/session clone root),
 #: because a Unix domain socket path is capped by the kernel
@@ -584,8 +604,8 @@ def compose_run_argv(
     if trigger_socket_host_path is not None:
         argv += ["--mount", f"type=bind,source={trigger_socket_host_path},target={TRIGGER_SOCKET_PATH}"]
     if task_protocol_host_dir is not None:
-        argv += ["--mount",
-                 f"type=bind,source={task_protocol_host_dir},target={TASK_PROTOCOL_DIR},readonly"]
+        source = _mount_source(task_protocol_host_dir)
+        argv += ["--mount", f"type=bind,source={source},target={TASK_PROTOCOL_DIR},readonly"]
     if wave_attachment is not None:
         argv += wave_attachment.mount_args()
     argv += [

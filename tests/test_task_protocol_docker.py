@@ -340,3 +340,39 @@ def test_an_install_that_skips_the_writability_check_is_caught() -> None:
     writable = FakeBackend(writable=f"/opt/skillc-task-protocol/{digest}/skillc-task-protocol")
     assert blind(writable, object()) is not None
     assert tpd.install_client(FakeBackend(writable=writable.writable), object()) is None
+
+
+_BAD_SOURCES = [
+    ("comma-adds-option", Path("/srv/lease/x,readonly=false")),
+    ("comma-retargets", Path("/srv/lease/x,dst=/etc")),
+    ("equals", Path("/srv/lease/x=y")),
+    ("double-quote", Path('/srv/lease/"x"')),
+    ("newline", Path("/srv/lease/x\ny")),
+    ("carriage-return", Path("/srv/lease/x\ry")),
+    ("nul", Path("/srv/lease/x\x00y")),
+    ("relative", Path("srv/lease/x")),
+    ("not-normalized", Path("/srv/lease/../etc")),
+    ("not-a-path", "/srv/lease/x"),
+]
+
+
+@pytest.mark.parametrize("source", [s for _, s in _BAD_SOURCES], ids=[n for n, _ in _BAD_SOURCES])
+def test_a_mount_source_that_could_alter_the_spec_is_refused(source: Any) -> None:
+    golden = GOLDENS[0]
+    with pytest.raises(ValueError):
+        db.compose_run_argv(**_inputs(golden), task_protocol_host_dir=source)
+
+
+def test_a_composer_without_the_source_check_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(db, "_mount_source", lambda path: str(path))
+    argv = db.compose_run_argv(**_inputs(GOLDENS[0]),
+                               task_protocol_host_dir=Path("/srv/lease/x,readonly=false"))
+    assert any("readonly=false" in a for a in argv)  # the injection the check exists to stop
+
+
+def test_a_lease_root_that_could_not_be_mounted_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(tpd.PlacementError):
+        tpd.lease_dir(tmp_path / "a,readonly=false", "ep-1")
+    with pytest.raises(tpd.PlacementError):
+        tpd.lease_dir(Path("relative-root"), "ep-1")
+    assert not (tmp_path / "a,readonly=false").exists()
