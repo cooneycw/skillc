@@ -1,20 +1,27 @@
 #!/bin/sh
 # P7 (#797 precondition 1.2.5): inside a container built with revision 7's
 # containment (read-only root filesystem; host-tmpfs binds for the home and the
-# three scratch paths), the directories writable by the container uid are
-# exactly the declared surfaces. ROOT REQUIRED. TOUCHES DOCKER.
+# three scratch paths), the container uid can write to exactly the declared
+# surfaces. ROOT REQUIRED. TOUCHES DOCKER.
 # Usage: p7.sh --image-id sha256:<64 hex> --runner-unit <unit>
-# The image must provide a find(1) with -writable; if it does not, the
-# inventory fails (OBSERVATION_FAILED), never reads as clean.
-# proc, sysfs and cgroup mounts are skipped: they hold no file persistence.
-# Every other mount is searched, including /dev/mqueue, so a writable IPC
-# filesystem shows up as an extra and must be dealt with in PR-1.
+#
+# Inside the container, the inventory:
+# - requires every declared surface to be a listed mountpoint that accepts a
+#   real marker write and removal (a missing or read-only surface fails);
+# - lists writable directories (GNU find -writable, an access(2) check) on
+#   every mount except proc, sysfs and cgroup, and counts any outside the
+#   declared surfaces;
+# - counts writable non-directory mountpoints (file bind mounts) as extras;
+# - reads every path list line by line with globbing off, never word-split.
+# If the image lacks a find(1) with -writable, the inventory fails
+# (OBSERVATION_FAILED), never reads as clean. /dev/mqueue is searched, so a
+# writable IPC filesystem shows as an extra, which PR-1 must then close.
 #
 # Arms and expected verdicts:
 #   clean     only the declared surfaces are writable       CONFIRMED_NEGATIVE
-#   survivor  a planted extra writable bind is found        SURVIVOR_OBSERVED
-#   fault     the inventory is made to search a path that
-#             does not exist                               OBSERVATION_FAILED
+#   survivor  a planted writable directory bind and a
+#             planted writable file bind are both found     SURVIVOR_OBSERVED
+#   fault     the declared home surface is left unmounted   OBSERVATION_FAILED
 set -eu
 PROBE_NAME=p7
 # shellcheck source=SCRIPTDIR/lib.sh
@@ -23,26 +30,42 @@ parse_common "$@"
 
 DECLARED='/probe-home /tmp /var/tmp /dev/shm'
 
-# Runs inside the container. Prints the number of writable directories that
-# lie outside every declared surface; exits nonzero if any search failed.
+# Runs inside the container. Prints the number of writable places outside the
+# declared surfaces; exits 3 if any required observation failed.
 # shellcheck disable=SC2016
 INVENTORY='
-set -eu
+set -euf
+mi=/proc/self/mountinfo
+[ -r "$mi" ] || exit 3
+for s in $DECLARED; do
+    awk -v m="$s" "\$5 == m { f = 1 } END { exit f ? 0 : 1 }" "$mi" || exit 3
+    w="$s/.skillc-dev-probe-write"
+    printf "x\n" > "$w" || exit 3
+    rm "$w" || exit 3
+done
 extra=0
-list=$(awk "{ for (i = 7; i <= NF; i++) if (\$i == \"-\") { print \$5, \$(i + 1); break } }" /proc/self/mountinfo)
-[ -n "$list" ] || exit 3
-search=$(printf "%s\n" "$list" | awk "\$2 != \"proc\" && \$2 != \"sysfs\" && \$2 !~ /^cgroup/ { print \$1 }")
-if [ "${PROBE_FAULT:-0}" = 1 ]; then search="$search /skillc-dev-probe-absent"; fi
-for mp in $search; do
-    out=$(find "$mp" -xdev -type d -writable -print) || exit 3
-    for d in $out; do
+mounts=$(awk "{ for (i = 7; i <= NF; i++) if (\$i == \"-\") { print \$(i + 1), \$5; break } }" "$mi") || exit 3
+[ -n "$mounts" ] || exit 3
+dirs=$(mktemp -d /tmp/.skillc-dev-probe-XXXXXX) || exit 3
+printf "%s\n" "$mounts" | while IFS=" " read -r fstype mp; do
+    case $fstype in proc | sysfs | cgroup | cgroup2) continue ;; esac
+    if [ -d "$mp" ]; then
+        find "$mp" -xdev -type d -writable -print >>"$dirs/found" || { : >"$dirs/failed"; continue; }
+    elif [ -w "$mp" ]; then
+        printf "%s\n" "$mp" >>"$dirs/found"
+    fi
+done
+[ ! -e "$dirs/failed" ] || exit 3
+if [ -e "$dirs/found" ]; then
+    while IFS= read -r d; do
         inside=0
         for s in $DECLARED; do
             case $d in "$s" | "$s"/*) inside=1 ;; esac
         done
         [ "$inside" = 1 ] || extra=$((extra + 1))
-    done
-done
+    done <"$dirs/found"
+fi
+rm -rf "$dirs"
 printf "%s\n" "$extra"
 '
 
@@ -52,46 +75,45 @@ observe() {
     require_image
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
     user=${PROBE_USER:-1000:1000}
-    mounts=
-    # shellcheck disable=SC2317  # invoked by the EXIT trap
-    cleanup() {
-        for m in $mounts; do
-            if mountpoint -q "$m" 2>/dev/null; then umount "$m" || true; fi
-        done
-        scratch_remove
-    }
-    trap cleanup EXIT
-    binds=
     for t in home tmp vartmp shm; do
-        m="$PROBE_SCRATCH/$t"
-        mkdir -p "$m"
-        mount -t tmpfs -o size=1m,mode=0700 skillc-dev-probe "$m" || probe_die 'mount-failed'
-        mounts="$mounts $m"
-        chown "$user" "$m" || probe_die 'chown-failed'
+        mount_tmpfs "$PROBE_SCRATCH/$t"
+        chown "$user" "$PROBE_SCRATCH/$t" || probe_die 'chown-failed'
     done
-    binds="--mount type=bind,source=$PROBE_SCRATCH/home,target=/probe-home"
-    binds="$binds --mount type=bind,source=$PROBE_SCRATCH/tmp,target=/tmp"
-    binds="$binds --mount type=bind,source=$PROBE_SCRATCH/vartmp,target=/var/tmp"
-    binds="$binds --mount type=bind,source=$PROBE_SCRATCH/shm,target=/dev/shm"
     mkdir -p "$PROBE_SCRATCH/extra"
-    chown "$user" "$PROBE_SCRATCH/extra" || probe_die 'chown-failed'
-    extra_bind="--mount type=bind,source=$PROBE_SCRATCH/extra,target=/probe-extra"
+    : >"$PROBE_SCRATCH/extra-file"
+    chown "$user" "$PROBE_SCRATCH/extra" "$PROBE_SCRATCH/extra-file" || probe_die 'chown-failed'
+    home="type=bind,source=$PROBE_SCRATCH/home,target=/probe-home"
+    tmp="type=bind,source=$PROBE_SCRATCH/tmp,target=/tmp"
+    vartmp="type=bind,source=$PROBE_SCRATCH/vartmp,target=/var/tmp"
+    shm="type=bind,source=$PROBE_SCRATCH/shm,target=/dev/shm"
+    xdir="type=bind,source=$PROBE_SCRATCH/extra,target=/probe-extra"
+    xfile="type=bind,source=$PROBE_SCRATCH/extra-file,target=/probe-extra-file"
 
-    # inventory ARM FAULT EXTRA_BINDS: the bind list is word-split on purpose;
-    # every element is built above from fixed text and the scratch path.
+    # inventory ARM MOUNT...: create, run in the foreground, read the count,
+    # then remove the container and verify it is gone.
     inventory() {
-        # shellcheck disable=SC2086
-        if n=$(docker run --rm --read-only --network none --ipc private --log-driver none \
-            --user "$user" $binds $3 -e "DECLARED=$DECLARED" -e "PROBE_FAULT=$2" \
-            -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY" 2>/dev/null) && is_uint "$n"; then
-            record "$1" extra "$n"
+        _arm=$1
+        shift
+        _m=
+        for _x in "$@"; do _m="$_m --mount $_x"; done
+        # shellcheck disable=SC2086  # each element is built above from fixed text
+        create_container --read-only --network none --ipc private --log-driver none \
+            --user "$user" $_m -e "DECLARED=$DECLARED" \
+            -- "$PROBE_IMAGE_ID" sh -c "$INVENTORY"
+        if n=$(docker start -a "$cid" 2>/dev/null) && is_uint "$n"; then
+            record "$_arm" extra "$n"
         else
-            record "$1" extra ERR
+            record "$_arm" extra ERR
         fi
+        docker rm -v "$cid" >/dev/null || probe_die 'rm-failed'
+        container_absent "$cid" || probe_die 'rm-unverified'
     }
-    inventory clean 0 ''
-    inventory survivor 0 "$extra_bind"
-    inventory fault 1 ''
+    inventory clean "$home" "$tmp" "$vartmp" "$shm"
+    inventory survivor "$home" "$tmp" "$vartmp" "$shm" "$xdir" "$xfile"
+    # Fault: the home surface is not mounted (Docker supplies its own /dev/shm,
+    # so omitting that bind would not exercise the check).
+    inventory fault "$tmp" "$vartmp" "$shm"
+    recheck_runner
 }
 
 verdict() {

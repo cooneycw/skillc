@@ -7,6 +7,7 @@ alias unreadable 0
 lazy errno 0
 lazy listed 0
 lazy unreadable 0
+lazy fd_reads 2
 fault errno 0
 fault listed 0
 fault unreadable 1

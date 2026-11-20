@@ -29,8 +29,18 @@ login, spend or host action beyond the probe itself.
   readings. That is what CI tests (`tests/test_run_window_probes.py`), including
   committed blind twins that the fixtures must catch.
 - **Residue** goes only to `skillc-dev-probe-<probe>-<pid>` under a tmpfs
-  (`/dev/shm`) or `/run`. The script removes it and verifies that it is gone,
-  and any mounts and containers it made. A failed cleanup exits 2.
+  (`/dev/shm`) or `/run`. Every process, container (by the full ID `docker`
+  returned, never by name) and mount is tracked as it is created. Cleanup
+  runs on exit and on `HUP`, `INT` and `TERM`. It verifies each resource is
+  gone (pid absent; `docker ps -a --filter id=` empty; path absent from
+  `/proc/self/mountinfo`) before removing scratch. The final `PROBE` line is
+  printed only after cleanup is verified. Otherwise the run prints
+  `REFUSED cleanup-failed`, keeps the scratch for inspection and exits 2.
+- **Runner exclusion.** Docker probes require the named unit to exist
+  (`LoadState=loaded`) and be `inactive` or `failed`, at start and again
+  before the verdicts. A typo'd unit refuses. A runner start between the two
+  checks is not excluded by the script, so the operator stops the runner's
+  timer for the probe run, as for a window.
 
 ## Running (runner VM, through the owner's CLI helper, outside any run window)
 
@@ -65,4 +75,4 @@ sets the container uid for P5 and P7. P2, P3, P4 and P8 use `python3 -I`
 | P5 | QUALIFIED | home bind leaks to VM disk or does not survive removal: PR-1 design must change |
 | P6 | QUALIFIED | records the mechanism only |
 | P7 | QUALIFIED, unless the image exposes an extra writable mount (for example `/dev/mqueue`), which PR-1 must then close | PR-1 containment must close the listed extra |
-| P8 | QUALIFIED | channel isolation does not hold; fact 2b fails closed |
+| P8 | QUALIFIED | channel isolation does not hold; fact 2b fails closed. If the `clean` arm's only survivor is a socket on fd 0–2 of the container's init (container-runtime stdio), record it: PR-1 must decide that case explicitly, not dismiss it |

@@ -1,0 +1,15 @@
+fd fd_hits 1
+fd map_hits 0
+fd unreadable 0
+mmap fd_hits 1
+mmap map_hits 1
+mmap unreadable 0
+reaped_a fd_hits 0
+reaped_a map_hits 0
+reaped_a unreadable 0
+reaped_b fd_hits 0
+reaped_b map_hits 0
+reaped_b unreadable 0
+fault fd_hits 0
+fault map_hits 0
+fault unreadable 1

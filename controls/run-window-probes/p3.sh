@@ -8,7 +8,9 @@
 #   held    umount2(flags=0) with an fd held returns EBUSY  SURVIVOR_OBSERVED
 #   clean   unmounted with no fd: superblock in no table    CONFIRMED_NEGATIVE
 #   alias   source unmounted, bind alias still listed       SURVIVOR_OBSERVED
-#   lazy    MNT_DETACH: gone from tables, fd still reads    SURVIVOR_OBSERVED
+#   lazy    MNT_DETACH succeeded, the superblock is in no
+#           table, and the planted marker is READ back
+#           through the held fd                             SURVIVOR_OBSERVED
 #   fault   mount-table scan over a planted unreadable table OBSERVATION_FAILED
 set -eu
 PROBE_NAME=p3
@@ -17,6 +19,7 @@ PROBE_NAME=p3
 parse_common "$@"
 
 EBUSY=16
+MARKER=skillc-dev-marker
 
 # umount2 PATH FLAGS: prints the errno number (0 on success), or ERR.
 umount2() {
@@ -28,37 +31,45 @@ print(0 if r == 0 else ctypes.get_errno())
 ' "$1" "$2" 2>/dev/null || printf 'ERR\n'
 }
 
-# sb_listed ROOT MAJMIN: prints "LISTED UNREADABLE" over every pid's mountinfo.
+# sb_listed ROOT MAJMIN: prints "LISTED UNREADABLE SCANNED" over every pid's
+# mountinfo; fails if any per-table count could not be computed.
 sb_listed() {
     listed=0
     unreadable=0
+    scanned=0
     for p in "$1"/[0-9]*; do
         [ -d "$p" ] || continue
         if t=$(cat -- "$p/mountinfo" 2>/dev/null); then
-            n=$(printf '%s\n' "$t" | awk -v d="$2" '$3 == d { c++ } END { print c + 0 }')
+            n=$(printf '%s\n' "$t" | awk -v d="$2" '$3 == d { c++ } END { print c + 0 }') || return 1
+            is_uint "$n" || return 1
             listed=$((listed + n))
+            scanned=$((scanned + 1))
         elif [ -d "$p" ]; then
             unreadable=$((unreadable + 1))
         fi
     done
-    printf '%s %s\n' "$listed" "$unreadable"
+    printf '%s %s %s\n' "$listed" "$unreadable" "$scanned"
 }
 
 record_sb() {
     if out=$(sb_listed "$2" "$3"); then
-        record "$1" listed "${out% *}"
-        record "$1" unreadable "${out#* }"
+        _l=${out%% *}
+        _rest=${out#* }
+        _u=${_rest%% *}
+        _s=${_rest#* }
+        if ! is_uint "$_s" || [ "$_s" -lt 1 ]; then _u=ERR; fi
+        record "$1" listed "$_l"
+        record "$1" unreadable "$_u"
     else
         record "$1" listed ERR
         record "$1" unreadable ERR
     fi
 }
 
-# fresh_tmpfs PATH: mount a new tmpfs and set $dev to its major:minor. Called
-# directly, never in $(...), so a refusal exits the probe, not a subshell.
+# fresh_tmpfs PATH: mount and track a new tmpfs; set $dev to its major:minor.
+# Called directly, never in $(...), so a refusal exits the probe.
 fresh_tmpfs() {
-    mkdir -p "$1"
-    mount -t tmpfs -o size=1m,mode=0700 skillc-dev-probe "$1" || probe_die 'mount-failed'
+    mount_tmpfs "$1"
     dev=$(mountpoint -d "$1") || probe_die 'majmin-unreadable'
     printf '%s\n' "$dev" | grep -Eq '^[0-9]+:[0-9]+$' || probe_die 'majmin-malformed'
 }
@@ -66,43 +77,35 @@ fresh_tmpfs() {
 observe() {
     require_root
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
-    # shellcheck disable=SC2317  # invoked by the EXIT trap
-    cleanup() {
-        for m in "$PROBE_SCRATCH/m" "$PROBE_SCRATCH/alias"; do
-            if mountpoint -q "$m" 2>/dev/null; then umount "$m" || true; fi
-        done
-        scratch_remove
-    }
-    trap cleanup EXIT
     m="$PROBE_SCRATCH/m"
 
-    # held, then clean (same superblock, after the fd closes).
     fresh_tmpfs "$m"
     exec 9<"$m"
     record held errno "$(umount2 "$m" 0)"
     exec 9<&-
-    e=$(umount2 "$m" 0)
-    record clean errno "$e"
+    record clean errno "$(umount2 "$m" 0)"
     record_sb clean /proc "$dev"
 
-    # alias: bind the tmpfs elsewhere, unmount the source, look for the superblock.
     fresh_tmpfs "$m"
     mkdir -p "$PROBE_SCRATCH/alias"
     mount --bind "$m" "$PROBE_SCRATCH/alias" || probe_die 'bind-failed'
+    track_mount "$PROBE_SCRATCH/alias"
     record alias errno "$(umount2 "$m" 0)"
     record_sb alias /proc "$dev"
     umount "$PROBE_SCRATCH/alias" || probe_die 'alias-cleanup-failed'
 
-    # lazy: detach with an fd held; the tables lose it, the fd still reads it.
     fresh_tmpfs "$m"
-    printf 'skillc-dev-marker\n' >"$m/marker"
+    printf '%s\n' "$MARKER" >"$m/marker"
     exec 9<"$m"
     record lazy errno "$(umount2 "$m" 2)"
     record_sb lazy /proc "$dev"
-    if [ -r "/proc/$$/fd/9/marker" ]; then record lazy fd_reads 1; else record lazy fd_reads 0; fi
+    if got=$(cat -- "/proc/$$/fd/9/marker" 2>/dev/null); then
+        if [ "$got" = "$MARKER" ]; then record lazy fd_reads 1; else record lazy fd_reads ERR; fi
+    else
+        record lazy fd_reads ERR
+    fi
     exec 9<&-
 
-    # fault: a planted pid whose mountinfo cannot be read (a dangling link).
     mkdir -p "$PROBE_SCRATCH/fakeproc/4242"
     ln -s "$PROBE_SCRATCH/absent-table" "$PROBE_SCRATCH/fakeproc/4242/mountinfo"
     record fault errno 0
@@ -125,12 +128,16 @@ v_table() {
     if [ "$l" -eq 0 ]; then printf '%s\n' "$PROBE_NEG"; else printf '%s\n' "$PROBE_SURV"; fi
 }
 
+# v_lazy: only "gone from every table AND still read through the fd" is the
+# survivor this arm exists to show. A superblock still listed means the
+# detach did not do what was planted.
 v_lazy() {
     base=$(v_table lazy)
-    r=$(rd_uint lazy fd_reads) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    if [ "$base" = "$PROBE_FAIL" ]; then printf '%s\n' "$PROBE_FAIL"; return; fi
-    # Tables empty but the content still readable is a survivor the tables miss.
-    if [ "$r" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$base"; fi
+    r=$(rd_bool lazy fd_reads) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    case $base in
+        "$PROBE_NEG") if [ "$r" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"; else printf '%s\n' "$PROBE_NEG"; fi ;;
+        *) printf '%s\n' "$PROBE_FAIL" ;;
+    esac
 }
 
 classify() {

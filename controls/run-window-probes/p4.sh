@@ -1,42 +1,60 @@
 #!/bin/sh
 # P4 (#797 precondition 1.2.3): persistence controls. Read-only and
-# unprivileged. No Docker.
+# unprivileged. No Docker. The conclusion is limited to the observed swap,
+# core-handler and resume configuration.
 #
 # The `live` arm reads the runner VM itself, and its verdict IS the finding:
-# CONFIRMED_NEGATIVE means swap off, no piped core handler and hibernation not
-# enterable, so a window may open. Any survivor there blocks a window; it is
-# not a probe error. The other arms run the same readers over planted copies
-# in the scratch directory, so the readers are shown to discriminate.
+# CONFIRMED_NEGATIVE means no swap device, a non-piped core_pattern and no
+# resume device, so a window may open. A survivor there blocks a window; it
+# is not a probe error. The other arms run the same readers over planted
+# copies in the scratch directory, so the readers are shown to discriminate.
 #
 # Arms and expected verdicts:
-#   live       the VM's own state                     CONFIRMED_NEGATIVE (finding)
-#   swap       a planted /proc/swaps with one device  SURVIVOR_OBSERVED
-#   pipe       a planted piped core_pattern           SURVIVOR_OBSERVED
-#   fault      readers pointed at dangling links      OBSERVATION_FAILED
+#   live    the VM's own state                    CONFIRMED_NEGATIVE (finding)
+#   swap    a planted swaps table with one device SURVIVOR_OBSERVED
+#   pipe    a planted piped core_pattern          SURVIVOR_OBSERVED
+#   fault   readers pointed at empty or dangling
+#           inputs                                OBSERVATION_FAILED
 set -eu
 PROBE_NAME=p4
 # shellcheck source=SCRIPTDIR/lib.sh
 . "${PROBE_LIB:-$(dirname -- "$0")/lib.sh}"
 parse_common "$@"
 
-# read_state ARM SWAPS CORE_PATTERN RESUME: record the three facts or ERR.
+# swap_devices FILE: count device rows of a /proc/swaps-shaped table. The
+# header must start with the kernel's fixed column name and every row must
+# have five fields; anything else fails.
+swap_devices() {
+    awk '
+        NR == 1 { if ($1 != "Filename") bad = 1; next }
+        NF == 0 { next }
+        NF != 5 { bad = 1 }
+        { c++ }
+        END { if (NR < 1 || bad) exit 1; print c + 0 }
+    ' "$1"
+}
+
+# read_state ARM SWAPS CORE_PATTERN POWER_DIR: record swap_devices,
+# core_piped and resume_set, each a number or ERR.
 read_state() {
-    if s=$(awk 'NR > 1 && NF > 0 { c++ } END { print c + 0 }' "$2" 2>/dev/null) && [ -r "$2" ]; then
+    if [ -r "$2" ] && s=$(swap_devices "$2" 2>/dev/null); then
         record "$1" swap_devices "$s"
     else
         record "$1" swap_devices ERR
     fi
-    if c=$(head -c 1 -- "$3" 2>/dev/null) && [ -r "$3" ]; then
+    if [ -r "$3" ] && c=$(head -c 1 -- "$3" 2>/dev/null) && [ -n "$c" ]; then
         if [ "$c" = '|' ]; then record "$1" core_piped 1; else record "$1" core_piped 0; fi
     else
         record "$1" core_piped ERR
     fi
-    # Hibernation needs a resume device: 0:0 means none. A kernel built
-    # without hibernation has no such file at all, which also means none; a
-    # path that exists (or dangles) but cannot be read is a failed observation.
-    if [ ! -e "$4" ] && [ ! -L "$4" ]; then
+    # Hibernation needs a resume device. The power interface directory must be
+    # visible; inside it, a missing `resume` means the kernel cannot resume
+    # (none), and a present one must read exactly major:minor.
+    if [ ! -d "$4" ] || [ ! -r "$4/state" ]; then
+        record "$1" resume_set ERR
+    elif [ ! -e "$4/resume" ] && [ ! -L "$4/resume" ]; then
         record "$1" resume_set 0
-    elif r=$(cat -- "$4" 2>/dev/null) && [ -n "$r" ]; then
+    elif r=$(cat -- "$4/resume" 2>/dev/null) && printf '%s\n' "$r" | grep -Eq '^[0-9]+:[0-9]+$'; then
         if [ "$r" = 0:0 ]; then record "$1" resume_set 0; else record "$1" resume_set 1; fi
     else
         record "$1" resume_set ERR
@@ -45,24 +63,27 @@ read_state() {
 
 observe() {
     scratch_make "${PROBE_TMPFS:-/dev/shm}"
-    trap scratch_remove EXIT
-    read_state live /proc/swaps /proc/sys/kernel/core_pattern /sys/power/resume
+    read_state live /proc/swaps /proc/sys/kernel/core_pattern /sys/power
     d=$PROBE_SCRATCH
-    printf 'Filename Type Size Used Priority\n' >"$d/swaps-none"
-    printf 'Filename Type Size Used Priority\n/swapfile file 1024 0 -2\n' >"$d/swaps-one"
+    header='Filename                                Type            Size            Used            Priority'
+    printf '%s\n' "$header" >"$d/swaps-none"
+    printf '%s\n/swapfile file 1048572 0 -2\n' "$header" >"$d/swaps-one"
     printf 'core\n' >"$d/core-file"
     printf '|/usr/lib/handler %%p\n' >"$d/core-pipe"
-    printf '0:0\n' >"$d/resume-none"
-    read_state swap "$d/swaps-one" "$d/core-file" "$d/resume-none"
-    read_state pipe "$d/swaps-none" "$d/core-pipe" "$d/resume-none"
-    for f in swaps core resume; do ln -s "$d/absent-$f-target" "$d/dangling-$f"; done
-    read_state fault "$d/dangling-swaps" "$d/dangling-core" "$d/dangling-resume"
+    mkdir -p "$d/power"
+    printf 'freeze mem\n' >"$d/power/state"
+    printf '0:0\n' >"$d/power/resume"
+    read_state swap "$d/swaps-one" "$d/core-file" "$d/power"
+    read_state pipe "$d/swaps-none" "$d/core-pipe" "$d/power"
+    : >"$d/empty"
+    ln -s "$d/absent-target" "$d/dangling"
+    read_state fault "$d/empty" "$d/dangling" "$d/absent-power"
 }
 
 verdict() {
     s=$(rd_uint "$1" swap_devices) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    c=$(rd_uint "$1" core_piped) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    r=$(rd_uint "$1" resume_set) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    c=$(rd_bool "$1" core_piped) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    r=$(rd_bool "$1" resume_set) || { printf '%s\n' "$PROBE_FAIL"; return; }
     if [ "$s" -eq 0 ] && [ "$c" -eq 0 ] && [ "$r" -eq 0 ]; then
         printf '%s\n' "$PROBE_NEG"
     else

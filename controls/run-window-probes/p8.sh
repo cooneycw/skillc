@@ -1,25 +1,51 @@
 #!/bin/sh
 # P8 (#797 fact 2b): container channel isolation. A holder container has
 # private network, IPC, mount and PID namespaces (compared by namespace
-# identity against PID 1), no host socket bind, and no inherited socket fd.
-# A corroborating arm records the known limit of queue-length checks: a
-# zero-byte Unix datagram carries SCM_RIGHTS while the receive queue reads 0.
-# ROOT REQUIRED. TOUCHES DOCKER.
+# identity against PID 1), no bind mount that is or contains a host socket,
+# and no socket fd in its init process. A corroborating arm records the known
+# limit of queue-length checks: a zero-byte Unix datagram carries SCM_RIGHTS
+# while FIONREAD reads 0. ROOT REQUIRED. TOUCHES DOCKER.
 # Usage: p8.sh --image-id sha256:<64 hex> --runner-unit <unit>
 #
 # Arms and expected verdicts:
-#   clean      private namespaces, no socket bind or fd      CONFIRMED_NEGATIVE
-#   sockbind   a planted host Unix socket bind              SURVIVOR_OBSERVED
-#   hostnet    --network host shares the host netns          SURVIVOR_OBSERVED
-#   zerobyte   fd queued in a zero-byte datagram, queue 0    SURVIVOR_OBSERVED
-#   fault      the container pid cannot be read              OBSERVATION_FAILED
+#   clean     private namespaces, no socket bind or fd      CONFIRMED_NEGATIVE
+#   sockbind  a planted host socket bind, and a planted bind
+#             of a directory that contains a socket         SURVIVOR_OBSERVED
+#   hostnet   --network host shares the host netns          SURVIVOR_OBSERVED
+#   zerobyte  exactly one fd for the planted file arrives in
+#             an empty datagram while FIONREAD reads 0      SURVIVOR_OBSERVED
+#   fault     the container pid cannot be read              OBSERVATION_FAILED
 set -eu
 PROBE_NAME=p8
 # shellcheck source=SCRIPTDIR/lib.sh
 . "${PROBE_LIB:-$(dirname -- "$0")/lib.sh}"
 parse_common "$@"
 
-# isolation ARM CONTAINER: record shared namespaces, socket binds, socket fds.
+# socket_binds ID: count bind mounts whose source is a socket or a directory
+# containing one. Structured inspect output; any unreadable source fails.
+socket_binds() {
+    docker inspect --format '{{json .Mounts}}' "$1" | python3 -I -c '
+import json, os, stat, sys
+count = 0
+for m in json.load(sys.stdin):
+    if m.get("Type") != "bind":
+        continue
+    src = m["Source"]
+    st = os.lstat(src)
+    if stat.S_ISSOCK(st.st_mode):
+        count += 1
+    elif stat.S_ISDIR(st.st_mode):
+        def fail(err):
+            raise err
+        for root, dirs, files in os.walk(src, onerror=fail):
+            for name in dirs + files:
+                if stat.S_ISSOCK(os.lstat(os.path.join(root, name)).st_mode):
+                    count += 1
+print(count)
+'
+}
+
+# isolation ARM ID: record shared namespaces, socket binds and socket fds.
 isolation() {
     pid=$(docker inspect --format '{{.State.Pid}}' "$2" 2>/dev/null) || pid=
     if ! is_uint "$pid" || [ "$pid" -eq 0 ] || [ ! -d "/proc/$pid" ]; then
@@ -38,27 +64,27 @@ isolation() {
         fi
     done
     if [ "$ok" = 1 ]; then record "$1" shared_ns "$shared"; else record "$1" shared_ns ERR; fi
-    if srcs=$(docker inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "$2"); then
-        binds=0
-        for s in $srcs; do
-            if [ -S "$s" ]; then binds=$((binds + 1)); fi
-        done
-        record "$1" socket_binds "$binds"
+    if b=$(socket_binds "$2" 2>/dev/null) && is_uint "$b"; then
+        record "$1" socket_binds "$b"
     else
         record "$1" socket_binds ERR
     fi
-    if ls -- "/proc/$pid/fd" >/dev/null 2>&1; then
+    # One listing; entry names in /proc/<pid>/fd never contain whitespace.
+    if names=$(ls -1A -- "/proc/$pid/fd" 2>/dev/null) && [ -n "$names" ]; then
         sockets=0
         bad=0
-        for e in "/proc/$pid/fd"/*; do
-            [ -L "$e" ] || continue
-            if t=$(readlink -- "$e"); then
+        for n in $names; do
+            if t=$(readlink -- "/proc/$pid/fd/$n"); then
                 case $t in socket:*) sockets=$((sockets + 1)) ;; esac
             else
                 bad=1
             fi
         done
-        if [ "$bad" = 0 ]; then record "$1" socket_fds "$sockets"; else record "$1" socket_fds ERR; fi
+        if [ "$bad" = 0 ] && [ -d "/proc/$pid" ]; then
+            record "$1" socket_fds "$sockets"
+        else
+            record "$1" socket_fds ERR
+        fi
     else
         record "$1" socket_fds ERR
     fi
@@ -69,46 +95,56 @@ observe() {
     require_runner_idle
     require_image
     scratch_make "${PROBE_SCRATCH_PARENT:-/run}"
-    names=
-    # shellcheck disable=SC2317  # invoked by the EXIT trap
-    cleanup() {
-        for n in $names; do docker rm -f "$n" >/dev/null 2>&1 || true; done
-        scratch_remove
-    }
-    trap cleanup EXIT
+    # run ARM OPTION...: start a tracked container that just sleeps.
     run() {
-        n="skillc-dev-probe-p8-$1-$$"
-        names="$names $n"
+        _arm=$1
         shift
-        docker run -d --name "$n" --log-driver none "$@" -- "$PROBE_IMAGE_ID" sleep 120 >/dev/null \
-            || probe_die 'run-failed'
+        cid=$(docker run -d --name "skillc-dev-probe-$PROBE_NAME-$_arm-$(probe_uuid)" \
+            --log-driver none "$@" -- "$PROBE_IMAGE_ID" sleep 120) || probe_die 'run-failed'
+        printf '%s\n' "$cid" | grep -Eq '^[0-9a-f]{64}$' || probe_die 'run-id-malformed'
+        track_container "$cid"
     }
     run clean --network none --ipc private
-    isolation clean "skillc-dev-probe-p8-clean-$$"
+    isolation clean "$cid"
 
+    mkdir -p "$PROBE_SCRATCH/sockdir"
     python3 -I -c '
 import socket, sys
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.bind(sys.argv[1])
-' "$PROBE_SCRATCH/host.sock" || probe_die 'socket-plant-failed'
+for path in sys.argv[1:]:
+    socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).bind(path)
+' "$PROBE_SCRATCH/host.sock" "$PROBE_SCRATCH/sockdir/inner.sock" || probe_die 'socket-plant-failed'
     run sockbind --network none --ipc private \
-        --mount "type=bind,source=$PROBE_SCRATCH/host.sock,target=/probe-host.sock"
-    isolation sockbind "skillc-dev-probe-p8-sockbind-$$"
+        --mount "type=bind,source=$PROBE_SCRATCH/host.sock,target=/probe-host.sock" \
+        --mount "type=bind,source=$PROBE_SCRATCH/sockdir,target=/probe-sockdir"
+    isolation sockbind "$cid"
 
     run hostnet --network host --ipc private
-    isolation hostnet "skillc-dev-probe-p8-hostnet-$$"
+    isolation hostnet "$cid"
 
-    # zerobyte: the limit fact 2b's construction exists to avoid.
+    : >"$PROBE_SCRATCH/planted"
     if z=$(python3 -I -c '
 import array, fcntl, os, socket, struct, sys, termios
+path = sys.argv[1]
+want = os.stat(path)
 a, b = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
-fd = os.open(sys.argv[1], os.O_RDONLY)
+b.settimeout(5)
+fd = os.open(path, os.O_RDONLY)
 a.sendmsg([b""], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [fd]))])
+os.close(fd)
 inq = struct.unpack("i", fcntl.ioctl(b.fileno(), termios.FIONREAD, b"\0\0\0\0"))[0]
-msg, anc, flags, addr = b.recvmsg(1, socket.CMSG_LEN(4))
-got = sum(1 for level, kind, _ in anc if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS)
-print(inq, got)
-' "$PROBE_SCRATCH/readings" 2>/dev/null); then
+msg, anc, flags, _ = b.recvmsg(16, socket.CMSG_SPACE(16))
+fds = []
+for level, kind, data in anc:
+    if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+        fds.extend(array.array("i", data[: len(data) - len(data) % 4]))
+ok = (msg == b"" and not flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC) and len(fds) == 1)
+if ok:
+    got = os.fstat(fds[0])
+    ok = (got.st_dev, got.st_ino) == (want.st_dev, want.st_ino)
+for f in fds:
+    os.close(f)
+print(inq, 1 if ok else 0)
+' "$PROBE_SCRATCH/planted" 2>/dev/null); then
         record zerobyte inq "${z% *}"
         record zerobyte fd_received "${z#* }"
     else
@@ -116,7 +152,8 @@ print(inq, got)
         record zerobyte fd_received ERR
     fi
 
-    isolation fault "skillc-dev-probe-p8-absent-$$"
+    isolation fault "$(probe_uuid)$(probe_uuid)"
+    recheck_runner
 }
 
 v_iso() {
@@ -132,12 +169,11 @@ v_iso() {
 
 v_zero() {
     q=$(rd_uint zerobyte inq) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    g=$(rd_uint zerobyte fd_received) || { printf '%s\n' "$PROBE_FAIL"; return; }
-    # A descriptor delivered while the queue read 0 is a survivor that a
-    # queue-length check cannot see.
-    if [ "$q" -eq 0 ] && [ "$g" -ge 1 ]; then printf '%s\n' "$PROBE_SURV"
-    elif [ "$g" -eq 0 ]; then printf '%s\n' "$PROBE_FAIL"
-    else printf '%s\n' "$PROBE_NEG"; fi
+    g=$(rd_bool zerobyte fd_received) || { printf '%s\n' "$PROBE_FAIL"; return; }
+    # Only the exact limit (a verified fd delivered while the queue read 0) is
+    # the survivor; any other reading fails this arm's qualification.
+    if [ "$q" -eq 0 ] && [ "$g" -eq 1 ]; then printf '%s\n' "$PROBE_SURV"
+    else printf '%s\n' "$PROBE_FAIL"; fi
 }
 
 classify() {

@@ -13,50 +13,68 @@
 #   CONFIRMED_NEGATIVE  the observation succeeded and found nothing
 #   SURVIVOR_OBSERVED   the observation succeeded and found a survivor
 #   OBSERVATION_FAILED  the observation could not be made completely
-# A missing, duplicated, empty or malformed reading is OBSERVATION_FAILED,
-# never a zero. No error text is ever matched; only exit statuses and parsed
-# numbers or fixed tokens decide.
+# A missing, duplicated, malformed, out-of-range or failed reading is
+# OBSERVATION_FAILED, never a zero. No error text is ever matched; only exit
+# statuses, errno numbers and parsed numbers or fixed tokens decide.
+#
+# Live-mode resources (processes, containers, mounts, scratch) are tracked as
+# they are created and released by probe_cleanup, which verifies each is gone.
+# finish() runs probe_cleanup BEFORE printing the final PROBE line, so a
+# QUALIFIED or MISMATCH line is never printed over live residue.
 
 PROBE_NEG=CONFIRMED_NEGATIVE
 PROBE_SURV=SURVIVOR_OBSERVED
 PROBE_FAIL=OBSERVATION_FAILED
 PROBE_MISMATCH=0
+PROBE_PIDS=
+PROBE_CONTAINERS=
+PROBE_MOUNTS=
+PROBE_SCRATCH=
+PROBE_MODE=classify
 
 probe_die() {
+    probe_cleanup || true
     printf 'PROBE %s REFUSED %s\n' "${PROBE_NAME:-unknown}" "$1"
     exit 2
 }
 
-# is_uint VALUE: true only for a nonempty string of ASCII digits.
+# is_uint VALUE: 1 to 18 ASCII digits (always within the shell's integer range).
 is_uint() {
     case $1 in
         '' | *[!0-9]*) return 1 ;;
-        *) return 0 ;;
     esac
+    [ "${#1}" -le 18 ]
 }
 
 # rd ARM KEY: print the single recorded value, or fail. Fails on a missing or
-# duplicated key, and on the ERR marker an observe step writes for a failure.
+# duplicated key, a line that is not exactly three fields, and the ERR marker.
 rd() {
     awk -v a="$1" -v k="$2" '
-        $1 == a && $2 == k { v = $3; n++ }
-        END { if (n != 1 || v == "" || v == "ERR") exit 1; print v }
+        $1 == a && $2 == k { n++; if (NF != 3) bad = 1; v = $3 }
+        END { if (n != 1 || bad || v == "" || v == "ERR") exit 1; print v }
     ' "$PROBE_READINGS"
 }
 
-# rd_uint ARM KEY: rd, and also refuse anything that is not an unsigned integer.
 rd_uint() {
     _v=$(rd "$1" "$2") || return 1
     is_uint "$_v" || return 1
     printf '%s\n' "$_v"
 }
 
-# record ARM KEY VALUE: append one reading (live mode only).
-record() {
-    printf '%s %s %s\n' "$1" "$2" "${3:-ERR}" >>"$PROBE_READINGS"
+rd_bool() {
+    _v=$(rd "$1" "$2") || return 1
+    case $_v in 0 | 1) printf '%s\n' "$_v" ;; *) return 1 ;; esac
 }
 
-# arm NAME EXPECTED VERDICT: print the verdict and note a mismatch.
+# record ARM KEY VALUE: append one reading (live mode only). A value that is
+# not a single token is recorded as ERR rather than splitting into fields.
+record() {
+    case ${3:-} in
+        '' | *[!A-Za-z0-9:._-]*) printf '%s %s ERR\n' "$1" "$2" >>"$PROBE_READINGS" ;;
+        *) printf '%s %s %s\n' "$1" "$2" "$3" >>"$PROBE_READINGS" ;;
+    esac
+}
+
 arm() {
     printf 'ARM %s %s\n' "$1" "$3"
     if [ "$3" != "$2" ]; then
@@ -68,8 +86,13 @@ info() {
     printf 'INFO %s\n' "$*"
 }
 
-# finish: exit 0 when every arm gave its expected verdict, 1 otherwise.
+# finish: release and verify every live resource, then exit 0 when every arm
+# gave its expected verdict, 1 otherwise.
 finish() {
+    if ! probe_cleanup; then
+        printf 'PROBE %s REFUSED cleanup-failed\n' "$PROBE_NAME"
+        exit 2
+    fi
     if [ "$PROBE_MISMATCH" = 0 ]; then
         printf 'PROBE %s QUALIFIED\n' "$PROBE_NAME"
         exit 0
@@ -78,8 +101,6 @@ finish() {
     exit 1
 }
 
-# parse_common "$@": sets PROBE_MODE (live|classify), PROBE_READINGS,
-# PROBE_IMAGE_ID and PROBE_RUNNER_UNIT. Unknown flags refuse.
 parse_common() {
     PROBE_MODE=live
     PROBE_READINGS=
@@ -103,62 +124,136 @@ parse_common() {
                 PROBE_RUNNER_UNIT=$2
                 shift 2
                 ;;
-            *) probe_die 'usage' ;;
+            *)
+                PROBE_MODE=classify
+                probe_die 'usage'
+                ;;
         esac
     done
     if [ "$PROBE_MODE" = classify ]; then
         if [ ! -f "$PROBE_READINGS" ] || [ ! -r "$PROBE_READINGS" ]; then
             probe_die 'readings-unreadable'
         fi
+    else
+        trap 'probe_cleanup || true; printf "PROBE %s REFUSED interrupted\n" "$PROBE_NAME"; exit 2' \
+            HUP INT TERM
+        trap 'probe_cleanup || true' EXIT
     fi
+}
+
+# probe_uuid: a fresh random token for container names.
+probe_uuid() {
+    tr -d '-' </proc/sys/kernel/random/uuid
 }
 
 # scratch_make PARENT: create a fresh private scratch directory, refusing reuse.
 scratch_make() {
     [ -d "$1" ] || probe_die 'scratch-parent-missing'
     PROBE_SCRATCH="$1/skillc-dev-probe-$PROBE_NAME-$$"
-    mkdir -m 0700 "$PROBE_SCRATCH" || probe_die 'scratch-exists'
+    mkdir -m 0700 "$PROBE_SCRATCH" || { PROBE_SCRATCH=; probe_die 'scratch-exists'; }
     PROBE_READINGS="$PROBE_SCRATCH/readings"
     : >"$PROBE_READINGS"
 }
 
-# scratch_remove: remove the scratch directory and verify it is gone. A
-# failed or unverified cleanup is reported and makes the run exit 2.
-scratch_remove() {
-    if [ -n "${PROBE_SCRATCH:-}" ] && [ -e "$PROBE_SCRATCH" ]; then
-        rm -rf -- "$PROBE_SCRATCH" || true
-        if [ -e "$PROBE_SCRATCH" ]; then
-            printf 'PROBE %s CLEANUP-FAILED\n' "$PROBE_NAME"
-            exit 2
-        fi
-    fi
+# track_pid PID / track_container ID / track_mount PATH: register for cleanup.
+track_pid() { PROBE_PIDS="$PROBE_PIDS $1"; }
+track_container() { PROBE_CONTAINERS="$PROBE_CONTAINERS $1"; }
+track_mount() { PROBE_MOUNTS="$1 $PROBE_MOUNTS"; }
+
+# is_mounted PATH: exit 0 if PATH is a mountpoint in this namespace, 1 if not,
+# 2 if the mount table could not be read.
+is_mounted() {
+    [ -r /proc/self/mountinfo ] || return 2
+    awk -v m="$1" '$5 == m { f = 1 } END { exit f ? 0 : 1 }' /proc/self/mountinfo
 }
 
-# require_root: the probe's arms need root; refuse rather than run blind.
+# container_absent ID: 0 only when the daemon answered and listed nothing.
+container_absent() {
+    _out=$(docker ps -a -q --no-trunc --filter "id=$1") || return 1
+    [ -z "$_out" ]
+}
+
+# probe_cleanup: release every tracked resource and verify it is gone. Returns
+# nonzero, keeping the scratch directory, if anything could not be verified.
+# Idempotent: released resources are removed from the tracking lists.
+probe_cleanup() {
+    [ "$PROBE_MODE" = live ] || return 0
+    _ok=0
+    for _p in $PROBE_PIDS; do
+        kill "$_p" 2>/dev/null || true
+        wait "$_p" 2>/dev/null || true
+        if [ -d "/proc/$_p" ]; then _ok=1; fi
+    done
+    PROBE_PIDS=
+    _left=
+    for _c in $PROBE_CONTAINERS; do
+        docker rm -f -v "$_c" >/dev/null 2>&1 || true
+        if ! container_absent "$_c"; then _ok=1; _left="$_left $_c"; fi
+    done
+    PROBE_CONTAINERS=$_left
+    _left=
+    for _m in $PROBE_MOUNTS; do
+        if is_mounted "$_m"; then umount "$_m" 2>/dev/null || true; fi
+        # Written as an if so `set -e` cannot end cleanup on the expected 1.
+        if is_mounted "$_m"; then _st=0; else _st=$?; fi
+        if [ "$_st" != 1 ]; then _ok=1; _left="$_left $_m"; fi
+    done
+    PROBE_MOUNTS=$_left
+    if [ "$_ok" = 0 ] && [ -n "$PROBE_SCRATCH" ] && [ -e "$PROBE_SCRATCH" ]; then
+        rm -rf -- "$PROBE_SCRATCH" 2>/dev/null || true
+        if [ -e "$PROBE_SCRATCH" ]; then _ok=1; else PROBE_SCRATCH=; fi
+    fi
+    return "$_ok"
+}
+
 require_root() {
     [ "$(id -u)" = 0 ] || probe_die 'root-required'
 }
 
-# require_image: validate --image-id and confirm the daemon holds exactly it.
 require_image() {
     printf '%s\n' "$PROBE_IMAGE_ID" | grep -Eq '^sha256:[0-9a-f]{64}$' || probe_die 'image-id-invalid'
     _id=$(docker image inspect --format '{{.Id}}' "$PROBE_IMAGE_ID") || probe_die 'image-absent'
     [ "$_id" = "$PROBE_IMAGE_ID" ] || probe_die 'image-id-mismatch'
 }
 
-# require_runner_idle: Docker probes never overlap a runner job. The unit name
-# is supplied by the operator; its ActiveState must be exactly inactive or failed.
-require_runner_idle() {
-    [ -n "$PROBE_RUNNER_UNIT" ] || probe_die 'runner-unit-required'
-    _state=$(systemctl show -p ActiveState --value -- "$PROBE_RUNNER_UNIT") || probe_die 'runner-state-unreadable'
-    case $_state in
-        inactive | failed) ;;
-        *) probe_die 'runner-active' ;;
-    esac
+# runner_idle: the named unit must exist (LoadState loaded) and be inactive or
+# failed. A typo'd unit reads LoadState not-found and refuses.
+runner_idle() {
+    [ -n "$PROBE_RUNNER_UNIT" ] || return 1
+    _load=$(systemctl show -p LoadState --value -- "$PROBE_RUNNER_UNIT") || return 1
+    [ "$_load" = loaded ] || return 1
+    _state=$(systemctl show -p ActiveState --value -- "$PROBE_RUNNER_UNIT") || return 1
+    case $_state in inactive | failed) return 0 ;; *) return 1 ;; esac
 }
 
-# require_overlay2: P5 and P6 read the overlay upper directory.
+# require_runner_idle: checked at start and again before verdicts
+# (recheck_runner). A runner start between the two checks is not excluded;
+# the operator stops the runner's timer for the probe run, as for a window.
+require_runner_idle() {
+    runner_idle || probe_die 'runner-not-idle'
+}
+
+recheck_runner() {
+    runner_idle || probe_die 'runner-became-active'
+}
+
 require_overlay2() {
     _driver=$(docker info --format '{{.Driver}}') || probe_die 'driver-unreadable'
     [ "$_driver" = overlay2 ] || probe_die 'driver-not-overlay2'
+}
+
+# mount_tmpfs PATH: mount a 1 MiB 0700 tmpfs at PATH and track it.
+mount_tmpfs() {
+    mkdir -p "$1"
+    mount -t tmpfs -o size=1m,mode=0700 skillc-dev-probe "$1" || probe_die 'mount-failed'
+    track_mount "$1"
+}
+
+# create_container ARGS...: `docker create`, then track the returned full ID in
+# $cid. Cleanup removes only IDs this probe created, never a name match.
+create_container() {
+    cid=$(docker create --name "skillc-dev-probe-$PROBE_NAME-$(probe_uuid)" "$@") \
+        || probe_die 'create-failed'
+    printf '%s\n' "$cid" | grep -Eq '^[0-9a-f]{64}$' || probe_die 'create-id-malformed'
+    track_container "$cid"
 }

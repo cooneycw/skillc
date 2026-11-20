@@ -1,0 +1,10 @@
+rmdir fstype tmpfs
+rmdir nlink 0
+last fstype tmpfs
+last nlink 0
+rename fstype tmpfs
+rename nlink 2
+hardlink fstype tmpfs
+hardlink nlink 2
+fault fstype tmpfs
+fault nlink ERR

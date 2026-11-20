@@ -11,11 +11,11 @@ The cases here are:
   expectation, including the exit status (0 QUALIFIED, 1 MISMATCH);
 - coverage: every probe has a qualified fixture whose fault arm is
   OBSERVATION_FAILED, plus at least one failing fixture;
-- blind twins: a deliberately weakened copy of the classifier (a missing
-  reading read as zero; an unreadable census ignored; a failed removal
-  trusted; a write that never landed trusted; an inherited socket fd ignored)
-  must NOT reproduce the committed expectation on its discriminating fixture,
-  so the fixtures can tell a working classifier from a blind one;
+- pairing: every readings file has exactly one expectation and vice versa;
+- blind twins: each deliberately weakened copy of a classifier must still
+  produce valid output but NOT reproduce the committed verdicts on its
+  discriminating fixture, so the fixtures can tell a working classifier from a
+  blind one;
 - usage refusals: unknown flags and unreadable readings exit 2.
 
 No live arm is run here, and nothing needs root, Docker or a VM.
@@ -75,6 +75,15 @@ def test_fixture_classifies_to_its_committed_expectation(probe: str, case: str) 
 
 
 @pytest.mark.parametrize("probe", NAMES)
+def test_fixture_files_pair_exactly(probe: str) -> None:
+    readings = {p.stem for p in (FIXTURES / probe).glob("*.readings")}
+    expects = {p.stem for p in (FIXTURES / probe).glob("*.expect")}
+    others = {p.name for p in (FIXTURES / probe).iterdir()} - {
+        f"{n}{ext}" for n in readings for ext in (".readings", ".expect")}
+    assert readings and readings == expects and not others
+
+
+@pytest.mark.parametrize("probe", NAMES)
 def test_every_probe_has_a_qualified_fault_arm_and_a_red_case(probe: str) -> None:
     qualified = (FIXTURES / probe / "qualified.expect").read_text()
     assert "ARM fault OBSERVATION_FAILED" in qualified
@@ -85,19 +94,40 @@ def test_every_probe_has_a_qualified_fault_arm_and_a_red_case(probe: str) -> Non
 
 #: (blind copy name, file to mutate, exact original text, weakened text, probe, fixture)
 BLIND_TWINS = [
-    ("missing-is-zero", "lib.sh", 'if (n != 1 || v == "" || v == "ERR") exit 1; print v',
-     'if (n != 1 || v == "" || v == "ERR") v = 0; print v', probe, "qualified")
+    ("missing-is-zero", "lib.sh", 'if (n != 1 || bad || v == "" || v == "ERR") exit 1',
+     'if (n != 1 || bad || v == "" || v == "ERR") v = 0', probe, "qualified")
     for probe in ("p1", "p4", "p5", "p7", "p8")
 ] + [
-    ("unreadable-ignored", "p2.sh", 'u=$(rd_uint "$1" unreadable) ||', "u=0 ||", "p2", "qualified"),
-    ("unreadable-ignored", "p3.sh", 'u=$(rd_uint "$1" unreadable) ||', "u=0 ||", "p3", "qualified"),
+    ("trailing-garbage-accepted", "lib.sh",
+     "$1 == a && $2 == k { n++; if (NF != 3) bad = 1; v = $3 }",
+     "$1 == a && $2 == k { n++; v = $3 }", "p1", "trailing-garbage"),
+    ("unreadable-ignored", "p2.sh", '[ "$u" -eq 0 ] || return 1', ":", "p2", "qualified"),
+    ("mmap-fd-trusted", "p2.sh", 'if [ "${h% *}" -ne 0 ]; then printf', "if false; then printf",
+     "p2", "mmap-holder-kept-fd"),
+    ("unreadable-ignored", "p3.sh", 'if [ "$e" -ne 0 ] || [ "$u" -ne 0 ]; then',
+     'if [ "$e" -ne 0 ]; then', "p3", "qualified"),
+    ("lazy-listing-ignored", "p3.sh", '"$PROBE_NEG") if [ "$r" -eq 1 ]',
+     '"$PROBE_NEG" | "$PROBE_SURV") if [ "$r" -eq 1 ]', "p3", "lazy-still-listed"),
     ("failed-rm-trusted", "p6.sh", 'if [ "$ok" -ne 1 ] || [ "$b" -lt 1 ]', "if false",
      "p6", "rm-failed"),
     ("unlanded-write-trusted", "p5.sh", 'if [ "$p" -eq 1 ]; then printf', "if true; then printf",
      "p5", "write-never-landed"),
     ("socket-fd-ignored", "p8.sh", 'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ] && [ "$f" -eq 0 ]',
      'if [ "$s" -eq 0 ] && [ "$b" -eq 0 ]', "p8", "inherited-socket-fd"),
+    ("queue-reading-ignored", "p8.sh", 'if [ "$q" -eq 0 ] && [ "$g" -eq 1 ]', 'if [ "$g" -eq 1 ]',
+     "p8", "zerobyte-queue-nonzero"),
 ]
+
+
+def assert_valid_output(run: subprocess.CompletedProcess[str], probe: str) -> list[str]:
+    """The run printed only ARM lines with known verdicts and one final PROBE
+    line, and exited 0 or 1: a crashed or shell-erroring script is not valid."""
+    lines = run.stdout.splitlines()
+    assert lines and run.returncode in (0, 1), (run.returncode, run.stderr)
+    assert lines[-1] in (f"PROBE {probe} QUALIFIED", f"PROBE {probe} MISMATCH")
+    arms = [line.split() for line in lines[:-1]]
+    assert all(len(a) == 3 and a[0] == "ARM" and a[2] in VERDICTS for a in arms)
+    return lines[:-1]
 
 
 @needs_sh
@@ -115,7 +145,9 @@ def test_blind_twin_is_caught_by_its_fixture(tmp_path: Path, blind: str, target:
     real = classify(PROBES / f"{probe}.sh", FIXTURES / probe / f"{case}.readings")
     weakened = classify(script, FIXTURES / probe / f"{case}.readings", lib=lib)
     assert real.stdout == expect
-    assert weakened.stdout != expect, f"blind twin {blind} reproduced the committed verdicts"
+    real_arms = assert_valid_output(real, probe)
+    weak_arms = assert_valid_output(weakened, probe)
+    assert weak_arms != real_arms, f"blind twin {blind} reproduced the committed verdicts"
 
 
 @needs_sh

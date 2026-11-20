@@ -5,6 +5,6 @@ rename fstype tmpfs
 rename nlink 2
 rename nlink 2
 hardlink fstype tmpfs
-hardlink nlink -1
+hardlink nlink 1234567890123456789
 fault fstype tmpfs
 fault nlink ERR

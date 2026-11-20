@@ -2,7 +2,7 @@ clean shared_ns 0
 clean socket_binds 0
 clean socket_fds 0
 sockbind shared_ns 0
-sockbind socket_binds 1
+sockbind socket_binds 2
 sockbind socket_fds 0
 hostnet shared_ns 1
 hostnet socket_binds 0
