@@ -65,7 +65,7 @@ def turn(world: dict[str, Any], role: str, mode: str = "healthy", *, session: st
         tail = [json.dumps(world["config"])]
     env = dict(os.environ, HOME=str(world["homes"][role]),
                FLOW_WAVE_MAILBOX_DIR=str(world["shared"]), FLOW_WAVE_REGISTRY_DIR=str(world["shared"]))
-    result = subprocess.run([sys.executable, "-I", str(world["scripts"] / "role_actor.py"), role, mode, *tail],
+    result = subprocess.run([sys.executable, "-I", str(world["scripts"] / "rehearsal_actor.py"), role, mode, *tail],
                             cwd=world["projects"][role], env=env, capture_output=True, text=True,
                             timeout=15, check=False)
     state = world["projects"][role] / ".rehearsal-state.json"

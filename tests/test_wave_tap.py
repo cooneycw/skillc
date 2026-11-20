@@ -38,6 +38,9 @@ class LocalHelperExecutor:
         for source in HELPERS.glob("*.sh"):
             dest = self.scripts / source.name
             shutil.copyfile(source, dest)
+            # A real install is root-owned 0755; the operation refuses a group- or
+            # world-writable helper, so the copy must not inherit a 0002 umask.
+            os.chmod(dest, 0o755)
             self.pins[source.name] = hashlib.sha256(dest.read_bytes()).hexdigest()
         self.stopped = False
         self.available = True
@@ -72,7 +75,7 @@ def boundary(tmp_path: Path) -> Iterator[Any]:
         tap.bind_channel(binding.role, channel)
         channel.start()
         try:
-            assert tap.assign(binding.role)
+            assert tap.assign(binding.role), tap.rows[-1]
             yield SimpleNamespace(binding=binding, executor=executor, tap=tap, endpoint=endpoint,
                                   channel=channel, socket=path)
         finally:

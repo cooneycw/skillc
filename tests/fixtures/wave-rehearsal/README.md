@@ -5,8 +5,10 @@ and final-capture delivery. It starts no model and makes no claim of full-path
 protocol coverage, hostile participant isolation, native wake or physical Docker
 qualification. No new runner/profile pin is selected here.
 
-`role_actor.py ROLE MODE INITIAL_JSON` starts a session; subsequent turns use
-`role_actor.py ROLE MODE resume SESSION LITERAL`. The initial JSON declares the
+`rehearsal_actor.py ROLE MODE INITIAL_JSON` starts a session; subsequent turns use
+`rehearsal_actor.py ROLE MODE resume SESSION LITERAL` (installed in the container as
+`role_actor.py`; the fixture file is named apart from `coordination-wave/role_actor.py`
+so mypy sees two modules). The initial JSON declares the
 wave and all three role bindings (attempt, task, generation, revision and nonce).
 The actor emits the parser's measured session header and scripted session metadata,
 keeps its session across resumes, and refuses a stale session before touching

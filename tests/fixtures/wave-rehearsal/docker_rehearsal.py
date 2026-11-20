@@ -37,7 +37,7 @@ class TappedWave(DockerWave):
     def __init__(self, *, helpers: Path, mode: str, **kwargs: Any) -> None:
         source = Path(__file__).resolve().parent
         self.executor = DockerHelperExecutor(None, helper_sources(helpers),
-            (source / "role_actor.py").read_bytes(), (source / "task.json").read_bytes())
+            (source / "rehearsal_actor.py").read_bytes(), (source / "task.json").read_bytes())
         self.specs = {role: {"attempt_id": kwargs["attempt_id"] + "-" + role,
             "task": "quote-" + role, "generation": 0, "revision": 1,
             "nonce": secrets.token_hex(16)} for role in ROLES}

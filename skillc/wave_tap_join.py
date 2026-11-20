@@ -20,7 +20,6 @@ from typing import Any
 from . import live_wave as lw
 from .git_snapshot import SafeTree, Unreadable
 
-
 #: What this diagnostic does to the primary verdict, stated in every report.
 VERDICT_EFFECT = "none (diagnostic only; #626 ruling 7039734091)"
 

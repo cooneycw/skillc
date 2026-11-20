@@ -187,7 +187,7 @@ def test_production_peer_gate_socket_drops_prevent_helper_and_completion(
         channel = DecideReplyChannel(path, lambda req: tap.request(endpoint, req), b.attempt_id)
         channel.set_peer_authorizer(lambda pid, uid, gid: peer_model.executor.peer_allowed(b.role, pid, uid, gid))
         tap.bind_channel(b.role, channel)
-        assert tap.assign(b.role)
+        assert tap.assign(b.role), tap.rows[-1]
         before = len(executor.calls)
         channel.start()
         try:
