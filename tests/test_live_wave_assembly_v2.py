@@ -7,7 +7,7 @@ on `freeze()` refusing version 2. The v1 control passes on both."""
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +15,45 @@ import pytest
 import task_protocol_fixture as tpf
 import test_wave_export as exported
 from test_live_wave_assembly import DIGEST, fixture
+from test_wave_wake import BASE, FILE, policy
 
 from skillc import live_wave_assembly as assembly
-from skillc import wave_wake_capture
+from skillc import wave_wake, wave_wake_capture
+from skillc.backend import ExecuteResult
 
 STEPS = [("integrator", "offer", 1, 100_000_000), ("worker", "offer", 1, 200_000_000),
          ("integrator", "ack", 2, 1_000_000_000), ("worker", "ack", 2, 1_100_000_000),
          ("worker", "complete", 3, 2_100_000_000), ("integrator", "complete", 3, 4_000_000_000)]
+
+
+def _rewake(source: Path, entries: dict[str, Any], row: dict[str, Any], origin_ns: int) -> None:
+    """Re-run the PR-A fixture's wake pokes into a capture that records its
+    origin (B8a), at a sibling root; the original capture stays catalogued."""
+    old = row["wake"]
+    root = old["root"] + "-origin"
+    base = wave_wake_capture.parse_context(old["context"])
+    context = wave_wake_capture.OriginContext(**asdict(base), origin_ns=origin_ns)
+    capture = wave_wake_capture.Capture(source / root, context, origin_ns / 1e9)
+    state = wave_wake.WakeState(replace(policy(), max_pokes=1), context.roles)
+    state.journal = lambda event: capture.append(dict(event))
+    bindings = row["plan"]["roles"]
+    for binding in bindings:
+        state.ended(binding["role"], binding["session_id"], ExecuteResult("exited", 0), BASE, 0)
+    for binding in bindings:
+        poke = state.offer(binding["role"], FILE, 1)
+        assert poke is not None
+        assert state.dispatch(poke, FILE, current_role=binding["role"],
+                              current_session=binding["session_id"], idle=True, live=True, now=1)
+    for binding in bindings:
+        state.ended(binding["role"], binding["session_id"], ExecuteResult("exited", 0), FILE, 5)
+    reference = capture.seal("STOPPED", [{"role": b["role"], "session_id": b["session_id"]}
+                                          for b in bindings])
+    for name in (root, root + "/objects"):
+        entries[name] = {"kind": "directory", "mode": 0o700}
+    obj = root + "/objects/" + reference.digest[7:]
+    data = (source / obj).read_bytes()
+    entries[obj] = {"kind": "file", "mode": 0o400, "bytes": len(data), "sha256": exported.sha(data)}
+    row["wake"] = {"root": root, "reference": asdict(reference), "context": asdict(context)}
 
 
 def _to_v2(steps: list[Any] = STEPS, *, keep_v1_protocol: bool = False,
@@ -58,6 +90,8 @@ def _to_v2(steps: list[Any] = STEPS, *, keep_v1_protocol: bool = False,
                 built = tpf.build(source.parent / f"unused-{index}", plan,
                                   catalogue["declaration_digest"], DIGEST, [],
                                   unbound=[r.role for r in plan.roles])
+            if row["wake"] is not None:
+                _rewake(source, entries, row, built.inventory.clock_origin_ns)
             wake = (wave_wake_capture.parse_context(row["wake"]["context"])
                     if row["wake"] is not None else None)
             row["protocol_v2"] = {

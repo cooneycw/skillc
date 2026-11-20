@@ -86,9 +86,43 @@ class Context:
     def digest(self) -> str:
         return _hash(_json(asdict(self)))
 
+    @property
+    def clock_origin_ns(self) -> int | None:
+        """The original six-field context records no origin, so it joins no
+        task-protocol clock (#620 PR-B, B8a)."""
+        return None
+
+
+@dataclass(frozen=True)
+class OriginContext(Context):
+    """#622 / #620 PR-B B8a: a context that also records the wave's ONE
+    monotonic origin in integer ns, so the sealed capture proves its own clock
+    join. A separate closed shape: the original six fields stay exactly as
+    they were, and their digests are unchanged."""
+
+    origin_ns: int
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if type(self.origin_ns) is not int or self.origin_ns < 0:
+            raise CaptureUnavailable('integer capture origin required')
+
+    @property
+    def clock_origin_ns(self) -> int | None:
+        return self.origin_ns
+
+
+_BASE_FIELDS = set(Context.__dataclass_fields__)
+_ORIGIN_FIELDS = set(OriginContext.__dataclass_fields__)
+
 
 def parse_context(value: object) -> Context:
-    row = _object(value, set(Context.__dataclass_fields__))
+    """Exactly two closed shapes: the original six keys, or those plus an
+    integer `origin_ns`. A missing, extra or null field is refused."""
+    if type(value) is dict and set(value) == _ORIGIN_FIELDS:
+        assert isinstance(value, dict)
+        return OriginContext(**{**value, 'roles': ww._roles(value['roles'])})
+    row = _object(value, _BASE_FIELDS)
     return Context(**{**row, 'roles': ww._roles(row['roles'])})
 
 
@@ -140,10 +174,13 @@ class Capture:
     """Single-use private writer. Each transition is fsynced before dispatch."""
 
     def __init__(self, root: Path, context: Context, origin: float) -> None:
-        if not isinstance(root, Path) or type(context) is not Context:
+        if not isinstance(root, Path) or type(context) not in (Context, OriginContext):
             raise CaptureUnavailable('owned capture root/context required')
         self.context = parse_context(asdict(context))
         self.origin = ww._time(origin)
+        recorded = self.context.clock_origin_ns
+        if recorded is not None and round(self.origin * 1e9) != recorded:
+            raise CaptureUnavailable('capture origin differs from its recorded context origin')
         self.root = root
         self.count = self.size = 0
         self.previous = ZERO
@@ -375,7 +412,9 @@ def _decode(raw: bytes, ref: Reference, expected: Context) -> dict[str, Any]:
 def verify(root: object, reference: object, expected: object) -> dict[str, Any]:
     """Expected reference/context come from the trusted caller, never a report."""
     try:
-        if not isinstance(root, Path) or type(reference) is not Reference or type(expected) is not Context:
+        if (not isinstance(root, Path) or type(reference) is not Reference
+                or not isinstance(expected, Context)
+                or type(expected) not in (Context, OriginContext)):
             raise CaptureUnavailable('independently held capture binding required')
         reference = parse_reference(asdict(reference))
         expected = parse_context(asdict(expected))

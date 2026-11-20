@@ -516,8 +516,12 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
 
     try:
         marker = wave.deadline.marker(wave.attempt_id)
-        context = custody.Context(wave.attempt_id, bound.approved_digest, policy.digest, roles,
-                                  'sha256:' + marker['budget_id'], declaration['clock'])
+        # The capture records the wave's one origin so it proves its own clock
+        # join (#620 PR-B, B8a); B8b sets that origin from the inventory.
+        context = custody.OriginContext(
+            wave.attempt_id, bound.approved_digest, policy.digest, roles,
+            'sha256:' + marker['budget_id'], declaration['clock'],
+            origin_ns=round(wave.deadline.start * 1e9))
         wave.wake_capture_context = context
         capture = custody.Capture(wave.root / 'wake-capture', context, wave.deadline.start)
 

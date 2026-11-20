@@ -190,8 +190,9 @@ def test_a_journal_bound_to_something_else_projects_nothing(tmp_path: Path, chan
 def test_the_clock_join_must_match_every_held_binding(tmp_path: Path, join: str) -> None:
     plan = tpf.plan_of(ROLES)
     built = tpf.build(tmp_path / "j", plan, DECL, DEADLINE, HEALTHY)
-    wake = wave_wake_capture.Context(plan.wave_id, DECL, "sha256:" + "f" * 64, ROLES, DEADLINE,
-                                     "monotonic")
+    wake = wave_wake_capture.OriginContext(plan.wave_id, DECL, "sha256:" + "f" * 64, ROLES,
+                                           DEADLINE, "monotonic",
+                                           origin_ns=built.inventory.clock_origin_ns)
     good = _join(built, wake)
     assert _adapt(built, plan, join=good, wake=wake)["status"] == "CAPTURED"
     bad: Any = {"missing": None, "inventory": replace(good, inventory_digest="sha256:" + "0" * 64),
