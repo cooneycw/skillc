@@ -178,8 +178,8 @@ class Context:
         _require(self.clock == "monotonic-ns", "controller monotonic clock required")
         _require(type(self.limits) is dict and set(self.limits) == set(DEFAULT_LIMITS),
                  "complete declared limits required")
-        for key, value in self.limits.items():
-            _int(value, 1, _LIMIT_CEILING[key])
+        for limit_name, limit_value in self.limits.items():
+            _int(limit_value, 1, _LIMIT_CEILING[limit_name])
         _require(self.limits["closure_reserve_records"] < self.limits["max_records"]
                  and self.limits["closure_reserve_bytes"] < self.limits["max_bytes"],
                  "closure reserve must leave capacity")
