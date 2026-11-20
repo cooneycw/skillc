@@ -440,8 +440,8 @@ def test_step_capture_returns_a_failing_step_status_under_errexit(tmp_path: Path
                                                                   shell: str) -> None:
     """The regression case from stage 1: under `sh -e` (dash), a step that
     fails must return its own status, not 125."""
-    run = subprocess.run([shell, "-eu", "-c", '. "$1"; rc=0; step_capture "$2" sh -c "exit 7"'
-                          ' || rc=$?; echo "rc=$rc"', shell, str(LIB), str(tmp_path / "e.err")],
+    script = '. "$1"; rc=0; step_capture "$2" sh -c "exit 7" || rc=$?; echo "rc=$rc"'
+    run = subprocess.run([shell, "-eu", "-c", script, shell, str(LIB), str(tmp_path / "e.err")],
                          capture_output=True, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
                          check=False, timeout=30)
     assert (run.returncode, run.stdout, run.stderr) == (0, b"rc=7\n", b"")
