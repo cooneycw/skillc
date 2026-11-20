@@ -19,7 +19,7 @@ import socket
 import tempfile
 import traceback
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -49,13 +49,13 @@ def _bytes(value: bytes | str) -> bytes:
     return value if isinstance(value, bytes) else value.encode("utf-8", "surrogateescape")
 
 
-def scan(surfaces: dict[str, bytes | str], needles: list[str]) -> list[tuple[str, str]]:
+def scan(surfaces: Mapping[str, bytes | str], needles: Sequence[str]) -> list[tuple[str, str]]:
     """Every (surface, needle) where the needle's bytes occur in the surface."""
     return [(name, needle) for name, surface in surfaces.items() for needle in needles
             if needle.encode() in _bytes(surface)]
 
 
-def planted(needles: list[str], inputs: list[bytes | str]) -> None:
+def planted(needles: Sequence[str], inputs: Sequence[bytes | str]) -> None:
     """A canary that never reached the component cannot show it is clean."""
     missing = [n for n in needles if not any(n.encode() in _bytes(i) for i in inputs)]
     assert not missing, f"canaries never planted: {missing}"
@@ -197,8 +197,10 @@ def _hostile(world: _World) -> tuple[list[str], list[bytes], list[bytes]]:
     # A request from the other sandbox on this endpoint, and honest traffic.
     receipts.append(world.send("worker", b'{"version":1,"op":"offer","request":9}\n',
                                as_role="integrator"))
-    for raw in (b'{"version":1,"op":"offer","request":10}', b'{"version":1,"op":"ack",'
-                b'"offer_id":"offer-integrator","request":11}'):
+    honest = [b'{"version":1,"op":"offer","request":10}',
+              (b'{"version":1,"op":"ack",'
+               b'"offer_id":"offer-integrator","request":11}')]
+    for raw in honest:
         receipts.append(world.send("integrator", raw + b"\n"))
     return list(c.values()), inputs, receipts
 
