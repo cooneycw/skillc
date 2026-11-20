@@ -450,14 +450,21 @@ class _Parser:
             if value[:1] not in {'"', "'"} and _key_split(_strip_comment(value)):
                 if not self.contracts:
                     raise _unsupported(lineno, "a list of mappings")
-                # #720: `- key: value` opens a mapping whose keys sit two columns
-                # right of the dash. Re-indent this one line in place and read the
-                # mapping at that column; it ends at the next item or a dedent.
-                self.lines[i] = " " * (ind + 2) + value
+                # #720: `- key: value` opens a mapping. Its keys sit at the column
+                # of the first key - the dash, plus the dash, plus the spaces
+                # after it (#739: assuming two columns silently repaired a
+                # mis-aligned `-   id:` that YAML rejects). Re-indent this one
+                # line in place and read the mapping at that column; it ends at
+                # the next item or a dedent.
+                gap = text[1:len(text) - len(text[1:].lstrip())]
+                if "\t" in gap:
+                    raise _unsupported(lineno, "a tab after a list dash")
+                column = ind + len(gap) + 1
+                self.lines[i] = " " * column + value
                 # The depth carries through (counter-model review): restarting it
                 # let alternating list/mapping nesting pass MAX_DEPTH and recurse
                 # until RecursionError aborted the whole scan.
-                item, i = self.mapping(i, ind + 2, depth + 1)
+                item, i = self.mapping(i, column, depth + 1)
                 items.append(item)
                 continue
             if self.contracts and value[:1] == "[":

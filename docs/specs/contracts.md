@@ -90,7 +90,8 @@ The block uses the same small YAML subset as skill frontmatter
 ([docs/frontmatter.md](../frontmatter.md)), **plus** two shapes that SKILL.md
 frontmatter still refuses:
 
-- **a list of mappings** (`- id: a` with the clause's keys under it);
+- **a list of mappings** (`- id: a` with the clause's keys under it, lined up
+  under the first key as YAML requires - #739);
 - **a one-line flow list of scalars** (`[a, b, "c"]`).
 
 Anything else is refused by name as `contract-shape`, never silently misread. That
@@ -119,7 +120,7 @@ contract's `version:`.
 
 | Rule | Severity | Reports BAD when | Committed bad cases (`controls/<rule>/bad/`) |
 |---|---|---|---|
-| `contract-shape` | error (parser rule) | the block does not parse or uses unsupported YAML; a required field is missing; an unknown field; a field of the wrong type; a duplicate contract name or clause id (the intent's id counts as a clause id, #749); a missing or dangling `subject:` | `unparseable`, `no-intent`, `wrapped-plain-scalar`, `unknown-field`, `duplicate-provider`, `subject-missing`, `subject-dangling`, `intent-id-collision` |
+| `contract-shape` | error (parser rule) | the block does not parse or uses unsupported YAML; a required field is missing; an unknown field; a field of the wrong type; a duplicate contract name or clause id (the intent's id counts as a clause id, #749); a missing or dangling `subject:` | `unparseable`, `no-intent`, `wrapped-plain-scalar`, `dash-spacing`, `unknown-field`, `duplicate-provider`, `subject-missing`, `subject-dangling`, `intent-id-collision` |
 | `clause-backed` | error | a clause has no `test`; a test path does not exist; a brace expansion yields a missing path; more than one brace group; a path outside the collection | `no-test`, `missing-path`, `brace-one-missing`, `two-brace-groups` |
 | `negative-backed` | error | a `never` or `authority` clause names no test path with a `bad` segment | `never-good-only`, `authority-good-only` |
 | `handoff-bilateral` | error | a `consumes` names a clause no contract `provides` | `nothing-provides` |
@@ -168,7 +169,7 @@ examined.
 | `0` | every contract is clean (warnings allowed) |
 | `1` | at least one error finding |
 | `2` | usage error: the collection directory does not exist |
-| `3` | **none declared**: no `CHARTER.md` under the collection, so nothing was checked. Never `0`: an empty population is not a clean one |
+| `3` | **none declared**: no `CHARTER.md` under the collection, and every directory was read, so nothing was checked. Never `0`: an empty population is not a clean one. A directory discovery could not read makes the run `1` instead, even with no contract found: an unexamined collection is not an empty one (#739) |
 
 Run on CPP at `3ed254698f3e` (34 SKILL.md files, no CHARTER.md yet), it prints
 `CONTRACTS: none declared` and exits 3.

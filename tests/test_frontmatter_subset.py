@@ -77,6 +77,37 @@ def test_a_flow_list_a_yaml_loader_rejects_is_refused_too(doc: str) -> None:
         parse_contract_block(doc)
 
 
+@pytest.mark.parametrize("doc", [
+    "---\nk:\n  -   id: a\n    t: x\n---\n",          # keys two right of the dash, not under `id`
+    "---\nk:\n  -  id: a\n      t: x\n  - id: b\n---\n",  # one column past `id`
+])
+def test_a_mis_aligned_list_mapping_a_yaml_loader_rejects_is_refused_too(doc: str) -> None:
+    """#739: the parser assumed a `- key:` item's keys sit two columns right of
+    the dash, silently repairing spacing PyYAML rejects."""
+    yaml = pytest.importorskip("yaml")
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load(doc.split("---\n")[1])
+    with pytest.raises(FrontmatterError):
+        parse_contract_block(doc)
+
+
+def test_a_tab_after_a_list_dash_is_refused_by_name() -> None:
+    with pytest.raises(FrontmatterError, match="a tab after a list dash"):
+        parse_contract_block("---\nk:\n  - \tid: a\n---\n")
+
+
+@pytest.mark.parametrize(("doc", "expected"), [
+    ("---\nk:\n  -   id: a\n      t: x\n---\n", [{"id": "a", "t": "x"}]),
+    ("---\nk:\n  -  id: a\n     t: x\n  - id: b\n    t: y\n---\n", [{"id": "a", "t": "x"}, {"id": "b", "t": "y"}]),
+])
+def test_an_aligned_wide_dash_list_mapping_both_parsers_accept_reads_the_same(
+    doc: str, expected: list[dict[str, str]],
+) -> None:
+    yaml = pytest.importorskip("yaml")
+    assert yaml.safe_load(doc.split("---\n")[1])["k"] == expected
+    assert parse_contract_block(doc)[0]["k"] == expected
+
+
 @pytest.mark.parametrize(("doc", "expected"), [
     ("---\nk: [a, b]  # note\n---\n", ["a", "b"]),
     ('---\nk: ["a", \'b\']\n---\n', ["a", "b"]),
