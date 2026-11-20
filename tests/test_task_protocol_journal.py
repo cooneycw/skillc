@@ -387,3 +387,48 @@ def test_verify_refuses_bindings_not_held_by_the_caller(tmp_path: Path) -> None:
     assert tj.verify(str(tmp_path), reference, CONTEXT)["status"] == "UNKNOWN"
     assert tj.verify(tmp_path, {}, CONTEXT)["status"] == "UNKNOWN"
     assert tj.verify(tmp_path, reference, CONTEXT.fields())["status"] == "UNKNOWN"
+
+
+def test_transact_records_at_the_elapsed_reading_it_decided_on(tmp_path: Path) -> None:
+    journal = _write(tmp_path / "j")
+    seen: list[tuple[int, bool]] = []
+
+    def decide(elapsed: int, fenced: bool) -> tuple[str, dict[str, Any], str]:
+        seen.append((elapsed, fenced))
+        return "fence", {"reason": "closure"}, "extra"
+
+    assert journal.transact(decide) == (2, INPUTS["clock_step_ns"], "extra")
+    assert seen == [(INPUTS["clock_step_ns"], False)]
+    fenced: list[bool] = []
+
+    def after(elapsed: int, is_fenced: bool) -> tuple[str, dict[str, Any], None]:
+        fenced.append(is_fenced)
+        return "rejection", {"principal": None, "reason": "fenced", "length": 1,
+                             "content_digest": "sha256:" + "3" * 64}, None
+
+    journal.transact(after)
+    assert fenced == [True]
+
+
+def test_transact_writes_nothing_when_the_decision_raises_or_names_a_writer_kind(
+        tmp_path: Path) -> None:
+    journal = _write(tmp_path / "j")
+
+    def broken(elapsed: int, fenced: bool) -> tuple[str, dict[str, Any], None]:
+        raise ValueError("decision failed")
+
+    with pytest.raises(ValueError):
+        journal.transact(broken)
+    with pytest.raises(JournalUnavailable):
+        journal.transact(lambda e, f: ("capture-seal", {}, None))
+    assert journal.append("fence", reason="closure")[0] == 2
+
+
+def test_a_backwards_clock_poisons_the_journal(tmp_path: Path) -> None:
+    values = iter([1000, 1100, 1050, 1200])
+    journal = _write(tmp_path / "j", clock_ns=lambda: next(values))
+    journal.append("fence", reason="closure")
+    with pytest.raises(JournalUnavailable, match="backwards"):
+        journal.transact(lambda e, f: ("fence", {"reason": "closure"}, None))
+    with pytest.raises(JournalUnavailable, match="poisoned"):
+        journal.append("fence", reason="closure")
