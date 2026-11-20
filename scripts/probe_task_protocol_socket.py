@@ -10,9 +10,13 @@ which does not exist yet; it qualifies what the kernel and daemon do.
   controller-mounted socket and cannot replace, rename or add to it. Both mount
   shapes are measured, because the shape is an open owner decision: the socket
   FILE bound read-only (`file`) and its parent DIRECTORY bound read-only (`dir`).
-- F2 `peercred`: `SO_PEERCRED` plus the peer's PID-namespace inode identifies
-  the owned sandbox, and does NOT identify a host process or a second sandbox
-  running under the same candidate uid.
+- F2 `peercred`: from `SO_PEERCRED`'s pid, the controller identifies the owned
+  sandbox, and does NOT identify a host process or a second sandbox running
+  under the same candidate uid. Two bases are reported separately: the peer's
+  PID-namespace inode (needs ptrace-level access to another uid's /proc, so a
+  root controller) and its cgroup v2 membership under the systemd driver
+  (world-readable). A start-time check around every read refuses a pid that
+  exited or was reused. A uid never identifies on its own.
 - F1 recreate (`recreate:file`, `recreate:dir`): the host unlinks and re-binds
   a lease socket while the sandbox lives. This is a characterization, not a
   gate: it reports `reaches-new` or `dead-end` per shape, because a single-file
@@ -56,6 +60,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import socket
@@ -190,52 +195,112 @@ def _peer(reading: object) -> dict[str, Any] | None:
         return None
     if not all(_int(reading.get(k)) for k in ("pid", "uid", "gid")):
         return None
-    ns, stable = reading.get("ns_inode"), reading.get("start_stable")
+    ns, cgroup, stable = reading.get("ns_inode"), reading.get("cgroup"), reading.get("start_stable")
     if ns is not None and not _int(ns):
+        return None
+    if cgroup is not None and not isinstance(cgroup, str):
         return None
     if stable is not None and not _is_bool(stable):
         return None
-    return dict(reading)
+    return {**reading, "ns_inode": ns, "cgroup": cgroup, "start_stable": stable}
 
 
-def identify(peer: Mapping[str, Any], owned_ns: int, uid: int, gid: int) -> str:
-    """'yes', 'no' or 'unknown': the peer is the owned sandbox only when its
-    kernel credentials carry the candidate identity AND its PID namespace is
-    the owned container's, with a stable start time across the probe. A
-    matching uid alone is never identity."""
-    if peer["pid"] <= 0 or peer["ns_inode"] is None or peer["start_stable"] is not True:
+_SCOPE = re.compile(r"docker-([0-9a-f]{64})\.scope")
+
+
+def container_of(cgroup: object) -> str | None:
+    """The container id in a cgroup v2 file under the systemd driver, `""`
+    for a readable v2 file in no docker scope, or None when unreadable or in
+    any other layout (cgroupfs, v1, hybrid). Only the first form identifies."""
+    if not isinstance(cgroup, str):
+        return None
+    lines = cgroup.splitlines()
+    if len(lines) != 1 or not lines[0].startswith("0::/"):
+        return None
+    found = [m.group(1) for part in lines[0][4:].split("/") if (m := _SCOPE.fullmatch(part))]
+    if len(found) > 1 or (not found and "/docker" in lines[0]):
+        return None
+    return found[0] if found else ""
+
+
+def identify_ns(peer: Mapping[str, Any], owned: object, uid: int, gid: int) -> str:
+    """'yes', 'no' or 'unknown' on the PID-namespace basis."""
+    if (not _int(owned) or peer["pid"] <= 0 or peer["ns_inode"] is None
+            or peer["start_stable"] is not True):
         return "unknown"
-    if peer["ns_inode"] != owned_ns:
+    if peer["ns_inode"] != owned:
         return "no"
     return "yes" if (peer["uid"], peer["gid"]) == (uid, gid) else "no"
 
 
-def classify_f2(reading: object) -> dict[str, Any]:
-    """Control FIRST: a host process must not identify. Then the owned
-    sandbox must identify and a same-uid second sandbox must not."""
-    if not isinstance(reading, Mapping):
-        return _verdict(NOT_COVERED, ["reading-unreadable"])
-    owned, uid, gid = reading.get("owned_ns_inode"), reading.get("uid"), reading.get("gid")
-    host, own, sibling = (_peer(reading.get(k))
-                          for k in ("host_peer", "owned_peer", "sibling_peer"))
-    if not (_int(owned) and _int(uid) and _int(gid)) or None in (host, own, sibling):
-        return _verdict(NOT_COVERED, ["reading-unreadable"])
-    assert host is not None and own is not None and sibling is not None
-    seen = identify(host, owned, uid, gid)
+def identify_cgroup(peer: Mapping[str, Any], owned: object, uid: int, gid: int) -> str:
+    """'yes', 'no' or 'unknown' on the cgroup-membership basis. `owned` is
+    the owned container's id, already confirmed against its init process."""
+    if not isinstance(owned, str) or peer["pid"] <= 0 or peer["start_stable"] is not True:
+        return "unknown"
+    found = container_of(peer["cgroup"])
+    if found is None:
+        return "unknown"
+    if found != owned:
+        return "no"
+    return "yes" if (peer["uid"], peer["gid"]) == (uid, gid) else "no"
+
+
+def _basis(identify_fn: Callable[[Mapping[str, Any], object, int, int], str], owned: object,
+           peers: Mapping[str, Mapping[str, Any]], uid: int, gid: int) -> dict[str, Any]:
+    """One basis: its own control (a host process must read 'no'), then the
+    owned sandbox must read 'yes' and the same-uid sibling 'no'."""
+    seen = identify_fn(peers["host"], owned, uid, gid)
     control = _verdict(HOLDS if seen == "no" else NOT_COVERED,
                        [] if seen == "no" else ["control-blind:host-peer-" + seen])
     if control["verdict"] != HOLDS:
         return {**control, "control": control}
     reasons = []
-    for name, peer, expected in (("owned", own, "yes"), ("sibling", sibling, "no")):
-        got = identify(peer, owned, uid, gid)
+    for name, expected in (("owned", "yes"), ("sibling", "no")):
+        got = identify_fn(peers[name], owned, uid, gid)
         if got == "unknown":
             return {**_verdict(NOT_COVERED, [name + "-peer-unknown"]), "control": control}
         if got != expected:
             reasons.append(f"{name}-peer-identified-{got}")
-    if own["uid"] != uid or own["gid"] != gid:
+    if (peers["owned"]["uid"], peers["owned"]["gid"]) != (uid, gid):
         reasons.append("owned-peer-credentials-mapped")
     return {**_verdict(FAILS if reasons else HOLDS, reasons), "control": control}
+
+
+def classify_f2(reading: object) -> dict[str, Any]:
+    """Two bases, reported separately: the peer's PID-namespace inode (needs
+    ptrace-level access to another uid's /proc entries) and its cgroup v2
+    membership (world-readable). The fact holds only if a READABLE basis
+    discriminates; if no basis is readable it is not covered; if any readable
+    basis fails, including a disagreement, it fails. A uid never suffices."""
+    if not isinstance(reading, Mapping):
+        return _verdict(NOT_COVERED, ["reading-unreadable"])
+    uid, gid = reading.get("uid"), reading.get("gid")
+    peers = {k: _peer(reading.get(k + "_peer")) for k in ("host", "owned", "sibling")}
+    if not (_int(uid) and _int(gid)) or any(v is None for v in peers.values()):
+        return _verdict(NOT_COVERED, ["reading-unreadable"])
+    assert isinstance(uid, int) and isinstance(gid, int)
+    checked = {k: v for k, v in peers.items() if v is not None}
+    owned_id = reading.get("owned_id")
+    init = container_of(reading.get("owned_init_cgroup"))
+    cgroup_owned = owned_id if isinstance(owned_id, str) and init == owned_id else None
+    bases = {"ns": _basis(identify_ns, reading.get("owned_ns_inode"), checked, uid, gid),
+             "cgroup": _basis(identify_cgroup, cgroup_owned, checked, uid, gid)}
+    if cgroup_owned is None:
+        bases["cgroup"] = {**_verdict(NOT_COVERED, ["owned-container-not-in-docker-scope"]),
+                           "control": _verdict(NOT_COVERED, ["control-unreadable"])}
+    verdicts = [b["verdict"] for b in bases.values()]
+    if FAILS in verdicts:
+        outcome = _verdict(FAILS, [f"{k}:{r}" for k, b in bases.items() for r in b["reasons"]
+                                   if b["verdict"] == FAILS])
+    elif HOLDS in verdicts:
+        outcome = _verdict(HOLDS, [])
+    else:
+        outcome = _verdict(NOT_COVERED, [f"{k}:{r}" for k, b in bases.items()
+                                         for r in b["reasons"]])
+    control = _verdict(HOLDS if any(b["control"]["verdict"] == HOLDS for b in bases.values())
+                       else NOT_COVERED, [])
+    return {**outcome, "bases": bases, "control": control}
 
 
 def _is_within(path: str, root: str) -> bool:
@@ -474,6 +539,14 @@ print(json.dumps(out, sort_keys=True))
 '''
 
 
+def read_cgroup(pid: int) -> str | None:
+    try:
+        with open(f"/proc/{pid}/cgroup") as stream:
+            return stream.read(4096)
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 class Listener:
     """One host-side endpoint. Replies with its tag, and records each peer's
     kernel credentials, PID-namespace inode and start-time stability, all read
@@ -502,7 +575,7 @@ class Listener:
         while not self.stop.is_set():
             try:
                 conn, _ = self.sock.accept()
-            except (TimeoutError, socket.timeout):
+            except TimeoutError:
                 continue
             except OSError:
                 return
@@ -516,11 +589,15 @@ class Listener:
                         ns: int | None = os.stat(f"/proc/{pid}/ns/pid").st_ino
                     except OSError:
                         ns = None
+                    cgroup = read_cgroup(pid)
                     conn.recv(256)
                     after = self._start(pid)
+                    # A pid that exited or was reused between SO_PEERCRED and
+                    # these reads changes or loses its start time.
                     stable = None if before is None or after is None else before == after
                     self.peers.append({"pid": pid, "uid": uid, "gid": gid, "ns_inode": ns,
-                                       "start_stable": stable})
+                                       "cgroup": cgroup, "start_before": before,
+                                       "start_after": after, "start_stable": stable})
                     conn.sendall(self.tag.encode() + b"\n")
                 except OSError:
                     continue
@@ -715,10 +792,19 @@ def measure_peercred(docker: Docker) -> dict[str, Any]:
         if owned is None or sibling is None:
             return reading
         pid = docker.call("inspect", "--format", "{{.State.Pid}}", owned)
+        ident = docker.call("inspect", "--format", "{{.Id}}", owned)
+        sibling_ident = docker.call("inspect", "--format", "{{.Id}}", sibling)
+        reading["owned_id"] = ident.strip() if ident else None
+        reading["sibling_id"] = sibling_ident.strip() if sibling_ident else None
         try:
-            reading["owned_ns_inode"] = os.stat(f"/proc/{int(pid or '0')}/ns/pid").st_ino
-        except (OSError, ValueError):
+            init = int(pid or "0")
+        except ValueError:
+            init = 0
+        try:
+            reading["owned_ns_inode"] = os.stat(f"/proc/{init}/ns/pid").st_ino if init else None
+        except OSError:
             reading["owned_ns_inode"] = None
+        reading["owned_init_cgroup"] = read_cgroup(init) if init > 0 else None
         cfg = {"socket": TARGET_SOCKET, "mount_target": TARGET_SOCKET, "attempts": False}
         for key, run in (("host_peer", lambda: _host_ping(lease_dir / "channel.sock")),
                          ("owned_peer", lambda: docker.exec_json(owned, cfg)),
@@ -734,10 +820,10 @@ def measure_peercred(docker: Docker) -> dict[str, Any]:
 def _host_ping(path: Path) -> str | None:
     """A separate host process, so its PID is not this probe's."""
     try:
-        done = subprocess.run([sys.executable, "-I", "-S", "-c",
-                               "import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(5);"
-                               "s.connect(sys.argv[1]);s.sendall(b'ping\\n');"
-                               "print(s.recv(64).decode().strip())", str(path)],
+        code = ("import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(5);"
+                "s.connect(sys.argv[1]);s.sendall(b'ping\\n');"
+                "print(s.recv(64).decode().strip())")
+        done = subprocess.run([sys.executable, "-I", "-S", "-c", code, str(path)],
                               capture_output=True, text=True, timeout=30, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return None

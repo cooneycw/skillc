@@ -52,6 +52,10 @@ def test_the_committed_cases_cover_every_outcome_for_every_fact() -> None:
     assert by_fact["environment"] == {probe.HOLDS, probe.NOT_COVERED}
     for fact in ("ro-mount", "peercred", "exclusive"):
         assert by_fact[fact] == gated, fact
+    peercred = [c for c in _cases() if c["fact"] == "peercred"]
+    for basis in ("ns", "cgroup"):
+        assert {probe.classify("peercred", c["readings"])["bases"][basis]["verdict"]
+                for c in peercred if "bases" in probe.classify("peercred", c["readings"])} == gated
     assert by_fact["recreate"] == {probe.REACHES_NEW, probe.DEAD_END, probe.NOT_COVERED}
 
 
@@ -86,12 +90,57 @@ def test_a_constant_classifier_disagrees(monkeypatch: pytest.MonkeyPatch, consta
 
 def test_a_uid_only_identifier_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
     """The named F2 red case: a peer sharing the candidate uid must not
-    identify as the owned sandbox."""
-    def uid_only(peer: dict[str, Any], _ns: int, uid: int, gid: int) -> str:
+    identify as the owned sandbox, on either basis."""
+    def uid_only(peer: dict[str, Any], _owned: object, uid: int, gid: int) -> str:
         return "yes" if (peer["uid"], peer["gid"]) == (uid, gid) else "no"
 
-    monkeypatch.setattr(probe, "identify", uid_only)
-    assert {"peercred-healthy", "peercred-host-peer-with-candidate-uid"} <= _disagreements()
+    monkeypatch.setattr(probe, "identify_ns", uid_only)
+    monkeypatch.setattr(probe, "identify_cgroup", uid_only)
+    assert {"peercred-healthy", "peercred-cgroup-only-healthy",
+            "peercred-host-peer-with-candidate-uid"} <= _disagreements()
+
+
+def test_a_cgroup_basis_that_trusts_any_docker_scope_is_caught(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    def any_scope(peer: dict[str, Any], _owned: object, _uid: int, _gid: int) -> str:
+        found = probe.container_of(peer["cgroup"])
+        return "unknown" if found is None else ("yes" if found else "no")
+
+    monkeypatch.setattr(probe, "identify_cgroup", any_scope)
+    assert "peercred-cgroup-only-healthy" in _disagreements()
+
+
+def test_a_cgroup_basis_blind_to_pid_reuse_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The PID-reuse race: a peer whose start time changed must not identify."""
+    real = probe.identify_cgroup
+
+    def no_start_check(peer: dict[str, Any], owned: object, uid: int, gid: int) -> str:
+        return real({**peer, "start_stable": True}, owned, uid, gid)
+
+    monkeypatch.setattr(probe, "identify_cgroup", no_start_check)
+    assert "peercred-pid-reused-before-read" in _disagreements()
+
+
+def test_a_layout_reader_that_accepts_cgroupfs_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    real = probe.container_of
+
+    def lenient(cgroup: object) -> str | None:
+        if isinstance(cgroup, str) and cgroup.startswith("0::/docker/"):
+            return cgroup.strip().rsplit("/", 1)[1]
+        return real(cgroup)
+
+    monkeypatch.setattr(probe, "container_of", lenient)
+    assert "peercred-cgroupfs-layout" in _disagreements()
+
+
+def test_the_container_of_reader() -> None:
+    a = "a" * 64
+    assert probe.container_of(f"0::/system.slice/docker-{a}.scope\n") == a
+    assert probe.container_of("0::/user.slice/user-999.slice/session-1.scope\n") == ""
+    assert probe.container_of(f"0::/docker/{a}\n") is None
+    assert probe.container_of(f"12:pids:/docker/{a}\n1:name=systemd:/docker/{a}\n") is None
+    assert probe.container_of(f"0::/system.slice/docker-{a}.scope/docker-{a}.scope\n") is None
+    assert probe.container_of(None) is None and probe.container_of("") is None
 
 
 def test_an_audit_that_accepts_everything_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:

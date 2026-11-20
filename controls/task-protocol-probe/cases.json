@@ -1068,6 +1068,561 @@
  },
  {
   "expect": "holds",
+  "fact": "peercred",
+  "name": "peercred-cgroup-only-healthy",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "peercred",
+  "name": "peercred-both-bases-healthy",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-no-basis-readable",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": null,
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": null,
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": null,
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": null,
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "peercred",
+  "name": "peercred-owned-cgroup-names-sibling",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "peercred",
+  "name": "peercred-sibling-cgroup-names-owned",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-cgroupfs-layout",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/docker/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/docker/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/docker/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-cgroup-v1-layout",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "12:pids:/docker/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n1:name=systemd:/docker/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-owned-cgroup-unreadable",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": null,
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-pid-exited-before-read",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": null,
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": null,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-pid-reused-before-read",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": false,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "peercred",
+  "name": "peercred-bases-disagree",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 1000,
+    "ns_inode": 4026531836,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "holds",
+  "fact": "peercred",
+  "name": "peercred-ns-control-blind-cgroup-holds",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 1000,
+    "ns_inode": 4026532001,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 1000
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": 4026532001,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": 4026532001,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": 4026532101,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-cgroup-control-blind",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "fails",
+  "fact": "peercred",
+  "name": "peercred-cgroup-uid-remapped",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 231072,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 231072
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "not-covered",
+  "fact": "peercred",
+  "name": "peercred-owned-id-differs-from-init",
+  "readings": {
+   "gid": 10001,
+   "host_peer": {
+    "cgroup": "0::/user.slice/user-999.slice/session-1.scope\n",
+    "gid": 999,
+    "ns_inode": null,
+    "pid": 812,
+    "start_stable": true,
+    "uid": 999
+   },
+   "owned_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "owned_init_cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+   "owned_ns_inode": null,
+   "owned_peer": {
+    "cgroup": "0::/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9001,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "sibling_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sibling_peer": {
+    "cgroup": "0::/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope\n",
+    "gid": 10001,
+    "ns_inode": null,
+    "pid": 9101,
+    "start_stable": true,
+    "uid": 10001
+   },
+   "uid": 10001
+  }
+ },
+ {
+  "expect": "holds",
   "fact": "exclusive:file",
   "name": "exclusive-file-healthy",
   "readings": {

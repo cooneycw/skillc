@@ -26,7 +26,9 @@ The tests also compile deliberately blind variants and require each one to
 disagree with these cases:
 
 - constant classifiers (always `holds`, always `fails`, always `not-covered`);
-- an identifier that trusts the uid alone (the F2 red case);
+- an identifier that trusts the uid alone, on either F2 basis (the F2 red case);
+- a cgroup basis that trusts any docker scope, ignores the start-time check
+  (the PID-reuse race), or accepts a cgroupfs layout;
 - an audit that accepts everything (the F3 red case);
 - a reader that never sees a replacement (the F1 red case);
 - a recreate reader that always reaches the new listener.

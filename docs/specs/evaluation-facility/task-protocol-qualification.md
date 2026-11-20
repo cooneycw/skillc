@@ -18,12 +18,29 @@ controller-named mount and lets this probe's readings choose its shape.
 | --- | --- | --- | --- |
 | F1 `ro-mount:file`, `ro-mount:dir` | No mount: no endpoint may answer. World-writable rw mount: the endpoint must be replaceable. | The candidate connects, then tries unlink, rename away, rename over, file create, socket bind and mkdir, then reconnects. Mount options come from `/proc/self/mountinfo`. | Connect refused with the mount present, another listener reached, mount rw, any replace succeeded, or the endpoint lost |
 | F1 `recreate:file`, `recreate:dir` | The sandbox reached the original listener, and a host process reaches the new one. | The host unlinks and re-binds the lease socket while the sandbox lives, then the sandbox reconnects. | Not a gate: reports `reaches-new` or `dead-end` |
-| F2 `peercred` | A separate host process must NOT identify as the sandbox. | `SO_PEERCRED`, the peer's PID-namespace inode and its start time, for the owned sandbox and for a second sandbox under the same candidate uid on the same listener. | The owned sandbox does not identify, its credentials are remapped, or the same-uid sibling identifies |
+| F2 `peercred` | Per basis: a separate host process must NOT identify as the sandbox. | From `SO_PEERCRED`'s pid, for the owned sandbox and for a second sandbox under the same candidate uid on the same listener: the `ns` basis (PID-namespace inode) and the `cgroup` basis (cgroup v2 `docker-<id>.scope`, confirmed against the owned container's init process), with the start time read before and after. | A readable basis does not identify the owned sandbox, identifies the same-uid sibling, or sees remapped credentials. Any readable basis failing (including two bases disagreeing) fails the fact |
 | F3 `exclusive:file`, `exclusive:dir` | Deliberate mis-mount (A's endpoint also mounted in B): the audit of the daemon's own mount records must refuse it, and B's reach scan must see A. | Two sandboxes with one lease each: the audit, plus a scan of every in-sandbox mount point for reachable listeners. | The audit refuses the healthy pair (shared ancestor, extra or rw endpoint mount, Docker socket, privileged or host namespace), or a sandbox reaches the other's listener |
 
 The design treats peer identity as unprovable when the peer's PID is 0 or
 invisible, its namespace is unreadable, or its start time changes during the probe.
 Each of those reads `not-covered`, never `holds`.
+
+F2 reports two bases, each with its own control and its own verdict:
+
+- `ns` compares the peer's PID-namespace inode with the owned container's. Reading
+  another uid's `/proc/<pid>/ns/pid` needs ptrace-level access, so a non-root
+  controller reads it as `not-covered`. That is an honest answer about the
+  controller's identity, not a refuted fact.
+- `cgroup` reads the world-readable `/proc/<pid>/cgroup`. It identifies only a
+  single cgroup v2 line naming exactly one `docker-<64 hex>.scope` component, and
+  only when the owned container's own init process is in that scope. A cgroupfs
+  path, a v1 or hybrid layout, an unreadable file, or an init process in another
+  scope reads `not-covered`.
+
+The fact holds only if at least one readable basis discriminates. It is not covered
+if no basis is readable, and it fails if any readable basis fails. A start time is
+read before and after every peer read, so a pid that exited or was reused between
+`SO_PEERCRED` and the read is `not-covered`.
 
 ## Outcomes and exit codes
 
