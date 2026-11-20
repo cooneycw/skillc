@@ -29,7 +29,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -965,21 +967,55 @@ def test_scan_prune_rule_case(case: str, shell: str) -> None:
     assert run_scan(LIB, case, shell) == scan_expected(case)
 
 
+def acl_unavailable(reason: str, env: Mapping[str, str] | None = None) -> NoReturn:
+    """The ACL cases have no execution record except CI, where the gate
+    installs acl. So under CI (Woodpecker sets CI=woodpecker; any non-empty CI
+    counts) an unavailable ACL path FAILS, and a green CI proves both cases ran.
+    Elsewhere (the runner VM has no acl package) it skips, as before."""
+    if (env if env is not None else os.environ).get("CI"):
+        pytest.fail(f"ACL case could not run under CI: {reason}")
+    pytest.skip(reason)
+
+
+def require_setfacl() -> None:
+    if shutil.which("setfacl") is None:
+        acl_unavailable("setfacl is required")
+
+
+def set_acl_or_unavailable(path: Path) -> None:
+    acl = subprocess.run(["setfacl", "-m", f"u:{NOBODY}:---", str(path)],
+                         capture_output=True, check=False, timeout=30)
+    if acl.returncode != 0:
+        acl_unavailable("this filesystem refuses POSIX ACLs")
+
+
+@pytest.mark.parametrize(("env", "outcome"), [({"CI": "woodpecker"}, "failed"),
+                                              ({"CI": "true"}, "failed"),
+                                              ({"CI": ""}, "skipped"), ({}, "skipped")])
+def test_acl_gate_fails_under_ci_and_skips_elsewhere(env: dict[str, str], outcome: str) -> None:
+    try:
+        acl_unavailable("setfacl is required", env)
+    except pytest.fail.Exception:
+        got = "failed"
+    except pytest.skip.Exception:
+        got = "skipped"
+    else:
+        got = "returned"
+    assert got == outcome
+
+
 @needs_root_drop
-@pytest.mark.skipif(shutil.which("setfacl") is None, reason="setfacl is required")
 def test_scan_fails_on_a_denial_the_mode_bits_do_not_explain() -> None:
     """The mode bits grant nobody search, but a named-user ACL entry denies
     it: access(2) and the mode disagree, so the scan must fail, not prune."""
+    require_setfacl()
     tree = short_dir("sa-")
     work = short_dir("so-")
     try:
         os.chown(work, NOBODY, NOBODY)
         (tree / "acl").mkdir()
         (tree / "acl").chmod(0o755)
-        acl = subprocess.run(["setfacl", "-m", f"u:{NOBODY}:---", str(tree / "acl")],
-                             capture_output=True, check=False, timeout=30)
-        if acl.returncode != 0:
-            pytest.skip("this filesystem refuses POSIX ACLs")
+        set_acl_or_unavailable(tree / "acl")
         script = 'scan "$1/p" "$2" all "" -type d -writable >/dev/null && echo OK || echo FAILED'
         run = run_scan_script(LIB, "sh", script, str(work), str(tree))
     finally:
@@ -998,10 +1034,7 @@ def acl_scan(lib: Path) -> str:
         os.chown(work, NOBODY, NOBODY)
         (tree / "acl").mkdir()
         (tree / "acl").chmod(MODES["noexec"])
-        acl = subprocess.run(["setfacl", "-m", f"u:{NOBODY}:---", str(tree / "acl")],
-                             capture_output=True, check=False, timeout=30)
-        if acl.returncode != 0:
-            pytest.skip("this filesystem refuses POSIX ACLs")
+        set_acl_or_unavailable(tree / "acl")
         script = 'scan "$1/p" "$2" all "" -type d -writable >/dev/null && echo OK || echo FAILED'
         run = run_scan_script(lib, "sh", script, str(work), str(tree))
     finally:
@@ -1011,8 +1044,8 @@ def acl_scan(lib: Path) -> str:
 
 
 @needs_root_drop
-@pytest.mark.skipif(shutil.which("setfacl") is None, reason="setfacl is required")
 def test_scan_fails_on_a_pruned_directory_that_carries_an_acl(tmp_path: Path) -> None:
+    require_setfacl()
     old = 'scan_recheck "$_pr.new" "$_u" "$_g" || return 1'
     source = LIB.read_text()
     assert source.count(old) == 1, "the mutation anchor moved; update the blind twin"
