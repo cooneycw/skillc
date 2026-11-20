@@ -3088,32 +3088,55 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     # run against the same --base never finds this run's staging behind it.
     import shutil
 
-    # Built in a directory this call alone owns, then published by ONE
-    # rename (#555): a receipt is never visible without the `skills/` tree it
-    # describes, a failure removes only this call's own build directory, and
-    # the rename refuses a target another writer populated meanwhile
-    # (counter-model review) - it never overwrites or deletes their output.
-    build: Path | None = None
+    # `receipt.json` is published LAST, and only once `skills/` is persisted
+    # (#555): a receipt describing a tree that was never written would be a
+    # false statement about `out/`. A failure removes only what THIS call
+    # created - never a sweep of `out/`, which another writer that also
+    # passed the emptiness pre-check may share (counter-model review) - and
+    # the receipt is published by hard link, which refuses, never replaces,
+    # one that is already there.
+    created_out = not out.exists()
+    skills_dir = out / "skills"
+    created_skills = False
+    partial: Path | None = None
     try:
         payload = degrade.receipt(degraded, pinned_revision=subject.revision)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        build = Path(tempfile.mkdtemp(prefix=f".{out.name}.partial-", dir=out.parent))
+        out.mkdir(parents=True, exist_ok=True)
+        try:
+            degrade.persist_skills(degraded, out)
+        except FileExistsError:
+            # copytree creates nothing when its target already exists.
+            print(f"skillc: {skills_dir} appeared while this run built; refusing to write into it", file=sys.stderr)
+            return 2
+        except BaseException:
+            created_skills = True  # copytree got past creating it, then failed
+            raise
+        created_skills = True
+        fd, name = tempfile.mkstemp(prefix=".receipt.json.partial-", dir=out)
+        partial = Path(name)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, indent=1) + "\n")
         umask = os.umask(0)
         os.umask(umask)
-        build.chmod(0o777 & ~umask)  # what `out.mkdir()` used to create, not mkdtemp's 0700
-        degrade.persist_skills(degraded, build)
-        (build / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+        partial.chmod(0o666 & ~umask)  # what `write_text` used to create, not mkstemp's 0600
         try:
-            os.rename(build, out)  # POSIX: replaces only an EMPTY directory
-        except OSError:
-            print(f"skillc: {out} was populated while this run built; refusing to write into it", file=sys.stderr)
+            os.link(partial, out / "receipt.json")
+        except FileExistsError:
+            print(f"skillc: {out / 'receipt.json'} appeared while this run built; refusing to replace it",
+                  file=sys.stderr)
             return 2
-        build = None
-        skills_dir = out / "skills"
+        created_skills = False  # published: no longer this call's to remove
     finally:
-        if build is not None:
-            shutil.rmtree(build, ignore_errors=True)
-        shutil.rmtree(degraded.staging, ignore_errors=True)
+        if partial is not None:
+            partial.unlink(missing_ok=True)
+        if created_skills:
+            shutil.rmtree(skills_dir, ignore_errors=True)
+        shutil.rmtree(degraded.staging, ignore_errors=True)  # may live under `out` (--base == --out)
+        if created_out:
+            try:
+                out.rmdir()  # only if empty: whatever else is there is not ours
+            except OSError:
+                pass
 
     locations = mutation.locations() if mutation is not None else ()
     print(f"subject       {degraded.subject_name}")

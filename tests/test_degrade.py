@@ -575,7 +575,6 @@ def test_cli_writes_no_receipt_when_persisting_the_tree_fails(
             "--out", str(out), "--base", str(tmp_path / "base"),
         ])
     assert not out.exists()
-    assert not list(tmp_path.glob(".out.partial-*"))  # this call's build directory is gone too
 
 
 def test_cli_never_overwrites_or_deletes_an_out_populated_by_another_writer(
@@ -586,23 +585,48 @@ def test_cli_never_overwrites_or_deletes_an_out_populated_by_another_writer(
     writer's output exactly as it was - never cleaning it up as its own."""
     collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
-    out = tmp_path / "out"
     real = degrade.persist_skills
 
-    def racing_persist(degraded: degrade.DegradedSource, target: Path) -> Path:
-        out.mkdir()
-        (out / "receipt.json").write_text("the other writer's\n", encoding="utf-8")
+    def racing_receipt(degraded: degrade.DegradedSource, target: Path) -> Path:
+        (target / "receipt.json").write_text("the other writer's\n", encoding="utf-8")
         return real(degraded, target)
 
-    monkeypatch.setattr(degrade, "persist_skills", racing_persist)
+    def racing_skills(degraded: degrade.DegradedSource, target: Path) -> Path:
+        (target / "skills").mkdir()
+        (target / "skills" / "theirs").write_text("the other writer's\n", encoding="utf-8")
+        return real(degraded, target)
+
+    for racing, theirs in ((racing_receipt, "receipt.json"), (racing_skills, "skills")):
+        out = tmp_path / f"out-{theirs}"
+        monkeypatch.setattr(degrade, "persist_skills", racing)
+        code = cli.main([
+            "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+            "--out", str(out), "--base", str(tmp_path / "base"),
+        ])
+        assert code == 2
+        assert [p.name for p in out.iterdir()] == [theirs]
+        kept = out / theirs if theirs == "receipt.json" else out / theirs / "theirs"
+        assert kept.read_text(encoding="utf-8") == "the other writer's\n"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_cli_publishes_when_base_is_or_lies_inside_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
+) -> None:
+    """Counter-model review pass 2 of #555: `--base` equal to, or nested
+    under, `--out` worked before #555 and must keep working - acquisition's
+    staging lives there while the tree is persisted."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    out = tmp_path / "out"
     code = cli.main([
         "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
-        "--out", str(out), "--base", str(tmp_path / "base"),
+        "--out", str(out), "--base", str(out / "b" if nested else out),
     ])
-    assert code == 2
-    assert [p.name for p in out.iterdir()] == ["receipt.json"]
-    assert (out / "receipt.json").read_text(encoding="utf-8") == "the other writer's\n"
-    assert not list(tmp_path.glob(".out.partial-*"))
+    assert code == 0
+    payload = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
+    assert degrade.materialize.tree_digest(out / "skills") == payload["degraded"]["digest"]
+    assert not list(out.glob(".receipt.json.partial-*"))
 
 
 def test_cli_exits_two_on_a_malformed_remove_file_spec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
