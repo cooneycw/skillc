@@ -39,12 +39,12 @@ from __future__ import annotations
 import hashlib
 import os
 import socket
-import struct
 import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from .decide_reply_channel import peer_credentials
 from .task_protocol_journal import CapacityExceeded, Journal, JournalUnavailable, Reference
 from .task_protocol_lease import Lease, Leases
 from .task_protocol_schema import MAX_REQUEST_BYTES, Receipt, Rejected, Request, parse_request
@@ -175,8 +175,7 @@ class Receiver:
         is unused here on purpose: the kernel, not the socket it reached,
         says who the peer is."""
         try:
-            pid, uid, gid = struct.unpack(
-                "3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            pid, uid, gid = peer_credentials(conn)
             instance = self.verifier.runtime_instance(pid, uid, gid)
         except Exception:  # noqa: BLE001 - an unavailable peer probe is no identity
             return None

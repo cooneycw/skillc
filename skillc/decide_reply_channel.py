@@ -72,6 +72,15 @@ READ_AS_NOTE = (
 )
 
 
+def peer_credentials(conn: socket.socket) -> tuple[int, int, int]:
+    """The connected peer's (pid, uid, gid) from the kernel's `SO_PEERCRED`,
+    never from anything the peer sent. The ONE implementation of peer
+    authority's first step: this channel's gate and the task-protocol
+    receiver (#620) both call it. Raises OSError when unavailable."""
+    pid, uid, gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+    return pid, uid, gid
+
+
 class ChannelRefusal(Exception):
     """Raised by a caller-supplied `decide` function to refuse a request as
     malformed or out of scope for this channel instance - mapped to
@@ -123,7 +132,7 @@ class _Handler(socketserver.BaseRequestHandler):
         self.request.settimeout(channel._request_timeout)
         if channel._peer_authorizer is not None:
             try:
-                peer = struct.unpack("3i", self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                peer = peer_credentials(self.request)
                 allowed = channel._peer_authorizer(*peer) is True
             except Exception:  # noqa: BLE001 - an unavailable peer probe must drop before decide
                 allowed = False
