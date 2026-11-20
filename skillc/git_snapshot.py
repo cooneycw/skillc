@@ -113,8 +113,13 @@ class SafeTree:
             raise Unreadable(f"a path nests deeper than the depth cap: {rel[:80]!r}")
         return parts
 
+    def _start(self) -> int:
+        """A fresh readable fd on the root directory. Subclasses that hold the
+        root as a descriptor rather than a path override only this (#797)."""
+        return os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
     def _open_dir(self, parts: list[str]) -> int:
-        fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fd = self._start()
         try:
             for part in parts:
                 nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -135,7 +140,7 @@ class SafeTree:
         parts = self._parts(rel)
         if not parts:
             return "dir"
-        fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fd = self._start()
         try:
             for index, part in enumerate(parts):
                 try:
