@@ -11,7 +11,6 @@ checker (`blind_*`), which must give a different verdict.
 from __future__ import annotations
 
 import fcntl
-import importlib.util
 import os
 import stat
 import subprocess
@@ -759,8 +758,9 @@ def test_channel_isolation_unknown_is_failed_and_still_scoped() -> None:
 
 
 #: Every Contract A input A-3 composes, each at its passing value except the one
-#: under test. A-3 must expose `removed_surface_verdict(**SUFFICIENT)` (spec,
-#: A-2) or adapt these guards to its real entry point; never delete them.
+#: under test. `run_window_compose.removed_surface_verdict(**SUFFICIENT)` is the
+#: contract (spec, A-2 and A-3a); adapt these guards to a changed entry point,
+#: never delete them or make them skip.
 SUFFICIENT: dict[str, Any] = {
     'census_complete': True, 'unlinked': NEG, 'reresolved': NEG, 'teardown': NEG, 'no_holder': NEG,
     'superblock_gone': NEG, 'tmpfs': True, 'isolation': rt.ScopedObservation(NEG, 'lifetime'),
@@ -768,9 +768,10 @@ SUFFICIENT: dict[str, Any] = {
 
 
 def a3_compose() -> Any:
-    if importlib.util.find_spec('skillc.run_window_compose') is None:
-        pytest.skip('A-3 composition not implemented yet')
-    return importlib.import_module('skillc.run_window_compose')
+    # Imported unconditionally since A-3a: a renamed or missing module is a
+    # failure here, never a skip (orchestrator condition on the A-3 plan).
+    from skillc import run_window_compose
+    return run_window_compose
 
 
 def test_a3_composition_reaches_absent_with_sufficient_evidence() -> None:
@@ -783,7 +784,8 @@ def test_a3_composition_reaches_absent_with_sufficient_evidence() -> None:
     {'no_holder': SURV},  # a holder vetoes
 ], ids=['launch-only-isolation', 'domain-veto', 'holder-veto'])
 def test_a3_composition_refuses_absent_when_one_input_fails(override: dict[str, Any]) -> None:
-    assert a3_compose().removed_surface_verdict(**{**SUFFICIENT, **override}) != 'ABSENT'
+    # Exactly UNKNOWN: PRESENT or ABSENT_UNLINKED would also be wrong here.
+    assert a3_compose().removed_surface_verdict(**{**SUFFICIENT, **override}) == 'UNKNOWN'
 
 
 # ------------------------------------------------------------------ fact 3
