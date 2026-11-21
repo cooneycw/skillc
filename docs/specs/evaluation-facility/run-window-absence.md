@@ -8,7 +8,7 @@ work is split in three SECRET-PATH parts. Only the last one lifts
 | Part | Delivers | Status |
 |---|---|---|
 | **A-1** | census of a removed root, fact 1 (unlinked), fact 4 (re-resolved), the held-descriptor reader | this change |
-| A-2 | teardown boundary, fact 2 (no holder), fact 2b (channel isolation), fact 3 (superblock gone) | later |
+| A-2 | teardown boundary, fact 2 (no holder), fact 2b (channel isolation), fact 3 (superblock gone) | `skillc/run_window_teardown.py` |
 | A-3 | per-surface composition, the total release predicate, the declaration | later; lifts the blocker |
 
 Until A-3 lands, nothing calls this module on a real window. Every
@@ -164,3 +164,149 @@ A-1's kernel facts are qualified on the runner VM by probes P1 (link counts
 through held fds) and P3 (fact 4 after a real unmount) from #803. A MISMATCH
 from either blocks **use** of this module in a window, not the merge of this
 code.
+
+## A-2: teardown boundary, facts 2, 2b and 3 (`run_window_teardown`)
+
+**Preconditions.** The controller establishes these and this module does
+not re-prove them:
+- **The controller runs as root in the initial PID namespace, with an
+  unfiltered procfs.** `procfs_ok` checks the visible parts: a nonempty
+  population, the same PID namespace as pid 1, and no `hidepid` or `subset`
+  option on `/proc`. Every fact refuses without it.
+- **The holder domain is empty,** so the only processes left are the declared
+  host workload. A descriptor transfer between surviving host processes during
+  a scan is outside that workload's behaviour. Fact 2's second pass narrows
+  that race; it cannot exclude it.
+- **The surviving host workload does not build deceptive views.** Fact 3's
+  coverage test needs two things: the task's root must be its own parent
+  through `/proc/<task>/root/..`, and its table's `/` record must have root
+  `/`. A chroot onto a filesystem root that was bind-mounted onto its own
+  immediate child passes both. Such a construction is outside the declared
+  host workload, and a real-chroot control (run as root) qualifies the common
+  case. A bind destination is walked through the task's own root, so it counts
+  what the container sees; the device check confirms it is a mountpoint, but
+  does not separate two mounts of one filesystem.
+
+**Launch-identity capture (`capture_launch_identity`)** is read-only. It runs
+once per role or login container, after `prepare()` starts it and before any
+dispatch. It binds the inspected full container ID to a live task in **this
+host's** procfs. A cgroup entry's leaf must BE the container (`<id>` or
+`docker-<id>.scope`), so a path that merely contains the ID does not count.
+The task's start time is read
+before and after the other reads; and Docker must report the same ID and pid
+again at the end. A pid reused before the first read, or a pid from another
+daemon's host, therefore makes the identity unusable. It records:
+- the cgroup entries as `(hierarchy, controllers, path)`;
+- validated namespace links, and pid 1's for comparison;
+- sockets counted at each bind's **destination** in the task's own root,
+  without following any link, rather than at the host source path, which
+  could have been replaced. The destination must be the mountpoint of the
+  task's effective (last-listed) mount there, with a matching device, and two
+  walks of the tree must agree exactly;
+- the init fd table, read twice and compared entry by entry.
+
+`docker_backend` is unchanged, and the Docker reader permits only `inspect`
+and `ps`.
+
+**Teardown boundary (`confirm_teardown`).** CONFIRMED_NEGATIVE only when all
+of these hold:
+- Docker answered with an empty list for every captured ID; any other output
+  is no answer;
+- no **task** (every `/proc/<pid>/task/<tid>`) sits at or under a captured
+  cgroup path in the same hierarchy;
+- no task shares a captured namespace.
+
+An empty or failed population, a malformed record, a reader exception, or an
+unusable or mixed-generation identity set (compared by identity, never
+equality or hashing) is OBSERVATION_FAILED. A task that cannot be read is
+skipped only if a fresh listing omits its process. A zombie is still listed
+and read; if it cannot be read the boundary fails, the fail-safe reading.
+
+**Fact 2 (`fact_no_holder`)** is corroboration and runs while the census
+entries are held. It checks:
+- every surviving **task's** fd table, since a task can own its own after
+  `unshare(CLONE_FILES)`;
+- every process's `map_files`.
+
+The targets are the census entries **and the census root**, which catches a
+holder that keeps a lazily detached tmpfs through its root alone. Each task's
+start time is pinned across its reads, and a replaced task is FAILED. Two
+passes must agree. The controller's own tasks are excluded, never its
+children. Census descriptors are `O_CLOEXEC` explicitly.
+
+**Fact 2b (`fact_channel_isolated`)** judges the LAUNCH captures and returns
+a `ScopedObservation` with `scope == 'launch-only'`.
+
+**Rule for A-3 (binding):** a `launch-only` 2b is **not sufficient for
+ABSENT**. The guards in `tests/test_run_window_teardown.py` call
+`run_window_compose.removed_surface_verdict(**SUFFICIENT)`, where `SUFFICIENT`
+holds every Contract A input at its passing value. They assert two things:
+that it gives `ABSENT`, and that it does not give `ABSENT` when a single
+input is changed. The single-input cases are a launch-only 2b, a non-empty
+domain, and a holder. A-3 implements that entry point, or adapts the guards
+to its real one; it never deletes them. The design's precondition 1.2.5 is a lifetime invariant, which needs
+PR-1's fd sampler (A23). Until a lifetime-scoped 2b exists, A-3's composition
+must keep every removed surface UNKNOWN. Two further rules hold whatever
+fact 2 says:
+- a non-empty domain vetoes ABSENT;
+- a SURVIVOR from fact 2 vetoes ABSENT.
+
+`tests/test_run_window_teardown.py::test_a3_composition_refuses_a_launch_only_isolation_for_absent`
+is skipped only while A-3's module does not exist. From the moment it exists
+the test runs, and it must be adapted to A-3's entry point, never deleted.
+
+**Fact 3 (`fact_superblock_gone`)** runs after the census entries are
+released and the caller has unmounted the tmpfs non-lazily. It reads every
+task's mount table, each parsed as complete kernel records. Every mount
+namespace must be read through a task whose root is the namespace root. That
+is decided by the kernel, not by the table: the task's root directory must be
+its own parent when looked up through `/proc/<task>/root/..`. This holds for
+a namespace root and never for a chroot, even one onto the root of a nested
+filesystem, whose record reads `/ /` like a namespace root. A namespace seen only through chrooted
+tasks is OBSERVATION_FAILED, because such a table omits mounts outside the
+chroot. Fact 3 is negative only if no table lists the census root's
+`major:minor`, which catches aliases under another mount ID and copies in
+other namespaces.
+
+**Reader errors** are sanitised to fixed text, with no filename, payload or
+exception context; that includes undecodable Docker output. A Docker reader
+that raises counts as unanswered. Only an exactly empty `ps` answer means
+absent.
+
+**Parsing.** cgroup records are validated, including each v1 controller name
+and the v2 empty-controller form. Every mountinfo field must be nonempty.
+Teardown and fact 3 pin each task's start time across their related reads.
+
+**Qualification.**
+
+Fake `/proc` cases, which run under any user:
+- per-task views: a worker task alone in the cgroup, and a holder only in a
+  worker's fd table;
+- a container root view: a replaced bind source, and a link on the
+  destination path;
+- chrooted and other-namespace tables;
+- the cases from the plan: A5, A6, A7, A10 and A21;
+- pid reuse before the first read; another daemon's host; a container
+  changed during capture;
+- a same path in another v1 hierarchy; malformed links and records;
+- empty, failed and unreadable populations; a raising Docker reader;
+  malformed `ps` output;
+- an unhashable, always-equal generation.
+
+Blind twins: a Docker-only teardown, a mount-ID-only fact 3, and a fact 2
+that counts the controller itself.
+
+**Real** fact 2 uses child processes: an fd holder, and a mapping-only holder
+with its fd closed. These are gated on the kernel granting `map_files` access,
+and are otherwise qualified by VM probe P2. A recording opener asserts that
+every census open requests `O_CLOEXEC`, and `F_GETFD` confirms it on every
+descriptor.
+
+`tests/test_run_window_argv_unchanged.py` compares `compose_run_argv` with a
+**reviewed literal baseline** and asserts the exact `inspect` and `ps`
+commands and environment. `tests/test_run_window_teardown_noleak.py` plants a
+marker in a cgroup path and a bind name, and a leaking twin must fail the
+oracle.
+
+The physical facts are P2 as root, P3 and P8 from #803. A MISMATCH blocks
+**use**, not merge.
