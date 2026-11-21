@@ -357,3 +357,46 @@ fact vetoing one at a time, the window allowlist cases, and blind twins:
 - one that reads a class aggregate.
 
 These are new instruments.
+
+## A-3b1: the `run_window_contracts` declaration (`run_window_contracts`)
+
+A calibration declaration opts in to the run-window contracts with a closed
+object, validated at parse time and again at execution (`require_approved`):
+
+```json
+{"run_window_contracts": {"version": 1, "limits": {"max_entries": 1024, "max_depth": 16}}}
+```
+
+- **Closed schema.** Exactly `version` (the int 1) and `limits` (exactly
+  `max_entries` and `max_depth`, each a positive int at or below slice 4's scan
+  ceilings, `remnant_scan.LIMITS['entries']` and `['depth']`). Anything else
+  refuses with a fixed reason, and no supplied value enters the text.
+- **Requires `credential_window`**, and through it `remnant_scan` and the VM
+  admission keys.
+- **Dispositions are fixed by class** (`DISPOSITION`), never declared:
+  `home`, `vault`, `staging`, `login-home`, `scratch-tmp`, `scratch-vartmp` and
+  `scratch-shm` are removed; `stdout`, `transcript`, `cache-log` and
+  `export-payload` are retained. A `disposition` key in the declaration is an
+  unknown key and refuses.
+- **No paths.** The root mapping is supplied privately at close by the trusted
+  adapter (A-3b2), as slice 4 does it.
+- **Parsing is shape-only.** Whether the running controller can hold a census
+  of the declared size (`run_window_absence.fd_budget_ok`) is a property of
+  the process, checked at admission by `require_census_budget`.
+- **Calibration-declaration only.** `parse_discrimination_declaration`,
+  `require_discrimination_approval_record` and
+  `require_approved_discrimination` refuse the key, as they refuse
+  `credential_window` and `remnant_scan`.
+- **Approval binding.** The key joins the whole-declaration digest like every
+  other key, so a change after approval is refused by the existing digest
+  check. No digest code changed.
+
+**No behaviour change for a declaration without the key.** The regression
+guard is `tests/test_run_window_contracts_legacy.py`. It imports only
+parent-era names, builds the legacy declarations at runtime and compares
+their outcomes with the committed
+`controls/run-window-contracts/legacy-calibration.json`. It must pass at the
+parent (so the fixture is the parent's real behaviour) and at the head.
+
+A-3b1 lifts no blocker. A-3b2 adds the close sequence and lifts
+`removed-root-absence-contract-unavailable`.

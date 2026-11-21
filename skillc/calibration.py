@@ -65,6 +65,7 @@ from . import (
     profile,
     records,
     remnant_scan,
+    run_window_contracts,
     schedule_budget,
     trial,
     verify,
@@ -625,6 +626,11 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
             remnant_scan.validate_plan(data)
         except remnant_scan.ScanRefused as exc:
             raise _refuse(str(exc)) from exc
+    if run_window_contracts.KEY in data:
+        try:
+            run_window_contracts.validate_plan(data)
+        except run_window_contracts.ContractsRefused as exc:
+            raise _refuse(str(exc)) from None
     if "wave_export" in data:
         try:
             wave_export.validate_plan(data)
@@ -1008,6 +1014,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
         raise _refuse("credential_window is supported only for calibration-declaration")
     if "remnant_scan" in data:
         raise _refuse("remnant_scan is supported only for calibration-declaration")
+    if run_window_contracts.KEY in data:
+        raise _refuse("run_window_contracts is supported only for calibration-declaration")
     if "execution_environment" in data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in data:
@@ -1279,6 +1287,11 @@ def require_approved(declaration: CalibrationDeclaration, root: Path, *,
             vm_credential_window.validate_plan(declaration.data)
         except vm_credential_window.CustodyRefused:
             raise _refuse("credential_window requires the closed custody and scan policy") from None
+    if run_window_contracts.KEY in declaration.data:
+        try:
+            run_window_contracts.validate_plan(declaration.data)
+        except run_window_contracts.ContractsRefused as exc:
+            raise _refuse(str(exc)) from None
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     require_outcome_approval(declaration)
     treated = _treated_arm(declaration)
@@ -1367,6 +1380,8 @@ def require_discrimination_approval_record(declaration: DiscriminationDeclaratio
         raise _refuse("credential_window is supported only for calibration-declaration")
     if "remnant_scan" in declaration.data:
         raise _refuse("remnant_scan is supported only for calibration-declaration")
+    if run_window_contracts.KEY in declaration.data:
+        raise _refuse("run_window_contracts is supported only for calibration-declaration")
     if "execution_environment" in declaration.data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in declaration.data:
@@ -1393,6 +1408,8 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     degraded file, never "whatever this field says now")."""
     if "remnant_scan" in declaration.data:
         raise _refuse("remnant_scan is supported only for calibration-declaration")
+    if run_window_contracts.KEY in declaration.data:
+        raise _refuse("run_window_contracts is supported only for calibration-declaration")
     if "execution_environment" in declaration.data:
         raise _refuse("execution_environment is supported only for calibration-declaration")
     if "operator_admission" in declaration.data:

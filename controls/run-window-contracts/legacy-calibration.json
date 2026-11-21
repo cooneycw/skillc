@@ -1,0 +1,33 @@
+{
+  "credential-window": {
+    "data_is_the_input": true,
+    "digest_binds": true,
+    "input_unmutated": true,
+    "parse": "ok",
+    "require_approved": "calibration declaration: execution_environment: VM/install observation is required"
+  },
+  "credential-window-without-scan": {
+    "input_unmutated": true,
+    "parse": "refused",
+    "reason": "calibration declaration: credential_window requires the closed custody and scan policy"
+  },
+  "discrimination-with-credential-window": {
+    "input_unmutated": true,
+    "parse": "refused",
+    "reason": "calibration declaration: credential_window is supported only for calibration-declaration"
+  },
+  "plain": {
+    "data_is_the_input": true,
+    "digest_binds": true,
+    "input_unmutated": true,
+    "parse": "ok",
+    "require_approved": "ok"
+  },
+  "remnant-scan": {
+    "data_is_the_input": true,
+    "digest_binds": true,
+    "input_unmutated": true,
+    "parse": "ok",
+    "require_approved": "calibration declaration: execution_environment: VM/install observation is required"
+  }
+}
