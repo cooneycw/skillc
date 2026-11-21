@@ -1,0 +1,1 @@
+- The helper tap is diagnostic only (owner ruling 2026-11-20, option A): `wave_tap_join.corroboration()` reports tap operations and coverage beside the verdict and takes no verdict input; the #620 PR-B client journal is the verdict source (Refs #626).
