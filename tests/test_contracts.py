@@ -243,6 +243,37 @@ def test_an_unreadable_subtree_refuses_certification(
     assert "could not be read" in capsys.readouterr().out
 
 
+def test_an_unreadable_directory_with_no_contract_found_is_not_none_declared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#739: zero contracts beside an unreadable directory printed `none declared`,
+    exit 3 - indistinguishable from a collection that truly declares nothing."""
+    import os
+
+    (tmp_path / "locked").mkdir()
+    real_scandir = os.scandir
+
+    def scandir(path: Path) -> object:
+        if str(path).endswith(os.sep + "locked"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    collection = contracts.load_collection(tmp_path)
+    assert not collection.contracts and collection.unreadable
+    assert cli.main(["contracts", str(tmp_path)]) == contracts.EXIT_FINDINGS
+    out = capsys.readouterr().out
+    assert "could not be read" in out and "none declared" not in out
+
+
+def test_a_mis_aligned_wide_dash_list_item_is_a_shape_error() -> None:
+    """#739: `-   id:` with its keys left two columns right of the dash is invalid
+    YAML; the parser re-indented it and certified the contract GOOD."""
+    case = CONTROLS / "contract-shape/bad/dash-spacing"
+    assert _rules(case) == ["contract-shape"]
+    assert cli.main(["contracts", str(case)]) == contracts.EXIT_FINDINGS
+
+
 @pytest.mark.parametrize("value", ['"\\0"', '"\\udc80"'])
 def test_an_unusable_filesystem_path_is_a_finding_not_a_crash(tmp_path: Path, value: str) -> None:
     case = tmp_path / "c"

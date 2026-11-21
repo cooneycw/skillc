@@ -2903,7 +2903,10 @@ def cmd_contracts(args: argparse.Namespace) -> int:
         print(f"skillc: no such collection directory: {root}", file=sys.stderr)
         return contracts.EXIT_USAGE
     collection = contracts.load_collection(root)
-    if not collection.contracts:
+    # #739: "none declared" needs a COMPLETE discovery. Zero contracts beside an
+    # unreadable directory is unexamined, not empty: the checks report it as a
+    # contract-shape error (exit 1), as they do when some contracts were found.
+    if not collection.contracts and not collection.unreadable:
         print(f"CONTRACTS: none declared under {root} - no CHARTER.md, nothing was checked")
         return contracts.EXIT_NONE_DECLARED
     findings = checks.run_contracts(collection)
