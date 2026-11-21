@@ -27,6 +27,20 @@ SID = "00000000-0000-0000-0000-000000000001"
 HEADER = ("OpenAI Codex v0.157.1\n--------\nsession id: " + SID + "\n--------\n").encode()
 
 
+#: The helper owner the unit fixture models when the suite runs as root (CI).
+MODEL_OWNER_UNDER_ROOT = 65534
+
+
+def model_owner() -> int:
+    """`operate(owner_uid=0)` is the PRODUCTION contract: every ancestor of
+    the installed helpers root-owned and not group/world-writable, and a
+    privilege drop to the candidate uid/gid. A pytest tmp path under /tmp
+    (1777) can never meet it. So under root the fixture models a non-root
+    owner, the same model the non-root lane gets from its own uid, and chowns
+    the helper copies to it; operate() itself is unchanged."""
+    return os.getuid() if os.getuid() != 0 else MODEL_OWNER_UNDER_ROOT
+
+
 class LocalHelperExecutor:
     """Trusted unit fixture: real helpers, no container/liveness qualification."""
 
@@ -34,6 +48,7 @@ class LocalHelperExecutor:
         self.scripts, self.shared = root / "scripts", root / "shared"
         self.scripts.mkdir()
         self.shared.mkdir()
+        self.owner = model_owner()
         self.pins = {}
         for source in HELPERS.glob("*.sh"):
             dest = self.scripts / source.name
@@ -41,6 +56,8 @@ class LocalHelperExecutor:
             # A real install is root-owned 0755; the operation refuses a group- or
             # world-writable helper, so the copy must not inherit a 0002 umask.
             os.chmod(dest, 0o755)
+            if self.owner != os.getuid():
+                os.chown(dest, self.owner, -1)
             self.pins[source.name] = hashlib.sha256(dest.read_bytes()).hexdigest()
         self.stopped = False
         self.available = True
@@ -55,7 +72,7 @@ class LocalHelperExecutor:
         self.calls.append(op)
         result = operation.operate({"scripts": str(self.scripts), "shared": str(self.shared),
             "pins": self.pins, "binding": asdict(binding), "operation": op, "nonce": nonce,
-            "assignment_rev": assignment_rev, "commit": commit}, owner_uid=os.getuid())
+            "assignment_rev": assignment_rev, "commit": commit}, owner_uid=self.owner)
         return {**result, **self.receipt_mutation}
 
     def retired(self, binding: Binding) -> bool:
@@ -319,3 +336,17 @@ def test_known_refusal_survives_loss_of_other_custody(boundary: Any, lost: str) 
     assert diagnostic["status"] == "UNKNOWN"
     assert "refused-protocol" in diagnostic["roles"][plan.roles[0].role]["ops"]
     assert lw.verdict(plan, evidence, grade)["status"] == "UNKNOWN"
+
+
+def test_the_fixture_helpers_pass_operate_under_this_uid(tmp_path: Path) -> None:
+    """Names the cause directly when the fixture cannot meet operate()'s
+    contract under the running uid (root in CI, a service account on the
+    runner), instead of surfacing as a refused assignment."""
+    executor = LocalHelperExecutor(tmp_path)
+    assert executor.owner != 0, "the unit fixture must never model the root contract"
+    for name in executor.pins:
+        info = os.lstat(executor.scripts / name)
+        assert info.st_uid == executor.owner and not info.st_mode & 0o022, name
+    binding = Binding("tap-wave", "worker-a", "attempt-a", SID, "quote-a", 0, 1, "task-nonce")
+    receipt = executor.execute(binding, "assignment", "n" * 32, None, None)
+    assert receipt["exit_code"] == 0 and receipt["effect"] is True, receipt
