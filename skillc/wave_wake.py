@@ -421,12 +421,22 @@ def observe(wave: Any, policy: WakePolicy) -> Revision:
 
 def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision] | None = None,
           deliver: Callable[[Poke], bool] | None = None, clock: Callable[[], float] = time.monotonic,
-          sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+          sleep: Callable[[float], None] = time.sleep,
+          after_bootstrap: Callable[[], None] | None = None,
+          before_close: Callable[[], None] | None = None,
+          defer_terminal_stop: bool = False) -> dict[str, Any]:
     """Drive all roles to declared caps/failures or the wave's ORIGINAL deadline.
 
     Test doubles may supply an observer or suppress transport. Production uses
     the fixed controller helper and fenced DockerWave.turn. No client runs here
     outside the backend, and no message content or CPP revision enters policy.
+
+    Three keyword-only hooks for the task-protocol producer (#626 P2), each
+    inert at its default. `after_bootstrap` runs once, after every initial
+    turn has finished and before any poke is offered. `before_close` runs in
+    the cleanup, immediately before `wave.close()`; it must record its own
+    failures rather than raise. `defer_terminal_stop` leaves a terminal
+    role's attempt running until `wave.close()`, so a live census can read it.
     """
     # The caller retains approval authority. A generated runtime declaration
     # cannot approve its own policy or replace that independently held binding.
@@ -489,6 +499,8 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
         return revision
 
     def stop_terminal(role: str) -> None:
+        if defer_terminal_stop:
+            return  # wave.close() stops every role; no stop is recorded before it
         if state.slots[role].phase == 'terminal' and not wave.closed and role not in stopped_roles:
             current = wave.states[role]
             stopped_roles.add(role)
@@ -542,6 +554,7 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
                 sleep(wave.deadline.remaining(policy.poll_seconds))
         for role in roles:
             futures[role] = pool.submit(wave.turn, role)
+        bootstrapped = after_bootstrap is None
         while True:
             wave.deadline.remaining(policy.poll_seconds)
             previous_revision = last_revision
@@ -561,6 +574,13 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
             if all(slot.phase == 'terminal' for slot in state.slots.values()):
                 outcome = 'STOPPED'
                 break
+            if not bootstrapped:
+                if futures:  # no poke until every initial turn has finished
+                    sleep(wave.deadline.remaining(policy.poll_seconds))
+                    continue
+                assert after_bootstrap is not None
+                after_bootstrap()
+                bootstrapped = True
             for role in roles:
                 poke = state.offer(role, revision, now)
                 if poke is None:
@@ -596,6 +616,11 @@ def drive(wave: Any, policy: WakePolicy, *, read_revision: Callable[[], Revision
         except BaseException as record_error:  # noqa: BLE001 - failed journal cannot bypass cleanup
             errors.append(record_error)
     finally:
+        if before_close is not None:
+            try:
+                before_close()
+            except BaseException as exc:  # noqa: BLE001 - a hook cannot bypass owned cleanup
+                errors.append(exc)
         # Close kills active roles, waits for their controller capture and confirms
         # every resource; no executor join may leave a live turn behind.
         try:
